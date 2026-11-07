@@ -93,6 +93,8 @@ fn build_occt_backend() {
     }
     if is_windows {
         println!("cargo:rustc-link-lib=dylib=user32");
+        // TKernel's filesystem/signal code and TKService fonts use registry APIs.
+        println!("cargo:rustc-link-lib=dylib=advapi32");
     }
     if target.to_ascii_lowercase().contains("apple-darwin") {
         println!("cargo:rustc-link-lib=dylib=objc");

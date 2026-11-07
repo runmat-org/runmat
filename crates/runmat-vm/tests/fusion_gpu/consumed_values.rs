@@ -1,5 +1,6 @@
 //! Production bytecode dispatch ownership, separate from fusion admission.
 use super::*;
+use runmat_runtime::context::RuntimeWorkspaceService;
 use std::collections::HashSet;
 
 pub(super) fn compile_borrowed_x(source: &str) -> runmat_vm::Bytecode {
@@ -214,12 +215,15 @@ fn borrowed_initial_workspace_survives_error_and_retires_only_after_replacement(
                 "source={source}; result={:?}",
                 result.outcome
             );
-            assert_eq!(
-                block_on(runtime.scope(async { projection.lookup("x") })).unwrap(),
-                Some(Value::Num(3.0)),
-                "staged prefix survives terminalization"
-            );
             block_on(runtime.scope(async { publication.publish_pending() })).unwrap();
+            assert_eq!(
+                block_on(
+                    runtime.scope(async { projection.try_lookup_with_context(&runtime, "x") })
+                )
+                .unwrap(),
+                Some(Value::Num(3.0)),
+                "terminal publication preserves the staged prefix"
+            );
             assert_eq!(
                 owner.lookup("x").unwrap(),
                 Some(Value::Num(3.0)),

@@ -85,6 +85,10 @@ fn unsupported() -> io::Error {
 
 #[async_trait::async_trait(?Send)]
 impl FsProvider for ReentrantProvider {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        runmat_filesystem::FsPathNamespace::VirtualRooted
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/"))
     }

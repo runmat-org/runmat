@@ -4,9 +4,6 @@ use runmat_value::MemmapFormatPresentationState;
 use std::rc::Rc;
 
 fn opened(runtime: &RuntimeContext, suffix: &str) -> MemmapReceiverState {
-    #[cfg(windows)]
-    let root = std::path::PathBuf::from("C:\\mapped-lifecycle");
-    #[cfg(not(windows))]
     let root = std::path::PathBuf::from("/mapped-lifecycle");
     let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(&root));
     let path = root.join(suffix);

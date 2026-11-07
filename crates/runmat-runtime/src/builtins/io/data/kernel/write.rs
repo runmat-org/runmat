@@ -216,9 +216,10 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
                 err,
             )
         })?;
-        entry.hash = sha256_hex(&chunk_bytes);
-        entry.object_id = format!("obj_{}", entry.hash);
-        let chunk_path = revision.join(format!("{}.json", entry.object_id));
+        let identity = crate::data::ChunkStorageIdentity::for_payload(&chunk_bytes);
+        entry.hash = identity.hash;
+        entry.object_id = identity.object_id;
+        let chunk_path = revision.join(identity.file_name);
         entry.data_path = make_rel_data_path(root, &chunk_path)?;
         provider
             .write(&chunk_path, &chunk_bytes)

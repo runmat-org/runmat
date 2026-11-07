@@ -12,6 +12,7 @@ use runmat_execution::{
 };
 use runmat_types::{NumericClass, NumericDomain};
 use runmat_value::Value;
+use std::error::Error;
 
 pub struct AdmittedRealUnaryCompound {
     physical: ProviderRealUnaryCompound,
@@ -28,6 +29,34 @@ pub struct AdmittedRealUnaryCompound {
 }
 
 impl AdmittedRealUnaryCompound {
+    pub(crate) fn invalid_continuation() -> crate::RuntimeError {
+        crate::build_runtime_error("compound unary did not consume its exact admitted continuation")
+            .with_identifier("RunMat:Placement:InvalidDecision")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    }
+
+    pub(crate) fn provider_execution_error(
+        &self,
+        runtime: Option<&RuntimeContext>,
+        descriptor: &'static runmat_builtins::BuiltinErrorDescriptor,
+        cause: runmat_accelerate_api::ProviderExecutionError,
+    ) -> crate::RuntimeError {
+        let cancelled = runtime.is_some_and(RuntimeContext::is_cancelled)
+            || cause.source().is_some_and(|source| {
+                source.is::<runmat_accelerate_api::ProviderCompoundCancelled>()
+            });
+        let mut error = crate::build_runtime_error(format!("{}: {cause}", descriptor.message))
+            .with_builtin(self.admission.binding.builtin.name)
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
+        if cancelled {
+            error = error.with_identifier("RunMat:Cancelled");
+        } else if let Some(identifier) = descriptor.identifier {
+            error = error.with_identifier(identifier);
+        }
+        crate::runtime_error::with_provider_execution_source(error.build(), cause)
+    }
+
     pub(crate) fn preflight_execution(
         &self,
         runtime: Option<&RuntimeContext>,

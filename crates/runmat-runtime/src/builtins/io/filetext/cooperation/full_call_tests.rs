@@ -105,11 +105,7 @@ impl RuntimeExecutionServices for TurnService {
 }
 
 fn root() -> &'static str {
-    if cfg!(windows) {
-        r"C:\filetext-turn"
-    } else {
-        "/filetext-turn"
-    }
+    "/filetext-turn"
 }
 
 struct Fixture {

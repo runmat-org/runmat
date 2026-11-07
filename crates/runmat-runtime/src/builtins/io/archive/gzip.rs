@@ -512,7 +512,16 @@ mod tests {
                 .iter()
                 .map(|value| scalar_text(value, "gzip", "output").unwrap())
                 .collect();
-            assert_eq!(names, vec!["compressed/a.txt.gz", "compressed/b.txt.gz"]);
+            let expected: Vec<_> = ["a.txt.gz", "b.txt.gz"]
+                .into_iter()
+                .map(|name| {
+                    std::path::Path::new("compressed")
+                        .join(name)
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+            assert_eq!(names, expected);
             run(gunzip_builtin(
                 None,
                 crate::builtins::common::test_support::builtin_arguments(vec![

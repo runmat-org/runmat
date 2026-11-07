@@ -36,7 +36,6 @@ pub(super) async fn run_local() {
     for branch in 0..4 {
         let mut config = NativeExecutionConfig::for_current_executable().unwrap();
         config.executable = std::env::current_exe().unwrap();
-        config.worker_arguments = vec!["--child".into()];
         config.max_workers = 2;
         config.worker_capabilities = super::capabilities();
         config.store_root = directory.path().join(format!("coupled-{branch}"));

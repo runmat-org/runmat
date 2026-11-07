@@ -6,7 +6,9 @@ use std::cell::Cell;
 #[test]
 fn failed_metadata_mutation_retains_operation_path_and_io_cause() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("head.json");
+    let root = temp.path().join("authority");
+    secure_directory(&root).unwrap();
+    let path = root.join("head.json");
     std::fs::create_dir(&path).unwrap();
     let error = atomic_json(&path, &serde_json::json!({"head": 1})).unwrap_err();
     let NativeExecutionError::MetadataIo {
@@ -46,12 +48,13 @@ impl Serialize for Expanding<'_> {
 #[test]
 fn over_limit_metadata_stops_before_visibility_and_preserves_the_existing_winner() {
     let temp = tempfile::tempdir().unwrap();
-    let existing = temp.path().join("retained.json");
+    let root = temp.path().join("authority");
+    let existing = root.join("retained.json");
     let original = serde_json::json!({"original": "immutable evidence"});
     atomic_json(&existing, &original).unwrap();
     let original_bytes = std::fs::read(&existing).unwrap();
     let inventory = || {
-        let mut entries = std::fs::read_dir(temp.path())
+        let mut entries = std::fs::read_dir(&root)
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
             .collect::<Vec<_>>();
@@ -80,7 +83,7 @@ fn over_limit_metadata_stops_before_visibility_and_preserves_the_existing_winner
         );
         assert_eq!(std::fs::read(&existing).unwrap(), original_bytes);
     }
-    let absent = temp.path().join("must-not-create").join("rejected.json");
+    let absent = root.join("must-not-create").join("rejected.json");
     assert!(immutable_json(&absent, &expanding).is_err());
     assert!(!absent.parent().unwrap().exists());
     assert_eq!(inventory(), original_inventory);

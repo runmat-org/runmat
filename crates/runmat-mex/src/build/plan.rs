@@ -259,6 +259,7 @@ fn msvc_arguments(
 ) -> Vec<String> {
     let mut arguments = vec![
         "/nologo".into(),
+        "/utf-8".into(),
         "/LD".into(),
         "/O2".into(),
         match build.language {
@@ -275,6 +276,9 @@ fn msvc_arguments(
             std::path::MAIN_SEPARATOR
         ),
     ];
+    if build.language == MexSourceLanguage::Cxx {
+        arguments.push("/EHsc".into());
+    }
     for include in &build.include_directories {
         arguments.push(format!("/I{}", include.display()));
     }
@@ -426,6 +430,7 @@ fn cxx_msvc_steps(
         let object = object_path(object_directory, index, source, "obj");
         let mut arguments = vec![
             "/nologo".into(),
+            "/utf-8".into(),
             "/O2".into(),
             "/c".into(),
             match language {
@@ -442,6 +447,8 @@ fn cxx_msvc_steps(
         }
         push_definitions(build, function_name, "/D", &mut arguments);
         if language == MexSourceLanguage::Cxx {
+            // Use C++ unwinding; the default MSVC catch-all also catches SEH.
+            arguments.push("/EHsc".into());
             arguments.extend(build.compiler_arguments.iter().cloned());
         }
         match language {
@@ -479,6 +486,7 @@ fn cxx_msvc_steps(
     let support_object = object_path(object_directory, build.sources.len(), support_source, "obj");
     let mut support_arguments = vec![
         "/nologo".into(),
+        "/utf-8".into(),
         "/O2".into(),
         "/c".into(),
         "/std:c11".into(),
@@ -660,6 +668,10 @@ fn cuda_steps(
         let (compiler, mut arguments) = match language {
             MexSourceLanguage::Cuda => {
                 let mut arguments = vec!["-O2".into(), "-std=c++17".into()];
+                if windows {
+                    arguments.push("-Xcompiler=/EHsc".into());
+                    arguments.push("-Xcompiler=/utf-8".into());
+                }
                 arguments.push(if windows {
                     "-Xcompiler=/MD".into()
                 } else {
@@ -672,7 +684,13 @@ fn cuda_steps(
             }
             MexSourceLanguage::C => {
                 let mut arguments = if windows {
-                    vec!["/nologo".into(), "/O2".into(), "/MD".into(), "/TC".into()]
+                    vec![
+                        "/nologo".into(),
+                        "/utf-8".into(),
+                        "/O2".into(),
+                        "/MD".into(),
+                        "/TC".into(),
+                    ]
                 } else {
                     vec!["-O2".into(), "-std=c11".into(), "-fPIC".into()]
                 };
@@ -688,10 +706,12 @@ fn cuda_steps(
                 let mut arguments = if windows {
                     vec![
                         "/nologo".into(),
+                        "/utf-8".into(),
                         "/O2".into(),
                         "/MD".into(),
                         "/TP".into(),
                         "/std:c++17".into(),
+                        "/EHsc".into(),
                     ]
                 } else {
                     vec!["-O2".into(), "-std=c++17".into(), "-fPIC".into()]
@@ -748,7 +768,13 @@ fn cuda_steps(
         object_extension,
     );
     let mut support_arguments = if windows {
-        vec!["/nologo".into(), "/O2".into(), "/MD".into(), "/TC".into()]
+        vec![
+            "/nologo".into(),
+            "/utf-8".into(),
+            "/O2".into(),
+            "/MD".into(),
+            "/TC".into(),
+        ]
     } else {
         vec!["-O2".into(), "-std=c11".into(), "-fPIC".into()]
     };
@@ -897,6 +923,16 @@ mod tests {
     use super::*;
     use crate::MexTarget;
 
+    fn linux_target() -> MexTarget {
+        MexTarget {
+            triple: "x86_64-unknown-linux-gnu".into(),
+            architecture: "x86_64".into(),
+            operating_system: "linux".into(),
+            pointer_width: 64,
+            suffix: "mexa64".into(),
+        }
+    }
+
     #[test]
     fn fortran_plan_compiles_language_and_support_units_then_links_with_fortran() {
         let temporary = tempfile::tempdir().unwrap();
@@ -906,7 +942,10 @@ mod tests {
             "#include \"fintrf.h\"\n      subroutine mexFunction(n,p,m,q)\n      end",
         )
         .unwrap();
-        let build = MexBuild::new(&source, temporary.path()).compiler("gfortran");
+        let build = MexBuild::new(&source, temporary.path())
+            .target(linux_target())
+            .compiler("gfortran")
+            .c_compiler("cc");
         let plan = build.plan().unwrap();
         assert_eq!(build.language, MexSourceLanguage::Fortran);
         assert_eq!(plan.steps.len(), 3);
@@ -1022,7 +1061,12 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let source = temporary.path().join("demo.cpp");
         std::fs::write(&source, "class MexFunction {}; ").unwrap();
-        let plan = MexBuild::new(&source, temporary.path()).plan().unwrap();
+        let plan = MexBuild::new(&source, temporary.path())
+            .target(linux_target())
+            .compiler("c++")
+            .c_compiler("cc")
+            .plan()
+            .unwrap();
         assert!(plan.arguments.contains(&"-std=c++17".to_string()));
         assert!(plan.arguments.contains(&"c++".to_string()));
         assert!(plan.arguments.contains(&"-std=c11".to_string()));
@@ -1054,6 +1098,11 @@ mod tests {
             MexBuildPlan::for_build_with_msvc_object_directory(&build, Some(temporary.path()))
                 .unwrap();
         assert_eq!(plan.steps.len(), 4);
+        assert!(plan.steps[0].arguments.contains(&"/EHsc".to_string()));
+        assert!(!plan.steps[1].arguments.contains(&"/EHsc".to_string()));
+        assert!(plan.steps[..3]
+            .iter()
+            .all(|step| step.arguments.contains(&"/utf-8".to_string())));
         assert!(plan.steps[0]
             .arguments
             .contains(&format!("/Tp{}", cpp.display())));

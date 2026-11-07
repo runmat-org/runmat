@@ -1,5 +1,42 @@
-use runmat_runtime::data::{DataArrayPayload, DataArrayValues};
+use runmat_runtime::data::{DataArrayPayload, DataArrayValues, DataChunkIndex, DataManifest};
 use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType, Tensor, Value};
+use std::path::{Component, Path};
+
+fn assert_portable_storage(root: &Path) {
+    let manifest: DataManifest =
+        serde_json::from_slice(&std::fs::read(root.join("manifest.json")).expect("manifest"))
+            .expect("decode manifest");
+    let check_path = |value: &str| {
+        assert!(!value.contains('\\'), "nonportable storage path: {value}");
+        assert!(!value.is_empty());
+        assert!(Path::new(value)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_))));
+        assert!(
+            root.join(value).is_file(),
+            "missing storage object: {value}"
+        );
+    };
+    for meta in manifest.arrays.values() {
+        check_path(&meta.data_path);
+        let index_path = meta.chunk_index_path.as_ref().expect("chunk index path");
+        check_path(index_path);
+        let index: DataChunkIndex =
+            serde_json::from_slice(&std::fs::read(root.join(index_path)).expect("chunk index"))
+                .expect("decode chunk index");
+        for chunk in index.chunks {
+            check_path(&chunk.data_path);
+            let digest = chunk.hash.strip_prefix("sha256:").expect("SHA-256 hash");
+            assert_eq!(digest.len(), 64);
+            assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            assert_eq!(chunk.object_id, format!("obj_{}", chunk.hash));
+            assert_eq!(
+                Path::new(&chunk.data_path).file_name().expect("chunk file"),
+                format!("obj_{digest}.json").as_str()
+            );
+        }
+    }
+}
 
 fn create_array(
     path: String,
@@ -167,9 +204,11 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
         &[(*array).clone(), slice, Value::Tensor(replacement)],
     )
     .expect("slice write");
+    assert_portable_storage(Path::new(&dataset_path));
 
-    let dataset = runmat_runtime::call_builtin("data.open", &[Value::String(dataset_path.into())])
-        .expect("open dataset");
+    let dataset =
+        runmat_runtime::call_builtin("data.open", &[Value::String(dataset_path.clone().into())])
+            .expect("open dataset");
     let tx = runmat_runtime::call_builtin("Dataset.begin", &[(*dataset).clone()])
         .expect("begin transaction");
     runmat_runtime::call_builtin(
@@ -183,6 +222,7 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
     .expect("queue transaction fill");
     runmat_runtime::call_builtin("DataTransaction.commit", &[(*tx).clone()])
         .expect("commit transaction");
+    assert_portable_storage(Path::new(&dataset_path));
 
     let read_back =
         runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()]).expect("read array");
@@ -208,6 +248,22 @@ fn dataset_lifecycle_preserves_wide_uint64_payloads_exactly() {
     let input = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer tensor");
     runmat_runtime::call_builtin("DataArray.write", &[(*array).clone(), Value::Tensor(input)])
         .expect("write source");
+    assert_portable_storage(Path::new(&source_path));
+    let slice = Value::Cell(
+        CellArray::new(
+            vec![Value::Int(IntValue::I32(1)), Value::String(":".into())],
+            1,
+            2,
+        )
+        .expect("slice"),
+    );
+    let input = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("slice tensor");
+    runmat_runtime::call_builtin(
+        "DataArray.write",
+        &[(*array).clone(), slice, Value::Tensor(input)],
+    )
+    .expect("write source slice before lifecycle operations");
+    assert_portable_storage(Path::new(&source_path));
 
     runmat_runtime::call_builtin(
         "data.copy",

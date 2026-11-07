@@ -934,7 +934,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
     ) -> Result<AwaitAction, ExecutionServiceError> {
         self.sweep_completed_graph_cancellations();
         if let Value::Job(handle) = &value {
-            self.prune_expired_job_receipts()?;
+            self.prune_expired_job_receipt(handle.id)?;
             let record = self.durable_receipt(handle)?;
             record.authority.check_context(runtime)?;
             if let Some(terminal) = record.terminal.borrow().as_ref() {

@@ -30,9 +30,9 @@ use crate::data::dataset_root;
 use crate::data::{
     array_object, data_error, dataset_object, ensure_manifest_sequence, get_object_prop,
     manifest_path, manifest_version_token, new_tx_id, now_rfc3339, parse_schema, parse_string,
-    remove_tx, sha256_hex, start_tx_with_id, transaction_object, validate_chunk_shape, with_tx,
-    with_tx_mut, DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry,
-    DataManifest, PendingCreateArray, PendingFill, PendingResize, PendingWrite, TxnStatus,
+    remove_tx, start_tx_with_id, transaction_object, validate_chunk_shape, with_tx, with_tx_mut,
+    DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry, DataManifest,
+    PendingCreateArray, PendingFill, PendingResize, PendingWrite, TxnStatus,
 };
 use crate::{make_cell, BuiltinResult};
 

@@ -63,6 +63,22 @@ impl FsProvider for PinnedFsProvider {
         &self,
         request: &DataManifestRequest,
     ) -> io::Result<DataManifestDescriptor> {
+        #[cfg(windows)]
+        {
+            let requested = if request.path.ends_with(".json") {
+                PathBuf::from(&request.path)
+            } else {
+                PathBuf::from(&request.path).join("manifest.json")
+            };
+            if let Some((path, provider)) = self.mounts.native_access(&requested)? {
+                if request.version.is_some() {
+                    return Err(missing());
+                }
+                let bytes = provider.read(&path).await?;
+                return serde_json::from_slice(&bytes)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error));
+            }
+        }
         let path = normalize(&if request.path.ends_with(".json") {
             PathBuf::from(&request.path)
         } else {
@@ -96,6 +112,13 @@ impl FsProvider for PinnedFsProvider {
         ))
     }
     async fn open_async(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+        #[cfg(windows)]
+        if let Some((path, _)) = self.mounts.native_access(path)? {
+            if flags.write || flags.append || flags.truncate || flags.create || flags.create_new {
+                return Err(denied("execution inputs are immutable"));
+            }
+            return Ok(Box::new(InputHandle(Cursor::new(self.read(&path).await?))));
+        }
         let path = normalize(path)?;
         if flags.write || flags.append || flags.truncate || flags.create || flags.create_new {
             self.mutable(&path)?;
@@ -142,6 +165,10 @@ impl FsProvider for PinnedFsProvider {
         Ok(Box::new(InputHandle(Cursor::new(bytes))))
     }
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        #[cfg(windows)]
+        if let Some((path, provider)) = self.mounts.native_access(path)? {
+            return provider.read(&path).await;
+        }
         let path = normalize(path)?;
         if let Some(provider) = self.mounts.provider(&path) {
             return provider.read(&path).await;
@@ -218,6 +245,17 @@ impl FsProvider for PinnedFsProvider {
     }
 
     async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        #[cfg(windows)]
+        if let Some((path, provider)) = self.mounts.native_access(path)? {
+            let metadata = provider.metadata(&path).await?;
+            return Ok(FsMetadata::new_with_hash(
+                metadata.file_type(),
+                metadata.len(),
+                metadata.modified(),
+                true,
+                metadata.hash().map(str::to_owned),
+            ));
+        }
         let path = normalize(path)?;
         if let Some(provider) = self.mounts.provider(&path) {
             let metadata = provider.metadata(&path).await?;
@@ -252,6 +290,10 @@ impl FsProvider for PinnedFsProvider {
         self.metadata(path).await
     }
     async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+        #[cfg(windows)]
+        if let Some((path, provider)) = self.mounts.native_access(path)? {
+            return provider.read_dir(&path).await;
+        }
         let path = normalize(path)?;
         if let Some(provider) = self.mounts.provider(&path) {
             return provider.read_dir(&path).await;
@@ -292,6 +334,11 @@ impl FsProvider for PinnedFsProvider {
         Ok(entries)
     }
     async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        #[cfg(windows)]
+        if let Some((path, _)) = self.mounts.native_access(path)? {
+            self.metadata(&path).await?;
+            return Ok(path);
+        }
         let path = normalize(path)?;
         self.metadata(&path).await?;
         Ok(path)

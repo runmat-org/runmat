@@ -6,7 +6,7 @@ use std::sync::{Arc, Barrier};
 #[test]
 fn concurrent_different_publishers_preserve_one_complete_program() {
     let directory = tempfile::tempdir().unwrap();
-    let store = Arc::new(ArtifactStore::new(directory.path().to_path_buf()).unwrap());
+    let store = Arc::new(ArtifactStore::new(directory.path().join("artifacts")).unwrap());
     let id = ArtifactId::derive(&[b"competing-programs"]);
     let start = Arc::new(Barrier::new(3));
     let first = vec![0x37; 256 * 1024];
@@ -43,7 +43,7 @@ fn concurrent_different_publishers_preserve_one_complete_program() {
 #[test]
 fn concurrent_identical_publishers_are_idempotent() {
     let directory = tempfile::tempdir().unwrap();
-    let store = Arc::new(ArtifactStore::new(directory.path().to_path_buf()).unwrap());
+    let store = Arc::new(ArtifactStore::new(directory.path().join("artifacts")).unwrap());
     let id = ArtifactId::derive(&[b"same-program"]);
     let start = Arc::new(Barrier::new(3));
     let handles = [0, 1].map(|_| {
@@ -80,12 +80,12 @@ fn publication_rejects_a_symlink_without_modifying_its_target() {
 #[test]
 fn artifact_reads_reject_original_oversize_before_loading_and_preserve_content() {
     let directory = tempfile::tempdir().unwrap();
-    let store = ArtifactStore::new(directory.path().to_path_buf()).unwrap();
+    let store = ArtifactStore::new(directory.path().join("artifacts")).unwrap();
     let id = ArtifactId::derive(&[b"bounded-native-artifact"]);
     store.put(id, b"original").unwrap();
     assert!(store.get(id, 7).is_err());
     assert_eq!(store.get(id, 8).unwrap(), b"original");
-    let path = directory.path().join(id.to_string());
+    let path = store.root.join(id.to_string());
     std::fs::File::create(&path)
         .unwrap()
         .set_len(1 << 30)

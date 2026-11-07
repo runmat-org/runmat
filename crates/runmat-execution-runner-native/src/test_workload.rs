@@ -1228,7 +1228,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             expected_artifact_id: None,
         };
         let identity = manifest.identity.to_string();
-        let root = format!("mex/{identity}");
+        let root = "mex/fixture";
         let filename = output.module.file_name().unwrap().to_string_lossy();
         let sidecar = LogicalObject::new(
             ObjectNamespace::ForeignArtifact,

@@ -39,14 +39,15 @@ pub(super) async fn evaluate(
             .map_err(|error| runtime_error(operator, ComparisonError::from(error)))?
     {
         return preparation::execute(context, lhs, rhs, operator, |lhs, rhs| async move {
-            evaluate_admitted(lhs, rhs, operator, output_source).await
+            evaluate_admitted(context, lhs, rhs, operator, output_source).await
         })
         .await;
     }
-    evaluate_admitted(lhs, rhs, operator, output_source).await
+    evaluate_admitted(context, lhs, rhs, operator, output_source).await
 }
 
 async fn evaluate_admitted(
+    context: Option<&crate::context::RuntimeContext>,
     lhs: Value,
     rhs: Value,
     operator: RelationalOperator,
@@ -62,8 +63,19 @@ async fn evaluate_admitted(
 
     let lhs = gather(lhs, operator).await?;
     let rhs = gather(rhs, operator).await?;
+    let host_route = crate::builtins::math::host_route::canonical(
+        context,
+        crate::context::VmFusionHostInstruction::ElementwiseBinary,
+        [&lhs, &rhs].into_iter(),
+    );
     let result = RootedValue::new(evaluate_host(lhs, rhs, operator)?)
         .map_err(|error| error.into_runtime_error())?;
+    if let (Some(context), Some(route)) = (context, host_route) {
+        route.confirm_host_branch(
+            context,
+            crate::context::VmFusionHostInstruction::ElementwiseBinary,
+        );
+    }
     result.try_map_owned(
         |value| restore_explicit_comparison_result(value, output_source.as_ref(), operator.name()),
         |error| error.into_runtime_error(),

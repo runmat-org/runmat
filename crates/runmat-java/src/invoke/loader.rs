@@ -287,6 +287,21 @@ fn build_class_loader(
                     &[JValue::Object(&path)],
                 )
                 .map_err(|error| jni_error(environment, error))?;
+            // Rust canonicalization retains Windows verbatim prefixes. NIO
+            // projects those native paths into file URIs; File.toURI encodes
+            // the prefix as a literal share component instead.
+            #[cfg(windows)]
+            let uri = {
+                let native_path = environment
+                    .call_method(&file, "toPath", "()Ljava/nio/file/Path;", &[])
+                    .and_then(JValueOwned::l)
+                    .map_err(|error| jni_error(environment, error))?;
+                environment
+                    .call_method(native_path, "toUri", "()Ljava/net/URI;", &[])
+                    .and_then(JValueOwned::l)
+                    .map_err(|error| jni_error(environment, error))?
+            };
+            #[cfg(not(windows))]
             let uri = environment
                 .call_method(&file, "toURI", "()Ljava/net/URI;", &[])
                 .and_then(JValueOwned::l)

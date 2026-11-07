@@ -15,6 +15,13 @@ SPEC.loader.exec_module(runner)
 
 
 class ScientificRoutingTests(unittest.TestCase):
+    def test_native_stack_matches_command_host_without_mutating_parent(self):
+        with patch.dict(runner.os.environ, {"RUST_MIN_STACK": "2097152", "RUST_TEST_THREADS": "1"}):
+            environment = runner.test_environment()
+            self.assertEqual(environment["RUST_MIN_STACK"], str(64 * 1024 * 1024))
+            self.assertEqual(environment["RUST_TEST_THREADS"], "1")
+            self.assertEqual(runner.os.environ["RUST_MIN_STACK"], "2097152")
+
     def test_standalone_benchmarks_have_separate_bounded_invocations(self):
         commands = [command for group in runner.GROUPS for command in runner.benchmark_commands(group)]
         self.assertEqual(len(commands), len(runner.STANDALONE_BENCHMARK_SMOKES))
@@ -25,6 +32,12 @@ class ScientificRoutingTests(unittest.TestCase):
             self.assertLessEqual(int(iterations), 1000)
             self.assertEqual(int(samples), 3)
         for group in runner.GROUPS:
+            expected = {package for package in runner.GROUPS[group]
+                        if package not in runner.PACKAGE_TEST_FEATURE_PROFILES}
+            for command in runner.benchmark_commands(group):
+                actual = {command[index + 1] for index, token in enumerate(command)
+                          if token == "--package"}
+                self.assertEqual(actual, expected)
             for command in runner.test_commands(group, include_extended=False):
                 self.assertNotIn("--all-targets", command)
                 self.assertTrue({"--lib", "--bins", "--tests", "--examples"}.issubset(command))

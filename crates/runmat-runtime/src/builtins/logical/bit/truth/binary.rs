@@ -86,17 +86,20 @@ async fn value(
             rhs,
             |lhs, rhs| async move {
                 let output =
-                    admitted_value(lhs, rhs, operation, contract, output_source, shape).await?;
+                    admitted_value(context, lhs, rhs, operation, contract, output_source, shape)
+                        .await?;
                 RootedValue::new(output).map_err(|error| error.into_runtime_error())
             },
         )
         .await;
     }
-    let output = admitted_value(lhs, rhs, operation, contract, output_source, shape).await?;
+    let output =
+        admitted_value(context, lhs, rhs, operation, contract, output_source, shape).await?;
     RootedValue::new(output).map_err(|error| error.into_runtime_error())
 }
 
 async fn admitted_value(
+    context: Option<&crate::context::RuntimeContext>,
     lhs: Value,
     rhs: Value,
     operation: LogicalBinaryOperator,
@@ -113,6 +116,17 @@ async fn admitted_value(
     let right = operand::from_value(contract.name, rhs, contract.invalid).await?;
     let data = evaluate::binary(&left, &right, &shape, operation);
     let value = operand::into_value(contract.name, data, shape.into(), contract.invalid)?;
+    if let Some(context) = context {
+        if let Some(route) = crate::builtins::math::host_route::selected(
+            context,
+            crate::context::VmFusionHostInstruction::ElementwiseBinary,
+        ) {
+            route.confirm_host_branch(
+                context,
+                crate::context::VmFusionHostInstruction::ElementwiseBinary,
+            );
+        }
+    }
     provider::restore_explicit(value, output_source.as_ref(), contract.name)
 }
 

@@ -325,10 +325,9 @@ async fn rehash_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Va
     use crate::user_functions::DynamicFunctionRefreshRequest;
 
     if output_count::current_output_count().is_some_and(|count| count > 1) {
-        return Err(build_runtime_error("rehash: too many output arguments")
-            .with_builtin("rehash")
-            .with_identifier("RunMat:rehash:TooManyOutputs")
-            .build());
+        return Err(rehash_typed_error(
+            &runmat_builtins::REHASH_ERROR_TOO_MANY_OUTPUTS,
+        ));
     }
     let request = match (args.len(), args.first()) {
         (0, _) => DynamicFunctionRefreshRequest::Default,
@@ -336,7 +335,11 @@ async fn rehash_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Va
             let mode = scalar_text(argument, "rehash", "mode").map_err(|source| {
                 build_runtime_error(source.message().to_owned())
                     .with_builtin("rehash")
-                    .with_identifier("RunMat:rehash:InvalidMode")
+                    .with_identifier(
+                        runmat_builtins::REHASH_ERROR_INVALID_MODE
+                            .identifier
+                            .expect("typed rehash diagnostic"),
+                    )
                     .with_source(source)
                     .build()
             })?;
@@ -345,31 +348,29 @@ async fn rehash_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Va
                 Some(RehashMode::Toolbox) => DynamicFunctionRefreshRequest::Toolbox,
                 Some(RehashMode::ToolboxCache) => DynamicFunctionRefreshRequest::ToolboxCache,
                 _ => {
-                    return Err(build_runtime_error(
-                        "rehash: expected path, toolbox, or toolboxcache",
-                    )
-                    .with_builtin("rehash")
-                    .with_identifier("RunMat:rehash:InvalidMode")
-                    .build());
+                    return Err(rehash_typed_error(
+                        &runmat_builtins::REHASH_ERROR_INVALID_MODE,
+                    ));
                 }
             }
         }
         _ => {
-            return Err(build_runtime_error("rehash: too many input arguments")
-                .with_builtin("rehash")
-                .with_identifier("RunMat:rehash:InvalidCall")
-                .build());
+            return Err(rehash_typed_error(
+                &runmat_builtins::REHASH_ERROR_INVALID_ARITY,
+            ));
         }
     };
     crate::user_functions::try_refresh_dynamic_functions(request)
         .await
-        .ok_or_else(|| {
-            build_runtime_error("rehash: no source-cache refresh service is installed")
-                .with_builtin("rehash")
-                .with_identifier("RunMat:rehash:Unavailable")
-                .build()
-        })??;
+        .ok_or_else(|| rehash_typed_error(&runmat_builtins::REHASH_ERROR_UNAVAILABLE))??;
     Ok(Value::Num(0.0))
+}
+
+fn rehash_typed_error(error: &runmat_builtins::BuiltinErrorDescriptor) -> RuntimeError {
+    build_runtime_error(error.message)
+        .with_builtin("rehash")
+        .with_identifier(error.identifier.expect("typed rehash diagnostic"))
+        .build()
 }
 
 #[runtime_builtin(
@@ -710,7 +711,11 @@ fn registry_text(value: &Value) -> BuiltinResult<String> {
     scalar_text(value, "winqueryreg", "selector").map_err(|source| {
         build_runtime_error(runmat_builtins::WINQUERYREG_ERROR_INVALID_INPUT.message)
             .with_builtin("winqueryreg")
-            .with_identifier("RunMat:winqueryreg:InvalidInput")
+            .with_identifier(
+                runmat_builtins::WINQUERYREG_ERROR_INVALID_INPUT
+                    .identifier
+                    .expect("typed registry diagnostic"),
+            )
             .with_source(source)
             .build()
     })
@@ -744,7 +749,11 @@ async fn query_windows_registry(
             String::from_utf8_lossy(&output.stderr).trim()
         ))
         .with_builtin("winqueryreg")
-        .with_identifier("RunMat:winqueryreg:QueryFailed")
+        .with_identifier(
+            runmat_builtins::WINQUERYREG_ERROR_QUERY
+                .identifier
+                .expect("typed registry diagnostic"),
+        )
         .build());
     }
     parse_registry_query_value(&String::from_utf8_lossy(&output.stdout))
@@ -769,22 +778,22 @@ async fn registry_output(
             if let ProcessInvocationError::Execution(source) = source {
                 return source.into_runtime_error();
             }
-            let identifier = match &source {
+            let descriptor = match &source {
                 ProcessInvocationError::ResourceEvidence => {
-                    "RunMat:Placement:InsufficientResourceEvidence"
+                    &runmat_builtins::WINQUERYREG_ERROR_INSUFFICIENT_RESOURCE
                 }
                 ProcessInvocationError::Capability(_) => {
-                    "RunMat:RuntimeContext:CapabilityUnavailable"
+                    &runmat_builtins::WINQUERYREG_ERROR_CAPABILITY
                 }
                 ProcessInvocationError::StaleDirectory(_)
                 | ProcessInvocationError::StaleExecutable(_) => {
-                    "RunMat:winqueryreg:StaleFilesystem"
+                    &runmat_builtins::WINQUERYREG_ERROR_STALE
                 }
-                _ => "RunMat:winqueryreg:ProcessFailed",
+                _ => &runmat_builtins::WINQUERYREG_ERROR_PROCESS,
             };
             build_runtime_error(format!("winqueryreg: {source}"))
                 .with_builtin("winqueryreg")
-                .with_identifier(identifier)
+                .with_identifier(descriptor.identifier.expect("typed registry diagnostic"))
                 .with_source(source)
                 .build()
         })
@@ -841,7 +850,11 @@ async fn query_windows_registry_names(
             String::from_utf8_lossy(&output.stderr).trim()
         ))
         .with_builtin("winqueryreg")
-        .with_identifier("RunMat:winqueryreg:QueryFailed")
+        .with_identifier(
+            runmat_builtins::WINQUERYREG_ERROR_QUERY
+                .identifier
+                .expect("typed registry diagnostic"),
+        )
         .build());
     }
     let names = String::from_utf8_lossy(&output.stdout)
@@ -1076,8 +1089,8 @@ mod tests {
     #[test]
     fn memmapfile_decodes_named_typed_format() {
         let _provider_guard = vfs::provider_override_lock();
-        let path = std::env::temp_dir().join("runmat_memmapfile_test.bin");
-        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(std::env::temp_dir()));
+        let path = PathBuf::from("/memmap-fixture/runmat_memmapfile_test.bin");
+        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir("/memmap-fixture"));
         provider.write_project_path(&path, &[1u8, 0, 2, 0]).unwrap();
         let _selected_provider = vfs::replace_provider(provider);
         let shape = Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
@@ -1278,9 +1291,6 @@ mod tests {
         }
 
         let _lock = vfs::provider_override_lock();
-        #[cfg(not(target_arch = "wasm32"))]
-        let root = std::env::temp_dir().join("runmat-memmap-table");
-        #[cfg(target_arch = "wasm32")]
         let root = PathBuf::from("/runmat-memmap-table");
         let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
             root.clone(),
@@ -1428,13 +1438,7 @@ mod tests {
         use std::sync::Arc;
 
         let _lock = vfs::provider_override_lock();
-        #[cfg(not(target_arch = "wasm32"))]
-        let selected_dir = std::env::temp_dir().join("runmat-memmap-selected");
-        #[cfg(not(target_arch = "wasm32"))]
-        let other_dir = std::env::temp_dir().join("runmat-memmap-other");
-        #[cfg(target_arch = "wasm32")]
         let selected_dir = PathBuf::from("/runmat-memmap-selected");
-        #[cfg(target_arch = "wasm32")]
         let other_dir = PathBuf::from("/runmat-memmap-other");
         let selected = Arc::new(MemoryFsProvider::with_current_dir(selected_dir.clone()));
         let other = Arc::new(MemoryFsProvider::with_current_dir(other_dir.clone()));
@@ -1681,9 +1685,6 @@ mod tests {
     #[test]
     fn fileattrib_read_flag_rejects_before_an_earlier_write_flag_mutates() {
         let _provider_lock = vfs::provider_override_lock();
-        #[cfg(not(target_arch = "wasm32"))]
-        let root = std::env::temp_dir().join("runmat-fileattrib-preflight");
-        #[cfg(target_arch = "wasm32")]
         let root = PathBuf::from("/runmat-fileattrib-preflight");
         let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
         let path = root.join("input.bin");
@@ -1710,9 +1711,6 @@ mod tests {
     #[test]
     fn fileattrib_output_count_admits_zero_one_two_and_rejects_three_before_mutation() {
         let _provider_lock = vfs::provider_override_lock();
-        #[cfg(windows)]
-        let root = PathBuf::from("C:\\runmat-fileattrib-output-count");
-        #[cfg(not(windows))]
         let root = PathBuf::from("/runmat-fileattrib-output-count");
         let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(&root));
         let path = root.join("input.bin");
@@ -1762,9 +1760,6 @@ mod tests {
     #[test]
     fn scalar_text_controls_reject_character_pages_without_filesystem_effects() {
         let _provider_lock = vfs::provider_override_lock();
-        #[cfg(windows)]
-        let root = PathBuf::from("C:\\runmat-fileattrib-paged-text");
-        #[cfg(not(windows))]
         let root = PathBuf::from("/runmat-fileattrib-paged-text");
         let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(&root));
         let path = root.join("input.bin");
@@ -1824,9 +1819,6 @@ mod tests {
     #[test]
     fn fileattrib_captured_path_retains_provider_for_mutation_and_metadata() {
         let _provider_lock = vfs::provider_override_lock();
-        #[cfg(not(target_arch = "wasm32"))]
-        let root = std::env::temp_dir().join("runmat-fileattrib-selected");
-        #[cfg(target_arch = "wasm32")]
         let root = PathBuf::from("/runmat-fileattrib-selected");
         let selected = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
         let other = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
@@ -1852,9 +1844,6 @@ mod tests {
     #[test]
     fn fileattrib_reports_unavailable_permission_facts_as_nan() {
         let _provider_lock = vfs::provider_override_lock();
-        #[cfg(not(target_arch = "wasm32"))]
-        let root = std::env::temp_dir().join("runmat-fileattrib-unknown-facts");
-        #[cfg(target_arch = "wasm32")]
         let root = PathBuf::from("/runmat-fileattrib-unknown-facts");
         let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
         provider

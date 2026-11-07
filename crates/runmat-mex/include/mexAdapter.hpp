@@ -19,14 +19,15 @@
 class MexFunction;
 
 namespace runmat_mex_detail {
+// A gateway belongs to one module; GCC must not coalesce its static storage.
 template <typename Gateway>
-std::unique_ptr<Gateway> &cppGateway() {
+static std::unique_ptr<Gateway> &cppGateway() {
     static std::unique_ptr<Gateway> gateway;
     return gateway;
 }
 
 template <typename Gateway>
-void invokeCppGateway(int outputCount, mxArray **outputValues, int inputCount,
+static void invokeCppGateway(int outputCount, mxArray **outputValues, int inputCount,
                       const mxArray **inputValues) {
     auto &gateway = cppGateway<Gateway>();
     if (!gateway) gateway = std::make_unique<Gateway>();

@@ -23,7 +23,12 @@ fn virtual_filesystem_cannot_fall_through_to_ambient_native_hdf5_file() {
         Vec::new(),
     ))
     .expect_err("memory provider has no native path grant");
-    assert_eq!(write.identifier(), ERR_PROVIDER.identifier);
+    let expected = if cfg!(windows) {
+        ERR_IO.identifier
+    } else {
+        ERR_PROVIDER.identifier
+    };
+    assert_eq!(write.identifier(), expected);
     assert!(!path.exists());
 
     let read = block_on(h5read_builtin(
@@ -33,6 +38,19 @@ fn virtual_filesystem_cannot_fall_through_to_ambient_native_hdf5_file() {
         Vec::new(),
     ))
     .expect_err("read cannot use ambient native path");
-    assert_eq!(read.identifier(), ERR_PROVIDER.identifier);
+    assert_eq!(read.identifier(), expected);
+    // A Windows drive-prefixed path is outside the virtual rooted namespace;
+    // capture rejects that spelling before asking for a native-path grant.
+    #[cfg(windows)]
+    for error in [&write, &read] {
+        assert_eq!(
+            error
+                .source
+                .as_deref()
+                .and_then(|cause| cause.downcast_ref::<std::io::Error>())
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::InvalidInput)
+        );
+    }
     assert!(!path.exists());
 }

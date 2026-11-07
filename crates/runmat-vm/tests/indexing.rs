@@ -90,13 +90,30 @@ fn logical_mask_indexing() {
 }
 
 #[test]
-fn logical_mask_linear_indexing_row_vector_returns_column() {
-    let vars = execute_source("A=[10,20,30,40]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
-    if let Value::Tensor(v) = &vars[2] {
-        assert_eq!(v.shape(), vec![2, 1]);
-        assert_eq!(v.materialize_f64(), vec![10.0, 30.0]);
-    } else {
-        panic!("v");
+fn logical_mask_linear_indexing_preserves_source_vector_orientation() {
+    // Vector-vector indexing follows A's orientation. Matrix sources and
+    // matrix masks are covered separately below.
+    for (source, shape) in [
+        (
+            "A=[10,20,30,40]; idx=logical([1,0,1,0]); v=A(idx);",
+            vec![1, 2],
+        ),
+        (
+            "A=[10,20,30,40]; idx=logical([1;0;1;0]); v=A(idx);",
+            vec![1, 2],
+        ),
+        (
+            "A=[10;20;30;40]; idx=logical([1,0,1,0]); v=A(idx);",
+            vec![2, 1],
+        ),
+    ] {
+        let vars = execute_source(source).unwrap();
+        if let Value::Tensor(v) = &vars[2] {
+            assert_eq!(v.shape(), shape, "{source}");
+            assert_eq!(v.materialize_f64(), vec![10.0, 30.0]);
+        } else {
+            panic!("v");
+        }
     }
 }
 

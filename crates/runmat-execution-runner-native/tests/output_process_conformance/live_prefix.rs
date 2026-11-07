@@ -26,8 +26,11 @@ pub(super) async fn verify(
                     cpu_millicores: config.worker_cpu_millicores,
                     memory_bytes: config.worker_memory_bytes,
                     scratch_bytes: config.worker_scratch_bytes,
-                    max_wall_millis: 30_000,
-                    max_artifact_bytes: 1024 * 1024,
+                    // Allow the observation and paged-read windows to finish before
+                    // this witness deliberately terminates its publisher.
+                    max_wall_millis: 5 * 60_000,
+                    // The durable source retains a bounded console subtree.
+                    max_artifact_bytes: u64::from(config.max_message_bytes),
                     max_egress_bytes: 0,
                     max_relay_bytes: 0,
                     accelerators: vec![],
@@ -82,6 +85,18 @@ pub(super) async fn verify(
         .console_page(forged, attempt_id, ConsoleCursor::default(), budget)
         .await
         .is_err());
+    let before_loss = client
+        .attach(job.id, 0, 0)
+        .await
+        .unwrap()
+        .execution
+        .unwrap();
+    assert!(
+        before_loss.attempts[0].terminal.is_none(),
+        "publisher retired before the loss trigger: {:?}",
+        before_loss.attempts[0].terminal
+    );
+    assert!(before_loss.attempts[0].unverified_retirement.is_none());
     let directory = root.join("jobs").join(job.id.to_string());
     std::fs::write(
         directory.join("test-provider-exit"),
@@ -92,6 +107,11 @@ pub(super) async fn verify(
         loop {
             let attached = client.attach(job.id, 0, 0).await.unwrap();
             let history = attached.execution.unwrap();
+            assert!(
+                history.attempts[0].terminal.is_none(),
+                "publisher loss produced an unexpected terminal result: {:?}",
+                history.attempts[0].terminal
+            );
             if history.attempts[0].unverified_retirement.is_some() {
                 break history;
             }

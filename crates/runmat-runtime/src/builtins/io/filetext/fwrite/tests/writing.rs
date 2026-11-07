@@ -116,8 +116,8 @@ fn borrowed_integer_storage_writes_exact_bytes_for_every_class() {
             (-4_i64).to_be_bytes().to_vec(),
         ),
     ];
-    for (precision, storage, expected) in cases {
-        let path = unique_path(&format!("fwrite_borrowed_{precision}"));
+    for (index, (precision, storage, expected)) in cases.into_iter().enumerate() {
+        let path = unique_path(&format!("fwrite_borrowed_{index}"));
         let opened = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w+b"),

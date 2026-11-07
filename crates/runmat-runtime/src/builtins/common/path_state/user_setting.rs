@@ -202,9 +202,6 @@ mod tests {
     #[test]
     fn relative_setting_keeps_public_spelling_and_captured_namespace() {
         let _serial = fs::provider_override_lock();
-        #[cfg(windows)]
-        let (first, replacement) = ("C:\\selected", "C:\\replacement");
-        #[cfg(not(windows))]
         let (first, replacement) = ("/selected", "/replacement");
         let _first = fs::replace_provider(Arc::new(fs::MemoryFsProvider::with_current_dir(first)));
         let selected = CapturedUserPathAuthority::capture().expect("selected namespace");
@@ -257,9 +254,6 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn supported_default_creation_uses_selected_provider_not_host_files() {
-        #[cfg(windows)]
-        let (cwd, home) = ("C:\\project", "C:\\isolated-home");
-        #[cfg(not(windows))]
         let (cwd, home) = ("/project", "/isolated-home");
         let provider = Arc::new(fs::MemoryFsProvider::with_current_dir(cwd));
         let selected = CapturedUserPathAuthority {

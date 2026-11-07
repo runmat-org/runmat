@@ -59,11 +59,7 @@ fn cell(values: Vec<Value>, rows: usize, cols: usize) -> Value {
 #[test]
 fn overwrite_streams_long_quoted_cells_through_selected_memory_owner() {
     let _lock = runmat_filesystem::provider_override_lock();
-    let root = if cfg!(windows) {
-        r"C:\tabular"
-    } else {
-        "/tabular"
-    };
+    let root = "/tabular";
     let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(root));
     let _guard = runmat_filesystem::replace_provider(provider.clone());
     runmat_filesystem::set_current_dir(root).expect("memory working directory");

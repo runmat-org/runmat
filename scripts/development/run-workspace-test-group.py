@@ -5,9 +5,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+
+
+# Match the native CLI command/Tokio-worker stack reserve. Unoptimized native
+# continuations can exceed libtest's default 2-MiB stack. This is a per-thread
+# virtual-address reserve; operating systems commit pages as they are used.
+NATIVE_TEST_STACK_BYTES = 64 * 1024 * 1024
+
+
+def test_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["RUST_MIN_STACK"] = str(NATIVE_TEST_STACK_BYTES)
+    return environment
 
 
 GROUPS = {
@@ -157,8 +170,14 @@ STANDALONE_BENCHMARK_SMOKES = (
 
 
 def benchmark_commands(group: str) -> list[list[str]]:
+    # Keep the same package feature selection as the ordinary group. Selecting
+    # only the benchmark's owner gives its dependencies a different feature
+    # graph and can rebuild the large runtime solely for this bounded smoke.
+    packages = [package for package in GROUPS[group]
+                if package not in PACKAGE_TEST_FEATURE_PROFILES]
     return [
-        ["cargo", "test", "--all-features", "--package", package,
+        ["cargo", "test", "--all-features",
+         *(argument for member in packages for argument in ("--package", member)),
          "--bench", target, "--", iterations, samples]
         for package, target, iterations, samples in STANDALONE_BENCHMARK_SMOKES
         if package in GROUPS[group]
@@ -213,7 +232,7 @@ def main() -> int:
 
     failure = 0
     for command in [*test_commands(args.group, args.include_extended), *benchmark_commands(args.group)]:
-        code = subprocess.run(command, cwd=repo_root).returncode
+        code = subprocess.run(command, cwd=repo_root, env=test_environment()).returncode
         if code and not failure:
             failure = code
     return failure

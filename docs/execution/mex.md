@@ -158,6 +158,11 @@ Source detection is order-independent. CUDA has the highest link-driver preceden
 
 RunMat currently builds on the target host; MEX cross-compilation is not available. macOS and Linux require a GNU-like compiler family, and Windows requires an MSVC-compatible family.
 
+MSVC builds read source files as UTF-8 and use UTF-8 for narrow string literals.
+C++ translation units enable standard exception unwinding. GNU Fortran gateways
+run on macOS and Linux; Windows rejects the incompatible GNU Fortran ABI before
+compilation.
+
 ### Matrix API Selection
 
 The API switches are mutually exclusive.

@@ -15,7 +15,14 @@ use runmat_process_host::HiddenMode;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[path = "support/native_host.rs"]
+mod native_host;
+
 fn main() {
+    native_host::run(run);
+}
+
+fn run() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

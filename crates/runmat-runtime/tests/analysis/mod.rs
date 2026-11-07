@@ -320,6 +320,7 @@ fn fea_conformance_manifest_uses_physical_fixture_language() {
 
 #[test]
 fn fea_prescribed_motion_release_fixture_gates() {
+    let _admission = crate::fea_admission::guard();
     let spec = manifest_specs()
         .into_iter()
         .find(|spec| spec.id == "transient_physical_tet4_support_motion_reference_cpu")
@@ -336,6 +337,7 @@ fn fea_prescribed_motion_release_fixture_gates() {
 
 #[test]
 fn fea_benchmark_conformance_manifest_gates() {
+    let _admission = crate::fea_admission::guard();
     let artifact_root = harness_artifact_root();
     let store_root = artifact_root
         .join("store")

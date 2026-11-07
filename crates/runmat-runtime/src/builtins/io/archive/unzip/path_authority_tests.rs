@@ -254,7 +254,12 @@ fn selected_relative_archive_and_default_output_survive_global_owner_and_cwd_swa
         HostEffectOutput::ReturnedValue,
     ))
     .expect("admitted extraction");
-    assert_eq!(result.filenames, vec!["/selected-cwd/owner.txt"]);
+    let expected = Path::new(SELECTED_CWD)
+        .join("owner.txt")
+        .to_str()
+        .expect("UTF-8 fixture path")
+        .to_owned();
+    assert_eq!(result.filenames, vec![expected.clone()]);
     result
         .into_value_with(std::convert::identity)
         .expect("published filename cell");
@@ -295,7 +300,7 @@ fn selected_relative_archive_and_default_output_survive_global_owner_and_cwd_swa
     .expect("selected receipt");
     assert_eq!(placement.selections.get(), 2);
     let second = UnzipResult {
-        filenames: vec!["/selected-cwd/owner.txt".into()],
+        filenames: vec![expected],
         receipt: Some(receipt),
     };
     resources.valid.store(false, Ordering::SeqCst);

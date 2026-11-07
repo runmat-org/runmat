@@ -233,7 +233,6 @@ impl SignalFixture {
         let directory = tempfile::tempdir().unwrap();
         let mut config = NativeExecutionConfig::for_current_executable().unwrap();
         config.executable = std::env::current_exe().unwrap();
-        config.worker_arguments = vec!["--child".into()];
         config.max_workers = 2;
         config.store_root = directory.path().join("isolated-signal");
         let session = NativeProgramSession::new(config).unwrap();
@@ -255,7 +254,6 @@ impl SignalFixture {
         let directory = tempfile::tempdir().unwrap();
         let supervisor = runmat_execution_runner_native::supervisor::LocalSupervisor::open({
             let mut execution = NativeExecutionConfig::for_current_executable().unwrap();
-            execution.worker_arguments = vec!["--child".into()];
             execution.max_workers = 2;
             execution.max_object_bytes = 64 * 1024 * 1024;
             runmat_execution_runner_native::supervisor::LocalSupervisorConfig::new(

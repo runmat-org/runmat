@@ -113,7 +113,7 @@ fn default_profile_rejects_untrusted_or_foreign_existing_state_without_discovery
     ];
     for case in cases {
         let temp = tempfile::tempdir().unwrap();
-        let paths = SupervisorPaths::new(temp.path().to_path_buf()).unwrap();
+        let paths = SupervisorPaths::new(temp.path().join("authority")).unwrap();
         let config = LocalSupervisorConfig::new(original.clone(), paths.clone()).unwrap();
         let path = publish_profile(&config).unwrap();
         match case {

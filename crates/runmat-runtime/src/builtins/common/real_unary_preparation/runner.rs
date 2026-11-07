@@ -1,10 +1,10 @@
 //! Consumes the selected compound through the original numerical/publication
 //! owners. No hook redispatch, fresh placement decision, or ambient plan lookup.
 use super::*;
+use crate::context::preparation::AdmittedRealUnaryCompound;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderRealUnaryExecution, ProviderRealUnaryPublication,
 };
-use std::error::Error;
 
 pub(crate) trait BeforeHost:
     FnOnce(&GpuTensorHandle, RealUnaryClassification) -> BuiltinResult<()>
@@ -84,24 +84,24 @@ where
         .as_ref()
         .is_some_and(|recorder| !recorder.expects_real_unary(plan.physical()))
     {
-        return Err(invalid());
+        return Err(AdmittedRealUnaryCompound::invalid_continuation());
     }
     plan.preflight_execution(runtime, &[value], recorder.is_some())?;
     let source = plan.physical().source();
     let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
-        .ok_or_else(invalid)?;
+        .ok_or_else(AdmittedRealUnaryCompound::invalid_continuation)?;
     let cancellation = runtime.map(RuntimeContext::cancellation);
     let evidence = plan
         .physical()
         .probe(cancellation.as_ref())
         .await
-        .map_err(|cause| provider_error(runtime, plan, adapter.internal_error, cause))?;
+        .map_err(|cause| plan.provider_execution_error(runtime, adapter.internal_error, cause))?;
     plan.validate_current(runtime, &[value])?;
     let execution = plan
         .physical()
         .consume(evidence, cancellation.as_ref())
         .await
-        .map_err(|cause| provider_error(runtime, plan, adapter.internal_error, cause))?;
+        .map_err(|cause| plan.provider_execution_error(runtime, adapter.internal_error, cause))?;
     plan.validate_current(runtime, &[value])?;
     match execution {
         ProviderRealUnaryExecution::Real(executed) => {
@@ -116,7 +116,7 @@ where
         }
         ProviderRealUnaryExecution::Continue(evidence) => {
             if !plan.physical().authenticates_continuation(&evidence) {
-                return Err(invalid());
+                return Err(AdmittedRealUnaryCompound::invalid_continuation());
             }
             (adapter.before_host)(source, evidence.classification())?;
             if let Some(recorder) = &recorder {
@@ -145,7 +145,7 @@ where
                 );
             }
             if proof.as_ref().is_some_and(|proof| !proof.is_confirmed()) {
-                return Err(invalid());
+                return Err(AdmittedRealUnaryCompound::invalid_continuation());
             }
             plan.validate_current(runtime, &[value])?;
             let domain = match output.value() {
@@ -153,7 +153,7 @@ where
                 Value::Complex(_, _) | Value::ComplexTensor(_) => {
                     runmat_types::NumericDomain::Complex
                 }
-                _ => return Err(invalid()),
+                _ => return Err(AdmittedRealUnaryCompound::invalid_continuation()),
             };
             let publication = if plan.unary().publication().publishes_host(source, domain) {
                 ProviderRealUnaryPublication::Host
@@ -169,7 +169,7 @@ where
             )?;
             let published_host = !crate::dispatcher::value_contains_gpu(output.value());
             if published_host != (publication == ProviderRealUnaryPublication::Host) {
-                return Err(invalid());
+                return Err(AdmittedRealUnaryCompound::invalid_continuation());
             }
             plan.validate_current(runtime, &[value])?;
             if let Some(recorder) = recorder {
@@ -178,31 +178,4 @@ where
             Ok(output)
         }
     }
-}
-
-fn invalid() -> crate::RuntimeError {
-    crate::build_runtime_error("compound unary did not consume its exact admitted continuation")
-        .with_identifier("RunMat:Placement:InvalidDecision")
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-        .build()
-}
-fn provider_error(
-    runtime: Option<&RuntimeContext>,
-    plan: &crate::context::preparation::AdmittedRealUnaryCompound,
-    descriptor: &'static runmat_builtins::BuiltinErrorDescriptor,
-    cause: runmat_accelerate_api::ProviderExecutionError,
-) -> crate::RuntimeError {
-    let cancelled = runtime.is_some_and(RuntimeContext::is_cancelled)
-        || cause
-            .source()
-            .is_some_and(|source| source.is::<runmat_accelerate_api::ProviderCompoundCancelled>());
-    let mut error = crate::build_runtime_error(format!("{}: {cause}", descriptor.message))
-        .with_builtin(plan.admission().binding.builtin.name)
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
-    if cancelled {
-        error = error.with_identifier("RunMat:Cancelled");
-    } else if let Some(identifier) = descriptor.identifier {
-        error = error.with_identifier(identifier);
-    }
-    crate::runtime_error::with_provider_execution_source(error.build(), cause)
 }

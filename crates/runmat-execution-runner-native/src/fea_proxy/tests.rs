@@ -378,10 +378,13 @@ fn delegated_work_owns_disjoint_capacity_until_verified_process_retirement() {
     let Reply::Budget { budget } = reply else {
         panic!("admitted child batch")
     };
-    assert_eq!(budget.granted_ops, OperationCount::from_operations(23));
+    let required = OperationCount::from_operations(23);
+    // The child can hold bounded growth headroom; only completed work is charged.
+    assert!(budget.granted_ops >= required);
+    assert!(budget.granted_ops <= budget.budget_ops);
     assert_eq!(
         accounting.ledger().snapshot().unwrap().reserved,
-        OperationCount::from_operations(23)
+        budget.granted_ops
     );
     assert_eq!(
         parent.call(Call {
@@ -404,13 +407,28 @@ fn delegated_work_owns_disjoint_capacity_until_verified_process_retirement() {
         events.lock().unwrap().settles.is_empty(),
         "a child owns no second Server lease"
     );
+    assert_eq!(
+        accounting
+            .ledger()
+            .snapshot()
+            .unwrap()
+            .reserved
+            .checked_add(required)
+            .unwrap(),
+        budget.granted_ops,
+        "terminal reports retain unused capacity until physical retirement"
+    );
     parent.retire_delegated(true).unwrap();
     assert_eq!(
-        scope.usage().unwrap().completed_ops.solve,
-        OperationCount::from_operations(23)
+        accounting.ledger().snapshot().unwrap().reserved,
+        OperationCount::ZERO
     );
+    assert_eq!(scope.usage().unwrap().completed_ops.solve, required);
     scope.settle(FeaRunOutcome::Completed).unwrap();
-    assert_eq!(events.lock().unwrap().settles.len(), 1);
+    let events = events.lock().unwrap();
+    assert_eq!(events.settles.len(), 1);
+    assert_eq!(events.settles[0].0, FeaRunOutcome::Completed);
+    assert_eq!(events.settles[0].1.completed_ops.total().unwrap(), required);
 }
 
 #[test]

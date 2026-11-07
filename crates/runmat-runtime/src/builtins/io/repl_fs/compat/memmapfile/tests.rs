@@ -176,9 +176,6 @@ fn selected_file_read_failure_retains_provider_cause() {
     use std::sync::Arc;
 
     let _lock = super::super::vfs::provider_override_lock();
-    #[cfg(not(target_arch = "wasm32"))]
-    let root = std::env::temp_dir().join("runmat-memmap-read-cause");
-    #[cfg(target_arch = "wasm32")]
     let root = std::path::PathBuf::from("/runmat-memmap-read-cause");
     let provider = Arc::new(super::super::vfs::MemoryFsProvider::with_current_dir(
         root.clone(),
@@ -205,9 +202,6 @@ fn wide_repeat_property_is_exact_without_a_large_file() {
     use std::sync::Arc;
 
     let _lock = super::super::vfs::provider_override_lock();
-    #[cfg(not(target_arch = "wasm32"))]
-    let root = std::env::temp_dir().join("runmat-memmap-wide-repeat");
-    #[cfg(target_arch = "wasm32")]
     let root = std::path::PathBuf::from("/runmat-memmap-wide-repeat");
     let provider = Arc::new(super::super::vfs::MemoryFsProvider::with_current_dir(
         root.clone(),

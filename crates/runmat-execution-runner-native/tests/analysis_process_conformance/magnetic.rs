@@ -30,7 +30,6 @@ pub(super) async fn run() {
         let root = directory.path().join("session");
         let mut config = NativeExecutionConfig::for_current_executable().unwrap();
         config.executable = std::env::current_exe().unwrap();
-        config.worker_arguments = vec!["--child".into()];
         config.max_workers = 1;
         config.store_root = root;
         config.worker_capabilities = super::capabilities();

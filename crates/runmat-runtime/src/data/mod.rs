@@ -23,7 +23,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 mod cooperation;
 mod publication;
 pub(crate) use cooperation::cooperate_data_work;
-pub(crate) use publication::create_array_revision;
+pub(crate) use publication::{create_array_revision, relative_storage_path, ChunkStorageIdentity};
 pub(crate) mod authority;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1098,9 +1098,10 @@ pub async fn write_array_payload_on(
         let chunk_bytes = serde_json::to_vec(&chunk_payload).map_err(|err| {
             data_error_with_source(format!("failed to encode chunk payload: {err}"), err)
         })?;
-        let hash = sha256_hex(&chunk_bytes);
-        let object_id = format!("obj_{hash}");
-        let data_path = chunk_dir.join(format!("{object_id}.json"));
+        let identity = ChunkStorageIdentity::for_payload(&chunk_bytes);
+        let hash = identity.hash;
+        let object_id = identity.object_id;
+        let data_path = chunk_dir.join(identity.file_name);
         provider
             .write(&data_path, &chunk_bytes)
             .await
@@ -1110,13 +1111,7 @@ pub async fn write_array_payload_on(
                     err,
                 )
             })?;
-        let rel_chunk_path = data_path
-            .strip_prefix(root)
-            .map_err(|err| {
-                data_error_with_source(format!("failed to compute chunk relative path: {err}"), err)
-            })?
-            .to_string_lossy()
-            .to_string();
+        let rel_chunk_path = relative_storage_path(root, &data_path)?;
         index.chunks.push(DataChunkIndexEntry {
             key: key.clone(),
             object_id: object_id.clone(),

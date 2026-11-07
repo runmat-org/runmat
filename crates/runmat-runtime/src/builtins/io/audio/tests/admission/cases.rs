@@ -250,8 +250,9 @@ fn relative_source_and_typed_range_mode_reach_exact_captured_owner() {
         tensor(result).integer_storage(),
         Some(&IntegerStorage::I16(vec![16_384]))
     );
+    let source = std::path::Path::new("/audio").join("tone.wav");
     let expected = HostEffectWorkload::AudioDecode {
-        source: std::path::Path::new("/audio/tone.wav"),
+        source: &source,
         range: Some(AudioFrameRange {
             first: 2,
             last: None,

@@ -8,7 +8,9 @@ use runmat_execution::cancellation::CancellationSource;
 use runmat_filesystem::FsProvider;
 use runmat_value::Value;
 
-use super::support::{encoded, runtime, RecordingProvider, ReplacingHttpService};
+use super::support::{
+    encoded, runtime, AmbientSwapRestoration, RecordingProvider, ReplacingHttpService,
+};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -29,7 +31,8 @@ fn public_gzip_keeps_captured_owner_when_ambient_provider_is_replaced() {
         .memory
         .write_project_path("/selected/source.bin", b"selected")
         .expect("selected source");
-    let _selected = runmat_filesystem::replace_provider(selected.clone());
+    let selected_scope = runmat_filesystem::replace_provider(selected.clone());
+    let _restore_swap = AmbientSwapRestoration::new(&selected_scope, Arc::clone(&swap));
     runmat_filesystem::set_current_dir("/selected").expect("selected cwd");
 
     let value = futures::executor::block_on(super::super::super::gzip_builtin(
@@ -44,9 +47,10 @@ fn public_gzip_keeps_captured_owner_when_ambient_provider_is_replaced() {
     let Value::Cell(outputs) = value else {
         panic!("gzip output must be a cell")
     };
+    let expected = std::path::Path::new("out").join("source.bin.gz");
     assert!(matches!(
         outputs.data(),
-        [Value::CharArray(path)] if runmat_value::decode_utf16_code_units(path.data()).expect("valid UTF-16 fixture") == "out/source.bin.gz"
+        [Value::CharArray(path)] if runmat_value::decode_utf16_code_units(path.data()).expect("valid UTF-16 fixture") == expected.to_str().expect("UTF-8 fixture path")
     ));
     assert!(selected
         .memory
@@ -60,11 +64,6 @@ fn public_gzip_keeps_captured_owner_when_ambient_provider_is_replaced() {
         .memory
         .read_project_path("/selected/out/source.bin.gz")
         .is_err());
-    drop(
-        swap.lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .take(),
-    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -85,7 +84,8 @@ fn public_url_gunzip_keeps_filesystem_owner_captured_before_http() {
             guard: Arc::clone(&swap),
         })),
     );
-    let _selected = runmat_filesystem::replace_provider(selected.clone());
+    let selected_scope = runmat_filesystem::replace_provider(selected.clone());
+    let _restore_swap = AmbientSwapRestoration::new(&selected_scope, Arc::clone(&swap));
     runmat_filesystem::set_current_dir("/selected").expect("selected cwd");
 
     let value = futures::executor::block_on(super::super::super::gunzip_builtin(
@@ -100,9 +100,10 @@ fn public_url_gunzip_keeps_filesystem_owner_captured_before_http() {
     let Value::Cell(outputs) = value else {
         panic!("gunzip output must be a cell")
     };
+    let expected = std::path::Path::new("out").join("archive.bin");
     assert!(matches!(
         outputs.data(),
-        [Value::CharArray(path)] if runmat_value::decode_utf16_code_units(path.data()).expect("valid UTF-16 fixture") == "out/archive.bin"
+        [Value::CharArray(path)] if runmat_value::decode_utf16_code_units(path.data()).expect("valid UTF-16 fixture") == expected.to_str().expect("UTF-8 fixture path")
     ));
     assert_eq!(sends.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -118,11 +119,6 @@ fn public_url_gunzip_keeps_filesystem_owner_captured_before_http() {
         .memory
         .read_project_path("/selected/out/archive.bin")
         .is_err());
-    drop(
-        swap.lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .take(),
-    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

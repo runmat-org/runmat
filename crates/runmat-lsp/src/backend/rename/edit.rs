@@ -152,9 +152,14 @@ mod tests {
 
     #[test]
     fn file_and_import_renames_preserve_location_and_extension() {
-        let old_uri = Url::parse("file:///project/signals/impactPulse.m").unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let directory = project.path().join("project/signals");
+        let old_uri = Url::from_file_path(directory.join("impactPulse.m")).unwrap();
         let (_, new_uri) = file_rename(&old_uri, "impactPulse", "impactResponse").unwrap();
-        assert_eq!(new_uri.as_str(), "file:///project/signals/impactResponse.m");
+        assert_eq!(
+            new_uri,
+            Url::from_file_path(directory.join("impactResponse.m")).unwrap()
+        );
         assert_eq!(
             quoted_renamed_import("../signals/impactPulse.m", "impactResponse"),
             "\"../signals/impactResponse.m\""
