@@ -6,7 +6,12 @@ std 1
 // the tip rises by `rise` so the props clear the body. The knuckle turns on the hinge pin, and
 // four M2 screws hold the motor and its pod to the pad.
 part arm {
+    // `length` is the nominal pin-bore-to-motor-axis length, the one arm.drawing dimensions. A
+    // station that needs a longer or shorter arm sets `length_offset`, so a change of `length`
+    // moves every station's motor by the same amount.
     input length : length = 88.2 mm
+    input length_offset : length = 0 mm
+    let reach = input.length + input.length_offset
     input rise : length = 5.2 mm
     input pad_tilt : angle = 0 deg
     feature knuckle_base = plane.offset(base = origin.xy, distance = -6.5 mm)
@@ -24,11 +29,11 @@ part arm {
     sketch beam_sa on plane.beam_sta {
         c = spline(points = [[0 mm, 6.38 mm], [2.542 mm, 6.198 mm], [4.4 mm, 5.66 mm], [5.873 mm, 4.779 mm], [6.954 mm, 3.581 mm], [7.617 mm, 2.068 mm], [7.84 mm, 0 mm], [7.617 mm, -2.068 mm], [6.954 mm, -3.581 mm], [5.873 mm, -4.779 mm], [4.4 mm, -5.66 mm], [2.542 mm, -6.198 mm], [0 mm, -6.38 mm], [-2.542 mm, -6.198 mm], [-4.4 mm, -5.66 mm], [-5.873 mm, -4.779 mm], [-6.954 mm, -3.581 mm], [-7.617 mm, -2.068 mm], [-7.84 mm, 0 mm], [-7.617 mm, 2.068 mm], [-6.954 mm, 3.581 mm], [-5.873 mm, 4.779 mm], [-4.4 mm, 5.66 mm], [-2.542 mm, 6.198 mm]], closed)
     }
-    feature beam_st1 = plane.offset(base = origin.yz, distance = input.length * 0.45)
+    feature beam_st1 = plane.offset(base = origin.yz, distance = let.reach * 0.45)
     sketch beam_s1 on plane.beam_st1 {
         c = spline(points = [[0 mm, 5.6 mm + input.rise * 0.45], [2.205 mm, 5.441 mm + input.rise * 0.45], [3.816 mm, 4.967 mm + input.rise * 0.45], [5.094 mm, 4.195 mm + input.rise * 0.45], [6.032 mm, 3.143 mm + input.rise * 0.45], [6.606 mm, 1.816 mm + input.rise * 0.45], [6.8 mm, 0 mm + input.rise * 0.45], [6.606 mm, -1.816 mm + input.rise * 0.45], [6.032 mm, -3.143 mm + input.rise * 0.45], [5.094 mm, -4.195 mm + input.rise * 0.45], [3.816 mm, -4.967 mm + input.rise * 0.45], [2.205 mm, -5.441 mm + input.rise * 0.45], [0 mm, -5.6 mm + input.rise * 0.45], [-2.205 mm, -5.441 mm + input.rise * 0.45], [-3.816 mm, -4.967 mm + input.rise * 0.45], [-5.094 mm, -4.195 mm + input.rise * 0.45], [-6.032 mm, -3.143 mm + input.rise * 0.45], [-6.606 mm, -1.816 mm + input.rise * 0.45], [-6.8 mm, 0 mm + input.rise * 0.45], [-6.606 mm, 1.816 mm + input.rise * 0.45], [-6.032 mm, 3.143 mm + input.rise * 0.45], [-5.094 mm, 4.195 mm + input.rise * 0.45], [-3.816 mm, 4.967 mm + input.rise * 0.45], [-2.205 mm, 5.441 mm + input.rise * 0.45]], closed)
     }
-    feature beam_st2 = plane.offset(base = origin.yz, distance = input.length - 6 mm)
+    feature beam_st2 = plane.offset(base = origin.yz, distance = let.reach - 6 mm)
     sketch beam_s2 on plane.beam_st2 {
         c = spline(points = [[0 mm, 1 mm + input.rise], [1.783 mm, 0.901 mm + input.rise], [3.087 mm, 0.605 mm + input.rise], [4.12 mm, 0.122 mm + input.rise], [4.879 mm, -0.536 mm + input.rise], [5.343 mm, -1.365 mm + input.rise], [5.5 mm, -2.5 mm + input.rise], [5.343 mm, -3.635 mm + input.rise], [4.879 mm, -4.464 mm + input.rise], [4.12 mm, -5.122 mm + input.rise], [3.087 mm, -5.604 mm + input.rise], [1.783 mm, -5.901 mm + input.rise], [0 mm, -6 mm + input.rise], [-1.783 mm, -5.901 mm + input.rise], [-3.087 mm, -5.604 mm + input.rise], [-4.12 mm, -5.122 mm + input.rise], [-4.879 mm, -4.464 mm + input.rise], [-5.343 mm, -3.635 mm + input.rise], [-5.5 mm, -2.5 mm + input.rise], [-5.343 mm, -1.365 mm + input.rise], [-4.879 mm, -0.536 mm + input.rise], [-4.12 mm, 0.122 mm + input.rise], [-3.087 mm, 0.605 mm + input.rise], [-1.783 mm, 0.901 mm + input.rise]], closed)
     }
@@ -39,7 +44,7 @@ part arm {
     feature pad_level = plane.offset(base = origin.xy, distance = input.rise - 4 mm)
     feature pad_base = plane.angle(base = plane.pad_level, axis = axis.pad_axis, angle = input.pad_tilt)
     sketch pad_s on plane.pad_base {
-        c = circle(center = [input.length, 0 mm], radius = 9 mm)
+        c = circle(center = [let.reach, 0 mm], radius = 9 mm)
     }
     feature pad = extrude(profile = sketch.pad_s, distance = 8 mm, mode = add)
     feature knuckle_cut = plane.offset(base = origin.xy, distance = -7 mm)
@@ -52,11 +57,19 @@ part arm {
     feature pad_top_level = plane.offset(base = origin.xy, distance = input.rise + 4 mm)
     feature pad_top = plane.angle(base = plane.pad_top_level, axis = axis.pad_axis, angle = input.pad_tilt)
     sketch bolt_s on plane.pad_top {
-        a = point(at = [input.length + 6 mm, 0 mm])
-        b = point(at = [input.length, 6 mm])
-        c = point(at = [input.length - 6 mm, 0 mm])
-        d = point(at = [input.length, -6 mm])
+        a = point(at = [let.reach + 6 mm, 0 mm])
+        b = point(at = [let.reach, 6 mm])
+        c = point(at = [let.reach - 6 mm, 0 mm])
+        d = point(at = [let.reach, -6 mm])
     }
+    // The motor seat: the pad's top face at the motor axis, Z up the motor axis, X along the arm.
+    // The arm study seats its motor pod here, so the pod follows the arm's length, rise and tilt.
+    feature motor_axis = axis.normal(plane = plane.pad_top, through = point(let.reach, 0 mm, input.rise + 4 mm))
+    feature seat_frame = frame(frame = at, origin = point(let.reach, 0 mm, input.rise + 4 mm), z = axis.motor_axis, x = origin.x)
+    // Where the nominal motor axis crosses the hinge's mid-plane, in the arm's axes. The arm unit
+    // places its motor station from this frame, adding the station's length offset, rise and pad
+    // tilt, so the motors follow `length`.
+    feature tip_frame = frame(frame = at, origin = point(input.length, 0 mm, 0 mm), z = origin.z, x = origin.x)
     feature motor_holes = hole(
         face = feature.pad.face.end,
         at = { a = sketch.bolt_s.a.at, b = sketch.bolt_s.b.at, c = sketch.bolt_s.c.at, d = sketch.bolt_s.d.at },
@@ -68,6 +81,8 @@ part arm {
     // motor pod's thrust comes in.
     region root : face = { select = [feature.bores.face.side(bores_s.pin)], expect = at_least_one }
     region motor_seat : face = { select = [feature.pad.face.end], expect = at_least_one }
+    publish seat = datum(datum = { datum = feature, feature = seat_frame })
+    publish tip = datum(datum = { datum = feature, feature = tip_frame })
     output arm = { body = feature.knuckle.body, part_number = "CD-AR-210", material = "carbon_fiber", color = "#3C4048" }
 
     // Datums: A the motor seat, B the hinge bore's axis, C the knuckle's underside.
@@ -77,7 +92,7 @@ part arm {
     // The hinge bore runs on a 4 mm ground pin (H8-class clearance), square to the motor seat
     // so the four props stay in one plane; the seat is flat and parallel to the knuckle face.
     size pin_bore = { on = [feature.bores.face.side(bores_s.pin)], size = 4.1 mm ± [0.018 mm, 0 mm] }
-    location pin_to_motor = { from = feature.bores.face.side(bores_s.pin), to = feature.pad.face.side(pad_s.c), distance = input.length ± 0.1 mm }
+    location pin_to_motor = { from = feature.bores.face.side(bores_s.pin), to = feature.pad.face.side(pad_s.c), distance = let.reach ± 0.1 mm }
     location motor_bolt_circle = { from = feature.motor_holes.face.wall(a), to = feature.motor_holes.face.wall(c), distance = 12 mm ± 0.05 mm }
     tolerance bore_square = { characteristic = perpendicularity, on = [feature.bores.face.side(bores_s.pin)], tolerance = 0.02 mm, diametral = true, datums = [{ label = "A" }] }
     tolerance seat_parallel = { characteristic = parallelism, on = [feature.pad.face.end], tolerance = 0.03 mm, datums = [{ label = "C" }] }

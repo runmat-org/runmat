@@ -39,25 +39,27 @@ assembly drone {
         placement = { placement = offset, offset = { translation = [-25 mm, -38 mm, 14 mm] } }
     }
 
-    // The arms on their hinges, each solved so its motor sits on the 300 mm diagonal with the
-    // props 55 mm above the belly. Both hinges are tilted: the front pins lean 20 deg so the
+    // The arms on their hinges. Each station's arm is arm.part's `length` plus a length offset:
+    // -6.66 mm front and +2.407 mm rear, so at the 88.2 mm nominal (81.54 mm front, 90.607 mm
+    // rear) the motors sit on the 300 mm diagonal with the props 55 mm above the belly, and a
+    // change of the arm's length moves all four motors along their arms. Both hinges are tilted: the front pins lean 20 deg so the
     // front arms rise as they swing back over the rear ones, and the rear pins lean 28 deg so the
     // rear arms drop as they swing forward under them. The right arms are the left ones'
     // mirror images, so their blade inputs are mirrored too.
     use assembly arm_station from "./mechanical/arm" as arm_front_left {
-        configuration = { select = inputs, values = { fold = input.fold_front, length = 81.54 mm, rise = 5.79 mm, pod_tilt = -20 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+        configuration = { select = inputs, values = { fold = input.fold_front, length_offset = -6.66 mm, rise = 5.79 mm, pod_tilt = -20 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
         placement = { placement = offset, offset = { translation = [44 mm, 52 mm, 24 mm], rotation = { rotation = euler, yaw = 56.324 deg, pitch = 0 deg, roll = 20 deg } } }
     }
     use assembly arm_station from "./mechanical/arm" as arm_front_right {
-        configuration = { select = inputs, values = { fold = -input.fold_front, length = 81.54 mm, rise = 5.79 mm, pod_tilt = 20 deg, blade_a = -input.blade_b - 180 deg, blade_b = -input.blade_a - 180 deg } }
+        configuration = { select = inputs, values = { fold = -input.fold_front, length_offset = -6.66 mm, rise = 5.79 mm, pod_tilt = 20 deg, blade_a = -input.blade_b - 180 deg, blade_b = -input.blade_a - 180 deg } }
         placement = { placement = offset, offset = { translation = [44 mm, -52 mm, 24 mm], rotation = { rotation = euler, yaw = -56.324 deg, pitch = 0 deg, roll = -20 deg } } }
     }
     use assembly arm_station from "./mechanical/arm" as arm_rear_left {
-        configuration = { select = inputs, values = { fold = -input.fold_rear, length = 90.607 mm, rise = 18.878 mm, pod_tilt = -28 deg, blade_a = input.rear_blade_a, blade_b = input.rear_blade_b } }
+        configuration = { select = inputs, values = { fold = -input.fold_rear, length_offset = 2.407 mm, rise = 18.878 mm, pod_tilt = -28 deg, blade_a = input.rear_blade_a, blade_b = input.rear_blade_b } }
         placement = { placement = offset, offset = { translation = [-66 mm, 44 mm, 13 mm], rotation = { rotation = euler, yaw = 124.168 deg, pitch = 0 deg, roll = 28 deg } } }
     }
     use assembly arm_station from "./mechanical/arm" as arm_rear_right {
-        configuration = { select = inputs, values = { fold = input.fold_rear, length = 90.607 mm, rise = 18.878 mm, pod_tilt = 28 deg, blade_a = -input.rear_blade_b - 180 deg, blade_b = -input.rear_blade_a - 180 deg } }
+        configuration = { select = inputs, values = { fold = input.fold_rear, length_offset = 2.407 mm, rise = 18.878 mm, pod_tilt = 28 deg, blade_a = -input.rear_blade_b - 180 deg, blade_b = -input.rear_blade_a - 180 deg } }
         placement = { placement = offset, offset = { translation = [-66 mm, -44 mm, 13 mm], rotation = { rotation = euler, yaw = -124.168 deg, pitch = 0 deg, roll = -28 deg } } }
     }
 
