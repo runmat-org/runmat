@@ -80,6 +80,8 @@ pub fn answer(name: &str, input: &str, files: &str) -> Value {
 }
 
 fn run(name: &str, input: &str, files: &str) -> Result<Value, (String, String)> {
+    // No OCCT here: an overview lists the parts, assemblies and drawings it links unchecked.
+    runmat_design_tools::overview::check_linked_models(false);
     if !TOOLS.contains(&name) {
         return Err(("unsupported".into(), format!("{name} runs with a server project")));
     }
@@ -182,6 +184,20 @@ mod tests {
         // A part still refuses: its change needs the model regenerated.
         let part = answer("design.propose_edit", r#"{"path":"/p/a.part","text":"part a {}"}"#, r#"{"/p/a.part":""}"#);
         assert_eq!(part["error"]["code"], "not_in_browser");
+    }
+
+    #[test]
+    fn an_assembly_that_uses_the_board_is_listed_without_compiling_it_here() {
+        let mut files = daq_files();
+        files.as_object_mut().unwrap().insert(
+            "/box.assembly".into(),
+            Value::String("runmat 0.7\nstd 1\n\nassembly box {\n    use circuit daq from \"./p\" as daq {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 0 mm] } }\n    }\n}\n".into()),
+        );
+        let out = answer("design.overview", r#"{"path":"/p/daq.circuit"}"#, &files.to_string());
+        let links = out["data"]["links"].as_array().unwrap_or_else(|| panic!("links, not {out}"));
+        let assembly = links.iter().find(|l| l["path"] == "/box.assembly").unwrap_or_else(|| panic!("the assembly's link, not {out}"));
+        assert_eq!(assembly["level"], "info", "{assembly}");
+        assert_eq!(assembly["status"], runmat_design_tools::overview::NOT_CHECKED_HERE, "{assembly}");
     }
 
     #[test]

@@ -1,12 +1,24 @@
 //! The overview's links: what the file uses, and the project files that use it.
 
 use super::facts::problems;
+use std::sync::atomic::{AtomicBool, Ordering};
 use super::{plural, Level, Link, Ran, Relation};
 use crate::check::{check, CheckInput};
 use crate::{dependency_files, DesignKind, Files};
 use runmat_design_syntax::{
     FeaDeclarationKind, FeaExpressionKind, FeaModuleItem, FeaStatementKind,
 };
+
+static MODELS_CHECKED: AtomicBool = AtomicBool::new(true);
+
+/// Whether an overview checks the parts, assemblies and drawings it links (on by default). The
+/// browser's design tools, which have no OCCT, turn it off.
+pub fn check_linked_models(on: bool) {
+    MODELS_CHECKED.store(on, Ordering::Relaxed);
+}
+
+/// A part's, assembly's or drawing's link where the tools run without the design kernel.
+pub const NOT_CHECKED_HERE: &str = "Checked when it opens in the editor";
 
 /// The most related files an overview reads beyond the file and what it needs.
 pub const MAX_RELATED: usize = 48;
@@ -143,6 +155,14 @@ fn status_of(path: &str, files: &Files, ran: &mut Ran) -> (String, Level, String
                 return (format!("Design rules: {s}"), l, "design.drc".into());
             }
         }
+    }
+    // A part, assembly or drawing regenerates on OCCT. Where the tools run without it (the
+    // browser), checking one would compile it on the test kernel: slow for a whole product (the
+    // drone recompiles its parts) and not the answer the editor gives. The link says so instead.
+    if DesignKind::of(path).is_some_and(|k| k.is_model()) && !MODELS_CHECKED.load(Ordering::Relaxed) {
+        // The link itself comes from reading the files, as design.inspect does.
+        ran.note("design.inspect");
+        return (NOT_CHECKED_HERE.into(), Level::Info, "design.inspect".into());
     }
     ran.note("design.check");
     match check(

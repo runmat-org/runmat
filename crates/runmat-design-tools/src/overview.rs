@@ -29,7 +29,7 @@ use crate::{kind_of, text_of, DesignKind, Files, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub use links::{related_candidates, study_geometry_files, MAX_RELATED};
+pub use links::{related_candidates, study_geometry_files, MAX_RELATED, NOT_CHECKED_HERE, check_linked_models};
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

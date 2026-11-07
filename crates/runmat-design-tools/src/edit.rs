@@ -31,6 +31,34 @@ pub struct ProposeEditInput {
     /// The Outline ids the command runs on (`feature:boss`, `component:R1`, `track:17`).
     #[serde(default)]
     pub selection: Option<Vec<String>>,
+    /// Text replacements on the file's current source, applied in order: each `old` must occur
+    /// exactly once. Give this, `text` or `command`; it saves resending a whole file for a
+    /// change of a few lines.
+    #[serde(default)]
+    pub replace: Option<Vec<Replacement>>,
+}
+
+/// One replacement of [`ProposeEditInput::replace`].
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Replacement {
+    /// Text that occurs exactly once in the file, with enough surrounding lines to be unique.
+    pub old: String,
+    /// What replaces it.
+    pub new: String,
+}
+
+/// The file's text after `replace`, or why a replacement doesn't apply.
+fn replaced(text: &str, replace: &[Replacement]) -> Result<String, ToolError> {
+    let mut out = text.to_owned();
+    for (n, r) in replace.iter().enumerate() {
+        match out.matches(r.old.as_str()).count() {
+            1 => out = out.replacen(r.old.as_str(), &r.new, 1),
+            0 => return Err(ToolError::invalid(format!("replacement {} doesn't match the file's current text; read the file and copy `old` exactly", n + 1))),
+            c => return Err(ToolError::invalid(format!("replacement {} matches {c} places; add surrounding lines to `old` so it matches once", n + 1))),
+        }
+    }
+    Ok(out)
 }
 
 /// A text edit of the old text, in UTF-16 offsets.
@@ -513,7 +541,13 @@ fn known_command(id: &str, kind: DesignKind) -> Result<(), ToolError> {
 pub fn propose(input: &ProposeEditInput, files: &Files) -> Result<StagedChange, ToolError> {
     let kind = kind_of(&input.path)?;
     let text = text_of(files, &input.path)?;
-    match (&input.text, &input.command) {
+    let from_replace = match &input.replace {
+        Some(replace) if input.text.is_none() && input.command.is_none() => Some(replaced(text, replace)?),
+        Some(_) => return Err(ToolError::invalid("give one of `text`, `replace` or `command`")),
+        None => None,
+    };
+    let text_input = from_replace.as_ref().or(input.text.as_ref());
+    match (text_input, &input.command) {
         (Some(new), None) => {
             let summary = format!("Edit {} ({} → {} bytes)", input.path, text.len(), new.len());
             Ok(stage(
@@ -561,7 +595,7 @@ pub fn propose(input: &ProposeEditInput, files: &Files) -> Result<StagedChange, 
             Ok(stage(summary, changed, files, &input.path))
         }
         _ => Err(ToolError::invalid(
-            "give either `text` (the new source) or `command` (a catalog command id)",
+            "give one of `text` (the new source), `replace` (replacements on the current source) or `command` (a catalog command id)",
         )),
     }
 }
@@ -577,6 +611,14 @@ mod tests {
         let (o, n) = unique_patch(old, new);
         assert_eq!(old.matches(&o).count(), 1, "{o:?}");
         assert_eq!(old.replacen(&o, &n, 1), new);
+    }
+
+    #[test]
+    fn replacements_apply_once_each_and_refuse_ambiguity() {
+        let r = |old: &str, new: &str| Replacement { old: old.into(), new: new.into() };
+        assert_eq!(replaced("a\nb\nc\n", &[r("b\n", "b\nx\n")]).unwrap(), "a\nb\nx\nc\n");
+        assert!(replaced("a\na\n", &[r("a", "b")]).unwrap_err().message.contains("matches 2 places"));
+        assert!(replaced("a\n", &[r("z", "b")]).unwrap_err().message.contains("doesn't match"));
     }
 
     #[test]
