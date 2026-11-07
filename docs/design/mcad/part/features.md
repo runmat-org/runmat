@@ -196,6 +196,8 @@ feature mc = mate_connector(placement = { on = frame, frame = { frame = on_face,
 
 `surface.extrude`, `surface.revolve`, `surface.sweep`, `surface.loft`, `surface.boundary`, `surface.fill`, `surface.planar`, `surface.ruled`, `surface.offset`, `surface.extend`, `surface.trim`, `surface.untrim`, `surface.knit`, `surface.thicken`, `surface.delete_hole`, `surface.cut_with_surface` and `surface.mid_surface` build and edit sheet bodies; `surface.thicken` and `surface.knit` turn them into solids.
 
+<!-- design:clip:mcad/surfaces -->
+
 ```part fragment
 feature patch = surface.planar(profile = sketch.s)
 feature grow = surface.extend(edges = [feature.patch.edge.boundary(s.b)], distance = 10 mm)

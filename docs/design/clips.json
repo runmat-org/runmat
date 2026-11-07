@@ -151,6 +151,14 @@
       "height": 1180,
       "seconds": 8.4,
       "base": "/design-assets/flow-clips/mcad/evaluate/evaluate"
+    },
+    {
+      "id": "mcad/surfaces",
+      "alt": "The drone body's skin starts as five closed stations, nose to tail; Lofted surface skins them into one sheet, and Thicken grows the sheet 1.8 mm inward into a solid molded wall, its rim showing at the open tail.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 13.5,
+      "base": "/design-assets/flow-clips/mcad/surfaces/surfaces"
     }
   ]
 }
