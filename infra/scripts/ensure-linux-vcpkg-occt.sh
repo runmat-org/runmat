@@ -8,6 +8,8 @@ VCPKG_MARKER="${VCPKG_ROOT}/.runmat-vcpkg-ref"
 LOCK_DIR="${VCPKG_ROOT}.lock"
 LOCK_ACQUIRED=0
 OVERLAY_TRIPLETS="${VCPKG_ROOT}/triplets/runmat"
+REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+OVERLAY_PORTS="${REPOSITORY_ROOT}/infra/vcpkg-linux-ports"
 
 mkdir -p "$(dirname "${VCPKG_ROOT}")"
 
@@ -67,7 +69,8 @@ has_occt() {
 
 if ! has_occt; then
   echo "Installing OpenCASCADE via vcpkg (${VCPKG_TRIPLET})"
-  "${VCPKG_ROOT}/vcpkg" install "opencascade:${VCPKG_TRIPLET}" --overlay-triplets="${OVERLAY_TRIPLETS}"
+  "${VCPKG_ROOT}/vcpkg" install "opencascade:${VCPKG_TRIPLET}" \
+    --overlay-triplets="${OVERLAY_TRIPLETS}" --overlay-ports="${OVERLAY_PORTS}"
 fi
 
 if ! has_occt; then

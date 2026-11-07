@@ -191,7 +191,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/vcpkg-runmat
-          key: linux-${{ runner.arch }}-vcpkg-occt-2026.06.01-${{ hashFiles('infra/scripts/ensure-linux-vcpkg-occt.sh') }}
+          key: linux-${{ runner.arch }}-vcpkg-occt-2026.06.01-${{ hashFiles('infra/scripts/ensure-linux-vcpkg-occt.sh', 'infra/vcpkg-linux-ports/**') }}
+          restore-keys: linux-${{ runner.arch }}-vcpkg-occt-2026.06.01-
 
       - name: Ensure pinned Linux OpenCASCADE (vcpkg)
         if: runner.os == 'Linux' && matrix.needs_occt
