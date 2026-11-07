@@ -25,6 +25,8 @@ $$
 
 where $m_i$ and $I_i$ are each occurrence's mass and inertia about its own center, $d_i$ is the offset of that center from the assembly's, and $E$ is the identity. The result lists parts with no density, so a missing material never hides as a light assembly.
 
+<!-- design:clip:mcad/evaluate -->
+
 ## Draft analysis
 
 Draft analysis takes a pull direction (an origin plane or axis, or a picked face) and a minimum draft angle, 1° by default, and sorts every face by its angle to the pull:

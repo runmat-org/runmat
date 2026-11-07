@@ -127,6 +127,30 @@
       "height": 1180,
       "seconds": 6.9,
       "base": "/design-assets/flow-clips/ecad/outputs/outputs"
+    },
+    {
+      "id": "mcad/direct",
+      "alt": "On the ESC heatsink, zoomed to the pedestal that seats the ESC, Offset face takes the pedestal's top face and moves it down 0.5 mm for a thicker gap pad; the four standoffs now stand 0.5 mm prouder of the seat.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 9.6,
+      "base": "/design-assets/flow-clips/mcad/direct/direct"
+    },
+    {
+      "id": "mcad/weldment",
+      "alt": "The drone's launch stand starts as its layout sketches; Structural member places 20 by 20 by 1.5 mm square tube on every line, mitred at the frame corners, and Cut list groups the 12 members into 5 items by length and end angle.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 10.1,
+      "base": "/design-assets/flow-clips/mcad/weldment/weldment"
+    },
+    {
+      "id": "mcad/evaluate",
+      "alt": "On one arm unit of the drone, Mass properties runs over every part: 43.8 g, the center of gravity and the inertia about it, with a row per part giving its material, density, volume and mass.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.4,
+      "base": "/design-assets/flow-clips/mcad/evaluate/evaluate"
     }
   ]
 }

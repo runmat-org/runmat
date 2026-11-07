@@ -213,6 +213,8 @@ feature trim = surface.cut_with_surface(body = feature.body.body, surface = feat
 
 A sheet-metal part carries its rules (thickness, bend radius, K-factor) on its base flange, and `flat_pattern` unfolds it from a fixed face. A weldment's structural members follow the segments of a layout sketch with a profile and a material, and its cut list is a drawing table.
 
+<!-- design:clip:mcad/weldment -->
+
 ```part fragment
 feature base = sheet_metal.base_flange(profile = sketch.s_chain, depth = 40 mm, rules = { thickness = 2 mm, bend_radius = 3 mm, rule = k_factor(k = 0.44) })
 feature flat = sheet_metal.flat_pattern(fixed_face = feature.base.face.sheet(base, ordinal = 0))
@@ -224,6 +226,8 @@ feature draft_check = mold.parting_line(body = feature.body.body, pull = origin.
 ## Direct edits
 
 `direct.move_faces`, `direct.replace_faces`, `direct.delete_faces` and `direct.move_bodies` edit imported or finished geometry as features in the history. `keep` lists relations the edit must keep, such as two faces staying parallel; an edit that would break one is an error (`cad.direct.relation_broken`).
+
+<!-- design:clip:mcad/direct -->
 
 ```part fragment
 feature pull = direct.move_faces(faces = [feature.body.face.end], motion = offset(distance = 5 mm), keep = [{ keep = parallel, a = feature.body.face.end, b = feature.body.face.start }])
