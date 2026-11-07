@@ -199,3 +199,43 @@ fn a_shelled_drafted_cover_names_every_face_in_the_draft_analysis() {
     assert!(unnamed.is_empty(), "unnamed faces {unnamed:?} in {out}");
     assert!(faces.iter().any(|f| f["face"].as_str().unwrap().contains("hollow")), "{out}");
 }
+
+/// A hinge mount's back block with two M2 bores 2.9 mm from its top edges: a 3 mm fillet on those
+/// edges crosses each bore by 0.1 mm.
+const HINGE: &str = "runmat 0.7\nstd 1\n\npart hinge_mount {\n    feature upper_base = plane.offset(base = origin.xy, distance = 6.7 mm)\n    sketch upper_s on plane.upper_base {\n        l1 = line(start = [-14 mm, -7.5 mm], end = [0 mm, -7.5 mm])\n        a1 = arc(center = [0 mm, 0 mm], start = [0 mm, -7.5 mm], end = [0 mm, 7.5 mm])\n        l2 = line(start = [0 mm, 7.5 mm], end = [-14 mm, 7.5 mm])\n        l3 = line(start = [-14 mm, 7.5 mm], end = [-14 mm, -7.5 mm])\n        pin = circle(center = [0 mm, 0 mm], radius = 2 mm)\n    }\n    feature upper = extrude(profile = sketch.upper_s, distance = 3.4 mm)\n    feature back_base = plane.offset(base = origin.xy, distance = -10.1 mm)\n    sketch back_s on plane.back_base {\n        k1 = line(start = [-20 mm, -7.5 mm], end = [-12 mm, -7.5 mm])\n        k2 = line(start = [-12 mm, -7.5 mm], end = [-12 mm, 7.5 mm])\n        k3 = line(start = [-12 mm, 7.5 mm], end = [-20 mm, 7.5 mm])\n        k4 = line(start = [-20 mm, 7.5 mm], end = [-20 mm, -7.5 mm])\n    }\n    feature back = extrude(profile = sketch.back_s, distance = 20.2 mm, mode = add)\n    feature bore_base = plane.offset(base = origin.xy, distance = -10.5 mm)\n    sketch bore_s on plane.bore_base {\n        s1 = circle(center = [-16 mm, -3.5 mm], radius = 1.1 mm)\n        s2 = circle(center = [-16 mm, 3.5 mm], radius = 1.1 mm)\n    }\n    feature bores = extrude(profile = sketch.bore_s, through_all, mode = cut)\n    feature round = fillet(edges = [edges_between(feature.back.face.side(back_s.k4), feature.back.face.end), edges_between(feature.back.face.side(back_s.k1), feature.back.face.end), edges_between(feature.back.face.side(back_s.k4), feature.back.face.side(back_s.k1))], radius = 3 mm)\n    output hinge_mount = { body = feature.upper.body, material = \"material.aluminum_6061\" }\n}\n";
+
+#[test]
+fn a_fillet_that_crosses_a_bore_keeps_every_face_on_its_surface() {
+    let compiled = call("compile", &["/p/hinge_mount.part", HINGE, "{}", ""]);
+    let body = &compiled["display"]["data"]["bodies"][0];
+    let faces = body["faces"].as_array().unwrap_or_else(|| panic!("{compiled}"));
+    let num = |v: &Value| v.as_f64().unwrap();
+    let point = |f: &Value, i: usize| [0, 1, 2].map(|k| num(&f["positions"][3 * i + k]));
+    // Each cylinder's tessellation lies on its cylinder: the bores' edges once ended at points
+    // 1.45 mm outside the bore.
+    for f in faces.iter().filter(|f| f["surface"]["surface"] == "cylinder") {
+        let (a, d, r) = (&f["surface"]["axis_point"], &f["surface"]["axis_direction"], num(&f["surface"]["radius"]));
+        for i in 0..f["positions"].as_array().unwrap().len() / 3 {
+            let p = point(f, i);
+            let v = [0, 1, 2].map(|k| p[k] - num(&a[k]));
+            let t: f64 = (0..3).map(|k| v[k] * num(&d[k])).sum();
+            let off = ((0..3).map(|k| (v[k] - t * num(&d[k])).powi(2)).sum::<f64>().sqrt() - r).abs();
+            assert!(off < 1e-6, "{} vertex {p:?} is {off} m off its cylinder", f["label"]);
+        }
+    }
+    // The block's -y side (8 x 20.2 mm and the lug's 12 x 3.4 mm) less a 3 mm strip under the top
+    // round, the corner round and the corner patch: 90.8 mm². It once tessellated to 109.3 mm².
+    let side = faces.iter().find(|f| f["reference"] == "feature.back.face.side(back_s.k1)").expect("the side face");
+    let tris = side["triangles"].as_array().unwrap();
+    let area: f64 = tris
+        .chunks(3)
+        .map(|t| {
+            let [a, b, c] = [0, 1, 2].map(|k| point(side, t[k].as_u64().unwrap() as usize));
+            let (u, w) = ([0, 1, 2].map(|k| b[k] - a[k]), [0, 1, 2].map(|k| c[k] - a[k]));
+            let n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+            (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt() / 2.0
+        })
+        .sum::<f64>()
+        * 1e6;
+    assert!((area - 90.8).abs() < 0.5, "side face {area} mm²");
+}

@@ -819,7 +819,9 @@ void require_corner_edge(const TopoDS_Edge& e, const TopoDS_Shape& shape, const 
 // OCCT's blend approximations use absolute tolerances tuned for millimetre models (a variable
 // radius fillet on a metre-scale box fails where the same box in millimetres blends): such an
 // operation works on a copy scaled up by 1000 and scales the result back, carrying origins and
-// kept faces through both transforms.
+// kept faces through both transforms. Every fillet runs in that frame: a constant 3 mm fillet
+// built in metres whose blend crosses a nearby hole left edges ending 1.5 mm off their faces
+// and split planar faces whose triangles overlapped their neighbours.
 struct MmFrame {
   bool on = false;
   std::unique_ptr<BRepBuilderAPI_Transform> up;
@@ -863,7 +865,7 @@ Tracked do_fillet(const Exec& x, const KInstr& in) {
   const double radius = in.reals[0];
   const std::size_t nvar = static_cast<std::size_t>(in.reals[1]);
   // Rational sections are exact circles; a radius law needs the polynomial approximation.
-  const MmFrame mm(src, nvar > 0);
+  const MmFrame mm(src, true);
   BRepFilletAPI_MakeFillet mk(mm.work.shape, nvar > 0 ? ChFi3d_Polynomial : ChFi3d_Rational);
   for (std::int64_t i = 0; i < n; ++i) {
     require_corner_edge(x.edge(operand, in.ints[5 + i]), src.shape, "fillet");
