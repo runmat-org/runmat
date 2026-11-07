@@ -12,9 +12,9 @@ Search in the Desktop's left rail finds parts along with files and docs. Type an
 
 - **Project:** the project's files and the RunMat docs.
 - **Library:** parts from KiCad symbol libraries opened beside the open circuit. Choose **Open KiCad library** in the group's header and name a `.kicad_sym` file relative to the circuit. The library is read in place, and its parts are found without any network request.
-- **Vendors:** orderable parts from vendors, with each vendor's stock, price breaks and lifecycle. This group appears only after you check **Search vendors** under the search field.
+- **Vendors:** orderable parts from vendors, with each vendor's stock, price breaks and lifecycle. This group appears only after you check **Search part vendors** under the search field.
 
-**Search vendors** starts off in every session. While it's off, nothing you type in Search is sent to a vendor. When you check it, Search lists the vendors your account can use, each with its own checkbox, and sends your search only to the checked vendors through the RunMat server. Search remembers which vendors you checked; it doesn't remember the switch. If the server or your plan doesn't include vendor search, the checkbox is unavailable and says why.
+**Search part vendors** starts off in every session. While it's off, nothing you type in Search is sent to a vendor. The chevron at the right of that row opens a menu of the part vendors your account can use, each with its own checkbox. When the box is checked, Search sends your search only to the vendors checked in that menu, through the RunMat server. Search remembers which vendors you checked; it doesn't remember the box. If you aren't signed in, or the server or your plan doesn't include vendor search, the box is unavailable and its tooltip says why.
 
 Select a part to see its symbol, footprint and 3D body, its parameters, datasheet and offers. **In stock only** in the Vendors header hides parts that no vendor holds in stock.
 
