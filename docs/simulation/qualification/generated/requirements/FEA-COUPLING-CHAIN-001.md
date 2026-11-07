@@ -1,6 +1,6 @@
 # FEA-COUPLING-CHAIN-001: Chained thermal-structural studies
 
-0 PASS, 0 PARTIAL, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 0 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## thermal_to_prestress_to_modal
 
@@ -9,7 +9,7 @@ Evidence kind: PublicRun. Criterion: A study runs thermal, then preload, then bu
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | thermoelastic | tet4 | numerical_kernel | OPEN |  |
-| thermoelastic | tet4 | public_study | OPEN |  |
+| thermoelastic | tet4 | public_study | PARTIAL | `runmat[test:check_cli]::thermal_prestress_example_runs_its_three_step_chain` (crates/runmat-cli/tests/check_cli.rs:1254) - The thermal-prestress example runs thermal steady, then thermomechanical preload, then prestressed modal from `runmat run`; no reference values. |
 | thermoelastic | tet10 | numerical_kernel | OPEN |  |
 | thermoelastic | tet10 | public_study | OPEN |  |
 | structural_stability | tet4 | numerical_kernel | OPEN |  |

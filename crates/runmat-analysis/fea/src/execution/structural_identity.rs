@@ -17,7 +17,7 @@ use super::{
 
 const STRUCTURAL_IDENTITY_PREFIX: &[u8] = b"runmat-structural-prepared-identities/v1\0";
 const STRUCTURAL_IDENTITY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 pub(crate) struct StructuralPreparedIdentities {
     pub study: StudyIdentity,

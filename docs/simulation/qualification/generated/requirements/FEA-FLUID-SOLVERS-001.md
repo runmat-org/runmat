@@ -1,6 +1,6 @@
 # FEA-FLUID-SOLVERS-001: Robust, scalable and accurate laminar flow solvers
 
-0 PASS, 0 PARTIAL, 0 FAIL, 36 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 34 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## coupled_newton_continuation
 
@@ -8,7 +8,7 @@ Evidence kind: IndependentReference. Criterion: A fully coupled pressure-based N
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | tet4 | numerical_kernel | OPEN |  |
+| incompressible_laminar_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::symmetry::thin_cells_on_symmetry_planes_converge_promptly` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/symmetry.rs:270) - thin cells on a symmetry plane (spanwise grading z⁴, first layer 1/256 of the span) converge in at most five coupled steps with the assembled momentum Jacobian ...<br>`runmat-analysis-fea[lib]::physics::cfd::canonical::tests::coupled_solve_reaches_the_segregated_fixed_point_in_far_fewer_outer_iterations` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:624) - the coupled Picard solve (FGMRES, SIMPLE block preconditioner) reaches the segregated solver's discrete solution in a fraction of the outer iterations; Newton l... |
 | incompressible_laminar_steady | tet4 | public_study | OPEN |  |
 | incompressible_laminar_steady | tet10 | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | tet10 | public_study | OPEN |  |
@@ -38,7 +38,7 @@ Evidence kind: PerformanceMeasurement. Criterion: Flow linear systems solve with
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | tet4 | numerical_kernel | OPEN |  |
+| incompressible_laminar_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::symmetry::assembled_momentum_block_matches_the_matrix_free_rows` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/symmetry.rs:292) - the assembled two-ring momentum Jacobian reproduces the matrix-free momentum rows to roundoff on a graded slab with symmetry planes, a pressure outlet, inflow a... |
 | incompressible_laminar_steady | tet4 | public_study | OPEN |  |
 | incompressible_laminar_steady | tet4 | parallel_cpu | OPEN |  |
 | incompressible_laminar_steady | tet10 | numerical_kernel | OPEN |  |

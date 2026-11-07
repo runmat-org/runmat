@@ -15,8 +15,11 @@ use super::{
 };
 
 const OBSERVATION_EVALUATION_PREFIX: &[u8] = b"runmat-analysis-observation-evaluation/v2\0";
+/// The request grows with the observed regions, so no fixed size caps it: the object inventory
+/// admits the stored request against the run's budget (`ObjectInventoryLimits::admitted`), and
+/// the codec keeps only the format's string and nesting bounds.
 const OBSERVATION_EVALUATION_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "ObservationEvaluationRequestWire")]
@@ -172,4 +175,12 @@ impl ObservationEvaluationRequest {
         )?;
         Ok(request)
     }
+}
+
+#[cfg(test)]
+#[test]
+fn observation_requests_are_bounded_by_the_admitted_inventory_not_a_fixed_size() {
+    let wire = crate::contracts::canonical_digest::WIRE_BOUND;
+    assert_eq!(OBSERVATION_EVALUATION_LIMITS.maximum_encoded_bytes, wire);
+    assert_eq!(OBSERVATION_EVALUATION_LIMITS.maximum_collection_items, wire);
 }

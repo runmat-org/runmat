@@ -27,7 +27,7 @@ and the side faces `Side A` (y = 0), `Side B` (y = 100 mm), `Side C` (z = 0) and
 (z = 100 mm); `duct.step` names the part `Duct` and the end faces `Near end` (x = 0) and
 `Far end` (x = 1 m). They were written from `cantilever.step` with `name-step-faces.cc`.
 
-`cavity-slab.step`, `plane-channel.step` and `pipe.step` come from `generate-flow-fixtures.cc`,
+`cavity-slab.step`, `plane-channel.step`, `plane-channel-long.step` and `pipe.step` come from `generate-flow-fixtures.cc`,
 which names the part and every face (`Lid`, `Inlet`, `Outlet`, `Lower wall`, `Wall`, ...).
 `portal-frame.step` names its members (`Girder`, `Left column`, `Right column`, `Ground`) and
 joints (`Left base`, `Right base`, `Left top`, `Right top`); `square-plate.step` names its

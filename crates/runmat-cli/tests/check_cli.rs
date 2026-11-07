@@ -412,9 +412,10 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     assert_eq!(evidence.artifact_digest, mesh.canonical_digest);
     // Golden counts for the authored independent-definition STEP fixture,
     // qualified by two byte-identical standalone meshes with seed zero.
-    assert_eq!(mesh.topology.nodes.len(), 402);
-    assert_eq!(mesh.topology.volume_elements.len(), 1204);
-    assert_eq!(mesh.topology.boundary_faces.len(), 768);
+    // Face gaps are sized to at least one element layer across (thin-layer sizing).
+    assert_eq!(mesh.topology.nodes.len(), 632);
+    assert_eq!(mesh.topology.volume_elements.len(), 2524);
+    assert_eq!(mesh.topology.boundary_faces.len(), 848);
 
     let model: AnalysisModel =
         serde_json::from_value(manifest["compiled"]["model"].clone()).unwrap();
@@ -1168,18 +1169,19 @@ fn passed_assessment(payload: &Value, id: &str) -> f64 {
 
 // witness: FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate @
 //   incompressible_laminar_steady/tet4/public_study;
-//   coverage: partial; boundary: pressure_drop on the public plane Poiseuille example lies
-//   within 5% of 12 mu U L / h^2 = 12 Pa; developing-inlet loss is inside that band.
+//   coverage: partial; boundary: pressure_drop on the public plane Poiseuille example
+//   (L/h = 30, Re = 1) lies within 5% of the fully developed 12 mu U L / h^2 = 36 Pa; the
+//   uniform inlet's entrance loss (about 0.9 h of equivalent length, +3%) is inside the band.
 #[test]
 fn plane_poiseuille_example_publishes_the_analytic_pressure_drop() {
     let temp = TempDir::new().unwrap();
     let payload = run_example_witness(
         &temp,
         "fluid-plane-poiseuille",
-        "    assessment poiseuille_drop { value = output.pressure_drop; minimum = 11.4 Pa; maximum = 12.6 Pa; evidence = authored_samples }\n",
+        "    assessment poiseuille_drop { value = output.pressure_drop; minimum = 34.2 Pa; maximum = 37.8 Pa; evidence = authored_samples }\n",
     );
     let drop = passed_assessment(&payload, "poiseuille_drop");
-    eprintln!("plane Poiseuille pressure_drop = {drop} Pa (analytic 12 Pa)");
+    eprintln!("plane Poiseuille pressure_drop = {drop} Pa (developed 36 Pa)");
 }
 
 // witness: FEA-ACOUSTIC-OUTPUTS-001/transmission_and_insertion_loss @

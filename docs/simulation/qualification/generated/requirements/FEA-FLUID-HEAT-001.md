@@ -1,6 +1,6 @@
 # FEA-FLUID-HEAT-001: Heat in the fluid: forced and natural convection, CHT and low-Mach flow
 
-0 PASS, 0 PARTIAL, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 1 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## forced_convection
 
@@ -42,7 +42,7 @@ Evidence kind: PhysicalBalance. Criterion: Two-way conjugate heat transfer with 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | conjugate_heat_transfer | tet4 | numerical_kernel | OPEN |  |
-| conjugate_heat_transfer | tet4 | public_study | OPEN |  |
+| conjugate_heat_transfer | tet4 | public_study | FAIL | `runmat[test:check_cli]::cht_plate_channel_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1217) - One public two-way CHT example on a linear mesh converges. |
 | conjugate_heat_transfer | tet10 | numerical_kernel | OPEN |  |
 | conjugate_heat_transfer | tet10 | public_study | OPEN |  |
 

@@ -13,7 +13,7 @@ use super::{
 
 const ACCURACY_EVALUATION_PREFIX: &[u8] = b"runmat-analysis-accuracy-evaluation/v2\0";
 const ACCURACY_EVALUATION_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(16 * 1024 * 1024, 1_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

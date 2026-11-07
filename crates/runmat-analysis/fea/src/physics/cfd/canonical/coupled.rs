@@ -558,6 +558,12 @@ pub(super) fn solve_with_time(
             }
             other => Error::Operator(other.to_string()),
         })?;
+        tracing::debug!(
+            iterations = report.iterations,
+            restart = p.policy.gmres_restart,
+            cells = n,
+            "fluid coupled FGMRES step"
+        );
         linear_iterations += report.iterations as u64;
         let (du, mut dp) = split(&step, n);
         // A closed component's pressure is defined up to a constant, which the Krylov step may

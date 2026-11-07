@@ -2,9 +2,22 @@ use anyhow::Result;
 use serde::Serialize;
 use std::path::Path;
 mod camera;
+mod legend;
 mod presentation;
 mod profiles;
+pub(super) use legend::authored_bound_units;
 pub(super) use presentation::Presentation;
+
+/// What a view's legend is written in terms of: the unit each assessment states its bound in
+/// (by assessment id) and each run's assessment results (by run id).
+#[derive(Default)]
+pub(super) struct LegendTerms {
+    pub display_units: std::collections::BTreeMap<String, String>,
+    pub assessments: std::collections::BTreeMap<
+        String,
+        Vec<runmat_runtime::analysis::assessment::PublishedStudyAssessment>,
+    >,
+}
 pub(super) use profiles::CaptureProfile;
 
 #[derive(Serialize)]
@@ -22,6 +35,10 @@ pub(super) struct View {
     pub deformation_field: Option<String>,
     pub scalar_scale: f64,
     pub unit: String,
+    /// The unit the legend is written in when it differs from `unit`: the one the study's
+    /// assessment of this quantity states its bound in. `minimum` and `maximum` stay in `unit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_unit: Option<String>,
     pub scene: String,
     pub poster: String,
     pub deformation_scale: f64,
@@ -65,6 +82,7 @@ pub(super) struct VolumeView {
 struct Encoded {
     minimum: Option<f64>,
     maximum: Option<f64>,
+    display_unit: Option<String>,
     position_error_m: f64,
     bounds: runmat_plot::core::BoundingBox,
     result_bounds: runmat_plot::core::BoundingBox,
@@ -146,6 +164,7 @@ pub(super) async fn capture(
     profile: CaptureProfile,
     solver_mesh: impl Fn(&str) -> Option<String>,
     presentation: &Presentation,
+    terms: &LegendTerms,
 ) -> Result<Vec<View>> {
     use runmat_runtime::analysis::field_scene::extrema;
     use runmat_runtime::builtins::plotting;
@@ -238,6 +257,8 @@ pub(super) async fn capture(
             let result_bounds = scene.bounds;
             presentation.dress(&mut scene);
             let mut scalar_scale = 1.0;
+            let mut range = None;
+            let mut display_unit = None;
             if let Some(legend) = scene
                 .overlay
                 .as_mut()
@@ -251,11 +272,20 @@ pub(super) async fn capture(
                     legend.minimum *= scalar_scale;
                     legend.maximum = 1.0;
                 }
+                range = Some((legend.minimum, legend.maximum));
+                if !spec.relative {
+                    display_unit = legend::present(
+                        legend,
+                        &spec.unit,
+                        &terms.display_units,
+                        terms
+                            .assessments
+                            .get(run_id)
+                            .map(Vec::as_slice)
+                            .unwrap_or_default(),
+                    )?;
+                }
             }
-            let legend = scene
-                .overlay
-                .as_ref()
-                .and_then(|overlay| overlay.scalar_legend.as_ref());
             let bytes = match plotting::encode_geometry_figure_scene_within(
                 &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
                 presentation.max_scene_bytes,
@@ -273,8 +303,9 @@ pub(super) async fn capture(
                 Err(error) => return Err(anyhow::Error::msg(error.to_string())),
             };
             Ok(Attempt::Fits(Encoded {
-                minimum: legend.map(|legend| legend.minimum),
-                maximum: legend.map(|legend| legend.maximum),
+                minimum: range.map(|range| range.0),
+                maximum: range.map(|range| range.1),
+                display_unit,
                 position_error_m: runmat_plot::event::FigureScene::geometry_position_error_m(
                     &scene,
                 ),
@@ -295,6 +326,7 @@ pub(super) async fn capture(
         let Encoded {
             minimum,
             maximum,
+            display_unit,
             position_error_m,
             bounds,
             result_bounds,
@@ -362,6 +394,7 @@ pub(super) async fn capture(
                 deformation_field,
                 scalar_scale,
                 unit: spec.unit,
+                display_unit,
                 scene: scene_path,
                 deformation_scale,
                 minimum,
@@ -418,6 +451,7 @@ pub(super) async fn capture(
             presentation.poster_height,
             camera.clone(),
             presentation.pixels_per_point(),
+            Some(presentation.theme_config()),
         )
         .await;
         plotting::close_geometry_scene(handle);

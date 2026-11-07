@@ -41,6 +41,8 @@ fn geometry_replay_preserves_field_colors_edges_and_legend() {
             unit: "Pa".into(),
             minimum: 0.0,
             maximum: 177.0,
+            limit: None,
+            note: None,
         }),
         region_count: 0,
         mapped_region_count: 0,

@@ -1804,6 +1804,8 @@ mod parity_tests {
                     unit: "m".into(),
                     minimum: 0.0,
                     maximum: 9.65e-10,
+                    limit: None,
+                    note: None,
                 }),
                 region_count: 1,
                 mapped_region_count: 1,

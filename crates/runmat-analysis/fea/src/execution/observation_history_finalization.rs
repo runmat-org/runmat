@@ -14,7 +14,7 @@ use crate::results::observation::{
 };
 
 const PREFIX: &[u8] = b"runmat-observation-history-finalization/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy)]
 pub enum ObservationHistorySourceContext<'a> {

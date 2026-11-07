@@ -9,7 +9,7 @@ Evidence kind: IndependentReference. Criterion: Independent exact simplex or man
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
-| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::radiation::exact_operators::tet10_and_tri6_all_entries_match_independent_simplex_moments_on_every_face` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation/exact_operators.rs:245) - Every Tet10/Tri6 matrix entry on all faces; independent simplex moments. No Tet4 or public topology audit credit. |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::radiation::exact_operators::tet10_and_tri6_all_entries_match_independent_simplex_moments_on_every_face` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation/exact_operators.rs:252) - Every Tet10/Tri6 matrix entry on all faces; independent simplex moments. No Tet4 or public topology audit credit. |
 
 ## regions
 
@@ -17,8 +17,8 @@ Evidence kind: SpatialConvergence. Criterion: Material-interface pressure, norma
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::interface::two_fluid_interface_pressure_mean_velocity_and_power_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/interface.rs:265) - Aligned two-medium slab, phase rotation and spatial refinement; not arbitrary heterogeneous or curved-interface qualification. |
-| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::interface::two_fluid_interface_pressure_mean_velocity_and_power_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/interface.rs:265) - Aligned two-medium slab, phase rotation and spatial refinement; not arbitrary heterogeneous or curved-interface qualification. |
+| acoustic_harmonic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::interface::two_fluid_interface_pressure_mean_velocity_and_power_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/interface.rs:280) - Aligned two-medium slab, phase rotation and spatial refinement; not arbitrary heterogeneous or curved-interface qualification. |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::interface::two_fluid_interface_pressure_mean_velocity_and_power_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/interface.rs:280) - Aligned two-medium slab, phase rotation and spatial refinement; not arbitrary heterogeneous or curved-interface qualification. |
 
 ## topology
 

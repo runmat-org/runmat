@@ -10,7 +10,7 @@ Evidence kind: IndependentReference. Criterion: `electrothermal steady` with sig
 |---|---|---|---|---|
 | electrothermal | tet4 | numerical_kernel | OPEN |  |
 | electrothermal | tet4 | public_study | OPEN |  |
-| electrothermal | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::electrothermal::tests::coupled::two_way_joule_heating_matches_the_closed_form_bar` (crates/runmat-analysis/fea/src/execution/electrothermal/tests/coupled.rs:108) - Two-way coupled steady Joule heating on a Tet10 bar with temperature-dependent resistivity iterates at least three sweeps; temperature matches the closed-form c... |
+| electrothermal | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::electrothermal::tests::coupled::two_way_joule_heating_matches_the_closed_form_bar` (crates/runmat-analysis/fea/src/execution/electrothermal/tests/coupled.rs:116) - Two-way coupled steady Joule heating on a Tet10 bar with temperature-dependent resistivity iterates at least three sweeps; temperature matches the closed-form c... |
 | electrothermal | tet10 | public_study | OPEN |  |
 | electrothermal | edge_elements | numerical_kernel | OPEN |  |
 | electrothermal | edge_elements | public_study | OPEN |  |

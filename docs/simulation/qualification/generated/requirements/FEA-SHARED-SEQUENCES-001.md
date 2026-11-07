@@ -8,7 +8,7 @@ Evidence kind: SemanticRealization. Criterion: An engineering study is an ordere
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::tests::semantic_state_and_reuse_transition_bind_exact_content_and_topology` (crates/runmat-analysis/fea/src/execution/tests.rs:303) - Semantic state and reuse transitions bind exact content and topology.<br>`runmat-analysis-fea[lib]::execution::tests::semantic_state_rejects_unimplemented_projection_transitions` (crates/runmat-analysis/fea/src/execution/tests.rs:486) - Semantic state rejects unimplemented projection transitions. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::tests::semantic_state_and_reuse_transition_bind_exact_content_and_topology` (crates/runmat-analysis/fea/src/execution/tests.rs:304) - Semantic state and reuse transitions bind exact content and topology.<br>`runmat-analysis-fea[lib]::execution::tests::semantic_state_rejects_unimplemented_projection_transitions` (crates/runmat-analysis/fea/src/execution/tests.rs:493) - Semantic state rejects unimplemented projection transitions. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -23,7 +23,7 @@ Evidence kind: SemanticRealization. Criterion: velocities, accelerations, and ti
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::state::thermal::tests::completed_thermal_state_binds_authored_static_thermoelastic_reuse` (crates/runmat-analysis/fea/src/execution/state/thermal.rs:444) - A completed thermal state binds authored static thermoelastic reuse; structural and fluid state kinds are separate. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::state::thermal::tests::completed_thermal_state_binds_authored_static_thermoelastic_reuse` (crates/runmat-analysis/fea/src/execution/state/thermal.rs:508) - A completed thermal state binds authored static thermoelastic reuse; structural and fluid state kinds are separate. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -68,7 +68,7 @@ Evidence kind: SemanticRealization. Criterion: Every state-producing step publis
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::state::thermal::tests::completed_thermal_result_publishes_immutable_topology_bound_terminal_state` (crates/runmat-analysis/fea/src/execution/state/thermal.rs:261) - A completed thermal result publishes an immutable topology-bound terminal state. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::state::thermal::tests::completed_thermal_result_publishes_immutable_topology_bound_terminal_state` (crates/runmat-analysis/fea/src/execution/state/thermal.rs:310) - A completed thermal result publishes an immutable topology-bound terminal state. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -83,7 +83,7 @@ Evidence kind: SemanticRealization. Criterion: Required governed cases include: 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::validate_sequence::tests::rejects_upstream_input_without_governed_transition` (crates/runmat-analysis/core/src/validate_sequence/tests.rs:315) - Upstream input without a governed transition is rejected; the preload-to-prestressed-modal case is covered by study planning tests. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::validate_sequence::tests::rejects_upstream_input_without_governed_transition` (crates/runmat-analysis/core/src/validate_sequence/tests.rs:316) - Upstream input without a governed transition is rejected; the preload-to-prestressed-modal case is covered by study planning tests. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

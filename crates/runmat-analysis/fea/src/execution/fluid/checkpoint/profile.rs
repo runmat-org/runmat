@@ -69,8 +69,8 @@ pub(super) fn require_complete_budget(
         .materialization_resident_bytes_estimate
         .checked_mul(2)
         .and_then(|v| v.checked_add(profile.encoded_bytes_upper_bound))
-        .and_then(|v| v.checked_add(p.source.preparation_resident_bytes))
-        .ok_or_else(|| invalid("fluid checkpoint complete history overflow"))?;
+        .ok_or_else(|| invalid("fluid checkpoint complete history overflow"))
+        .and_then(|later| p.source.resident_with(later))?;
     let remaining = p
         .workload
         .resident_ceiling()?

@@ -58,16 +58,27 @@ fn incomplete_transport_or_construction_never_grants_admission() {
 }
 
 #[test]
-fn additive_lifetimes_exact_ceiling_and_overflow_are_checked() {
-    let bytes = admission::phase_resident_bytes(10, 20, 30, 40, 50).unwrap();
-    assert_eq!(bytes, 190);
+fn sequential_lifetimes_exact_ceiling_and_overflow_are_checked() {
+    // Retained 30 + decoded 50 live throughout; then the largest of scratch 40, the solve
+    // 100, and encoding (verification 20 + output 2 x 5 + 7 = 37).
+    let bytes = admission::phase_resident_bytes(100, 20, 30, 40, 50, 5, 7).unwrap();
+    assert_eq!(bytes, 180);
+    // Scratch above the solve is the peak; then encoding above both.
+    assert_eq!(
+        admission::phase_resident_bytes(10, 5, 30, 40, 50, 0, 0).unwrap(),
+        120
+    );
+    assert_eq!(
+        admission::phase_resident_bytes(10, 5, 30, 4, 50, 10, 20).unwrap(),
+        125
+    );
     admission::require_ceiling(bytes, bytes).unwrap();
     assert!(matches!(
         admission::require_ceiling(bytes, bytes - 1),
         Err(ResourcePlanningError::AccuracyCeiling { .. })
     ));
     assert!(matches!(
-        admission::phase_resident_bytes(0, 0, 0, u64::MAX, 0),
+        admission::phase_resident_bytes(0, 0, u64::MAX, 0, 1, 0, 0),
         Err(ResourcePlanningError::Overflow(_))
     ));
     assert!(admission::require_ceiling(u64::MAX, u64::MAX).is_err());

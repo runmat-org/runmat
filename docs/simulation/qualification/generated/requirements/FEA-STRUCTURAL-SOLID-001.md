@@ -30,9 +30,9 @@ Evidence kind: IndependentReference. Criterion: Implement documented damping inp
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | linear_structural | tet4 | numerical_kernel | OPEN |  |
-| linear_structural | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::tests::tet10_body_force_quadrature_preserves_integrated_volume_resultant` (crates/runmat-analysis/fea/src/assembly/mod.rs:3272) - Tet10 body-force quadrature preserves the integrated volume resultant. |
-| linear_structural | beam | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::tests::explicit_body_force_density_integrates_beam_and_shell_volume` (crates/runmat-analysis/fea/src/assembly/mod.rs:3737) - An explicit body-force density integrates over beam and shell volumes. |
-| linear_structural | shell | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::tests::shell_assembles_authored_rayleigh_damping` (crates/runmat-analysis/fea/src/assembly/mod.rs:2745) - A shell assembles authored Rayleigh damping; solid damping is not asserted here.<br>`runmat-analysis-fea[lib]::assembly::tests::explicit_body_force_density_integrates_beam_and_shell_volume` (crates/runmat-analysis/fea/src/assembly/mod.rs:3737) - An explicit body-force density integrates over beam and shell volumes. |
+| linear_structural | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::tests::tet10_body_force_quadrature_preserves_integrated_volume_resultant` (crates/runmat-analysis/fea/src/assembly/mod.rs:3653) - Tet10 body-force quadrature preserves the integrated volume resultant. |
+| linear_structural | beam | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::tests::explicit_body_force_density_integrates_beam_and_shell_volume` (crates/runmat-analysis/fea/src/assembly/mod.rs:4132) - An explicit body-force density integrates over beam and shell volumes. |
+| linear_structural | shell | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::tests::shell_assembles_authored_rayleigh_damping` (crates/runmat-analysis/fea/src/assembly/mod.rs:3100) - A shell assembles authored Rayleigh damping; solid damping is not asserted here.<br>`runmat-analysis-fea[lib]::assembly::tests::explicit_body_force_density_integrates_beam_and_shell_volume` (crates/runmat-analysis/fea/src/assembly/mod.rs:4132) - An explicit body-force density integrates over beam and shell volumes. |
 | linear_structural | tet4 | public_study | OPEN |  |
 | linear_structural | tet10 | public_study | OPEN |  |
 | linear_structural | beam | public_study | OPEN |  |
@@ -50,7 +50,7 @@ Evidence kind: IndependentReference. Criterion: Make stress, strain, energy, and
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| linear_structural | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::post::solid::tests::recovery_uses_each_elements_assigned_material` (crates/runmat-analysis/fea/src/post/solid.rs:333) - Two Tet4 elements with different Young's moduli recover different stresses from the same strain, in serial and with two threads; Tet10 recovery is covered by th... |
+| linear_structural | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::post::solid::tests::recovery_uses_each_elements_assigned_material` (crates/runmat-analysis/fea/src/post/solid.rs:470) - Two Tet4 elements with different Young's moduli recover different stresses from the same strain, in serial and with two threads; Tet10 recovery is covered by th... |
 | linear_structural | tet10 | numerical_kernel | OPEN |  |
 | linear_structural | beam | numerical_kernel | OPEN |  |
 | linear_structural | shell | numerical_kernel | OPEN |  |
@@ -73,7 +73,7 @@ Evidence kind: IndependentReference. Criterion: Realize constant and parameteriz
 |---|---|---|---|---|
 | linear_structural | tet4 | numerical_kernel | OPEN |  |
 | linear_structural | tet10 | numerical_kernel | OPEN |  |
-| linear_structural | beam | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::large_load_sweep_does_not_fabricate_dofs_from_excitation_count` (crates/runmat-analysis/fea/src/tests.rs:4589) - A large load sweep does not fabricate degrees of freedom from the excitation count; diagnostic completeness is not asserted. |
+| linear_structural | beam | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::large_load_sweep_does_not_fabricate_dofs_from_excitation_count` (crates/runmat-analysis/fea/src/tests.rs:4767) - A large load sweep does not fabricate degrees of freedom from the excitation count; diagnostic completeness is not asserted. |
 | linear_structural | shell | numerical_kernel | OPEN |  |
 | linear_structural | tet4 | public_study | OPEN |  |
 | linear_structural | tet10 | public_study | OPEN |  |

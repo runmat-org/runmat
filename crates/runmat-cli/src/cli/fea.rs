@@ -57,6 +57,10 @@ pub struct SnapshotPresentationArgs {
     /// shown small, such as a website hero on a phone, uses about 2
     #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
     pub text_scale: f32,
+    /// Poster theme: `dark` or `light`, the app's dark or light plot theme for the background,
+    /// grid, text, legend and triad. Scenes are the same in both; only the posters differ.
+    #[arg(long, default_value = "dark", value_name = "dark|light")]
+    pub theme: String,
     /// Cut section views normal to this axis at this fraction of the result's extent along it
     /// (0 at its minimum, 1 at its maximum; default 0.5). Default: through the center, across
     /// the result's thinnest axis

@@ -17,7 +17,7 @@ use super::{
 
 const WORKLOAD_PREFIX: &[u8] = b"runmat-structural-response-spectrum-workload/v1\0";
 const WORKLOAD_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(128 * 1024 * 1024, 2_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Placement-neutral modal response-spectrum intent bound to one immutable modal basis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

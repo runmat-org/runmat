@@ -104,7 +104,7 @@ fn heated_die() -> (AnalysisModel, SolverMeshArtifact) {
     (model, mesh)
 }
 
-// witness: FEA-THERMAL-SOURCES-001/heat_generation @ thermal_steady/tet4/numerical_kernel;
+// witness: FEA-THERMAL-INPUT-001/heat_generation @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial; boundary: a total heat rate on a solid region compiles to P / V over the
 //   region's meshed volume, and the steady energy balance generates and removes exactly P.
 #[test]

@@ -1,5 +1,6 @@
 //! Publication phase estimates derived from original borrowed inventories before codec work.
 use super::*;
+use crate::analysis::structural_study::publication::evidence::immutable_batch_workspace;
 use crate::analysis::AnalysisStudyRunData;
 use runmat_canonical_codec::{encode_json_bounded, profile_json_bytes};
 
@@ -221,6 +222,12 @@ impl AnalysisPublicationBuilder {
                 message: "source demand omits original transport".into(),
             });
         }
+        // The source's own demand and the catalog persistence it is followed by share the lease.
+        let required = immutable_batch_workspace(encoded)
+            .map(|persist| persist.max(required))
+            .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
+                message: "publication source workspace overflow".into(),
+            })?;
         let planned = self.source_workspace_bytes.max(required);
         self.admit(planned)?;
         let identity = canonical_digest("publication-source-inventory", &objects)?;
@@ -380,17 +387,18 @@ impl AnalysisPublicationBuilder {
             ),
         )
         .map_err(AnalysisPublicationError::from)?;
-        let resident = add(
-            profile.encoded_bytes_upper_bound,
-            profile.resident_workspace_bytes_estimate,
-        )?;
-        let available = maximum
-            .checked_sub(resident)
-            .filter(|bytes| *bytes > 0)
+        let required = state_persistence_workspace(&profile)
+            .filter(|required| *required <= maximum)
             .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-                message: "semantic state encoding exceeds its phase allowance".into(),
+                message: format!(
+                    "semantic state encoding exceeds its phase allowance: state {} bytes, encoding workspace {} bytes, allowance {maximum} bytes",
+                    profile.encoded_bytes_upper_bound, profile.resident_workspace_bytes_estimate,
+                ),
             })?;
         let bytes = state.canonical_bytes().map_err(|error| error.to_string())?;
+        if bytes.len() as u64 > profile.encoded_bytes_upper_bound {
+            return Err("semantic state exceeds its profiled encoding".into());
+        }
         let relative = format!(
             "sha256_{digest}/states/sha256_{}.state",
             state
@@ -400,7 +408,7 @@ impl AnalysisPublicationBuilder {
                 .trim_start_matches("sha256:")
         );
         self.evidence_access
-            .persist_bytes(&relative, &bytes, available)
+            .persist_bytes(&relative, &bytes, required)
     }
 
     /// Admit the typed clone of the public run placed into the family manifest.
@@ -475,6 +483,15 @@ fn json_projection(value: &impl Serialize, maximum: u64) -> Result<u64, Analysis
     })
 }
 
+/// Encoding and persistence are sequential: the encoder's workspace, which includes its
+/// output, is released except for the output, which then joins one comparison buffer.
+pub(super) fn state_persistence_workspace(
+    profile: &runmat_canonical_codec::CanonicalEncodingProfile,
+) -> Option<u64> {
+    immutable_batch_workspace(profile.encoded_bytes_upper_bound)
+        .map(|persist| persist.max(profile.resident_workspace_bytes_estimate))
+}
+
 pub(super) fn source_workspace(
     objects: &[runmat_execution::value::ValueRef],
 ) -> Result<u64, AnalysisPublicationError> {
@@ -485,14 +502,17 @@ pub(super) fn source_workspace(
     else {
         return Ok(0);
     };
+    let overflow = || AnalysisPublicationError::ResourceLimit {
+        message: "publication source workspace overflow".into(),
+    };
     let decoded =
         runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
             encoded, 1,
         )
-        .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-            message: "publication source workspace overflow".into(),
-        })?;
-    add(encoded, decoded)
+        .ok_or_else(overflow)?;
+    // Replay (transport plus decode) and catalog persistence run in sequence under one lease.
+    let persist = immutable_batch_workspace(encoded).ok_or_else(overflow)?;
+    Ok(add(encoded, decoded)?.max(persist))
 }
 
 mod erased_json {

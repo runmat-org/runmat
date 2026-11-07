@@ -62,6 +62,8 @@ pub(in crate::commands::fea) struct Presentation {
     pub section: Option<runmat_runtime::analysis::field_scene::volume::SectionPlaneChoice>,
     /// Largest scene file one view may write, in bytes.
     pub max_scene_bytes: usize,
+    /// The plot theme posters are drawn in; scenes carry no theme.
+    pub theme: runmat_plot::styling::ThemeVariant,
 }
 
 impl Default for Presentation {
@@ -79,6 +81,7 @@ impl Default for Presentation {
             text_scale: 1.0,
             section: None,
             max_scene_bytes: 16 * 1024 * 1024,
+            theme: runmat_plot::styling::ThemeVariant::ModernDark,
         }
     }
 }
@@ -110,6 +113,7 @@ impl Presentation {
             text_scale: parse_text_scale(args.text_scale)?,
             section: args.section.as_deref().map(parse_section).transpose()?,
             max_scene_bytes: parse_scene_budget(args.max_scene_bytes)?,
+            theme: parse_theme(&args.theme)?,
         })
     }
 
@@ -139,6 +143,14 @@ impl Presentation {
 
     pub fn pixels_per_point(&self) -> f32 {
         (self.poster_width as f32 / POSTER_REFERENCE_WIDTH).max(1.0) * self.text_scale
+    }
+
+    /// The app's plot theme for posters: its dark or light tokens.
+    pub fn theme_config(&self) -> runmat_plot::styling::PlotThemeConfig {
+        runmat_plot::styling::PlotThemeConfig {
+            variant: self.theme,
+            ..Default::default()
+        }
     }
 
     pub fn aspect_ratio(&self) -> f32 {
@@ -335,6 +347,15 @@ fn parse_padding(padding: f32) -> Result<f32> {
 fn parse_scene_budget(bytes: usize) -> Result<usize> {
     anyhow::ensure!(bytes > 0, "--max-scene-bytes must be positive");
     Ok(bytes)
+}
+
+fn parse_theme(text: &str) -> Result<runmat_plot::styling::ThemeVariant> {
+    use runmat_plot::styling::ThemeVariant;
+    Ok(match text {
+        "dark" => ThemeVariant::ModernDark,
+        "light" => ThemeVariant::ClassicLight,
+        _ => bail!("--theme must be dark or light, not '{text}'"),
+    })
 }
 
 fn parse_text_scale(scale: f32) -> Result<f32> {

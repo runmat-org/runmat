@@ -1005,6 +1005,13 @@ pub struct GeometrySceneScalarLegend {
     pub unit: String,
     pub minimum: f64,
     pub maximum: f64,
+    /// An acceptance limit on the shown quantity, in `unit`: marked on the bar when it falls in
+    /// the range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<f64>,
+    /// A line under the range, such as how far the result is from that limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
