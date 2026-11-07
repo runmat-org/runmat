@@ -5,9 +5,16 @@ pub(super) fn add(a: u64, b: u64) -> Result<u64, ResourcePlanningError> {
         .ok_or(ResourcePlanningError::Overflow("fluid resource byte sum"))
 }
 
+/// Peak of one steady fluid phase. The retained source preparation and the decoded inputs
+/// live throughout. Three stages follow one another and never coexist: the source's
+/// finite-volume derivation scratch, the numerical solve (`numerical`), and result encoding,
+/// which holds the retained solution (`verification`, the numerical bound without its
+/// solver-only Krylov, preconditioner and coupled-block workspace) and the output buffers.
 pub(super) fn phase_resident_bytes(
     numerical: u64,
+    verification: u64,
     preparation: u64,
+    preparation_scratch: u64,
     decoded_inputs: u64,
     result_encoded: u64,
     result_materialization: u64,
@@ -15,7 +22,9 @@ pub(super) fn phase_resident_bytes(
     // Two buffers conservatively cover canonical result encoding plus transport
     // staging. The scheduler independently accounts its output-set/object closure.
     let output = add(add(result_encoded, result_encoded)?, result_materialization)?;
-    add(add(numerical, preparation)?, add(decoded_inputs, output)?)
+    let encoding = add(verification, output)?;
+    let staged = preparation_scratch.max(numerical).max(encoding);
+    add(add(preparation, decoded_inputs)?, staged)
 }
 
 pub(super) fn require_ceiling(required: u64, maximum: u64) -> Result<(), ResourcePlanningError> {
@@ -39,7 +48,8 @@ pub(super) fn validate_prepared(
     if input_bytes == 0
         || result_bytes == 0
         || prepared.inputs.encoded_payload_bytes.0 != input_bytes
-        || prepared.inputs.transport_closure_bytes.0 < input_bytes
+        // Content-addressed repeated chunks can make unique transport smaller than the payload.
+        || prepared.inputs.transport_closure_bytes.0 == 0
         || prepared.inputs.decoded_resident_bytes_admission_budget.0 < decode_bytes
         || prepared.output.encoded_payload_bytes_upper_bound.0 != result_bytes
         || prepared.output.transport_closure_bytes_upper_bound.0 < result_bytes

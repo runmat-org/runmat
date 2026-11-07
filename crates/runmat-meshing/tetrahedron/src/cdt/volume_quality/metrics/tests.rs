@@ -94,6 +94,7 @@ fn streamed_uniform_contexts_preserve_every_original_cell_and_complete_quality()
         MetricContexts::Indexed(original),
         &boundary_node_identities(&provenance),
         &protected_facet_identities(&provenance),
+        &provenance,
         &NeverCancelled,
     )
     .unwrap();

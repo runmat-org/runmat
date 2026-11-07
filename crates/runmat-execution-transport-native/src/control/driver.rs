@@ -170,7 +170,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
         let response = self
             .client
             .driver_bootstrap(
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 to_i64(authority.fencing_token)?,
                 &authority.credential,
             )
@@ -178,10 +178,10 @@ impl DriverControlPlane for HttpDriverControlPlane {
             .map_err(map_error)?
             .into_inner();
         if response.run_id != authority.run_id
-            || response.org_id != authority.org_id
+            || response.org_id != authority.org_id.as_str()
             || response.project_id != authority.project_id
             || response.allocation_lease_id != authority.allocation_lease_id
-            || response.driver_lease_id != authority.driver_lease_id
+            || response.driver_lease_id != authority.driver_lease_id.as_str()
             || to_u64(response.fencing_token)? != authority.fencing_token
         {
             return Err(TransportError::StaleAuthority);
@@ -235,7 +235,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
         let response = self
             .client
             .record_driver_usage(
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 to_i64(authority.fencing_token)?,
                 &authority.credential,
                 &types::DriverUsageRequest {
@@ -256,7 +256,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
         let response = self
             .client
             .driver_heartbeat(
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 to_i64(authority.fencing_token)?,
                 &authority.credential,
                 &types::DriverHeartbeatRequest {
@@ -610,7 +610,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
         let response = self
             .client
             .store_artifact(
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 to_i64(authority.fencing_token)?,
                 &authority.credential,
                 &types::StoreDriverArtifactRequest {
@@ -649,7 +649,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
     ) -> TransportResult<()> {
         self.client
             .driver_transition(
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 to_i64(authority.fencing_token)?,
                 &authority.credential,
                 &types::DriverTransitionRequest {
@@ -686,7 +686,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
         let response = self
             .client
             .resize_driver_workers(
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 to_i64(authority.fencing_token)?,
                 &authority.credential,
                 &types::ResizeDriverWorkersRequest {
@@ -706,7 +706,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
         let response = self
             .client
             .list_driver_workers(
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 to_i64(authority.fencing_token)?,
                 &authority.credential,
             )
@@ -739,7 +739,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
                 "v1",
                 "execution",
                 "drivers",
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 "workers",
                 &original.allocation_lease_id,
                 "retirement",
@@ -889,7 +889,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
     ) -> TransportResult<()> {
         self.client
             .authorize_driver_worker(
-                &authority.driver_lease_id,
+                authority.driver_lease_id.as_str(),
                 allocation_lease_id,
                 to_i64(authority.fencing_token)?,
                 &authority.credential,

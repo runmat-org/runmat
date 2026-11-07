@@ -20,7 +20,7 @@ use super::{
 };
 
 const PREFIX: &[u8] = b"runmat-fea-frequency-sample-publication/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 2_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]

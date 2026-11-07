@@ -1,18 +1,16 @@
 use super::*;
 use crate::{fixtures::canonical_tetrahedron_solver_mesh, CanonicalMeshingContract, ElementOrder};
-use runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate;
 
 #[test]
-fn validation_estimate_covers_canonical_materialization_for_both_orders() {
+fn validation_estimate_covers_the_direct_encoding_for_both_orders() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let original = mesh.clone();
         let estimate = mesh.validation_resident_bytes_estimate().unwrap();
         let encoded = mesh.canonical_encode().unwrap();
-        assert!(
-            estimate
-                >= canonical_payload_materialization_resident_bytes_estimate(&encoded).unwrap()
-        );
+        // Identity validation runs the direct encoder; no serde value tree is materialized, so
+        // the estimate covers the encoded bytes, not a value-tree materialization.
+        assert!(estimate >= encoded.len() as u64, "{estimate} vs {}", encoded.len());
         assert_eq!(mesh, original);
         assert_eq!(estimate, mesh.validation_resident_bytes_estimate().unwrap());
     }

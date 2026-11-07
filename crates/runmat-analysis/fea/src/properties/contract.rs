@@ -46,8 +46,9 @@ pub struct CompiledPropertyAudit {
 pub enum CompiledPropertyAuditOwner {
     MaterialAssignment {
         assignment_index: u64,
-        expected_material_id: String,
-        assigned_material_id: String,
+        /// Shared with every element of the same assignment: one owner per assignment.
+        expected_material_id: Arc<str>,
+        assigned_material_id: Arc<str>,
         confidence: EvidenceConfidence,
     },
     Laminate {

@@ -71,7 +71,7 @@ pub fn couple_fluid_structure(
     domain: &CfdDomain,
     topology: &cfd::CfdDomainTopology,
     options: FsiCouplingOptions,
-) -> Result<FsiCouplingResult, String> {
+) -> Result<FsiCouplingResult, super::super::coupling::dense::DenseCouplingError> {
     let sample_count = options.sample_count;
     let schedule = cfd::realize_velocity_schedule(
         model,

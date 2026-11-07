@@ -1,4 +1,4 @@
-# Procedure Sequences, Observations, and Accuracy
+# Study contracts
 
 An FEA model describes physical objects. An analysis sequence describes when those objects are
 active, which procedure runs, what state crosses a procedure boundary, which results must be

@@ -4,6 +4,14 @@ use std::{cell::Cell, rc::Rc};
 
 struct DenyingHost(Rc<Cell<u32>>);
 impl AsyncFeaRunAdmission for DenyingHost {
+    fn request_grant(
+        &self,
+        _: FeaRunRequest,
+        _: FeaRunUsage,
+        _: runmat_simulation_usage::OperationCount,
+    ) -> RuntimeServiceFuture<Result<FeaRunBudget, FeaRunDenied>> {
+        Box::pin(async { Err(FeaRunDenied::SignInRequired) })
+    }
     fn admit(
         &self,
         request: FeaRunRequest,
@@ -59,4 +67,94 @@ fn no_async_host_keeps_the_existing_domain_gate_and_does_not_precharge_scripts()
         |result, lease_error| result.and(Err(lease_error)),
     ));
     assert_eq!(result.unwrap(), 42);
+}
+
+#[test]
+fn numerical_capacity_renews_without_charging_or_overlapping_primitive_work() {
+    use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
+    use std::cell::RefCell;
+
+    fn ops(value: u64) -> OperationCount {
+        OperationCount::from_operations(value)
+    }
+    struct CapacityHost {
+        budget: FeaRunBudget,
+        requests: Rc<RefCell<Vec<(OperationCount, OperationCount)>>>,
+    }
+    impl AsyncFeaRunAdmission for CapacityHost {
+        fn request_grant(
+            &self,
+            _: FeaRunRequest,
+            usage: FeaRunUsage,
+            required: OperationCount,
+        ) -> RuntimeServiceFuture<Result<FeaRunBudget, FeaRunDenied>> {
+            self.requests
+                .borrow_mut()
+                .push((usage.completed_ops.total().unwrap(), required));
+            let renewed = FeaRunBudget {
+                granted_ops: required,
+                ..self.budget
+            };
+            Box::pin(async move { Ok(renewed) })
+        }
+        fn admit(
+            &self,
+            _: FeaRunRequest,
+        ) -> RuntimeServiceFuture<Result<Box<dyn AsyncFeaRunLease>, FeaRunDenied>> {
+            Box::pin(async { Err(FeaRunDenied::LicenseInvalid) })
+        }
+    }
+
+    let budget = FeaRunBudget {
+        budget_ops: ops(20),
+        granted_ops: ops(0),
+        expires_at_unix_millis: runmat_time::unix_timestamp_ms() as u64 + 60_000,
+        heartbeat_millis: 30_000,
+    };
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_fea_run_admission(Rc::new(CapacityHost {
+                budget,
+                requests: Rc::clone(&requests),
+            })),
+        );
+    let request = FeaRunRequest::local(
+        FeaRunKind::Solve,
+        1000,
+        runmat_execution::Digest::sha256(b"numerical-capacity"),
+    )
+    .unwrap();
+    let child = FeaRunScope::from_parent_supervised_delegation(request, budget, 0).unwrap();
+    futures::executor::block_on(child.run_future(async {
+        let usage = UsageContext::capture().unwrap();
+        ensure_available_capacity(&usage, ops(7), Some(&runtime))
+            .await
+            .unwrap();
+        let before = usage.ledger().snapshot().unwrap();
+        assert_eq!(before.completed.total().unwrap(), ops(0));
+        assert_eq!(before.reserved, ops(0));
+        let mut work = usage
+            .ledger()
+            .reserve(UsageCategory::Solve, ops(5))
+            .unwrap();
+        assert_eq!(
+            ensure_available_capacity(&usage, ops(1), Some(&runtime)).await,
+            Err(FeaRunDenied::Accounting(LedgerError::OutstandingWork))
+        );
+        work.complete(ops(5)).unwrap();
+        drop(work);
+        ensure_available_capacity(&usage, ops(5), Some(&runtime))
+            .await
+            .unwrap();
+        assert_eq!(usage.ledger().snapshot().unwrap().completed.solve, ops(5));
+        assert!(matches!(
+            ensure_available_capacity(&usage, ops(16), Some(&runtime)).await,
+            Err(FeaRunDenied::Accounting(LedgerError::BudgetExceeded { .. }))
+        ));
+    }));
+    assert_eq!(
+        *requests.borrow(),
+        vec![(ops(0), ops(7)), (ops(5), ops(10))]
+    );
 }

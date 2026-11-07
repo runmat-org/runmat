@@ -138,7 +138,10 @@ pub(crate) fn diagnostic_interior_star_quality(
             Err(err) => {
                 *diagnostic
                     .rejected_by_reason
-                    .entry(boundary_node_refill_validation_reason(&err))
+                    .entry(
+                        boundary_node_refill_validation_reason(&err)
+                            .map_err(ConstrainedCavityRefillError::Accounting)?,
+                    )
                     .or_default() += 1;
             }
         }

@@ -350,7 +350,8 @@ impl PlotRenderer {
                             _ => None,
                         };
                         let pipeline = variant.unwrap_or_else(|| {
-                            self.wgpu_renderer.get_pipeline(render_data.pipeline_type)
+                            self.wgpu_renderer
+                                .pipeline_for(render_data, self.scene.translucent_last())
                         });
                         render_pass.set_pipeline(pipeline);
                         // Set the uniform bind group (required by shaders)

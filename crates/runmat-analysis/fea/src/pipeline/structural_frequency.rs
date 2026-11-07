@@ -32,11 +32,33 @@ use crate::{
         backend::kind::LinearAlgebraBackendKind,
         dynamics::{
             evaluate_harmonic_physical_state, solve_direct_harmonic, solve_modal_harmonic,
-            ModalHarmonicLoad, ModalReducedSystem,
+            DirectHarmonicError, ModalHarmonicError, ModalHarmonicLoad, ModalProjectionError,
+            ModalReducedSystem,
         },
     },
     AnalysisRunIdentity,
 };
+
+fn modal_projection_error(error: ModalProjectionError) -> AnalysisExecutionError {
+    match error {
+        ModalProjectionError::Usage(error) => AnalysisExecutionError::Usage(error),
+        other => AnalysisExecutionError::Invalid(other.to_string()),
+    }
+}
+
+fn modal_harmonic_error(error: ModalHarmonicError) -> AnalysisExecutionError {
+    match error {
+        ModalHarmonicError::Usage(error) => AnalysisExecutionError::Usage(error),
+        other => AnalysisExecutionError::Invalid(other.to_string()),
+    }
+}
+
+fn direct_harmonic_error(error: DirectHarmonicError) -> AnalysisExecutionError {
+    match error {
+        DirectHarmonicError::Usage(error) => AnalysisExecutionError::Usage(error),
+        other => AnalysisExecutionError::Invalid(other.to_string()),
+    }
+}
 
 /// Re-derives the physical formulation and admits a published frequency study directly from its
 /// typed multi-sample result.
@@ -75,6 +97,30 @@ pub fn admit_prestressed_structural_frequency_publication(
         publication,
         Some(prestress_state),
         None,
+    )
+}
+
+/// Admits a modal-reduced frequency publication (`modal_harmonic`) against the modal-basis state
+/// its workload names.
+pub fn admit_modal_structural_frequency_publication(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    modal_state: &CanonicalSemanticState,
+    result: &crate::execution::StructuralFrequencySolverResult,
+    publication: &crate::execution::StructuralFrequencyPublicationManifest,
+) -> AnalysisExecutionResult<AnalysisRunIdentity> {
+    if workload.prestress_transition().is_some() {
+        return Err(AnalysisExecutionError::Invalid(
+            "prestressed structural frequency publication requires its exact base state".into(),
+        ));
+    }
+    admit_structural_frequency_publication_with_state(
+        workload,
+        solver_mesh,
+        result,
+        publication,
+        None,
+        Some(modal_state),
     )
 }
 
@@ -138,8 +184,7 @@ fn admit_structural_frequency_publication_with_state(
                     "modal structural frequency publication names another basis or topology",
                 ));
             }
-            ModalReducedSystem::project(&assembly.real, basis)
-                .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+            ModalReducedSystem::project(&assembly.real, basis).map_err(modal_projection_error)?;
         }
         _ => {
             return Err(AnalysisExecutionError::Invalid(
@@ -336,7 +381,54 @@ fn execute_structural_frequency_entry_with_state(
         ));
     }
     let omega = TAU * request.entry().frequency_hz();
-    execute_prepared_entry(workload, request, modal_state, assembly, omega)
+    let reference_loads = reference_static_correction_loads(
+        workload,
+        solver_mesh,
+        request,
+        prestress_state,
+        &assembly,
+    )?;
+    execute_prepared_entry(
+        workload,
+        request,
+        modal_state,
+        assembly,
+        omega,
+        reference_loads,
+    )
+}
+
+/// Applied loads that span the static correction of a modal-reduced sweep, or `None` when the
+/// step requests no correction. They are the real and imaginary load at the plan's reference
+/// frequency, so every entry of one sweep solves in the same reduced space (the receipt names one
+/// solution space for all entries).
+fn reference_static_correction_loads(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &StructuralFrequencyEntryRequest,
+    prestress_state: Option<&CanonicalSemanticState>,
+    assembly: &ComplexStructuralAssemblySummary,
+) -> AnalysisExecutionResult<Option<[Vec<f64>; 2]>> {
+    if !matches!(
+        workload.solver(),
+        StructuralFrequencySolverPlan::ModalReduced { .. }
+    ) || workload.procedure_step()?.modal_static_correction()
+        == runmat_analysis_core::ModalStaticCorrection::None
+    {
+        return Ok(None);
+    }
+    let reference_hz = workload.plan().reference_frequency_hz();
+    if request.entry().frequency_hz().to_bits() == reference_hz.to_bits() {
+        return Ok(Some([
+            assembly.real.operator.load().to_vec(),
+            assembly.imaginary_load.clone(),
+        ]));
+    }
+    let reference = assemble_entry(workload, solver_mesh, reference_hz, prestress_state)?;
+    Ok(Some([
+        reference.real.operator.load().to_vec(),
+        reference.imaginary_load,
+    ]))
 }
 
 /// Re-derives one entry's canonical physical scope without evaluating unrelated frequencies.
@@ -397,6 +489,7 @@ fn execute_prepared_entry(
     modal_state: Option<&CanonicalSemanticState>,
     assembly: ComplexStructuralAssemblySummary,
     omega: f64,
+    static_correction_loads: Option<[Vec<f64>; 2]>,
 ) -> AnalysisExecutionResult<StructuralFrequencyEntryResult> {
     let (real, imaginary, iterations, residual_norm, relative_residual, solution_space) =
         match workload.solver() {
@@ -408,7 +501,7 @@ fn execute_prepared_entry(
                 }
                 let response =
                     solve_direct_harmonic(&assembly.real, &assembly.imaginary_load, omega, *policy)
-                        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                        .map_err(direct_harmonic_error)?;
                 (
                     response.displacement_real,
                     response.displacement_imaginary,
@@ -435,8 +528,36 @@ fn execute_prepared_entry(
                         "modal structural frequency entry state has no modal basis".into(),
                     )
                 })?;
-                let reduced = ModalReducedSystem::project(&assembly.real, basis)
-                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                let static_corrections = match &static_correction_loads {
+                    None => Vec::new(),
+                    Some(loads) => {
+                        let retained = basis
+                            .modes()
+                            .iter()
+                            .map(|mode| mode.dof_shape())
+                            .chain(
+                                basis
+                                    .residual_vectors()
+                                    .iter()
+                                    .map(|residual| residual.dof_shape()),
+                            )
+                            .collect::<Vec<_>>();
+                        super::modal_residual::applied_load_static_corrections(
+                            &assembly.real,
+                            &retained,
+                            &[loads[0].as_slice(), loads[1].as_slice()],
+                        )
+                        .map_err(|error| match error {
+                            crate::contracts::FeaRunError::Usage(cause) => {
+                                AnalysisExecutionError::Usage(cause)
+                            }
+                            other => AnalysisExecutionError::Invalid(other.to_string()),
+                        })?
+                    }
+                };
+                let reduced =
+                    ModalReducedSystem::project_enriched(&assembly.real, basis, static_corrections)
+                        .map_err(modal_projection_error)?;
                 let load = ModalHarmonicLoad {
                     real: (reduced)
                         .load_field(assembly.real.operator.load())
@@ -447,8 +568,8 @@ fn execute_prepared_entry(
                         .and_then(|field| (reduced).project_load(&field))
                         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
                 };
-                let response = solve_modal_harmonic(&reduced, omega, &load)
-                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                let response =
+                    solve_modal_harmonic(&reduced, omega, &load).map_err(modal_harmonic_error)?;
                 let real = (reduced)
                     .expand_state(&response.displacement_real)
                     .map(|field| field.into_canonical_storage())

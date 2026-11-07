@@ -22,6 +22,37 @@ impl PlotRenderer {
     pub fn has_geometry_scene(&self) -> bool {
         self.last_geometry_scene.is_some()
     }
+    /// Whether the overlay draws the figure title. A CAD preview's title is its source name,
+    /// which the host shows elsewhere; a result scene (one with a scalar legend) draws its
+    /// title, such as a caption stating what was solved.
+    pub fn shows_geometry_title(&self) -> bool {
+        match &self.geometry_overlay {
+            None => true,
+            Some(overlay) => overlay.scalar_legend.is_some() && self.figure_title.is_some(),
+        }
+    }
+
+    /// Whether a geometry scene is a result: one colored by a field, with a scalar legend.
+    pub fn geometry_scene_is_result(&self) -> bool {
+        self.geometry_overlay
+            .as_ref()
+            .is_some_and(|overlay| overlay.scalar_legend.is_some())
+    }
+
+    /// Whether one 3-D axes draws its world-axis lines, tick marks and tick labels. A result
+    /// scene never does: a CAD world-origin triad drawn through a colored field reads as data.
+    pub fn shows_world_triad(&self, axes_index: usize) -> bool {
+        !(self.axes_shows_geometry(axes_index) && self.geometry_scene_is_result())
+    }
+
+    /// Whether the corner orientation triad is drawn: a geometry scene's own setting; figures
+    /// follow `axis on`/`axis off` alone.
+    pub fn shows_orientation_triad(&self) -> bool {
+        self.last_geometry_scene
+            .as_ref()
+            .is_none_or(|scene| scene.show_orientation_triad)
+    }
+
     pub fn geometry_xray_enabled(&self) -> bool {
         self.geometry_xray_enabled
     }
@@ -213,6 +244,7 @@ impl PlotRenderer {
 
     pub(super) fn rebuild_geometry_scene_nodes(&mut self, geometry_scene: &GeometryScene) {
         self.scene.clear();
+        self.scene.set_translucent_last(true);
         self.scene_buffer_cache.borrow_mut().clear();
         self.geometry_node_owner_ids.clear();
         for (index, chunk) in geometry_scene.chunks.iter().enumerate() {

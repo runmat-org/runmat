@@ -3,6 +3,34 @@ use super::*;
 use std::sync::{atomic::AtomicBool, atomic::AtomicU32, mpsc::sync_channel};
 
 #[test]
+fn final_device_owner_transfers_to_joiner_on_return_and_panic() {
+    for panic in [false, true] {
+        let state = Arc::new(State {
+            used: AtomicU32::new(0),
+            limit: 1,
+            stopped: Arc::new(AtomicBool::new(false)),
+            scoped_emission: Mutex::new(()),
+            scoped_work: Mutex::new(Vec::new()),
+            worker_closed: AtomicBool::new(false),
+            retained_uncertain: AtomicBool::new(false),
+            shutdown_requested: AtomicBool::new(false),
+            access: None,
+            health: None,
+        });
+        let weak = Arc::downgrade(&state);
+        let thread = spawn_retained(state, move || {
+            assert!(!panic, "worker unwind fixture");
+        })
+        .unwrap();
+        let (owner, result) = thread.join().expect("retirement owner survives unwind");
+        assert_eq!(result.is_err(), panic);
+        assert!(weak.upgrade().is_some());
+        drop(owner);
+        assert!(weak.upgrade().is_none());
+    }
+}
+
+#[test]
 fn process_exit_drains_worker_after_main_thread_local_destruction() {
     const CHILD: &str = "RUNMAT_GPU_SHUTDOWN_EXIT_CHILD";
     if std::env::var_os(CHILD).is_some() {

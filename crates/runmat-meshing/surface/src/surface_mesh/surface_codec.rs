@@ -14,7 +14,7 @@ use super::{
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-exact-surface-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "exact-surface-mesh/v1";
 const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 1024 * 1024, 64);
+    CanonicalLimits::platform_content(1024 * 1024, 64);
 
 pub fn encode_exact_surface_mesh(
     mesh: &ExactSurfaceMesh,
@@ -119,7 +119,7 @@ pub(crate) fn decode_exact_surface_mesh_with_byte_limit(
         topology,
         batches,
         options,
-        CanonicalLimits::new(maximum_encoded_bytes, 20_000_000, 1024 * 1024, 64),
+        CanonicalLimits::content_bounded(maximum_encoded_bytes, 1024 * 1024, 64),
     )
 }
 

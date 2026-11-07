@@ -1,6 +1,6 @@
 # FEA-RELEASE-CI-001: Blocking attested evidence in the existing release graph
 
-0 PASS, 0 PARTIAL, 1 FAIL, 5 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 0 FAIL, 5 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## preserved_existing_release_graph
 
@@ -8,7 +8,7 @@ Evidence kind: PublicationIntegrity. Criterion: Treat the current `origin/dev` C
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | release_pipeline | FAIL | `runmat-analysis-qualification[test:release_checks]::meshing_release_evidence_is_a_release_dependency` (crates/runmat-analysis/qualification/tests/release_checks.rs:111) - The meshing release-evidence validator passes: release promotion depends on meshing release evidence; FEA release evidence and the rest of the graph are not che... |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | PARTIAL | `runmat-analysis-qualification[test:release_checks]::meshing_release_evidence_is_a_release_dependency` (crates/runmat-analysis/qualification/tests/release_checks.rs:111) - The meshing release-evidence validator passes: release promotion depends on meshing release evidence; FEA release evidence and the rest of the graph are not che... |
 | shared_infrastructure | mesh_independent | source_check | OPEN |  |
 
 ## complete_cross_family_corpus

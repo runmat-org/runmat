@@ -242,6 +242,8 @@ pub(super) struct OwnedProperties {
     pub audit: Vec<CompiledPropertyAudit>,
     /// One shared owner per selected source material, keyed by its address in the model.
     shared_materials: std::collections::HashMap<usize, Arc<MaterialModel>>,
+    /// One shared pair of material-id owners per source assignment, keyed by its index.
+    shared_assignment_ids: std::collections::HashMap<usize, (Arc<str>, Arc<str>)>,
 }
 
 impl OwnedProperties {
@@ -288,9 +290,8 @@ impl SelectedProperty<'_> {
                         material,
                     },
                 );
-                output
-                    .audit
-                    .push(assignment_audit(identity, assignment_index, assignment)?);
+                let audit = output.assignment_audit(identity, assignment_index, assignment)?;
+                output.audit.push(audit);
             }
             Self::Beam {
                 element_id,
@@ -311,9 +312,8 @@ impl SelectedProperty<'_> {
                         reference_axis,
                     },
                 );
-                output
-                    .audit
-                    .push(assignment_audit(identity, assignment_index, assignment)?);
+                let audit = output.assignment_audit(identity, assignment_index, assignment)?;
+                output.audit.push(audit);
             }
             Self::Shell {
                 element_id,
@@ -336,9 +336,8 @@ impl SelectedProperty<'_> {
                         },
                     },
                 );
-                output
-                    .audit
-                    .push(assignment_audit(identity, assignment_index, assignment)?);
+                let audit = output.assignment_audit(identity, assignment_index, assignment)?;
+                output.audit.push(audit);
             }
             Self::Laminate {
                 element_id,
@@ -393,9 +392,38 @@ impl SelectedProperty<'_> {
     }
 }
 
+impl OwnedProperties {
+    fn assignment_audit(
+        &mut self,
+        identity: StableDigest,
+        index: usize,
+        assignment: &MaterialAssignment,
+    ) -> Result<CompiledPropertyAudit, PropertyCompilationError> {
+        let (expected_material_id, assigned_material_id) = self
+            .shared_assignment_ids
+            .entry(index)
+            .or_insert_with(|| {
+                (
+                    Arc::from(assignment.expected_material_id.as_str()),
+                    Arc::from(assignment.assigned_material_id.as_str()),
+                )
+            })
+            .clone();
+        assignment_audit(
+            identity,
+            index,
+            expected_material_id,
+            assigned_material_id,
+            assignment,
+        )
+    }
+}
+
 fn assignment_audit(
     identity: StableDigest,
     index: usize,
+    expected_material_id: Arc<str>,
+    assigned_material_id: Arc<str>,
     assignment: &MaterialAssignment,
 ) -> Result<CompiledPropertyAudit, PropertyCompilationError> {
     Ok(CompiledPropertyAudit {
@@ -404,8 +432,8 @@ fn assignment_audit(
             assignment_index: u64::try_from(index).map_err(|_| {
                 PropertyCompilationError::Identity("assignment index exceeds u64".into())
             })?,
-            expected_material_id: assignment.expected_material_id.clone(),
-            assigned_material_id: assignment.assigned_material_id.clone(),
+            expected_material_id,
+            assigned_material_id,
             confidence: assignment.confidence,
         },
     })

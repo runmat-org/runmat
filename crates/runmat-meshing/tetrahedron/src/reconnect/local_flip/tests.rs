@@ -238,7 +238,8 @@ fn mesh_local_reconnection_applies_quality_improving_interior_face_flip() {
             max_attempted_reconnections: 32,
             max_accepted_reconnections: 1,
         },
-    );
+    )
+    .unwrap();
 
     assert_eq!(report.attempted_reconnection_count, 1);
     assert_eq!(report.accepted_reconnection_count, 1);
@@ -279,7 +280,8 @@ fn mesh_local_reconnection_records_quality_neutral_rejection() {
             max_attempted_reconnections: 32,
             max_accepted_reconnections: 1,
         },
-    );
+    )
+    .unwrap();
 
     assert_eq!(report.attempted_reconnection_count, 1);
     assert_eq!(report.accepted_reconnection_count, 0);
@@ -320,7 +322,8 @@ fn mesh_local_reconnection_records_attempt_budget_limit() {
             max_attempted_reconnections: 1,
             max_accepted_reconnections: 4,
         },
-    );
+    )
+    .unwrap();
 
     assert_eq!(report.attempted_reconnection_count, 1);
     assert_eq!(report.accepted_reconnection_count, 1);

@@ -8,7 +8,7 @@ Evidence kind: PublicationIntegrity. Criterion: Use distinct canonical identitie
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::study::sequence::tests::excitation_selection_changes_solver_identity_and_roundtrips_distinctly` (crates/runmat-analysis/core/src/study/sequence/tests.rs:28) - Excitation selection changes solver identity and round-trips distinctly.<br>`runmat-analysis-fea[lib]::results::observation::tests::output_and_accuracy_changes_do_not_invalidate_solver_layers` (crates/runmat-analysis/fea/src/results/observation/tests.rs:2680) - Output and accuracy changes do not invalidate solver identity layers. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::study::sequence::tests::excitation_selection_changes_solver_identity_and_roundtrips_distinctly` (crates/runmat-analysis/core/src/study/sequence/tests.rs:28) - Excitation selection changes solver identity and round-trips distinctly.<br>`runmat-analysis-fea[lib]::results::observation::tests::output_and_accuracy_changes_do_not_invalidate_solver_layers` (crates/runmat-analysis/fea/src/results/observation/tests.rs:2696) - Output and accuracy changes do not invalidate solver identity layers. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -23,7 +23,7 @@ Evidence kind: PublicationIntegrity. Criterion: Reuse the meshing system's archi
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::tests::numerical_objects_are_deterministically_chunked_and_self_validating` (crates/runmat-analysis/fea/src/execution/tests.rs:208) - Numerical objects are deterministically chunked and self-validating. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::tests::numerical_objects_are_deterministically_chunked_and_self_validating` (crates/runmat-analysis/fea/src/execution/tests.rs:209) - Numerical objects are deterministically chunked and self-validating. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

@@ -33,6 +33,8 @@ pub(crate) enum SparseRightIluError {
     NonfiniteOutput { row: usize },
     #[error("right ILU operation cancelled")]
     Cancelled,
+    #[error("right ILU numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
 }
 
 fn check_cancelled(cancelled: &impl Fn() -> bool) -> Result<(), SparseRightIluError> {
@@ -59,6 +61,7 @@ impl SparseRightIlu {
             runmat_sparse_solvers::precond::Ilu0::strict(arrays.view()).map_err(|error| {
                 use runmat_sparse_solvers::SolverError;
                 match error {
+                    SolverError::Usage(error) => SparseRightIluError::Usage(error),
                     SolverError::MissingDiagonal { row } => {
                         SparseRightIluError::MissingDiagonal { row }
                     }
@@ -113,7 +116,12 @@ impl SparseRightIlu {
         let mut output = vec![0.0; input.len()];
         self.factor
             .apply(input, &mut output)
-            .map_err(|_| SparseRightIluError::DimensionMismatch)?;
+            .map_err(|error| match error {
+                runmat_sparse_solvers::SolverError::Usage(error) => {
+                    SparseRightIluError::Usage(error)
+                }
+                _ => SparseRightIluError::DimensionMismatch,
+            })?;
         if let Some(row) = output.iter().position(|value| !value.is_finite()) {
             return Err(SparseRightIluError::NonfiniteOutput { row });
         }

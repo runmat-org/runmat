@@ -110,6 +110,40 @@ pub fn encode_geometry_figure_scene(
 #[cfg(feature = "plot-core")]
 pub const GEOMETRY_SCENE_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 
+/// Why a geometry scene could not be encoded for its consumer.
+#[cfg(feature = "plot-core")]
+#[derive(Debug, thiserror::Error)]
+pub enum GeometrySceneEncodeError {
+    /// The encoded payload is larger than the consumer accepts.
+    #[error("figure scene payload is {required} bytes; its consumer accepts at most {maximum}")]
+    PayloadTooLarge { required: usize, maximum: usize },
+    #[error("{0}")]
+    Encode(crate::RuntimeError),
+}
+
+/// Encodes a geometry figure scene for a consumer that accepts at most `maximum_bytes` (a
+/// viewer's file limit, for example). A larger payload is refused with both sizes, so the
+/// caller can draw a lighter scene sized to fit.
+#[cfg(feature = "plot-core")]
+pub fn encode_geometry_figure_scene_within(
+    scene: &runmat_plot::event::FigureScene,
+    maximum_bytes: usize,
+) -> Result<Vec<u8>, GeometrySceneEncodeError> {
+    let limits = crate::replay::limits::ReplayLimits {
+        max_scene_payload_bytes: usize::MAX,
+        ..geometry_scene_limits()
+    };
+    let bytes = crate::replay::export_figure_scene_payload_with_limits(scene, limits)
+        .map_err(GeometrySceneEncodeError::Encode)?;
+    if bytes.len() > maximum_bytes {
+        return Err(GeometrySceneEncodeError::PayloadTooLarge {
+            required: bytes.len(),
+            maximum: maximum_bytes,
+        });
+    }
+    Ok(bytes)
+}
+
 /// Geometry scene payload limits: the configured scene budget, never below
 /// [`GEOMETRY_SCENE_PAYLOAD_BYTES`].
 #[cfg(feature = "plot-core")]

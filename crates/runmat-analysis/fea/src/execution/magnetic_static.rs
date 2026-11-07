@@ -24,7 +24,7 @@ pub use result::MagnetostaticSolverResult;
 #[cfg(test)]
 mod tests;
 const PREFIX: &[u8] = b"runmat-magnetostatic-workload/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -139,9 +139,18 @@ impl MagnetostaticWorkload {
             &input.volumes,
             self.relative_residual_target,
         )
-        .map_err(invalid)?;
+        .map_err(magnetic_failure)?;
         drop(input);
         MagnetostaticSolverResult::new(self, mesh, formulation, sampling, response)
+    }
+}
+
+fn magnetic_failure(error: crate::physics::magnetic::MagnetostaticError) -> AnalysisExecutionError {
+    match error {
+        crate::physics::magnetic::MagnetostaticError::Accounting(cause) => {
+            AnalysisExecutionError::Usage(cause)
+        }
+        other => invalid(other),
     }
 }
 

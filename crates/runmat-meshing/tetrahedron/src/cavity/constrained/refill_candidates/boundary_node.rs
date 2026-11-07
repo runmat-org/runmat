@@ -4,7 +4,7 @@ use super::super::{
     refill_tetrahedra::{
         improve_refill_with_local_flips_with_diagnostics,
         raw_refill_tetrahedron_with_rejection_reason, refill_validation_reason,
-        LocalTetrahedronReconnectionDiagnostics,
+        LocalTetrahedronReconnectionDiagnostics, RefillTetrahedronError,
     },
     tetrahedralize_points, ConnectivityPoint, ConstrainedCavityRefillTetrahedron,
 };
@@ -54,10 +54,13 @@ pub(in super::super) fn boundary_node_refill_candidate(
         }
         match raw_refill_tetrahedron_with_rejection_reason(node_ids, tetrahedron_points, options) {
             Ok(tetrahedron) => refill_tetrahedra.push(tetrahedron),
-            Err(reason) => {
+            Err(RefillTetrahedronError::Rejected(reason)) => {
                 if first_rejection.is_none() {
                     first_rejection = Some(boundary_node_refill_rejection_reason(reason));
                 }
+            }
+            Err(RefillTetrahedronError::Accounting(error)) => {
+                return Err(ConstrainedCavityValidationError::Accounting(error));
             }
         }
     }
@@ -73,7 +76,7 @@ pub(in super::super) fn boundary_node_refill_candidate(
                 boundary_nodes,
                 refill,
                 options,
-            )));
+            )?));
         }
         return Ok(Err(
             first_rejection.unwrap_or("boundary_node_delaunay_empty")
@@ -89,8 +92,11 @@ pub(in super::super) fn boundary_node_refill_candidate(
             boundary_nodes,
             refill,
             options,
-        ))),
-        Err(_) => {
+        )?)),
+        Err(err) => {
+            if let ConstrainedCavityValidationError::Accounting(cause) = err {
+                return Err(ConstrainedCavityValidationError::Accounting(cause));
+            }
             if let Some(refill) = boundary_node_exact_cover_refill_candidate(
                 cavity,
                 boundary_nodes,
@@ -102,7 +108,7 @@ pub(in super::super) fn boundary_node_refill_candidate(
                     boundary_nodes,
                     refill,
                     options,
-                )));
+                )?));
             }
             let (completed_cavity, completed_tetrahedra, inserted_nodes) =
                 match complete_missing_boundary_face_tetrahedra(
@@ -121,7 +127,10 @@ pub(in super::super) fn boundary_node_refill_candidate(
                 options.volume_relative_tolerance,
             ) {
                 Ok(refill) => refill,
-                Err(err) => return Ok(Err(boundary_node_refill_validation_reason(&err))),
+                Err(err) => {
+                    return Ok(Err(boundary_node_refill_validation_reason(&err)
+                        .map_err(ConstrainedCavityValidationError::Accounting)?))
+                }
             };
             refill.inserted_nodes = inserted_nodes;
             Ok(Ok(boundary_node_refill_with_local_flips(
@@ -129,7 +138,7 @@ pub(in super::super) fn boundary_node_refill_candidate(
                 boundary_nodes,
                 refill,
                 options,
-            )))
+            )?))
         }
     }
 }
@@ -145,13 +154,13 @@ fn boundary_node_refill_with_local_flips(
     boundary_nodes: &BTreeMap<u32, Point3>,
     refill: ConstrainedCavityRefill,
     options: ConstrainedCavityRefillOptions,
-) -> BoundaryNodeRefillCandidate {
+) -> Result<BoundaryNodeRefillCandidate, ConstrainedCavityValidationError> {
     let (improved, local_reconnection_diagnostics) =
-        improve_refill_with_local_flips_with_diagnostics(cavity, boundary_nodes, &refill, options);
-    BoundaryNodeRefillCandidate {
+        improve_refill_with_local_flips_with_diagnostics(cavity, boundary_nodes, &refill, options)?;
+    Ok(BoundaryNodeRefillCandidate {
         refill: improved.unwrap_or(refill),
         local_reconnection_diagnostics,
-    }
+    })
 }
 
 pub(in super::super) fn boundary_node_refill_rejection_reason(
@@ -167,8 +176,8 @@ pub(in super::super) fn boundary_node_refill_rejection_reason(
 
 pub(in super::super) fn boundary_node_refill_validation_reason(
     error: &ConstrainedCavityValidationError,
-) -> &'static str {
-    match refill_validation_reason(error) {
+) -> Result<&'static str, runmat_simulation_usage::LedgerError> {
+    Ok(match refill_validation_reason(error)? {
         "boundary_face_count_mismatch" => "boundary_node_boundary_face_count_mismatch",
         "missing_boundary_face" => "boundary_node_missing_boundary_face",
         "unexpected_boundary_face" => "boundary_node_unexpected_boundary_face",
@@ -178,5 +187,5 @@ pub(in super::super) fn boundary_node_refill_validation_reason(
         "boundary_region_mismatch" => "boundary_node_boundary_region_mismatch",
         "invalid_cavity" => "boundary_node_invalid_cavity",
         other => other,
-    }
+    })
 }

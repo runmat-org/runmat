@@ -28,10 +28,16 @@ pub(super) fn points_for_face(
         normal = normal.map(|v| -v);
         height = -height;
     }
-    let Some(prepared) = PreparedJacobian::new(metric) else {
+    let accounting = |cause| {
+        error(
+            DelaunayVolumeSliverErrorKind::Accounting(cause),
+            "metric offcenter numerical accounting failed",
+        )
+    };
+    let Some(prepared) = PreparedJacobian::new(metric).map_err(accounting)? else {
         return Ok(Vec::new());
     };
-    let Some(direction) = prepared.normal_step(normal) else {
+    let Some(direction) = prepared.normal_step(normal).map_err(accounting)? else {
         return Ok(Vec::new());
     };
     let centroid: [f64; 3] = std::array::from_fn(|i| (face[0][i] + face[1][i] + face[2][i]) / 3.);
@@ -50,15 +56,18 @@ pub(super) fn points_for_face(
                 std::array::from_fn(|i| corner[i] + blend * (centroid[i] - corner[i]));
             let point = |height: f64| std::array::from_fn(|i| foot[i] + height * direction[i]);
             let score = |height| {
-                prepared
-                    .score([face[0], face[1], face[2], point(height)])
-                    .unwrap_or(0.)
+                Ok::<f64, DelaunayVolumeSliverError>(
+                    prepared
+                        .score([face[0], face[1], face[2], point(height)])
+                        .map_err(accounting)?
+                        .unwrap_or(0.),
+                )
             };
             let mut lower = 0.;
             let mut bracket = None;
             for sample in 1..=8 {
                 let upper = maximum_height * f64::from(sample) / 8.;
-                if score(upper) >= target {
+                if score(upper)? >= target {
                     bracket = Some(upper);
                     break;
                 }
@@ -69,18 +78,18 @@ pub(super) fn points_for_face(
             };
             for _ in 0..32 {
                 let middle = 0.5 * (lower + upper);
-                if score(middle) >= target {
+                if score(middle)? >= target {
                     upper = middle;
                 } else {
                     lower = middle;
                 }
             }
             let candidate = point(upper);
-            let quality = score(upper);
+            let quality = score(upper)?;
             if candidate.iter().all(|v| v.is_finite()) && quality >= target {
                 result.push((candidate, quality));
                 let outer = point(maximum_height);
-                let outer_quality = score(maximum_height);
+                let outer_quality = score(maximum_height)?;
                 if outer_quality > quality {
                     result.push((outer, outer_quality));
                 }

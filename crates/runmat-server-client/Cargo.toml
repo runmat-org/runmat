@@ -1,6 +1,6 @@
 [package]
 name = "runmat-server-client"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 description = "Authenticated public API client and auth helpers for RunMat server integrations"
 authors = ["Dystr Team"]
@@ -20,6 +20,7 @@ rand = "0.8"
 runmat-execution = { workspace = true }
 runmat-package = { workspace = true }
 runmat-types = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 progenitor-client = "0.11"
 regress = "0.10"
 futures = "0.3"

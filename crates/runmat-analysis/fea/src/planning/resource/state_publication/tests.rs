@@ -215,7 +215,7 @@ fn insufficient_output_and_source_reservations_are_rejected() {
             0 => bad.output.encoded_payload_bytes_upper_bound.0 -= 1,
             1 => bad.output.construction_resident_bytes_admission_budget.0 -= 1,
             2 => bad.inputs.decoded_resident_bytes_admission_budget = ByteCount(1),
-            3 => bad.inputs.transport_closure_bytes = ByteCount(1),
+            3 => bad.inputs.transport_closure_bytes = ByteCount(0),
             4 => bad.inputs.encoded_payload_bytes = ByteCount(1),
             _ => unreachable!(),
         }

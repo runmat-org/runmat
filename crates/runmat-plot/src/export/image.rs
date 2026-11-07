@@ -256,27 +256,17 @@ impl ImageExporter {
     ) -> Result<Vec<u8>, String> {
         let width = self.settings.width.max(1);
         let height = self.settings.height.max(1);
-        let png = if let Some(theme) = &self.theme {
-            crate::export::native_surface::render_geometry_scene_png_bytes_interactive_with_camera_and_theme(
+        let rgba =
+            crate::export::native_surface::render_geometry_scene_rgba_bytes_with_camera_theme_and_scale(
                 scene.clone(),
                 width,
                 height,
                 camera,
-                theme.clone(),
+                self.theme.clone().unwrap_or_default(),
+                self.settings.pixels_per_point,
             )
-            .await
-        } else {
-            let rgba =
-                crate::export::native_surface::render_geometry_scene_rgba_bytes_interactive_with_camera_and_theme(
-                    scene.clone(),
-                    width,
-                    height,
-                    camera,
-                    PlotThemeConfig::default(),
-                )
-                .await?;
-            self.encode_png_bytes(&rgba)
-        }?;
+            .await?;
+        let png = self.encode_png_bytes(&rgba)?;
         super::geometry_callouts::annotate_png(png, scene, camera, width, height)
     }
 

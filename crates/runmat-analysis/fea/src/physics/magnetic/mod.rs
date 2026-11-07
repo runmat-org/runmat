@@ -82,6 +82,8 @@ pub struct MagneticVolumeData {
 
 #[derive(Debug, Error)]
 pub enum MagnetostaticError {
+    #[error("magnetic assembly numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("invalid magnetic input: {0}")]
     InvalidInput(String),
     #[error("unsupported magnetic envelope: {0}")]

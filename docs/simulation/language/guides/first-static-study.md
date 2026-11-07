@@ -1,4 +1,4 @@
-# Build and run a static structural study
+# First static study
 
 This guide uses the checked example at
 [`docs/simulation/examples/structural-static.fea`](../../examples/structural-static.fea).

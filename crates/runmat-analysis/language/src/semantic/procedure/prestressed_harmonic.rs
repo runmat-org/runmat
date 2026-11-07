@@ -17,11 +17,11 @@ pub(super) fn lower(
             CheckedFeaStatementKind::Assignment {
                 target, relation: FeaAssignmentRelation::Equal, ..
             } if target.len() == 1
-                && matches!(target[0].as_str(), "prestress" | "basis" | "frequencies")
+                && matches!(target[0].as_str(), "prestress" | "basis" | "frequencies" | "static_correction")
                 && names.insert(target[0].as_str()));
         if !valid {
             error(declaration, header.span,
-                "prestressed_harmonic accepts unique `prestress`, `frequencies` and optional `basis` assignments",
+                "prestressed_harmonic accepts unique `prestress`, `frequencies` and optional `basis` and `static_correction` assignments",
                 diagnostics);
             return None;
         }
@@ -38,5 +38,16 @@ pub(super) fn lower(
     }
     step.independent_domain =
         requirements::frequencies(declaration, header, statements, diagnostics)?;
+    if step.solution_space == SolutionSpace::ModalReduced {
+        super::modal_reduction::static_correction(declaration, statements, &mut step, diagnostics)?;
+    } else if values::assignment(statements, "static_correction").is_some() {
+        error(
+            declaration,
+            header.span,
+            "`static_correction` applies to a modal-reduced sweep; add `basis`",
+            diagnostics,
+        );
+        return None;
+    }
     Some(step)
 }

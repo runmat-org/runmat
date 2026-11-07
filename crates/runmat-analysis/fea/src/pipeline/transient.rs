@@ -206,7 +206,10 @@ pub fn prepare_transient_checkpoint_scope(
             schedule: basis.schedule,
         },
     )
-    .map_err(|error| FeaRunError::Solve(error.to_string()))
+    .map_err(|error| match error {
+        crate::execution::AnalysisExecutionError::Usage(error) => FeaRunError::Usage(error),
+        other => FeaRunError::Solve(other.to_string()),
+    })
 }
 
 /// Projects the separately scheduled checkpoint-scope task before constructing any operator.
@@ -304,7 +307,10 @@ pub fn run_transient_block(
             schedule: basis.schedule.clone(),
         },
     )
-    .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+    .map_err(|error| match error {
+        crate::execution::AnalysisExecutionError::Usage(error) => FeaRunError::Usage(error),
+        other => FeaRunError::Solve(other.to_string()),
+    })?;
     if input.request.scope != expected_scope {
         return Err(FeaRunError::Solve(
             "transient block request scope differs from the actual prepared workload".into(),
@@ -403,6 +409,7 @@ pub fn run_transient_block(
     };
     result.map_err(|error| match error {
         TransientSolveError::Assembly(error) => error,
+        TransientSolveError::Usage(error) => FeaRunError::Usage(error),
         other => FeaRunError::Solve(other.to_string()),
     })
 }
@@ -575,6 +582,7 @@ fn execute_transient_with_fields(
     }
     .map_err(|error| match error {
         TransientSolveError::Assembly(error) => error,
+        TransientSolveError::Usage(error) => FeaRunError::Usage(error),
         other => FeaRunError::Solve(other.to_string()),
     })?;
     finish_transient_run(

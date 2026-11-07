@@ -1,6 +1,6 @@
 [package]
 name = "runmat-circuit-spice"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -10,9 +10,9 @@ repository = "https://github.com/runmat-org/runmat"
 
 # The native engine is runmat-circuit-sim; ngspice (BSD) remains an optional engine, loaded at run time through libloading (MIT/Apache); nothing links to it.
 [dependencies]
-runmat-circuit = { path = "../runmat-circuit", version = "=0.6.2" }
+runmat-circuit = { path = "../runmat-circuit", version = "=0.7.0" }
 # The native engine (clean-room, ours).
-runmat-circuit-sim = { path = "../runmat-circuit-sim", version = "=0.6.2" }
+runmat-circuit-sim = { path = "../runmat-circuit-sim", version = "=0.7.0" }
 serde = { workspace = true }
 # JSON Schema of the report for design.simulate's tool definition (MIT/Apache-2.0).
 schemars = { version = "0.8", optional = true }

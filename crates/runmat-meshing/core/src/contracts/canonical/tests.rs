@@ -268,6 +268,7 @@ fn typed_failure_round_trips_and_requires_canonical_diagnostics() {
             value: MeshingDiagnosticValue::Scalar(0.02),
             unit: None,
         }],
+        accounting_error: None,
         remediation: "relax the quality target or resolve the named geometric feature".into(),
     };
     failure.validate().unwrap();

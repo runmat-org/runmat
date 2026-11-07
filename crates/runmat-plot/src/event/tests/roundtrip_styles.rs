@@ -401,6 +401,7 @@ fn legacy_surface_scene_rebuilds_canonical_f64_sources() {
         geometry_overlay: None,
         geometry_physical_context: None,
         geometry_lines: Vec::new(),
+        geometry_orientation_triad: true,
         layout: snapshot.layout,
         metadata: snapshot.metadata,
         plots: vec![ScenePlot::Surface {

@@ -1,4 +1,4 @@
-# Fluid–structure interaction in RunMat: pressure, wall motion, and partitioned coupling
+# Fluid–structure
 
 Fluid–structure interaction (FSI) transfers fluid traction to a structure and structural wall
 motion back to the fluid. The paired interface is explicit; matching-looking CAD faces do not
@@ -100,6 +100,13 @@ aligned symmetry planes (`structural.symmetry`) are also admitted.
   accepted interval, its coupling iterations and residual, the cumulative interface work, the
   strain and kinetic energy (average acceleration makes their sum equal the work), and the
   structure's dynamic residual.
+- `field.element.stress` and `field.element.von_mises_stress` on the solid, recovered from the
+  converged displacement:
+  [not yet in the current release](pending:fluid-structure-interaction.solid-stress).
+
+A one-way study, where a structural analysis takes the pressure and wall shear stress of an earlier
+fluid analysis as a load on the wetted faces without feeding the deflection back into the flow, is
+[not yet in the current release](pending:fluid-structure-interaction.one-way-fluid-loads).
 
 ## How do I choose coupling time step and convergence tolerance?
 

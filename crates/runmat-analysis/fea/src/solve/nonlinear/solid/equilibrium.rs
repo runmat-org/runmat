@@ -1,7 +1,23 @@
 use super::{
-    constraint_error, norm, relative_norm, AcceptedSolidIncrement, AcceptedSolidState,
-    SolidAttemptWork, SolidNewtonError, SolidNewtonProblem,
+    constraint_error, measured_solid, norm, solid_count, AcceptedSolidIncrement,
+    AcceptedSolidState, SolidAttemptWork, SolidNewtonError, SolidNewtonProblem,
 };
+use runmat_simulation_usage::LedgerError;
+
+fn measured_norm(values: &[f64]) -> Result<f64, SolidNewtonError> {
+    measured_solid(|| solid_count(values.len(), 1), || Ok(norm(values)))
+}
+
+fn measured_relative_norm(values: &[f64], scale: f64) -> Result<f64, SolidNewtonError> {
+    let value = measured_norm(values)?;
+    if value == 0.0 {
+        Ok(0.0)
+    } else if scale > 0.0 {
+        measured_solid(|| solid_count(1, 1), || Ok(value / scale))
+    } else {
+        Ok(f64::INFINITY)
+    }
+}
 
 impl SolidNewtonProblem<'_> {
     pub(super) fn solve_trial(
@@ -11,12 +27,19 @@ impl SolidNewtonProblem<'_> {
         work: &mut SolidAttemptWork,
     ) -> Result<AcceptedSolidIncrement, SolidNewtonError> {
         // Supports move with the load factor; free coordinates start from the accepted state.
-        let mut displacement = committed
-            .displacement
-            .iter()
-            .zip(&self.prescribed)
-            .map(|(u, p)| u + (factor - committed.load_factor) * p)
-            .collect::<Vec<_>>();
+        let delta_factor =
+            measured_solid(|| solid_count(1, 1), || Ok(factor - committed.load_factor))?;
+        let mut displacement = measured_solid(
+            || solid_count(committed.displacement.len().min(self.prescribed.len()), 2),
+            || {
+                Ok(committed
+                    .displacement
+                    .iter()
+                    .zip(&self.prescribed)
+                    .map(|(u, p)| u + delta_factor * p)
+                    .collect::<Vec<_>>())
+            },
+        )?;
         let mut evaluation = self.evaluate_trial(
             &displacement,
             &committed.constitutive,
@@ -25,13 +48,23 @@ impl SolidNewtonProblem<'_> {
         )?;
         work.tangent_evaluations += 1;
         let mut residual = self.residual(&evaluation.evaluation, factor)?;
-        let force_norm = norm(
-            &self
-                .reduction
-                .transpose_apply(&self.scale_force)
-                .map_err(constraint_error)?,
-        ) * factor;
-        let scale = force_norm.max(norm(&residual));
+        let reduced_force = measured_solid(
+            || solid_count(self.reduction.recovery_coefficients.len(), 2),
+            || {
+                self.reduction
+                    .transpose_apply(&self.scale_force)
+                    .map_err(constraint_error)
+            },
+        )?;
+        let force_norm = measured_solid(
+            || {
+                solid_count(reduced_force.len(), 1)?
+                    .checked_add(solid_count(1, 1)?)
+                    .map_err(LedgerError::from)
+            },
+            || Ok(norm(&reduced_force) * factor),
+        )?;
+        let scale = force_norm.max(measured_norm(&residual)?);
         if !scale.is_finite() || !force_norm.is_finite() {
             return Err(SolidNewtonError::Evaluation(
                 "physical force/residual norm overflow".into(),
@@ -43,7 +76,7 @@ impl SolidNewtonProblem<'_> {
             if crate::is_fea_cancelled() {
                 return Err(SolidNewtonError::Cancelled);
             }
-            let relative_residual = relative_norm(&residual, scale);
+            let relative_residual = measured_relative_norm(&residual, scale)?;
             if iteration == self.policy.max_iterations
                 && relative_residual > self.policy.relative_residual_tolerance
             {
@@ -51,24 +84,41 @@ impl SolidNewtonProblem<'_> {
             }
             let correction =
                 self.correction(&evaluation.evaluation.tangent, &residual, factor, work)?;
-            let motion_norm = |u: &[f64]| u.iter().fold(0.0_f64, |n, value| n.hypot(*value));
-            let motion_scale = motion_norm(&displacement).max(motion_norm(&committed.displacement));
-            let relative_increment = relative_norm(&correction, motion_scale);
+            let motion_scale =
+                measured_norm(&displacement)?.max(measured_norm(&committed.displacement)?);
+            let relative_increment = measured_relative_norm(&correction, motion_scale)?;
             if relative_residual <= self.policy.relative_residual_tolerance
                 && relative_increment <= self.policy.relative_residual_tolerance
             {
-                let dissipation = evaluation
-                    .evaluation
-                    .element_evidence
-                    .iter()
-                    .map(|e| e.plastic_dissipation_increment_j)
-                    .sum::<f64>();
+                let dissipation = measured_solid(
+                    || {
+                        solid_count(
+                            evaluation
+                                .evaluation
+                                .element_evidence
+                                .len()
+                                .saturating_sub(1),
+                            1,
+                        )
+                    },
+                    || {
+                        Ok(evaluation
+                            .evaluation
+                            .element_evidence
+                            .iter()
+                            .map(|e| e.plastic_dissipation_increment_j)
+                            .sum::<f64>())
+                    },
+                )?;
                 if !dissipation.is_finite() || dissipation < 0.0 {
                     return Err(SolidNewtonError::Evaluation(
                         "invalid plastic dissipation".into(),
                     ));
                 }
-                let accumulated = committed.accumulated_plastic_dissipation_j + dissipation;
+                let accumulated = measured_solid(
+                    || solid_count(1, 1),
+                    || Ok(committed.accumulated_plastic_dissipation_j + dissipation),
+                )?;
                 if !accumulated.is_finite() {
                     return Err(SolidNewtonError::Evaluation(
                         "plastic dissipation overflow".into(),
@@ -113,7 +163,7 @@ impl SolidNewtonProblem<'_> {
                 break;
             }
             work.iterations += 1;
-            let old_norm = norm(&residual);
+            let old_norm = measured_norm(&residual)?;
             let mut alpha = 1.0;
             let mut candidate = None;
             let attempts = if self.policy.line_search {
@@ -122,11 +172,16 @@ impl SolidNewtonProblem<'_> {
                 0
             };
             for attempt in 0..=attempts {
-                let trial_u = displacement
-                    .iter()
-                    .zip(&correction)
-                    .map(|(u, delta)| u + alpha * delta)
-                    .collect::<Vec<_>>();
+                let trial_u = measured_solid(
+                    || solid_count(displacement.len().min(correction.len()), 2),
+                    || {
+                        Ok(displacement
+                            .iter()
+                            .zip(&correction)
+                            .map(|(u, delta)| u + alpha * delta)
+                            .collect::<Vec<_>>())
+                    },
+                )?;
                 // Every line-search candidate uses the SAME accepted constitutive history.
                 let trial = self.evaluate_trial(
                     &trial_u,
@@ -136,18 +191,30 @@ impl SolidNewtonProblem<'_> {
                 )?;
                 work.tangent_evaluations += 1;
                 let trial_residual = self.residual(&trial.evaluation, factor)?;
-                let trial_norm = norm(&trial_residual);
-                if !self.policy.line_search
-                    || trial_norm <= (1.0 - 1.0e-4 * alpha) * old_norm
-                    || relative_norm(&trial_residual, scale)
-                        <= self.policy.relative_residual_tolerance
-                {
+                let trial_norm = measured_norm(&trial_residual)?;
+                let sufficient = if !self.policy.line_search {
+                    true
+                } else {
+                    let threshold = measured_solid(
+                        || solid_count(1, 3),
+                        || Ok((1.0 - 1.0e-4 * alpha) * old_norm),
+                    )?;
+                    trial_norm <= threshold
+                        || measured_relative_norm(&trial_residual, scale)?
+                            <= self.policy.relative_residual_tolerance
+                };
+                if sufficient {
                     candidate = Some((trial_u, trial, trial_residual));
-                    correction_norm = alpha * norm(&correction);
+                    let magnitude = measured_norm(&correction)?;
+                    correction_norm =
+                        measured_solid(|| solid_count(1, 1), || Ok(alpha * magnitude))?;
                     break;
                 }
                 if attempt < attempts {
-                    alpha *= self.policy.backtrack_reduction;
+                    alpha = measured_solid(
+                        || solid_count(1, 1),
+                        || Ok(alpha * self.policy.backtrack_reduction),
+                    )?;
                     backtracks += 1;
                     work.backtracks += 1;
                 }

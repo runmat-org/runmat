@@ -71,7 +71,7 @@ impl PlotRenderer {
             cam.axis_scale = self.axes_3d_axis_scale(0, bounds);
             cam.target = center * cam.axis_scale;
             cam.up = Vec3::Z;
-            cam.position = cam.target + Vec3::new(1.0, -1.0, 1.0);
+            cam.position = cam.target + self.default_3d_view_direction(0);
             cam.fit_bounds(bounds.min, bounds.max);
             if let Some(axis_cam) = self.axes_cameras.get_mut(0) {
                 *axis_cam = cam;

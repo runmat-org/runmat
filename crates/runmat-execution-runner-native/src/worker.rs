@@ -102,6 +102,17 @@ async fn run_program_worker(
             None => execute_launch(request, channel.clone(), collective).await,
         },
     };
+    let fea_outcome = match &response {
+        Ok(WorkerExecutionOutcome::Completed { response, .. })
+            if !matches!(
+                response.as_ref(),
+                WorkerResponse::Failure { .. } | WorkerResponse::RuntimeFailure { .. }
+            ) =>
+        {
+            runmat_runtime::analysis::fea_run_admission::FeaRunOutcome::Completed
+        }
+        _ => runmat_runtime::analysis::fea_run_admission::FeaRunOutcome::Failed,
+    };
     let payload = match response {
         Ok(WorkerExecutionOutcome::Completed {
             response,
@@ -135,9 +146,9 @@ async fn run_program_worker(
     }
     .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     // The parent may close the request pipe as soon as it reads the terminal frame.
-    if let Some(scope) = &fea_scope {
+    if let Some(scope) = fea_scope {
         scope
-            .check()
+            .settle(fea_outcome)
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     }
     Ok(payload)

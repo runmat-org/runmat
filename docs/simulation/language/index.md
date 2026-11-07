@@ -4,7 +4,7 @@ keywords: [.fea language, FEA study file, declarations, runmat check, runmat run
 doc_type: language-reference
 examples: [cantilever-static, two-body-static]
 ---
-# The `.fea` study language
+# Study language
 
 A `.fea` file describes a finite-element study in source form: the geometry and its named regions, the mesh, the materials, the loads and supports, the analysis steps, the results to publish, and, when needed, how the work is placed on cores, GPUs and workers. RunMat checks the whole description before it translates CAD, meshes or solves, so an error in a unit, a region name or a procedure is reported in seconds, at its line.
 

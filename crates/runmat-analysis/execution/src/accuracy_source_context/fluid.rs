@@ -70,15 +70,7 @@ pub(crate) fn resource_workspace(
     maximum: u64,
 ) -> AnalysisBridgeResult<u64> {
     let (w, m) = original_source(request, inputs)?;
-    runmat_analysis_fea::planning::resource::preflight_fluid_accuracy_source(&w, &m, maximum)?;
-    let projection =
-        runmat_analysis_fea::planning::resource::derive_fluid_steady_resource_projection(&w, &m)?;
-    if projection.phase_resident_bytes_upper_bound.0 > maximum {
-        return Err(invalid(
-            "fluid accuracy complete source workspace exceeds carried admission",
-        ));
-    }
-    Ok(projection.phase_resident_bytes_upper_bound.0)
+    Ok(runmat_analysis_fea::planning::resource::fluid_accuracy_source_workspace(&w, &m, maximum)?)
 }
 
 pub(super) fn validate(

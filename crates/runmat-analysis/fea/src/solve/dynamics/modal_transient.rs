@@ -16,6 +16,13 @@ pub use contract::{
 const BETA: f64 = 0.25;
 const GAMMA: f64 = 0.5;
 
+fn dense_error(error: super::dense::DenseSolveError) -> ModalTransientError {
+    match error {
+        super::dense::DenseSolveError::Usage(error) => ModalTransientError::Usage(error),
+        _ => ModalTransientError::Singular,
+    }
+}
+
 pub fn solve_modal_transient(
     system: &ModalReducedSystem,
     time_points_s: &[f64],
@@ -122,8 +129,8 @@ pub fn refresh_modal_transient_state(
         &multiply(operators.damping, operators.size, &velocity),
         &multiply(operators.stiffness, operators.size, &displacement),
     );
-    let acceleration = solve_square(operators.mass, &right_hand_side, operators.size)
-        .map_err(|_| ModalTransientError::Singular)?;
+    let acceleration =
+        solve_square(operators.mass, &right_hand_side, operators.size).map_err(dense_error)?;
     let coordinates = ModalTransientCoordinateState {
         displacement: runmat_types::physical::Quantity::<
             runmat_types::physical::kind::Displacement,
@@ -241,7 +248,7 @@ fn integrate_initial(
         &multiply(operators.stiffness, operators.size, &displacement),
     );
     let acceleration = solve_square(operators.mass, &initial_right_hand_side, operators.size)
-        .map_err(|_| ModalTransientError::Singular)?;
+        .map_err(dense_error)?;
     integrate_from_state(
         operators,
         time_points_s,
@@ -348,8 +355,8 @@ fn advance_dense_modal_state(
         BETA * time_step_s.powi(2),
         operators.stiffness,
     );
-    let acceleration = solve_square(&effective, &right_hand_side, operators.size)
-        .map_err(|_| ModalTransientError::Singular)?;
+    let acceleration =
+        solve_square(&effective, &right_hand_side, operators.size).map_err(dense_error)?;
     let displacement = predicted_displacement
         .iter()
         .zip(&acceleration)

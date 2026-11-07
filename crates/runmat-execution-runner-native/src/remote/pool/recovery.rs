@@ -29,7 +29,7 @@ struct TaskBinding {
 }
 
 impl RemotePoolCheckpoint {
-    #[cfg(test)]
+    #[cfg(all(test, feature = "occt-native"))]
     pub(crate) fn test_completed_task_wall_millis(&self, task: TaskId) -> Option<u64> {
         self.completed_task_wall_millis.get(&task).copied()
     }
@@ -716,7 +716,7 @@ impl RemotePoolDriver {
         authoritative_unstarted: Option<&AuthoritativeUnstartedInventory>,
     ) -> NativeExecutionResult<()> {
         if self.value_scope != authority.run_id
-            || evidence.org_id != authority.org_id
+            || evidence.org_id != authority.org_id.as_str()
             || evidence.cluster_id != owner.cluster_id
             || evidence.node_id != owner.node_id
             || evidence.run_id != authority.run_id

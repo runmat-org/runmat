@@ -8,7 +8,7 @@ Evidence kind: AccuracyAcceptance. Criterion: A converged algebraic solve is not
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::adaptation::solved_source::tests::original_both_order_static_results_retain_typed_convergence_and_scalar_observations` (crates/runmat-analysis/fea/src/adaptation/solved_source/tests.rs:15) - Original static results retain typed convergence and scalar observations for both element orders. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::adaptation::solved_source::tests::original_both_order_static_results_retain_typed_convergence_and_scalar_observations` (crates/runmat-analysis/fea/src/adaptation/solved_source/tests.rs:16) - Original static results retain typed convergence and scalar observations for both element orders. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

@@ -46,6 +46,187 @@ fn test_map(dof_count: usize, element_count: usize) -> ElementDofMap {
     ElementDofMap::new(dof_count, offsets, dofs).unwrap()
 }
 
+#[test]
+fn assembly_cursor_keeps_a_failed_block_pending_and_advances_exactly_once() {
+    let map = test_map(64, 700);
+    let shape = ElementOutputShape {
+        matrices: 500,
+        vectors: 1,
+        scalars: 1,
+    };
+    let mut cursor = ElementAssemblyCursor::new::<f64>(&map, shape);
+    let first = cursor.next_block().unwrap();
+    assert_eq!(first.start, 0);
+    assert!(first.end < map.element_count());
+    assert!(cursor.complete(first.end..map.element_count()).is_err());
+    assert_eq!(cursor.next_block(), Some(first.clone()));
+    let first_end = first.end;
+    cursor.complete(first.clone()).unwrap();
+    assert!(cursor.complete(first).is_err());
+    let second = cursor.next_block().unwrap();
+    assert_eq!(second.start, first_end);
+}
+
+#[test]
+fn awaited_owner_suspends_before_shared_numeric_fill() {
+    use std::future::{poll_fn, Future};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::task::{Context, Poll, Wake, Waker};
+
+    struct NoopWake;
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    let map = test_map(64, 10);
+    let pattern = map.symbolic_pattern(plan(1)).unwrap();
+    let shape = ElementOutputShape {
+        matrices: 2,
+        vectors: 1,
+        scalars: 1,
+    };
+    let expected = assemble_elements(&map, &pattern, shape, plan(1), kernel, no_visit).unwrap();
+    let kernels = Arc::new(AtomicUsize::new(0));
+    let observed = kernels.clone();
+    let future = assemble_elements_with_owner(
+        &map,
+        &pattern,
+        shape,
+        plan(1),
+        usize::MAX,
+        move |element, dofs, out| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            kernel(element, dofs, out)
+        },
+        no_visit,
+        |_, _| {
+            let mut first_poll = true;
+            poll_fn(move |cx| {
+                if first_poll {
+                    first_poll = false;
+                    cx.waker().wake_by_ref();
+                    Poll::<Result<(), ElementAssemblyError<String, ()>>>::Pending
+                } else {
+                    Poll::Ready(Ok(()))
+                }
+            })
+        },
+    );
+    let mut future = std::pin::pin!(future);
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut context = Context::from_waker(&waker);
+    assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+    assert_eq!(kernels.load(Ordering::SeqCst), 0);
+    let Poll::Ready(actual) = future.as_mut().poll(&mut context) else {
+        panic!("owner should complete on the second poll")
+    };
+    assert_eq!(actual.unwrap(), expected);
+    assert_eq!(kernels.load(Ordering::SeqCst), map.element_count());
+}
+
+#[test]
+fn scatter_reserves_before_mutation_and_settles_only_executed_additions() {
+    use runmat_simulation_usage::{OperationCount, UsageContext, UsageLedger};
+    use std::sync::Arc;
+
+    let map = test_map(32, 3);
+    let pattern = map.symbolic_pattern(plan(1)).unwrap();
+    let shape = ElementOutputShape {
+        matrices: 2,
+        vectors: 1,
+        scalars: 1,
+    };
+    let quote = scatter_work_for_block::<f64>(&map, shape, 0..map.element_count()).unwrap();
+    let complex_quote =
+        scatter_work_for_block::<runmat_sparse_solvers::c64>(&map, shape, 0..map.element_count())
+            .unwrap();
+    assert_eq!(complex_quote.operations(), quote.operations() * 2);
+    let complex_ledger = Arc::new(UsageLedger::new(complex_quote, complex_quote).unwrap());
+    let complex_usage = UsageContext::new(Arc::clone(&complex_ledger));
+    complex_usage
+        .run_sync(|| {
+            assemble_elements(
+                &map,
+                &pattern,
+                shape,
+                plan(1),
+                |_, dofs, out: &mut ElementOutputs<'_, runmat_sparse_solvers::c64>| {
+                    for matrix in 0..shape.matrices {
+                        out.matrix(matrix)
+                            .fill(runmat_sparse_solvers::c64::new(1.0, 1.0));
+                    }
+                    for vector in 0..shape.vectors {
+                        out.vector(vector)
+                            .fill(runmat_sparse_solvers::c64::new(1.0, 1.0));
+                    }
+                    *out.scalar(0) = runmat_sparse_solvers::c64::new(1.0, 1.0);
+                    assert!(!dofs.is_empty());
+                    Ok::<_, String>(())
+                },
+                no_visit,
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        complex_ledger.snapshot().unwrap().completed.assembly,
+        complex_quote
+    );
+    let denied_ledger =
+        Arc::new(UsageLedger::new(OperationCount::ZERO, OperationCount::ZERO).unwrap());
+    let denied_usage = UsageContext::new(Arc::clone(&denied_ledger));
+    let mut visits = 0;
+    let denied = denied_usage.run_sync(|| {
+        assemble_elements(&map, &pattern, shape, plan(1), kernel, |_| {
+            visits += 1;
+            Ok::<_, String>(())
+        })
+    });
+    assert!(matches!(denied, Err(ElementAssemblyError::Accounting(_))));
+    assert_eq!(visits, 0);
+    assert_eq!(
+        denied_ledger.snapshot().unwrap().completed.assembly,
+        OperationCount::ZERO
+    );
+
+    let ledger = Arc::new(UsageLedger::new(quote, quote).unwrap());
+    let usage = UsageContext::new(Arc::clone(&ledger));
+    usage
+        .run_sync(|| assemble_elements(&map, &pattern, shape, plan(1), kernel, no_visit))
+        .unwrap();
+    let snapshot = ledger.snapshot().unwrap();
+    assert_eq!(snapshot.completed.assembly, quote);
+    assert_eq!(snapshot.reserved, OperationCount::ZERO);
+
+    let prefix_ledger = Arc::new(UsageLedger::new(quote, quote).unwrap());
+    let prefix_usage = UsageContext::new(Arc::clone(&prefix_ledger));
+    let mut visited = 0;
+    let failed = prefix_usage.run_sync(|| {
+        assemble_elements(&map, &pattern, shape, plan(1), kernel, |_| {
+            visited += 1;
+            if visited == 2 {
+                Err("stop".to_owned())
+            } else {
+                Ok(())
+            }
+        })
+    });
+    assert!(matches!(
+        failed,
+        Err(ElementAssemblyError::Element { element: 1, .. })
+    ));
+    assert_eq!(
+        prefix_ledger.snapshot().unwrap().completed.assembly,
+        OperationCount::from_operations(1)
+    );
+    assert_eq!(
+        prefix_ledger.snapshot().unwrap().reserved,
+        OperationCount::ZERO
+    );
+}
+
 fn kernel(element: usize, dofs: &[u32], out: &mut ElementOutputs<'_, f64>) -> Result<(), String> {
     let n = dofs.len();
     for matrix in 0..2 {

@@ -3,6 +3,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub(crate) enum ThermalAssemblyError {
+    #[error("thermal assembly numerical accounting failed: {0}")]
+    Accounting(#[from] runmat_simulation_usage::LedgerError),
     #[error("thermal sparse operator construction failed: {0}")]
     SparseOperator(String),
     #[error("thermal analysis projection is invalid: {0}")]
@@ -53,4 +55,15 @@ pub(crate) enum ThermalAssemblyError {
         second_excitation_id: String,
         location: String,
     },
+}
+
+/// A projection traversal that ran out of simulation work keeps its usage type; every other
+/// projection failure is an invalid projection.
+impl From<crate::topology::AnalysisProjectionError> for ThermalAssemblyError {
+    fn from(error: crate::topology::AnalysisProjectionError) -> Self {
+        match error {
+            crate::topology::AnalysisProjectionError::Accounting(cause) => Self::Accounting(cause),
+            error => Self::InvalidProjection(error.to_string()),
+        }
+    }
 }

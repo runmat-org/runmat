@@ -1,6 +1,6 @@
 # FEA-THERMAL-ACCURACY-001: Independent thermal references and refinement qualification
 
-0 PASS, 2 PARTIAL, 1 FAIL, 11 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 3 PARTIAL, 0 FAIL, 11 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## references
 
@@ -21,7 +21,7 @@ Evidence kind: SpatialConvergence. Criterion: Demonstrate spatial convergence of
 |---|---|---|---|---|
 | thermal_steady | tet4 | public_study | OPEN |  |
 | thermal_steady | tet10 | public_study | OPEN |  |
-| thermal_transient | tet4 | public_study | FAIL | `runmat-analysis-fea[lib]::execution::thermal_workload::tests::initial_fields::continuum::resolved_tet4_heated_cube_cold_cooling_has_continuum_spatial_convergence` (crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum.rs:135) - Tet4 heated-cube cold cooling continuum temperature, flux, stored heat and power with temporal contamination bound; does not prove Tet10 spatial gate. |
+| thermal_transient | tet4 | public_study | PARTIAL | `runmat-analysis-fea[lib]::execution::thermal_workload::tests::initial_fields::continuum::resolved_tet4_heated_cube_cold_cooling_has_continuum_spatial_convergence` (crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum.rs:132) - Tet4 heated-cube cold cooling continuum temperature, flux, stored heat and power with temporal contamination bound; does not prove Tet10 spatial gate. |
 | thermal_transient | tet10 | public_study | OPEN |  |
 
 ## time

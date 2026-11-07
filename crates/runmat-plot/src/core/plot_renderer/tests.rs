@@ -133,8 +133,20 @@ fn applies_data_aspect_ratio_to_3d_display_bounds() {
 
     let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
 
-    assert_eq!(display.min, Vec3::new(0.0, 0.0, -1.5));
-    assert_eq!(display.max, Vec3::new(1.0, 2.0, 2.5));
+    // A fixed data aspect keeps the limits; the axis scale carries the aspect.
+    assert_eq!(display.min, Vec3::ZERO);
+    assert_eq!(display.max, Vec3::new(1.0, 2.0, 1.0));
+}
+
+#[test]
+fn data_aspect_scales_one_data_unit_per_axis_without_moving_limits() {
+    // daspect([1 2 4]) over a 1 x 2 x 1 box: units = max(1/1, 2/2, 1/4) = 1, so one data
+    // unit is 1, 2 and 4 box units long along x, y and z.
+    let scale = data_aspect_axis_scale(Vec3::new(1.0, 2.0, 1.0), [1.0, 2.0, 4.0]);
+    assert!((scale - Vec3::new(1.0, 0.5, 0.25)).abs().max_element() < 1.0e-6);
+    // axis equal on a flat 2320 x 1320 x 220 mm pack: one shared scale, no cube.
+    let scale = data_aspect_axis_scale(Vec3::new(2320.0, 1320.0, 220.0), [1.0; 3]);
+    assert!((scale - Vec3::splat(1.0 / 2320.0)).abs().max_element() < 1.0e-9);
 }
 
 #[test]

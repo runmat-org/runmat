@@ -9,6 +9,34 @@ use runmat_canonical_codec::encode_contract;
 use runmat_execution::Digest;
 use runmat_meshing_core::{fixtures, SolverMeshArtifact};
 
+#[test]
+fn fluid_execution_keeps_accounting_and_cancellation_typed() {
+    use crate::physics::{
+        cfd::canonical::CanonicalFluidError, fluid_structure::FluidStructureError,
+    };
+    use runmat_simulation_usage::LedgerError;
+
+    let cause = LedgerError::GrantUnavailable;
+    assert!(matches!(
+        fluid_error(CanonicalFluidError::Accounting(cause)),
+        AnalysisExecutionError::Usage(LedgerError::GrantUnavailable)
+    ));
+    assert!(matches!(
+        fluid_structure_error(FluidStructureError::Flow(CanonicalFluidError::Accounting(
+            cause
+        ))),
+        AnalysisExecutionError::Usage(LedgerError::GrantUnavailable)
+    ));
+    assert!(matches!(
+        fluid_error(CanonicalFluidError::Cancelled),
+        AnalysisExecutionError::Cancelled
+    ));
+    assert!(matches!(
+        fluid_structure_error(FluidStructureError::Cancelled),
+        AnalysisExecutionError::Cancelled
+    ));
+}
+
 pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let mesh = fixtures::slab_mesh(1);
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);

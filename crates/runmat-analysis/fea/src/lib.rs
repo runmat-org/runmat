@@ -34,9 +34,13 @@ pub use frequency::{
 pub use pipeline::linear_static::{
     run_linear_static, run_linear_static_from_thermal_state,
     run_linear_static_from_thermal_state_with_prepared_constraint_plan,
-    run_linear_static_with_options, run_linear_static_with_prepared_constraint_plan,
-    run_linear_static_with_prepared_constraint_plan_and_linearization, LinearStaticExecution,
-    PreparedThermoelasticStaticInput, StaticResourceAdmission, ThermoelasticStaticResult,
+    run_linear_static_with_options, run_linear_static_with_options_tet4_owned,
+    run_linear_static_with_prepared_constraint_plan,
+    run_linear_static_with_prepared_constraint_plan_and_linearization,
+    run_linear_static_with_prepared_constraint_plan_and_linearization_tet4_owned,
+    run_linear_static_with_prepared_constraint_plan_tet4_owned, LinearStaticExecution,
+    PreparedThermoelasticStaticInput, StaticLinearizationInput, StaticResourceAdmission,
+    ThermoelasticStaticResult,
 };
 pub use pipeline::modal::{
     execute_structural_modal_workload, execute_structural_prestressed_modal_workload,

@@ -479,6 +479,7 @@ fn terminal_failure(stage: MeshingStageKind, detail: &str) -> Box<MeshingFailure
             value: MeshingDiagnosticValue::Text(detail),
             unit: None,
         }],
+        accounting_error: None,
         remediation: "regenerate the solver projection and validation from current inputs".into(),
     })
 }

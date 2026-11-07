@@ -68,6 +68,7 @@ impl FigureScene {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots,
@@ -104,6 +105,7 @@ impl FigureScene {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots,
@@ -146,6 +148,7 @@ impl FigureScene {
                 .iter()
                 .filter_map(|chunk| GeometryLines::capture(chunk, grid))
                 .collect(),
+            geometry_orientation_triad: scene.show_orientation_triad,
             layout: FigureLayout {
                 axes_rows: 1,
                 axes_cols: 1,
@@ -242,6 +245,7 @@ impl FigureScene {
         scene.overlay = self.geometry_overlay;
         scene.physical_context = self.geometry_physical_context;
         scene.show_grid = self.metadata.grid_enabled;
+        scene.show_orientation_triad = self.geometry_orientation_triad;
         scene.axis_equal = self.metadata.axis_equal;
         Ok(scene)
     }
@@ -455,7 +459,9 @@ pub(super) fn scene_chunk_to_mesh_plot(
         mesh_id: chunk.mesh_id.clone(),
         face_color_rgba: chunk.material.albedo.to_array(),
         edge_color_rgba: [0.08, 0.10, 0.13, 1.0],
-        face_alpha: chunk.material.albedo.w,
+        // The chunk's opacity is already in its face and vertex colours; a face alpha would
+        // apply it a second time when the mesh is decoded.
+        face_alpha: 1.0,
         edge_alpha: 0.0,
         edge_width: 0.0,
         edge_mode: "none".to_string(),

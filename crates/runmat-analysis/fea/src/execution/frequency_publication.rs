@@ -21,7 +21,7 @@ use super::{
 
 const FREQUENCY_PUBLICATION_PREFIX: &[u8] = b"runmat-structural-frequency-publication/v1\0";
 pub(super) const FREQUENCY_PUBLICATION_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(256 * 1024 * 1024, 2_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Semantic publication for one frequency sample. Physical object locations are deliberately
 /// absent: the generic execution-artifact catalog owns transport and retention.

@@ -52,6 +52,20 @@ fn midpoint_rejects_genuinely_unrepresentable_parameter() {
 }
 
 #[test]
+fn unrepresentable_midpoint_takes_the_coarsest_inner_parameter() {
+    // The exact midpoint of 1/2^62 and 3/4 needs exponent 63; 1/2 lies in the middle half.
+    let inner = dyadic(1, 62)
+        .midpoint(dyadic(3, 2), context())
+        .expect("a coarser inner parameter exists");
+    assert_eq!((inner.numerator, inner.exponent), (1, 1));
+    // Width 3 at exponent 62 with no middle-half point coarser than the ends: strictly inside.
+    let inner = dyadic(4, 62).midpoint(dyadic(7, 62), context()).unwrap();
+    assert!(inner.exponent <= 62);
+    let value = inner.parameter().unwrap();
+    assert!(value > 4.0 * 2.0_f64.powi(-62) && value < 7.0 * 2.0_f64.powi(-62));
+}
+
+#[test]
 fn off_centre_splits_reserve_precision_for_later_subdivision() {
     let mut left = dyadic(0, 0);
     let right = dyadic(1, 0);

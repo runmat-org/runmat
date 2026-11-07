@@ -16,6 +16,8 @@ pub(crate) mod capabilities;
 #[cfg(not(target_arch = "wasm32"))]
 mod controls;
 #[cfg(not(target_arch = "wasm32"))]
+mod unsigned_conversion;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod spirv;
 
 pub(crate) struct PreparedModule {

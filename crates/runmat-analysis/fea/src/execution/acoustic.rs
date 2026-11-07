@@ -4,7 +4,8 @@ use crate::{
     admission::AnalysisRunIdentity,
     contracts::{validate_solver_formulation_compatibility, SolverMethod},
     physics::acoustic::{
-        solve_canonical_harmonic, validate_canonical_input, AcousticHarmonicPolicy,
+        solve_canonical_harmonic, validate_canonical_input, AcousticHarmonicError,
+        AcousticHarmonicPolicy,
     },
 };
 use runmat_analysis_core::{
@@ -41,7 +42,7 @@ pub use frequency_assembly::{
 #[cfg(test)]
 pub(in crate::execution) mod tests;
 const PREFIX: &[u8] = b"runmat-acoustic-harmonic-workload/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -149,8 +150,14 @@ impl AcousticHarmonicWorkload {
             self.solver,
             self.power_balance_relative_tolerance,
         )
-        .map_err(invalid)?;
+        .map_err(acoustic_failure)?;
         AcousticHarmonicSolverResult::new(self, mesh, formulation, response)
+    }
+}
+fn acoustic_failure(error: AcousticHarmonicError) -> AnalysisExecutionError {
+    match error {
+        AcousticHarmonicError::Accounting(cause) => AnalysisExecutionError::Usage(cause),
+        other => invalid(other),
     }
 }
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {

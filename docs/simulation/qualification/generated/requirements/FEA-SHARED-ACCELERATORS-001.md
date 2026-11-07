@@ -43,7 +43,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Local parallelism uses execution
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::solve::linear::tests::scoped_pcg_matches_serial_and_rejects_nested_execution` (crates/runmat-analysis/fea/src/solve/linear/tests.rs:283) - A scoped pool solve equals the serial solve and nested pools are rejected; global pool independence and CPU resource accounting are covered in the resources req... |
+| shared_infrastructure | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::solve::linear::tests::scoped_pcg_matches_serial_and_rejects_nested_execution` (crates/runmat-analysis/fea/src/solve/linear/tests.rs:284) - A scoped pool solve equals the serial solve and nested pools are rejected; global pool independence and CPU resource accounting are covered in the resources req... |
 | shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
 

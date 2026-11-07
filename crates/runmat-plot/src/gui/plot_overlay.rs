@@ -5,6 +5,7 @@
 
 use crate::core::{plot_utils, PlotRenderer};
 use crate::geometry_scene::GeometrySceneScalarLegend;
+use crate::legend_text::{with_unit, LegendPrecision};
 use crate::overlay::cad_overlay::{CadOverlayActions, CadOverlayRenderInput, CadOverlayState};
 use crate::plots::TextStyle;
 use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
@@ -13,21 +14,6 @@ use glam::{Vec3, Vec4};
 
 fn transparent_frame() -> egui::Frame {
     egui::Frame::NONE
-}
-
-fn format_scalar_legend_value(value: f64, unit: &str) -> String {
-    let number = if value == 0.0 {
-        "0".to_string()
-    } else if value.abs() < 0.001 || value.abs() >= 10_000.0 {
-        format!("{value:.2e}")
-    } else {
-        format!("{value:.3}")
-    };
-    if unit.is_empty() {
-        number
-    } else {
-        format!("{number} {unit}")
-    }
 }
 
 /// GUI overlay manager for plot annotations and controls
@@ -680,6 +666,17 @@ impl PlotOverlay {
         Rect::from_min_size(
             egui::pos2(x, y),
             egui::vec2(width.min(outer.max.x - x), height.min(outer.max.y - y)),
+        )
+    }
+
+    /// The vertical span of a 3-D axes' colorbar. A 3-D plot area reaches the panel edges, so
+    /// the bar keeps a tenth of the height clear above and below, as MATLAB's 3-D axes position
+    /// does, and its end tick labels stay inside the figure.
+    fn colorbar_span_3d(plot_rect: Rect) -> Rect {
+        let inset = plot_rect.height() * 0.1;
+        Rect::from_min_max(
+            egui::pos2(plot_rect.min.x, plot_rect.min.y + inset),
+            egui::pos2(plot_rect.max.x, plot_rect.max.y - inset),
         )
     }
 
@@ -1361,11 +1358,23 @@ impl PlotOverlay {
                             config.font_scale,
                         );
                     }
-                    self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
+                    // `axis off` hides the orientation triad, axis ticks and their labels.
+                    let axes_visible = Self::axes_visible(plot_renderer, i);
+                    if axes_visible {
+                        self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
+                    }
                     let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
                         || plot_renderer.overlay_show_grid_for_axes(i);
                     if show_world_grid_overlay {
-                        self.draw_3d_origin_axis_ticks(ui, r, plot_renderer, i, config.font_scale);
+                        if axes_visible {
+                            self.draw_3d_origin_axis_ticks(
+                                ui,
+                                r,
+                                plot_renderer,
+                                i,
+                                config.font_scale,
+                            );
+                        }
                         self.draw_projected_world_texts(ui, r, plot_renderer, i, config.font_scale);
                     }
                     for (label, pos) in plot_renderer.pie_labels_for_axes(i) {
@@ -1382,7 +1391,13 @@ impl PlotOverlay {
                     if plot_renderer.overlay_show_legend_for_axes(i) {
                         self.draw_axes_legend(ui, r, plot_renderer, i, config.font_scale);
                     }
-                    self.draw_colorbar(ui, r, plot_renderer, i, config.font_scale);
+                    self.draw_colorbar(
+                        ui,
+                        Self::colorbar_span_3d(r),
+                        plot_renderer,
+                        i,
+                        config.font_scale,
+                    );
                     continue;
                 }
                 // `axis off` hides the box, grid, ticks and axis labels; the title stays.
@@ -1535,23 +1550,29 @@ impl PlotOverlay {
                 cam.projection,
                 crate::core::camera::ProjectionType::Perspective { .. }
             ) {
-                self.draw_3d_orientation_gizmo(
-                    ui,
-                    centered_plot_rect,
-                    plot_renderer,
-                    0,
-                    config.font_scale,
-                );
-                let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
-                    || plot_renderer.overlay_show_grid_for_axes(0);
-                if show_world_grid_overlay {
-                    self.draw_3d_origin_axis_ticks(
+                // `axis off` hides the orientation triad, axis ticks and their labels.
+                let axes_visible = Self::axes_visible(plot_renderer, 0);
+                if axes_visible {
+                    self.draw_3d_orientation_gizmo(
                         ui,
                         centered_plot_rect,
                         plot_renderer,
                         0,
                         config.font_scale,
                     );
+                }
+                let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
+                    || plot_renderer.overlay_show_grid_for_axes(0);
+                if show_world_grid_overlay {
+                    if axes_visible {
+                        self.draw_3d_origin_axis_ticks(
+                            ui,
+                            centered_plot_rect,
+                            plot_renderer,
+                            0,
+                            config.font_scale,
+                        );
+                    }
                     self.draw_projected_world_texts(
                         ui,
                         centered_plot_rect,
@@ -1560,7 +1581,13 @@ impl PlotOverlay {
                         config.font_scale,
                     );
                 }
-                self.draw_colorbar(ui, centered_plot_rect, plot_renderer, 0, config.font_scale);
+                self.draw_colorbar(
+                    ui,
+                    Self::colorbar_span_3d(centered_plot_rect),
+                    plot_renderer,
+                    0,
+                    config.font_scale,
+                );
             } else {
                 // `axis off` hides the box, grid, ticks and axis labels; the title stays.
                 let axes_visible = Self::axes_visible(plot_renderer, 0);
@@ -2565,6 +2592,9 @@ impl PlotOverlay {
         axes_index: usize,
         font_scale: f32,
     ) {
+        if !plot_renderer.shows_orientation_triad() {
+            return;
+        }
         let cam_ref = plot_renderer
             .axes_camera(axes_index)
             .unwrap_or_else(|| plot_renderer.camera());
@@ -2685,6 +2715,9 @@ impl PlotOverlay {
         axes_index: usize,
         font_scale: f32,
     ) {
+        if !plot_renderer.shows_world_triad(axes_index) {
+            return;
+        }
         let cam_ref = plot_renderer
             .axes_camera(axes_index)
             .unwrap_or_else(|| plot_renderer.camera());
@@ -2708,40 +2741,26 @@ impl PlotOverlay {
             Some(Pos2::new(sx, sy))
         };
 
-        let nice_step = |raw: f64| -> f64 {
-            if !raw.is_finite() || raw <= 0.0 {
-                return 1.0;
-            }
-            let pow10 = 10.0_f64.powf(raw.log10().floor());
-            let norm = raw / pow10;
-            let mult = if norm <= 1.0 {
-                1.0
-            } else if norm <= 2.0 {
-                2.0
-            } else if norm <= 5.0 {
-                5.0
-            } else {
-                10.0
+        // Label the frame the renderer drew its axis lines and tick marks from. Without finite
+        // bounds, fall back to an origin triad sized from the on-screen scale.
+        let frame = plot_renderer.axis_frame_3d(axes_index).unwrap_or_else(|| {
+            let origin = Vec3::ZERO;
+            let px_per = |axis: Vec3| match (project(origin), project(origin + axis)) {
+                (Some(a), Some(b)) => ((b.x - a.x).hypot(b.y - a.y) as f64).max(1e-6),
+                _ => 1.0,
             };
-            mult * pow10
-        };
-
-        // Label the ticks the renderer drew: each axis has its own step and length, since 3-D
-        // axes may scale each data axis differently.
-        let origin = Vec3::ZERO;
-        let (steps, lens) = plot_renderer
-            .world_axis_triad_for_axes(axes_index)
-            .unwrap_or_else(|| {
-                let px_per = |axis: Vec3| match (project(origin), project(origin + axis)) {
-                    (Some(a), Some(b)) => ((b.x - a.x).hypot(b.y - a.y) as f64).max(1e-6),
-                    _ => 1.0,
-                };
-                let steps = [Vec3::X, Vec3::Y, Vec3::Z].map(|axis| nice_step(96.0 / px_per(axis)));
-                (steps, steps.map(|step| step as f32 * 5.0))
-            });
-        if steps.iter().any(|step| !(step.is_finite() && *step > 0.0)) {
-            return;
-        }
+            let steps = [Vec3::X, Vec3::Y, Vec3::Z]
+                .map(|axis| crate::core::plot_renderer::nice_tick_step(96.0 / px_per(axis)));
+            crate::core::plot_renderer::AxisFrame3d {
+                origin,
+                world_origin: true,
+                z_base: origin,
+                lens: steps.map(|step| step as f32 * 5.0),
+                steps,
+            }
+        });
+        let origin = frame.origin;
+        let lens = frame.lens;
 
         let scale = font_scale.max(0.75);
         let font = FontId::proportional(Self::axes_tick_font_size(
@@ -2763,7 +2782,7 @@ impl PlotOverlay {
             (dir / len) * base
         };
 
-        if let Some(pos) = project(Vec3::X * lens[0] * 1.10) {
+        if let Some(pos) = project(origin + Vec3::X * lens[0] * 1.10) {
             if let Some(label) = plot_renderer.overlay_x_label_for_axes(axes_index) {
                 let style = plot_renderer
                     .overlay_x_label_style_for_axes(axes_index)
@@ -2781,7 +2800,7 @@ impl PlotOverlay {
                 );
             }
         }
-        if let Some(pos) = project(Vec3::Y * lens[1] * 1.10) {
+        if let Some(pos) = project(origin + Vec3::Y * lens[1] * 1.10) {
             if let Some(label) = plot_renderer.overlay_y_label_for_axes(axes_index) {
                 let style = plot_renderer
                     .overlay_y_label_style_for_axes(axes_index)
@@ -2800,7 +2819,7 @@ impl PlotOverlay {
                 );
             }
         }
-        if let Some(pos) = project(Vec3::Z * lens[2] * 1.10) {
+        if let Some(pos) = project(frame.z_base + Vec3::Z * lens[2] * 1.10) {
             if let Some(label) = plot_renderer.overlay_z_label_for_axes(axes_index) {
                 let style = plot_renderer
                     .overlay_z_label_style_for_axes(axes_index)
@@ -2825,29 +2844,26 @@ impl PlotOverlay {
             return;
         }
 
-        let draw_axis = |axis: Vec3, major_step: f64, axis_len: f32, color: Color32| {
-            for i in 1..=6 {
-                let t = (i as f32) * (major_step as f32);
-                if t >= axis_len * 0.999 {
-                    break;
-                }
-                let p = origin + axis * t;
+        let draw_axis = |axis_index: usize, axis: Vec3, color: Color32| {
+            for (offset_along, value) in frame.ticks(axis_index) {
+                let p = frame.axis_start(axis_index) + axis * offset_along;
                 let Some(pos) = project(p) else { continue };
                 // Offset labels slightly away from the axis in screen-space based on camera right/up.
                 let offset =
                     outward_offset(pos, 7.0 * scale) + egui::Vec2::new(3.0 * scale, -3.0 * scale);
+                let text = plot_utils::format_tick_label(value);
                 painter.text(
                     pos + offset,
                     Align2::LEFT_CENTER,
-                    plot_utils::format_tick_label((i as f64) * major_step),
+                    text,
                     font.clone(),
                     color,
                 );
             }
         };
-        draw_axis(Vec3::X, steps[0], lens[0], col_x);
-        draw_axis(Vec3::Y, steps[1], lens[1], col_y);
-        draw_axis(Vec3::Z, steps[2], lens[2], col_z);
+        draw_axis(0, Vec3::X, col_x);
+        draw_axis(1, Vec3::Y, col_y);
+        draw_axis(2, Vec3::Z, col_z);
     }
 
     fn draw_title_in_rect(
@@ -3257,9 +3273,10 @@ impl PlotOverlay {
         let width = (plot_rect.width() * 0.34).clamp(190.0, 300.0);
         let pad = 12.0 * scale;
         let bar_height = 7.0 * scale;
+        let note_height = if legend.note.is_some() { 16.0 * scale } else { 0.0 };
         let rect = Rect::from_min_size(
             egui::pos2(plot_rect.max.x - width - pad, plot_rect.min.y + pad),
-            egui::vec2(width, 56.0 * scale),
+            egui::vec2(width, 56.0 * scale + note_height),
         );
         // Keep the figure-owned scale legible over scene annotations and mesh
         // imagery; the mesh counts belong in the viewport information control.
@@ -3275,9 +3292,11 @@ impl PlotOverlay {
             (text.y.clamp(0.0, 1.0) * 255.0) as u8,
             (text.z.clamp(0.0, 1.0) * 255.0) as u8,
         );
-        let muted = text_color.gamma_multiply(0.68);
+        let muted = text_color.gamma_multiply(0.85);
         let label_font = FontId::proportional(11.0 * scale);
-        let detail_font = FontId::proportional(9.0 * scale);
+        // The range values are the data the legend exists for: as large as its label, so they
+        // stay readable when a poster is shown small.
+        let detail_font = FontId::proportional(11.0 * scale);
         ui.painter().text(
             rect.right_top(),
             Align2::RIGHT_TOP,
@@ -3324,20 +3343,44 @@ impl PlotOverlay {
                 color,
             );
         }
+        let precision = LegendPrecision::for_range(legend.minimum, legend.maximum);
         ui.painter().text(
             bar_rect.left_bottom() + egui::vec2(0.0, 3.0 * scale),
             Align2::LEFT_TOP,
-            format_scalar_legend_value(legend.minimum, &legend.unit),
+            with_unit(precision.format(legend.minimum), &legend.unit),
             detail_font.clone(),
             muted,
         );
         ui.painter().text(
             bar_rect.right_bottom() + egui::vec2(0.0, 3.0 * scale),
             Align2::RIGHT_TOP,
-            format_scalar_legend_value(legend.maximum, &legend.unit),
-            detail_font,
+            with_unit(precision.format(legend.maximum), &legend.unit),
+            detail_font.clone(),
             muted,
         );
+        // A limit inside the range is marked across the bar where it falls.
+        if let Some(limit) = legend.limit.filter(|limit| {
+            legend.maximum > legend.minimum && (legend.minimum..=legend.maximum).contains(limit)
+        }) {
+            let t = ((limit - legend.minimum) / (legend.maximum - legend.minimum)) as f32;
+            let x = bar_rect.min.x + bar_rect.width() * t;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(x, bar_rect.min.y - 3.0 * scale),
+                    egui::pos2(x, bar_rect.max.y + 3.0 * scale),
+                ],
+                Stroke::new(2.0 * scale, text_color),
+            );
+        }
+        if let Some(note) = &legend.note {
+            ui.painter().text(
+                rect.right_bottom(),
+                Align2::RIGHT_BOTTOM,
+                note,
+                detail_font,
+                text_color,
+            );
+        }
     }
 
     fn draw_x_label_in_rect(&self, ui: &mut egui::Ui, rect: Rect, label: &str, scale: f32) {

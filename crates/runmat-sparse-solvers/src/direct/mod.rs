@@ -59,6 +59,27 @@ pub enum FactorKind {
     Lu,
 }
 
+/// One bounded arithmetic batch in a refined direct solve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectSolvePhase {
+    InitialSubstitution,
+    RefinementSubstitution,
+    Residual,
+    Norm,
+    CorrectionUpdate,
+}
+
+pub enum DirectOwnedError<A> {
+    Numerical(SolverError),
+    Admission(A),
+}
+
+impl<A> From<SolverError> for DirectOwnedError<A> {
+    fn from(error: SolverError) -> Self {
+        Self::Numerical(error)
+    }
+}
+
 impl FactorKind {
     pub fn is_symmetric(self) -> bool {
         !matches!(self, FactorKind::Lu)
@@ -224,7 +245,11 @@ impl PatternFingerprint {
 
 pub(crate) enum SymbolicInner {
     Cholesky(faer::sparse::linalg::cholesky::SymbolicCholesky<usize>),
-    Lu(faer::sparse::linalg::lu::SymbolicLu<usize>),
+    Lu {
+        symbolic: faer::sparse::linalg::lu::SymbolicLu<usize>,
+        /// Reference schedule fixed at analysis from the symmetrized pattern.
+        reference: Result<DirectReferenceWork, ReferenceWorkError>,
+    },
 }
 
 /// Ordering plus symbolic factor for one sparsity pattern; shareable across numeric
@@ -239,6 +264,9 @@ pub struct SymbolicFactorization {
     pub(crate) scalar_bytes: usize,
     pub(crate) complex: bool,
 }
+
+mod reference_work;
+pub use reference_work::{DirectReferenceWork, ReferenceWorkError};
 
 impl std::fmt::Debug for SymbolicFactorization {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -305,6 +333,30 @@ impl SymbolicFactorization {
         let values = try_vec(col_idx.len(), T::zero())?;
         let matrix = CsrRef::try_new(n, n, row_ptr, col_idx, &values)?;
         Self::analyze::<T>(matrix.into(), options, control)
+    }
+
+    /// The [`FactorEstimate`] that [`Self::analyze_pattern`] reports, without building the
+    /// factor structure when the analysis is simplicial (caller-owned Cholesky or LDLT): the
+    /// ordering, then the elimination tree and column counts of the permuted pattern. Other
+    /// options run the full analysis.
+    pub fn estimate_pattern<T: FactorScalar>(
+        n: usize,
+        row_ptr: &[usize],
+        col_idx: &[usize],
+        options: &DirectOptions,
+        control: SolveControl<'_>,
+    ) -> SolverResult<FactorEstimate> {
+        if options.workspace != DirectWorkspacePolicy::CallerOwned
+            || !matches!(options.kind, FactorKind::Cholesky | FactorKind::Ldlt)
+        {
+            return Ok(Self::analyze_pattern::<T>(n, row_ptr, col_idx, options, control)?.estimate());
+        }
+        let values = try_vec(col_idx.len(), T::zero())?;
+        let matrix: SparseInput<'_, T> = CsrRef::try_new(n, n, row_ptr, col_idx, &values)?.into();
+        control.check()?;
+        let permutation = symmetric_ordering(matrix, &options.ordering)?;
+        control.check()?;
+        cholesky::simplicial_estimate::<T>(matrix, options.kind, &permutation)
     }
 
     pub fn kind(&self) -> FactorKind {
@@ -430,7 +482,16 @@ impl<T: FactorScalar> DirectSolver<T> {
             converged: 0,
         });
         let (numeric, regularized) = match symbolic.kind {
-            FactorKind::Lu => (lu::factorize::<T>(&symbolic, matrix, None)?, 0),
+            FactorKind::Cholesky | FactorKind::Ldlt => reference_work::with_direct_usage(
+                &symbolic,
+                reference_work::DirectPhase::Factorization,
+                || cholesky::factorize::<T>(&symbolic, matrix, &options, None),
+            )?,
+            FactorKind::Lu => reference_work::with_direct_usage(
+                &symbolic,
+                reference_work::DirectPhase::Factorization,
+                || Ok((lu::factorize::<T>(&symbolic, matrix, None)?, 0)),
+            )?,
             _ => cholesky::factorize::<T>(&symbolic, matrix, &options, None)?,
         };
         control.check()?;
@@ -456,6 +517,21 @@ impl<T: FactorScalar> DirectSolver<T> {
             residual: 0.0,
             converged: 0,
         });
+        if matches!(
+            self.symbolic.kind,
+            FactorKind::Cholesky | FactorKind::Ldlt | FactorKind::Lu
+        ) {
+            let symbolic = Arc::clone(&self.symbolic);
+            return reference_work::with_direct_usage(
+                &symbolic,
+                reference_work::DirectPhase::Factorization,
+                || self.refactorize_numeric(matrix),
+            );
+        }
+        self.refactorize_numeric(matrix)
+    }
+
+    fn refactorize_numeric(&mut self, matrix: SparseInput<'_, T>) -> SolverResult<()> {
         let previous = std::mem::replace(&mut self.numeric, NumericInner::Llt(Vec::new()));
         let (numeric, regularized) = match self.symbolic.kind {
             FactorKind::Lu => (
@@ -487,20 +563,51 @@ impl<T: FactorScalar> DirectSolver<T> {
 
     /// Solves `A X = B` in place for `k` column-major right-hand sides.
     pub fn solve_in_place(&self, rhs: &mut [T], k: usize) -> SolverResult<()> {
+        self.solve_in_place_initialized(rhs, k, |_| {})
+    }
+
+    fn solve_in_place_initialized(
+        &self,
+        rhs: &mut [T],
+        k: usize,
+        initialize: impl FnOnce(&mut [T]),
+    ) -> SolverResult<()> {
         let n = self.dimension();
-        if rhs.len() != n * k {
+        let expected = n.checked_mul(k).ok_or(SolverError::IndexOverflow)?;
+        if rhs.len() != expected {
             return Err(SolverError::Dimension(format!(
                 "rhs has {} entries, expected {}",
                 rhs.len(),
-                n * k
+                expected
             )));
         }
         if n == 0 || k == 0 {
             return Ok(());
         }
         match &self.numeric {
-            NumericInner::Lu(numeric) => lu::solve(&self.symbolic, numeric, rhs, k)?,
-            numeric => cholesky::solve(&self.symbolic, numeric, rhs, k),
+            numeric @ (NumericInner::Llt(_) | NumericInner::Ldlt(_)) => {
+                reference_work::with_direct_usage(
+                    &self.symbolic,
+                    reference_work::DirectPhase::Solve { rhs_columns: k },
+                    || {
+                        initialize(rhs);
+                        cholesky::solve(&self.symbolic, numeric, rhs, k);
+                        Ok(())
+                    },
+                )?
+            }
+            NumericInner::Lu(numeric) => reference_work::with_direct_usage(
+                &self.symbolic,
+                reference_work::DirectPhase::Solve { rhs_columns: k },
+                || {
+                    initialize(rhs);
+                    lu::solve(&self.symbolic, numeric, rhs, k)
+                },
+            )?,
+            numeric => {
+                initialize(rhs);
+                cholesky::solve(&self.symbolic, numeric, rhs, k);
+            }
         }
         Ok(())
     }
@@ -508,11 +615,34 @@ impl<T: FactorScalar> DirectSolver<T> {
     /// Solves `Aᵀ X = B` in place (for condition estimation and adjoint problems).
     pub fn solve_transpose_in_place(&self, rhs: &mut [T], k: usize) -> SolverResult<()> {
         let n = self.dimension();
-        if rhs.len() != n * k {
+        if rhs.len() != n.checked_mul(k).ok_or(SolverError::IndexOverflow)? {
             return Err(SolverError::Dimension("transpose rhs length".into()));
         }
+        if n == 0 || k == 0 {
+            return Ok(());
+        }
         match &self.numeric {
-            NumericInner::Lu(numeric) => lu::solve_transpose(&self.symbolic, numeric, rhs, k),
+            numeric @ (NumericInner::Llt(_) | NumericInner::Ldlt(_)) => {
+                reference_work::with_direct_usage(
+                    &self.symbolic,
+                    reference_work::DirectPhase::Solve { rhs_columns: k },
+                    || {
+                        for value in rhs.iter_mut() {
+                            *value = value.conj();
+                        }
+                        cholesky::solve(&self.symbolic, numeric, rhs, k);
+                        for value in rhs.iter_mut() {
+                            *value = value.conj();
+                        }
+                        Ok(())
+                    },
+                )
+            }
+            NumericInner::Lu(numeric) => reference_work::with_direct_usage(
+                &self.symbolic,
+                reference_work::DirectPhase::Solve { rhs_columns: k },
+                || lu::solve_transpose(&self.symbolic, numeric, rhs, k),
+            ),
             _ => {
                 // Hermitian A: Aᵀ = conj(A), so Aᵀ x = b  ⇔  A conj(x) = conj(b).
                 for value in rhs.iter_mut() {
@@ -583,23 +713,103 @@ impl<T: FactorScalar> DirectSolver<T> {
         x: &mut [T],
         k: usize,
     ) -> SolverResult<DirectSolveReport> {
-        let n = self.dimension();
-        if b.len() != n * k || x.len() != n * k {
-            return Err(SolverError::Dimension("refined solve dimensions".into()));
+        let future =
+            self.solve_refined_with_optional_owner(matrix, b, x, k, None::<DirectReadyOwner>);
+        let mut future = std::pin::pin!(future);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match std::future::Future::poll(future.as_mut(), &mut context) {
+            std::task::Poll::Ready(result) => result.map_err(|error| match error {
+                DirectOwnedError::Numerical(error) => error,
+                DirectOwnedError::Admission(never) => match never {},
+            }),
+            std::task::Poll::Pending => unreachable!("immediate direct owner cannot suspend"),
         }
-        x.copy_from_slice(b);
-        self.solve_in_place(x, k)?;
+    }
+
+    pub async fn solve_refined_with_owner<O, F, A>(
+        &self,
+        matrix: SparseInput<'_, T>,
+        b: &[T],
+        x: &mut [T],
+        k: usize,
+        before_batch: O,
+    ) -> Result<DirectSolveReport, DirectOwnedError<A>>
+    where
+        O: FnMut(DirectSolvePhase, runmat_simulation_usage::OperationCount) -> F,
+        F: std::future::Future<Output = Result<(), A>>,
+    {
+        self.solve_refined_with_optional_owner(matrix, b, x, k, Some(before_batch))
+            .await
+    }
+
+    async fn solve_refined_with_optional_owner<O, F, A>(
+        &self,
+        matrix: SparseInput<'_, T>,
+        b: &[T],
+        x: &mut [T],
+        k: usize,
+        mut before_batch: Option<O>,
+    ) -> Result<DirectSolveReport, DirectOwnedError<A>>
+    where
+        O: FnMut(DirectSolvePhase, runmat_simulation_usage::OperationCount) -> F,
+        F: std::future::Future<Output = Result<(), A>>,
+    {
+        let n = self.dimension();
+        let expected = n.checked_mul(k).ok_or(SolverError::IndexOverflow)?;
+        if b.len() != expected || x.len() != expected {
+            return Err(SolverError::Dimension("refined solve dimensions".into()).into());
+        }
+        let substitution_work = if before_batch.is_some()
+            || runmat_simulation_usage::UsageContext::capture().is_some()
+        {
+            let reference_work = self
+                .symbolic
+                .reference_work()
+                .map_err(|error| match error {
+                    ReferenceWorkError::Overflow(error) => SolverError::Usage(error.into()),
+                    other => SolverError::Unsupported(other.to_string()),
+                })?;
+            Some((
+                reference_work
+                    .solve_operations(u64::try_from(k).map_err(|_| SolverError::IndexOverflow)?)
+                    .map_err(|error| SolverError::Usage(error.into()))?,
+                reference_work
+                    .solve_operations(1)
+                    .map_err(|error| SolverError::Usage(error.into()))?,
+            ))
+        } else {
+            None
+        };
+        let residual_work = direct_residual_work(&matrix, T::IS_COMPLEX)?;
+        let norm_work = direct_vector_work(n, if T::IS_COMPLEX { 4 } else { 2 })?;
+        let update_work = direct_vector_work(n, if T::IS_COMPLEX { 2 } else { 1 })?;
+        if let Some((initial_work, _)) = substitution_work {
+            direct_acquire_capacity(
+                &mut before_batch,
+                DirectSolvePhase::InitialSubstitution,
+                initial_work,
+            )
+            .await?;
+        }
+        self.solve_in_place_initialized(x, k, |x| x.copy_from_slice(b))?;
         let mut residual = vec![T::zero(); n];
         let mut correction = vec![T::zero(); n];
         let mut worst = 0.0f64;
         let mut steps_taken = 0usize;
         for column in 0..k {
             let bc = &b[column * n..(column + 1) * n];
-            let b_norm = par::norm2(bc);
+            direct_acquire_capacity(&mut before_batch, DirectSolvePhase::Norm, norm_work).await?;
+            let b_norm = direct_measured_solve(norm_work, || par::norm2(bc))?;
             let xc = &mut x[column * n..(column + 1) * n];
-            matrix.residual(xc, bc, &mut residual, &mut correction);
+            direct_acquire_capacity(&mut before_batch, DirectSolvePhase::Residual, residual_work)
+                .await?;
+            direct_measured_solve(residual_work, || {
+                matrix.residual(xc, bc, &mut residual, &mut correction)
+            })?;
             let mut relative = if b_norm > 0.0 {
-                par::norm2(&residual) / b_norm
+                direct_acquire_capacity(&mut before_batch, DirectSolvePhase::Norm, norm_work)
+                    .await?;
+                direct_measured_solve(norm_work, || par::norm2(&residual))? / b_norm
             } else {
                 0.0
             };
@@ -608,13 +818,39 @@ impl<T: FactorScalar> DirectSolver<T> {
                 && relative > self.options.refinement_tolerance
             {
                 correction.copy_from_slice(&residual);
-                self.solve_in_place(&mut correction, 1)?;
-                for i in 0..n {
-                    xc[i] += correction[i];
+                if let Some((_, solve_work)) = substitution_work {
+                    direct_acquire_capacity(
+                        &mut before_batch,
+                        DirectSolvePhase::RefinementSubstitution,
+                        solve_work,
+                    )
+                    .await?;
                 }
-                matrix.residual(xc, bc, &mut residual, &mut correction);
+                self.solve_in_place(&mut correction, 1)?;
+                direct_acquire_capacity(
+                    &mut before_batch,
+                    DirectSolvePhase::CorrectionUpdate,
+                    update_work,
+                )
+                .await?;
+                direct_measured_solve(update_work, || {
+                    for i in 0..n {
+                        xc[i] += correction[i];
+                    }
+                })?;
+                direct_acquire_capacity(
+                    &mut before_batch,
+                    DirectSolvePhase::Residual,
+                    residual_work,
+                )
+                .await?;
+                direct_measured_solve(residual_work, || {
+                    matrix.residual(xc, bc, &mut residual, &mut correction)
+                })?;
                 let next = if b_norm > 0.0 {
-                    par::norm2(&residual) / b_norm
+                    direct_acquire_capacity(&mut before_batch, DirectSolvePhase::Norm, norm_work)
+                        .await?;
+                    direct_measured_solve(norm_work, || par::norm2(&residual))? / b_norm
                 } else {
                     0.0
                 };
@@ -646,6 +882,64 @@ impl<T: FactorScalar> DirectSolver<T> {
     pub fn pivots(&self) -> Option<Vec<f64>> {
         cholesky::pivots(&self.symbolic, &self.numeric)
     }
+}
+
+type DirectReadyOwner = fn(
+    DirectSolvePhase,
+    runmat_simulation_usage::OperationCount,
+) -> std::future::Ready<Result<(), std::convert::Infallible>>;
+
+async fn direct_acquire_capacity<O, F, A>(
+    owner: &mut Option<O>,
+    phase: DirectSolvePhase,
+    work: runmat_simulation_usage::OperationCount,
+) -> Result<(), DirectOwnedError<A>>
+where
+    O: FnMut(DirectSolvePhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+{
+    if let Some(owner) = owner {
+        owner(phase, work)
+            .await
+            .map_err(DirectOwnedError::Admission)?;
+    }
+    Ok(())
+}
+
+fn direct_vector_work(
+    elements: usize,
+    per_element: u64,
+) -> SolverResult<runmat_simulation_usage::OperationCount> {
+    use runmat_simulation_usage::{LedgerError, OperationCount};
+    let count = u64::try_from(elements).map_err(|_| LedgerError::CountOverflow)?;
+    OperationCount::from_operations(count)
+        .checked_mul(per_element)
+        .map_err(|error| SolverError::Usage(error.into()))
+}
+
+fn direct_residual_work<T: Scalar>(
+    matrix: &SparseInput<'_, T>,
+    complex: bool,
+) -> SolverResult<runmat_simulation_usage::OperationCount> {
+    let entries = match matrix {
+        SparseInput::Csr(matrix) => matrix.nnz(),
+        SparseInput::Csc(matrix) => matrix.nnz(),
+    };
+    direct_vector_work(entries, if complex { 8 } else { 2 })
+}
+
+fn direct_measured_solve<R>(
+    count: runmat_simulation_usage::OperationCount,
+    work: impl FnOnce() -> R,
+) -> SolverResult<R> {
+    use runmat_simulation_usage::{UsageCategory, UsageContext};
+    let Some(context) = UsageContext::capture() else {
+        return Ok(work());
+    };
+    let mut reservation = context.ledger().reserve(UsageCategory::Solve, count)?;
+    let result = work();
+    reservation.complete(count)?;
+    Ok(result)
 }
 
 fn matrix_apply<T: Scalar>(matrix: SparseInput<'_, T>, x: &[T], y: &mut [T]) {

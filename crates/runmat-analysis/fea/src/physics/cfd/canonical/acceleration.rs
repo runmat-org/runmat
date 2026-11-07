@@ -3,6 +3,7 @@
 //! The same affine combination acts on U/p/q; no source/reference solution is used.
 use super::{geometry_ops::V, recovery, CanonicalFluidError as Error, CanonicalFluidProblem};
 use crate::solve::fixed_point::{propose, FixedPointError};
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory};
 
 pub(super) struct Fields<'a> {
     pub velocity: &'a mut Vec<V>,
@@ -57,30 +58,56 @@ pub(super) fn consider(
             *history = None;
             return Ok(original);
         }
+        Err(FixedPointError::Accounting(cause)) => return Err(Error::Accounting(cause)),
+        Err(FixedPointError::Cancelled) => return Err(Error::Cancelled),
         Err(error) => return Err(Error::Operator(error.to_string())),
     };
     let Some(mut candidate) = candidate else {
         return Ok(original);
     };
-    if p.pressure_reference_plan
-        .normalize(p, &mut candidate.image)
-        .is_err()
-    {
-        return Ok(original);
+    match p.pressure_reference_plan.normalize(p, &mut candidate.image) {
+        Ok(()) => {}
+        Err(error @ Error::Accounting(_)) => return Err(error),
+        Err(_) => return Ok(original),
     }
     let gamma = candidate.coefficient;
-    let velocity = current
-        .velocity
-        .iter()
-        .zip(&previous.velocity)
-        .map(|(a, b)| std::array::from_fn(|k| a[k] - gamma * (a[k] - b[k])))
-        .collect::<Vec<V>>();
-    let flux = current
-        .flux
-        .iter()
-        .zip(&previous.flux)
-        .map(|(a, b)| a - gamma * (a - b))
-        .collect::<Vec<_>>();
+    // U has three scalar components. Each component of U and q uses one
+    // difference, one product and one subtraction. The existing zip semantics
+    // select the exact immutable number of paired entries in this batch.
+    let velocity_work = OperationCount::from_operations(
+        u64::try_from(current.velocity.len().min(previous.velocity.len()))
+            .map_err(|_| LedgerError::CountOverflow)?,
+    )
+    .checked_mul(9)
+    .map_err(LedgerError::from)?;
+    let flux_work = OperationCount::from_operations(
+        u64::try_from(current.flux.len().min(previous.flux.len()))
+            .map_err(|_| LedgerError::CountOverflow)?,
+    )
+    .checked_mul(3)
+    .map_err(LedgerError::from)?;
+    let affine_work = velocity_work
+        .checked_add(flux_work)
+        .map_err(LedgerError::from)?;
+    let (velocity, flux) = crate::algebra::capacity::measured_sync(
+        UsageCategory::Solve,
+        affine_work,
+        || -> Result<_, Error> {
+            let velocity = current
+                .velocity
+                .iter()
+                .zip(&previous.velocity)
+                .map(|(a, b)| std::array::from_fn(|k| a[k] - gamma * (a[k] - b[k])))
+                .collect::<Vec<V>>();
+            let flux = current
+                .flux
+                .iter()
+                .zip(&previous.flux)
+                .map(|(a, b)| a - gamma * (a - b))
+                .collect::<Vec<_>>();
+            Ok((velocity, flux))
+        },
+    )?;
     if velocity
         .iter()
         .flatten()
@@ -91,9 +118,10 @@ pub(super) fn consider(
     }
     // Backflow, nonfinite geometry actions or any failed original recovery reject
     // this speculative proposal. The already-validated ordinary SIMPLE image remains.
-    let Ok(trial) = recovery::evaluate_with_time(p, &velocity, &candidate.image, &flux, time)
-    else {
-        return Ok(original);
+    let trial = match recovery::evaluate_with_time(p, &velocity, &candidate.image, &flux, time) {
+        Ok(trial) => trial,
+        Err(error @ Error::Accounting(_)) => return Err(error),
+        Err(_) => return Ok(original),
     };
     if merit(&trial) >= merit(&original) {
         return Ok(original);

@@ -393,6 +393,7 @@ impl AnalysisPublicationBuilder {
         step: &AnalysisStudyStepRunData,
         catalog: &runmat_execution::value::PublishedObjectCatalog,
         roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, AnalysisPublicationError> {
         let _source_phase = self.begin_catalog_phase(&catalog.objects)?;
@@ -406,7 +407,7 @@ impl AnalysisPublicationBuilder {
         self.admit(frequency_bytes(step, catalog, roots)?)
             .map_err(|error| error.context("frequency step typed copies and published objects"))?;
         self.store
-            .persist_structural_frequency(step, catalog, roots, source)
+            .persist_structural_frequency(step, catalog, roots, render_topology, source)
             .map_err(Into::into)
     }
     pub fn stage_acoustic_frequency(
@@ -414,6 +415,7 @@ impl AnalysisPublicationBuilder {
         step: &AnalysisStudyStepRunData,
         catalog: &runmat_execution::value::PublishedObjectCatalog,
         roots: &crate::analysis::FrequencySampleArtifactRootInventory,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, AnalysisPublicationError> {
         let _source_phase = self.begin_catalog_phase(&catalog.objects)?;
@@ -427,7 +429,7 @@ impl AnalysisPublicationBuilder {
         self.admit(frequency_bytes(step, catalog, roots)?)
             .map_err(|error| error.context("frequency step typed copies and published objects"))?;
         self.store
-            .persist_acoustic_frequency(step, catalog, roots, source)
+            .persist_acoustic_frequency(step, catalog, roots, render_topology, source)
             .map_err(Into::into)
     }
     /// Reads staged chunks where staging wrote them: records, tiles and histories stay resident

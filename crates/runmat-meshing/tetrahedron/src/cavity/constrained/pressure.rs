@@ -11,7 +11,7 @@ use super::{
     boundary_nodes::{
         boundary_node_coordinates, cavity_boundary_node_ids, cavity_boundary_triangles,
     },
-    refill_tetrahedra::raw_refill_tetrahedron_with_rejection_reason,
+    refill_tetrahedra::{raw_refill_tetrahedron_with_rejection_reason, RefillTetrahedronError},
     topology::{sorted_face, tetrahedron_faces},
     validation::{validate_constrained_cavity, validate_refill_options},
     ConstrainedCavity, ConstrainedCavityNode, ConstrainedCavityRefillError,
@@ -74,14 +74,16 @@ pub fn constrained_cavity_refill_pressure_boundary_faces(
                     {
                         continue;
                     }
-                    if raw_refill_tetrahedron_with_rejection_reason(
+                    match raw_refill_tetrahedron_with_rejection_reason(
                         tetrahedron_node_ids,
                         points,
                         relaxed_options,
-                    )
-                    .is_err()
-                    {
-                        continue;
+                    ) {
+                        Ok(_) => {}
+                        Err(RefillTetrahedronError::Rejected(_)) => continue,
+                        Err(RefillTetrahedronError::Accounting(cause)) => {
+                            return Err(ConstrainedCavityRefillError::Accounting(cause));
+                        }
                     }
                     for face in tetrahedron_boundary_faces {
                         if let Some(count) = face_candidate_counts.get_mut(&face) {

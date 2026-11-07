@@ -23,6 +23,9 @@ mod overlay_queries;
 #[path = "plot_renderer/data_primitives.rs"]
 mod data_primitives;
 pub use data_primitives::DataPrimitive;
+#[path = "plot_renderer/axis_frame.rs"]
+mod axis_frame;
+pub use axis_frame::*;
 #[path = "plot_renderer/free_helpers.rs"]
 mod free_helpers;
 #[cfg(test)]
@@ -199,7 +202,6 @@ pub struct PlotRenderer {
     last_scene_viewport_px: Option<(u32, u32)>,
     /// Per-axes tick step and length of each 3-D origin axis, as last drawn, so the overlay
     /// labels the same ticks.
-    world_axis_triads: std::collections::HashMap<usize, ([f64; 3], [f32; 3])>,
     /// Last per-axes plot viewport sizes used to build viewport-dependent geometry.
     last_axes_plot_sizes_px: Option<Vec<(u32, u32)>>,
     /// Last per-axes orthographic view bounds used for viewport-dependent 2D stroke geometry.
@@ -426,7 +428,6 @@ impl PlotRenderer {
             geometry_node_owner_ids: HashMap::new(),
             geometry_hidden_owner_node_ids: BTreeSet::new(),
             last_scene_viewport_px: None,
-            world_axis_triads: std::collections::HashMap::new(),
             last_axes_plot_sizes_px: None,
             last_axes_view_bounds: None,
             last_axes_view_contract: None,

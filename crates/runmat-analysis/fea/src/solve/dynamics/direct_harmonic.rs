@@ -60,6 +60,8 @@ pub enum DirectHarmonicError {
     Cancelled,
     #[error("direct harmonic right preconditioning failed: {0}")]
     Preconditioning(String),
+    #[error("direct harmonic numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
     #[error("direct harmonic Krylov solve did not converge: iterations={iterations}/{maximum_iterations}, restart={restart}, reduced_dofs={reduced_dof_count}, residual_norm={residual_norm}, relative_residual={relative_residual}")]
     NotConverged {
         iterations: u32,
@@ -135,7 +137,10 @@ pub fn solve_direct_harmonic(
         (c64::new(-omega * omega, 0.0), operators.mass()),
         (c64::new(0.0, omega), operators.damping()),
     ])
-    .map_err(|error| DirectHarmonicError::Preconditioning(error.to_string()))?;
+    .map_err(|error| match error {
+        runmat_sparse_solvers::SolverError::Usage(error) => DirectHarmonicError::Usage(error),
+        other => DirectHarmonicError::Preconditioning(other.to_string()),
+    })?;
     let rhs: Vec<c64> = reduced_real
         .iter()
         .zip(&reduced_imaginary)
@@ -165,6 +170,9 @@ pub fn solve_direct_harmonic(
         }
         Err(runmat_sparse_solvers::SolverError::Singular { .. }) => {
             return Err(DirectHarmonicError::Breakdown)
+        }
+        Err(runmat_sparse_solvers::SolverError::Usage(error)) => {
+            return Err(DirectHarmonicError::Usage(error))
         }
         Err(error) => return Err(DirectHarmonicError::Preconditioning(error.to_string())),
     }

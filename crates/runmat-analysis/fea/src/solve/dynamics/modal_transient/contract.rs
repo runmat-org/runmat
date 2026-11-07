@@ -51,4 +51,6 @@ pub enum ModalTransientError {
     Singular,
     #[error("modal transient solve was cancelled")]
     Cancelled,
+    #[error("modal transient numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
 }

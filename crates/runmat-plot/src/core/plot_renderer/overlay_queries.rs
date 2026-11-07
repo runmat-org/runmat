@@ -9,7 +9,16 @@ impl PlotRenderer {
     pub fn overlay_sg_title_style(&self) -> &TextStyle {
         &self.figure_sg_title_style
     }
+    /// The title of one axes. A geometry scene that draws its title (see
+    /// [`Self::shows_geometry_title`]) has it on its one axes, so the overlay lays out a title
+    /// band for it as it does for a figure's axes title.
     pub fn overlay_title_for_axes(&self, axes_index: usize) -> Option<&String> {
+        if self.last_figure.is_none() && self.has_geometry_scene() {
+            return self
+                .figure_title
+                .as_ref()
+                .filter(|_| axes_index == 0 && self.shows_geometry_title());
+        }
         self.last_figure
             .as_ref()
             .and_then(|f| f.axes_metadata(axes_index))
@@ -116,11 +125,6 @@ impl PlotRenderer {
             .as_ref()
             .map(|f| f.reference_line_labels_for_axes(axes_index))
             .unwrap_or_default()
-    }
-
-    /// The tick step and length of each 3-D origin axis (x, y, z) as last drawn.
-    pub fn world_axis_triad_for_axes(&self, axes_index: usize) -> Option<([f64; 3], [f32; 3])> {
-        self.world_axis_triads.get(&axes_index).copied()
     }
 
     pub fn cell_label_marks_for_axes(

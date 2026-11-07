@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-TRANSIENT-001: Acoustic transient analysis
 
-0 PASS, 0 PARTIAL, 1 FAIL, 11 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 0 FAIL, 11 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## duct_pulse
 
@@ -22,7 +22,7 @@ Evidence kind: PublicationIntegrity. Criterion: An `acoustic transient` run publ
 | acoustic_transient | tet4 | numerical_kernel | OPEN |  |
 | acoustic_transient | tet4 | public_study | OPEN |  |
 | acoustic_transient | tet10 | numerical_kernel | OPEN |  |
-| acoustic_transient | tet10 | public_study | FAIL | `runmat[test:typed_fea_geometry_cli]::acoustic::response::pressure_transient_publishes_its_complete_time_history` (crates/runmat-cli/tests/typed_fea_geometry_cli/acoustic/response.rs:81) - A quadratic-mesh pulse study run through the CLI publishes 21 pressure snapshots on a 21-point time axis ending at 2 ms, all finite, with the prescribed surface... |
+| acoustic_transient | tet10 | public_study | PARTIAL | `runmat[test:typed_fea_geometry_cli]::acoustic::response::pressure_transient_publishes_its_complete_time_history` (crates/runmat-cli/tests/typed_fea_geometry_cli/acoustic/response.rs:120) - A quadratic-mesh pulse study run through the CLI publishes 21 native pressure snapshots and the complete authored history on a 21-point time axis ending at 2 ms... |
 
 ## energy_balance
 

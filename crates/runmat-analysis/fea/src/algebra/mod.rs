@@ -1,4 +1,5 @@
 mod compensated;
+pub(crate) mod capacity;
 pub(crate) use compensated::CompensatedSum;
 pub(crate) mod anchored_energy;
 pub use anchored_energy::EnergyError;
@@ -18,7 +19,11 @@ mod right_inverse;
 pub(crate) mod storage;
 
 pub(crate) use coercivity::CoercivityWorkEnvelope;
-pub use coercivity::{CoercivityCertificate, CoercivityError, PreparedSolverAdmissibility};
+pub use coercivity::{
+    CoercivityCertificate, CoercivityError, PreparedSolverAdmissibility, ScalarConductionError,
+    ScalarConductionProof,
+};
+pub use coercivity::NumericalCapacityPhase;
 pub use compatibility::{
     validate_prepared_solver_compatibility, validate_solver_compatibility, CompatibilityError,
     RealPreconditioner, RealSolver,

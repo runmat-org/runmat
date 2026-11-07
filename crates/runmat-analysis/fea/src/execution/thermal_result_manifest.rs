@@ -11,7 +11,7 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
 const PREFIX: &[u8] = b"runmat-thermal-solver-result-manifest/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[cfg(test)]
 #[path = "thermal_result_manifest_tests.rs"]

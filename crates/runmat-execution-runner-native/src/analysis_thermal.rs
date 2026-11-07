@@ -112,6 +112,7 @@ pub(crate) async fn execute_with_pool(
     let solve = coordinator
         .prepare_solve()
         .map_err(|e| protocol(format!("thermal solve preparation: {e}")))?;
+    crate::machine_capacity::trace_footprint("thermal solve prepared");
     let (executed, accounting) = execute_one(
         pool,
         &solve.host,

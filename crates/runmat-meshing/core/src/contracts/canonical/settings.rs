@@ -26,7 +26,7 @@ pub struct MeshingRequestSettings {
     pub limits: MeshingSizeLimits,
     pub cancellation: CancellationPolicy,
     /// Requested element layers across thin gaps (proximity sizing). `None` keeps the canonical
-    /// two layers.
+    /// two layers across gaps between edges and one layer across gaps between facing faces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cells_across_gap: Option<u32>,
     /// Local sizing controls on named geometry regions, ordered by control name.

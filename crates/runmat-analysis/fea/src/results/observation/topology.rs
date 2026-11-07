@@ -557,7 +557,8 @@ fn integration_point_elements(
     for element in &projection.elements {
         crate::topology::storage::check_cancelled().map_err(storage_error)?;
         for (ordinal, barycentric) in TETRAHEDRON_FOUR_POINT_RULE.into_iter().enumerate() {
-            let (shape, _) = crate::topology::quadrature::volume_shape(element.order, barycentric);
+            let (shape, _) = crate::topology::quadrature::volume_shape(element.order, barycentric)
+                .map_err(ObservationError::Accounting)?;
             let mut position_m = [0.0; 3];
             for (value, index) in shape.iter().zip(&element.node_indices) {
                 let node = projection

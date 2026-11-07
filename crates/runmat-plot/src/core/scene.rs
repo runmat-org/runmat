@@ -301,6 +301,12 @@ impl BoundingBox {
     }
 }
 
+/// A blended triangle surface: drawn after opaque items when the scene asks for it.
+pub fn is_translucent_surface(data: &RenderData) -> bool {
+    data.pipeline_type == super::PipelineType::Triangles
+        && data.material.alpha_mode == AlphaMode::Blend
+}
+
 /// Scene graph managing hierarchical plot objects
 pub struct Scene {
     nodes: HashMap<NodeId, SceneNode>,
@@ -314,6 +320,9 @@ pub struct Scene {
     // Culling and LOD
     frustum: Option<Frustum>,
     camera_position: Vec3,
+
+    /// Draw blended surfaces after every opaque item (see [`Scene::set_translucent_last`]).
+    translucent_last: bool,
 }
 
 impl Default for Scene {
@@ -332,7 +341,20 @@ impl Scene {
             bounds_dirty: true,
             frustum: None,
             camera_position: Vec3::ZERO,
+            translucent_last: false,
         }
+    }
+
+    /// Draw blended surfaces after every opaque item, without depth writes, so translucent
+    /// context geometry composites over the opaque geometry behind it and never hides it.
+    /// Geometry scenes set this; figures keep their creation order, which MATLAB plots
+    /// depend on in 2-D.
+    pub fn set_translucent_last(&mut self, translucent_last: bool) {
+        self.translucent_last = translucent_last;
+    }
+
+    pub fn translucent_last(&self) -> bool {
+        self.translucent_last
     }
 
     /// Add a new node to the scene

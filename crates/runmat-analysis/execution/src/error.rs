@@ -27,10 +27,16 @@ pub enum AnalysisBridgeError {
     Identity(&'static str),
     #[error("analysis execution bridge artifact failure: {0}")]
     Artifact(#[from] runmat_execution_artifact::ArtifactError),
+    #[error("analysis output exceeds the admitted run budget: {0}")]
+    InventoryCapacity(#[from] runmat_execution_artifact::object::InventoryCapacityError),
     #[error("analysis execution contract failure: {0}")]
     Analysis(#[from] runmat_analysis_fea::execution::AnalysisExecutionError),
     #[error(transparent)]
     FeaRun(#[from] runmat_analysis_fea::contracts::FeaRunError),
+    #[error(transparent)]
+    LinearAssembly(#[from] runmat_analysis_fea::assembly::LinearAssemblyError),
+    #[error(transparent)]
+    SolidAssembly(#[from] runmat_analysis_fea::assembly::solver_solid::SolverSolidAssemblyError),
     #[error(transparent)]
     Resource(#[from] runmat_analysis_fea::planning::resource::ResourcePlanningError),
     #[error("analysis execution runner failure: {0}")]
@@ -39,4 +45,40 @@ pub enum AnalysisBridgeError {
     Platform(#[from] runmat_execution::ContractError),
     #[error("analysis execution codec failure: {0}")]
     Codec(#[from] runmat_canonical_codec::CanonicalCodecError),
+}
+
+impl AnalysisBridgeError {
+    pub fn accounting_cause(&self) -> Option<&runmat_simulation_usage::LedgerError> {
+        use runmat_analysis_fea::{
+            assembly::{
+                solver_solid::SolverSolidAssemblyError, LinearAssemblyError,
+                StructuralAssemblyError,
+            },
+            constraints::ConstraintPlanError,
+            FeaRunError,
+        };
+        match self {
+            Self::FeaRun(FeaRunError::Usage(cause))
+            | Self::Analysis(runmat_analysis_fea::execution::AnalysisExecutionError::Usage(
+                cause,
+            ))
+            | Self::SolidAssembly(SolverSolidAssemblyError::Accounting(cause))
+            | Self::LinearAssembly(LinearAssemblyError::SolidOperator(
+                SolverSolidAssemblyError::Accounting(cause),
+            ))
+            | Self::LinearAssembly(LinearAssemblyError::Structural(
+                StructuralAssemblyError::Accounting(cause),
+            ))
+            | Self::LinearAssembly(LinearAssemblyError::ConstraintPlan(
+                ConstraintPlanError::Accounting(cause),
+            )) => Some(cause),
+            _ => None,
+        }
+    }
+}
+
+impl From<runmat_analysis_fea::assembly::StructuralAssemblyError> for AnalysisBridgeError {
+    fn from(error: runmat_analysis_fea::assembly::StructuralAssemblyError) -> Self {
+        Self::LinearAssembly(runmat_analysis_fea::assembly::LinearAssemblyError::Structural(error))
+    }
 }

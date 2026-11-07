@@ -180,21 +180,7 @@ impl DriverClockParent {
 
 impl RemoteDriverConfig {
     pub fn from_env() -> NativeExecutionResult<Self> {
-        let authority = DriverAuthority {
-            server_url: required("RUNMAT_EXECUTION_SERVER_URL")?,
-            run_id: required("RUNMAT_EXECUTION_RUN_ID")?,
-            org_id: required("RUNMAT_EXECUTION_ORG_ID")?,
-            project_id: required("RUNMAT_EXECUTION_PROJECT_ID")?,
-            allocation_lease_id: required("RUNMAT_EXECUTION_ALLOCATION_ID")?,
-            driver_lease_id: required("RUNMAT_EXECUTION_DRIVER_LEASE_ID")?,
-            fencing_token: required("RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN")?
-                .parse()
-                .map_err(|_| invalid("driver fencing token is malformed"))?,
-            credential: required("RUNMAT_EXECUTION_DRIVER_CREDENTIAL")?,
-        };
-        authority
-            .validate()
-            .map_err(|error| invalid(&error.to_string()))?;
+        let authority = authority_from(|name| std::env::var(name).ok())?;
         let endpoint_identity_file =
             PathBuf::from(required("RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE")?);
         if !endpoint_identity_file.is_absolute() || !endpoint_identity_file.is_file() {
@@ -221,6 +207,36 @@ impl RemoteDriverConfig {
             }),
         })
     }
+}
+
+/// Reads and validates the Server-issued driver authority. A malformed
+/// organization or driver-lease identifier fails here, before any Server call.
+fn authority_from(var: impl Fn(&str) -> Option<String>) -> NativeExecutionResult<DriverAuthority> {
+    let required = |name: &str| {
+        var(name)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| invalid(&format!("remote driver is missing {name}")))
+    };
+    let authority = DriverAuthority {
+        server_url: required("RUNMAT_EXECUTION_SERVER_URL")?,
+        run_id: required("RUNMAT_EXECUTION_RUN_ID")?,
+        org_id: DriverAuthority::parse_org_id(&required("RUNMAT_EXECUTION_ORG_ID")?)
+            .map_err(|error| invalid(&error.to_string()))?,
+        project_id: required("RUNMAT_EXECUTION_PROJECT_ID")?,
+        allocation_lease_id: required("RUNMAT_EXECUTION_ALLOCATION_ID")?,
+        driver_lease_id: DriverAuthority::parse_driver_lease_id(&required(
+            "RUNMAT_EXECUTION_DRIVER_LEASE_ID",
+        )?)
+        .map_err(|error| invalid(&error.to_string()))?,
+        fencing_token: required("RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN")?
+            .parse()
+            .map_err(|_| invalid("driver fencing token is malformed"))?,
+        credential: required("RUNMAT_EXECUTION_DRIVER_CREDENTIAL")?,
+    };
+    authority
+        .validate()
+        .map_err(|error| invalid(&error.to_string()))?;
+    Ok(authority)
 }
 
 fn nonce(name: &str) -> NativeExecutionResult<[u8; 16]> {
@@ -255,4 +271,71 @@ fn required(name: &str) -> NativeExecutionResult<String> {
 
 fn invalid(message: &str) -> NativeExecutionError {
     NativeExecutionError::Configuration(message.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn variables(org_id: &str, driver_lease_id: &str) -> BTreeMap<&'static str, String> {
+        [
+            ("RUNMAT_EXECUTION_SERVER_URL", "https://control.invalid"),
+            ("RUNMAT_EXECUTION_RUN_ID", "run"),
+            ("RUNMAT_EXECUTION_ORG_ID", org_id),
+            ("RUNMAT_EXECUTION_PROJECT_ID", "project"),
+            ("RUNMAT_EXECUTION_ALLOCATION_ID", "allocation"),
+            ("RUNMAT_EXECUTION_DRIVER_LEASE_ID", driver_lease_id),
+            ("RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN", "3"),
+            ("RUNMAT_EXECUTION_DRIVER_CREDENTIAL", "credential"),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name, value.to_string()))
+        .collect()
+    }
+
+    fn read(org_id: &str, driver_lease_id: &str) -> NativeExecutionResult<DriverAuthority> {
+        let variables = variables(org_id, driver_lease_id);
+        authority_from(|name| variables.get(name).cloned())
+    }
+
+    fn configuration_message(result: NativeExecutionResult<DriverAuthority>) -> String {
+        match result {
+            Err(NativeExecutionError::Configuration(message)) => message,
+            Err(other) => panic!("expected a configuration error, got {other}"),
+            Ok(_) => panic!("expected a configuration error, got an authority"),
+        }
+    }
+
+    #[test]
+    fn server_issued_authority_is_typed_at_validation() {
+        let org_id = crate::remote::test_ids::TEST_ORG_ID;
+        let lease = crate::remote::test_ids::test_driver_lease_id(3);
+        let authority = read(org_id, lease.as_str()).unwrap();
+        assert_eq!(authority.org_id, crate::remote::test_ids::test_org_id());
+        assert_eq!(authority.driver_lease_id, lease);
+        assert_eq!(authority.fencing_token, 3);
+    }
+
+    #[test]
+    fn malformed_org_id_is_rejected_at_validation() {
+        let lease = crate::remote::test_ids::test_driver_lease_id(3);
+        for org_id in ["org-1", "00000000000000000000000000000001", "org_ABC"] {
+            assert_eq!(
+                configuration_message(read(org_id, lease.as_str())),
+                "driver authority has a malformed org id",
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_driver_lease_id_is_rejected_at_validation() {
+        let org_id = crate::remote::test_ids::TEST_ORG_ID;
+        for lease in ["driver-3", "00000000000000000000000000000003", org_id] {
+            assert_eq!(
+                configuration_message(read(org_id, lease)),
+                "driver authority has a malformed driver lease id",
+            );
+        }
+    }
 }

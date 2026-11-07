@@ -1,6 +1,6 @@
 # FEA-COUPLING-FSI-001: Dynamics/fluid interaction with stable conservative ALE execution
 
-0 PASS, 0 PARTIAL, 0 FAIL, 9 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 1 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## interface
 
@@ -8,7 +8,7 @@ Evidence kind: PhysicalBalance. Criterion: Resolve exact interface sides and con
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| fluid_structure_interaction | canonical_mixed_topology | public_study | OPEN |  |
+| fluid_structure_interaction | canonical_mixed_topology | public_study | FAIL | `runmat[test:check_cli]::fsi_compliant_tube_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1237) - The compliant-tube example runs steady two-way FSI from `runmat run` to a completed, numerically acceptable run. |
 
 ## motion
 

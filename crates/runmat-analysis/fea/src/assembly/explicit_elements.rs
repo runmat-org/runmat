@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{cell::RefCell, collections::BTreeSet, future::Future, rc::Rc};
 
 mod beam_contribution;
 mod beam_inertia;
@@ -23,8 +23,8 @@ use super::{
 };
 use crate::{
     algebra::element_assembly::{
-        assemble_elements, no_visit, ElementAssemblyError, ElementDofMap, ElementOutputShape,
-        ElementOutputs,
+        assemble_elements, assemble_elements_with_async_owner, no_visit, AsyncElementKernel,
+        ElementAssemblyError, ElementDofMap, ElementFillFuture, ElementOutputShape, ElementOutputs,
     },
     algebra::{
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
@@ -33,6 +33,49 @@ use crate::{
     planning::resource::LocalExecutionPlan,
     properties::CompiledPropertyMap,
 };
+use runmat_simulation_usage::OperationCount;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ExplicitCapacityPhase {
+    Element { index: usize },
+    Scatter { elements: std::ops::Range<usize> },
+}
+
+struct ExplicitAwaitedKernel<'a, K, O, F> {
+    kernel: &'a K,
+    before: Rc<RefCell<O>>,
+    element_work: &'a [OperationCount],
+    _future: std::marker::PhantomData<fn() -> F>,
+}
+
+impl<K, O, F, A> AsyncElementKernel<f64, StructuralAssemblyError, A>
+    for ExplicitAwaitedKernel<'_, K, O, F>
+where
+    K: Fn(usize, &[u32], &mut ElementOutputs<'_, f64>) -> Result<(), StructuralAssemblyError>,
+    O: FnMut(ExplicitCapacityPhase, OperationCount) -> F,
+    F: Future<Output = Result<(), A>>,
+{
+    fn fill<'a>(
+        &'a mut self,
+        index: usize,
+        dofs: &'a [u32],
+        values: &'a mut [f64],
+        shape: ElementOutputShape,
+    ) -> ElementFillFuture<'a, StructuralAssemblyError, A> {
+        Box::pin(async move {
+            let future = (self.before.borrow_mut())(
+                ExplicitCapacityPhase::Element { index },
+                self.element_work[index],
+            );
+            future.await.map_err(ElementAssemblyError::Admission)?;
+            let mut out = ElementOutputs::from_buffer(dofs.len(), shape, values);
+            (self.kernel)(index, dofs, &mut out).map_err(|error| ElementAssemblyError::Element {
+                element: index,
+                error,
+            })
+        })
+    }
+}
 
 pub(super) struct ExplicitElementAssembly {
     pub stiffness: RealSparseMatrix,
@@ -45,6 +88,42 @@ pub(super) struct ExplicitElementAssembly {
     pub shell_count: usize,
 }
 
+fn explicit_primitive_work(
+    element: &runmat_analysis_core::StructuralElement,
+    properties: &CompiledPropertyMap,
+    topology_digest: runmat_execution::Digest,
+) -> Result<OperationCount, StructuralAssemblyError> {
+    let operations = match &element.kind {
+        StructuralElementKind::Beam(_) => 2 * 43 + 64 + 6_624,
+        StructuralElementKind::Shell(_) => {
+            let identity = crate::physics::structural::topology::explicit_element_identity(
+                topology_digest,
+                &element.element_id,
+                &element.region_id,
+                &element.kind,
+            )
+            .map_err(|error| StructuralAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
+            let property = properties.shell_property(identity).ok_or_else(|| {
+                StructuralAssemblyError::UnassignedExplicitRegion {
+                    element_id: element.element_id.clone(),
+                    region_id: element.region_id.clone(),
+                }
+            })?;
+            // Frame construction uses the documented maximum of its two valid axes.
+            // The remaining calls have fixed reference schedules for the selected property.
+            let matrix = 62 + 68 + 597 + 74_491;
+            match &property.owner {
+                crate::properties::CompiledShellPropertyOwner::Homogeneous { .. } => {
+                    62 + 55 + 55 + matrix
+                }
+                crate::properties::CompiledShellPropertyOwner::Laminate { .. } => 62 + 2 * matrix,
+            }
+        }
+    };
+    Ok(OperationCount::from_operations(operations))
+}
+
+#[cfg(test)]
 pub(super) fn assemble_explicit_elements(
     structural: &StructuralModel,
     properties: &CompiledPropertyMap,
@@ -52,6 +131,37 @@ pub(super) fn assemble_explicit_elements(
     canonical_node_indices: &[usize],
     local_execution: LocalExecutionPlan,
 ) -> Result<ExplicitElementAssembly, StructuralAssemblyError> {
+    let future = assemble_explicit_elements_with_owner(
+        structural,
+        properties,
+        layout,
+        canonical_node_indices,
+        local_execution,
+        false,
+        |_, _| std::future::ready(Ok::<(), StructuralAssemblyError>(())),
+    );
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    match Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result,
+        std::task::Poll::Pending => unreachable!("immediate explicit assembly cannot suspend"),
+    }
+}
+
+pub(super) async fn assemble_explicit_elements_with_owner<O, F, A>(
+    structural: &StructuralModel,
+    properties: &CompiledPropertyMap,
+    layout: &StructuralDofLayout,
+    canonical_node_indices: &[usize],
+    local_execution: LocalExecutionPlan,
+    awaited_elements: bool,
+    before: O,
+) -> Result<ExplicitElementAssembly, A>
+where
+    O: FnMut(ExplicitCapacityPhase, OperationCount) -> F,
+    F: Future<Output = Result<(), A>>,
+    A: From<StructuralAssemblyError> + Send,
+{
     validate_explicit_topology(structural, canonical_node_indices)?;
     let beam_count = structural
         .elements
@@ -64,7 +174,7 @@ pub(super) fn assemble_explicit_elements(
         .filter(|element| matches!(element.kind, StructuralElementKind::Shell(_)))
         .count();
     if beam_count == 0 && shell_count == 0 {
-        return Err(StructuralAssemblyError::MissingDiscretization);
+        return Err(StructuralAssemblyError::MissingDiscretization.into());
     }
     let topology_digest = properties
         .identity
@@ -118,93 +228,127 @@ pub(super) fn assemble_explicit_elements(
             Ok::<_, StructuralAssemblyError>(())
         })
         .map_err(explicit_assembly_error)?;
-    let pattern = map
-        .symbolic_pattern(local_execution)
-        .map_err(|error| explicit_assembly_error(error.map_element(|never| match never {})))?;
+    let pattern = map.symbolic_pattern(local_execution).map_err(|error| {
+        explicit_assembly_error(
+            error
+                .map_element(|never| match never {})
+                .map_admission(|never| match never {}),
+        )
+    })?;
     let recovery = (0..elements.len())
         .map(|_| std::sync::OnceLock::new())
         .collect::<Vec<std::sync::OnceLock<ExplicitRecovery>>>();
+    let element_work = if awaited_elements {
+        elements
+            .iter()
+            .map(|element| explicit_primitive_work(element, properties, topology_digest))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
     const K: usize = 0;
     const M: usize = 1;
     const C: usize = 2;
-    let assembled = assemble_elements(
-        &map,
-        &pattern,
-        ElementOutputShape {
-            matrices: 3,
-            vectors: 0,
-            scalars: 1,
-        },
-        local_execution,
-        |index, dofs, out: &mut ElementOutputs<'_, f64>| {
-            let element = &elements[index];
-            match &element.kind {
-                StructuralElementKind::Beam(beam) => {
-                    let contribution = beam_contribution::compute(
-                        structural,
-                        &node_index,
-                        element,
-                        beam,
-                        properties,
-                        layout,
-                        canonical_node_indices,
-                        topology_digest,
-                    )?;
-                    check_element_dofs(element, dofs, &contribution.dofs)?;
-                    write_matrix(out.matrix(K), &contribution.stiffness);
-                    let mass = out.matrix(M);
-                    for (local, value) in contribution.mass.iter().enumerate() {
-                        mass[local * BEAM_ELEMENT_DOF_COUNT + local] = *value;
-                    }
-                    if let runmat_analysis_core::MechanicalDampingModel::Rayleigh {
-                        mass_coefficient,
-                        stiffness_coefficient,
-                    } = contribution.damping
-                    {
-                        let damping = out.matrix(C);
-                        for row in 0..BEAM_ELEMENT_DOF_COUNT {
-                            for column in 0..BEAM_ELEMENT_DOF_COUNT {
-                                let mass = if row == column {
-                                    contribution.mass[row]
-                                } else {
-                                    0.0
-                                };
-                                damping[row * BEAM_ELEMENT_DOF_COUNT + column] =
-                                    mass_coefficient.canonical_value() * mass
-                                        + stiffness_coefficient.canonical_value()
-                                            * contribution.stiffness[row][column];
-                            }
+    let shape = ElementOutputShape {
+        matrices: 3,
+        vectors: 0,
+        scalars: 1,
+    };
+    let kernel = |index: usize, dofs: &[u32], out: &mut ElementOutputs<'_, f64>| {
+        let element = &elements[index];
+        match &element.kind {
+            StructuralElementKind::Beam(beam) => {
+                let contribution = beam_contribution::compute(
+                    structural,
+                    &node_index,
+                    element,
+                    beam,
+                    properties,
+                    layout,
+                    canonical_node_indices,
+                    topology_digest,
+                )?;
+                check_element_dofs(element, dofs, &contribution.dofs)?;
+                write_matrix(out.matrix(K), &contribution.stiffness);
+                let mass = out.matrix(M);
+                for (local, value) in contribution.mass.iter().enumerate() {
+                    mass[local * BEAM_ELEMENT_DOF_COUNT + local] = *value;
+                }
+                if let runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+                    mass_coefficient,
+                    stiffness_coefficient,
+                } = contribution.damping
+                {
+                    let damping = out.matrix(C);
+                    for row in 0..BEAM_ELEMENT_DOF_COUNT {
+                        for column in 0..BEAM_ELEMENT_DOF_COUNT {
+                            let mass = if row == column {
+                                contribution.mass[row]
+                            } else {
+                                0.0
+                            };
+                            damping[row * BEAM_ELEMENT_DOF_COUNT + column] =
+                                mass_coefficient.canonical_value() * mass
+                                    + stiffness_coefficient.canonical_value()
+                                        * contribution.stiffness[row][column];
                         }
-                        *out.scalar(0) = 1.0;
                     }
-                    let _ = recovery[index].set(ExplicitRecovery::Beam(contribution.recovery));
+                    *out.scalar(0) = 1.0;
                 }
-                StructuralElementKind::Shell(shell) => {
-                    let contribution = shell_contribution::compute(
-                        structural,
-                        &node_index,
-                        element,
-                        shell,
-                        properties,
-                        layout,
-                        canonical_node_indices,
-                        topology_digest,
-                    )?;
-                    check_element_dofs(element, dofs, &contribution.dofs)?;
-                    write_matrix(out.matrix(K), &contribution.stiffness);
-                    write_matrix(out.matrix(M), &contribution.mass);
-                    if let Some(damping) = &contribution.damping {
-                        write_matrix(out.matrix(C), damping);
-                        *out.scalar(0) = 1.0;
-                    }
-                    let _ = recovery[index].set(ExplicitRecovery::Shell(contribution.recovery));
-                }
+                let _ = recovery[index].set(ExplicitRecovery::Beam(contribution.recovery));
             }
-            Ok(())
-        },
-        no_visit,
-    )
-    .map_err(explicit_assembly_error)?;
+            StructuralElementKind::Shell(shell) => {
+                let contribution = shell_contribution::compute(
+                    structural,
+                    &node_index,
+                    element,
+                    shell,
+                    properties,
+                    layout,
+                    canonical_node_indices,
+                    topology_digest,
+                )?;
+                check_element_dofs(element, dofs, &contribution.dofs)?;
+                write_matrix(out.matrix(K), &contribution.stiffness);
+                write_matrix(out.matrix(M), &contribution.mass);
+                if let Some(damping) = &contribution.damping {
+                    write_matrix(out.matrix(C), damping);
+                    *out.scalar(0) = 1.0;
+                }
+                let _ = recovery[index].set(ExplicitRecovery::Shell(contribution.recovery));
+            }
+        }
+        Ok(())
+    };
+    let assembled = if awaited_elements {
+        let before = Rc::new(RefCell::new(before));
+        let mut awaited_kernel = ExplicitAwaitedKernel::<_, _, F> {
+            kernel: &kernel,
+            before: Rc::clone(&before),
+            element_work: &element_work,
+            _future: std::marker::PhantomData,
+        };
+        assemble_elements_with_async_owner(
+            &map,
+            &pattern,
+            shape,
+            local_execution,
+            1,
+            &kernel,
+            &mut awaited_kernel,
+            no_visit,
+            |elements, count| {
+                let future =
+                    (before.borrow_mut())(ExplicitCapacityPhase::Scatter { elements }, count);
+                async move { future.await.map_err(ElementAssemblyError::Admission) }
+            },
+        )
+        .await
+        .map_err(explicit_owned_error)?
+    } else {
+        assemble_elements(&map, &pattern, shape, local_execution, kernel, no_visit)
+            .map_err(explicit_assembly_error)?
+    };
     let has_rayleigh_damping = assembled.scalars[0] > 0.0;
     let mut beam_recovery = Vec::with_capacity(beam_count);
     let mut shell_recovery = Vec::with_capacity(shell_count);
@@ -215,7 +359,8 @@ pub(super) fn assemble_explicit_elements(
             None => {
                 return Err(StructuralAssemblyError::LocalExecution(
                     "explicit element recovery summary missing".into(),
-                ))
+                )
+                .into())
             }
         }
     }
@@ -371,8 +516,54 @@ fn explicit_assembly_error(
 ) -> StructuralAssemblyError {
     match error {
         ElementAssemblyError::Element { error, .. } => error,
+        ElementAssemblyError::Admission(error) => error,
+        ElementAssemblyError::Accounting(error) => StructuralAssemblyError::Accounting(error),
         ElementAssemblyError::Cancelled => StructuralAssemblyError::Cancelled,
         other => StructuralAssemblyError::LocalExecution(other.to_string()),
+    }
+}
+
+fn explicit_owned_error<A: From<StructuralAssemblyError>>(
+    error: ElementAssemblyError<StructuralAssemblyError, A>,
+) -> A {
+    match error {
+        ElementAssemblyError::Admission(error) => error,
+        ElementAssemblyError::Element { error, .. } => error.into(),
+        ElementAssemblyError::Accounting(error) => {
+            StructuralAssemblyError::Accounting(error).into()
+        }
+        ElementAssemblyError::Cancelled => StructuralAssemblyError::Cancelled.into(),
+        ElementAssemblyError::DofOutOfRange {
+            element,
+            dof,
+            dof_count,
+        } => StructuralAssemblyError::LocalExecution(format!(
+            "element {element} references degree of freedom {dof} outside 0..{dof_count}"
+        ))
+        .into(),
+        ElementAssemblyError::DofIndexOverflow(count) => StructuralAssemblyError::LocalExecution(
+            format!("degree-of-freedom count {count} exceeds the 32-bit assembly index"),
+        )
+        .into(),
+        ElementAssemblyError::OutsidePattern { row, column } => {
+            StructuralAssemblyError::LocalExecution(format!(
+                "assembly entry ({row}, {column}) is outside the symbolic pattern"
+            ))
+            .into()
+        }
+        ElementAssemblyError::PatternMismatch(reason) => {
+            StructuralAssemblyError::LocalExecution(reason.into()).into()
+        }
+        ElementAssemblyError::Pattern(error) => {
+            StructuralAssemblyError::LocalExecution(error.to_string()).into()
+        }
+        ElementAssemblyError::Allocation(count) => StructuralAssemblyError::LocalExecution(
+            format!("assembly storage allocation failed for {count} entries"),
+        )
+        .into(),
+        ElementAssemblyError::Execution(reason) => {
+            StructuralAssemblyError::LocalExecution(reason).into()
+        }
     }
 }
 

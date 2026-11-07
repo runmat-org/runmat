@@ -12,8 +12,13 @@ struct Pending {
 pub struct Replies {
     pending: Mutex<Option<Pending>>,
     invalid: std::sync::atomic::AtomicBool,
+    reader_ready: std::sync::atomic::AtomicBool,
 }
 impl Replies {
+    pub(crate) fn activate_reader(&self) {
+        self.reader_ready
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
     pub fn observe(&self, bytes: &[u8]) -> bool {
         if bytes.len() as u64 > MAX_FRAME_BYTES {
             return false;
@@ -69,6 +74,22 @@ pub struct Client {
     cpu: u64,
 }
 impl Client {
+    pub(crate) fn delegated_permit(
+        self: &Arc<Self>,
+        budget: FeaRunBudget,
+    ) -> Result<Box<dyn FeaRunPermit>, FeaRunDenied> {
+        budget.validate()?;
+        let mut state = self.calls.lock().unwrap_or_else(|error| error.into_inner());
+        if state.sequence != 0 || state.active.is_some() {
+            return Err(FeaRunDenied::LicenseInvalid);
+        }
+        state.active = Some(1);
+        Ok(Box::new(ProxyPermit {
+            client: Arc::clone(self),
+            root: 1,
+            budget,
+        }))
+    }
     pub fn new(
         assignment: ProgramExecutionAssignment,
         cpu: u64,
@@ -91,6 +112,15 @@ impl Client {
         state: &mut ClientState,
         operation: Operation,
     ) -> Result<Reply, FeaRunDenied> {
+        if !self
+            .replies
+            .reader_ready
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            // A failed bootstrap can drop its attached permit before starting
+            // the reply reader. Cleanup must not wait for an impossible reply.
+            return Err(FeaRunDenied::ServerUnreachable);
+        }
         if self
             .replies
             .invalid
@@ -182,26 +212,27 @@ impl FeaRunPermit for ProxyPermit {
     fn budget(&self) -> FeaRunBudget {
         self.budget
     }
-    fn heartbeat(&self, usage: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
-        let mut state = self.client.calls.lock().unwrap_or_else(|e| e.into_inner());
-        if state.active != Some(self.root) {
-            return Err(FeaRunDenied::LicenseInvalid);
-        }
-        match self.client.call_locked(
-            &mut state,
-            Operation::Heartbeat {
-                root: self.root,
-                usage: usage.clone(),
-            },
-        )? {
-            Reply::Budget { budget } => Ok(budget),
-            _ => Err(FeaRunDenied::LicenseInvalid),
-        }
+    fn heartbeat(&self, usage: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+        self.renew(Operation::Heartbeat {
+            root: self.root,
+            usage: usage.clone(),
+        })
+    }
+    fn request_grant(
+        &self,
+        usage: &FeaRunUsage,
+        required: runmat_simulation_usage::OperationCount,
+    ) -> Result<FeaRunBudget, FeaRunDenied> {
+        self.renew(Operation::RequestGrant {
+            root: self.root,
+            usage: usage.clone(),
+            required,
+        })
     }
     fn settle(
         self: Box<Self>,
         outcome: FeaRunOutcome,
-        usage: &ResourceUsage,
+        usage: &FeaRunUsage,
     ) -> Result<(), FeaRunDenied> {
         let mut state = self.client.calls.lock().unwrap_or_else(|e| e.into_inner());
         if state.active != Some(self.root) {
@@ -218,6 +249,18 @@ impl FeaRunPermit for ProxyPermit {
         state.active = None;
         match reply? {
             Reply::Settled => Ok(()),
+            _ => Err(FeaRunDenied::LicenseInvalid),
+        }
+    }
+}
+impl ProxyPermit {
+    fn renew(&self, operation: Operation) -> Result<FeaRunBudget, FeaRunDenied> {
+        let mut state = self.client.calls.lock().unwrap_or_else(|e| e.into_inner());
+        if state.active != Some(self.root) {
+            return Err(FeaRunDenied::LicenseInvalid);
+        }
+        match self.client.call_locked(&mut state, operation)? {
+            Reply::Budget { budget } => Ok(budget),
             _ => Err(FeaRunDenied::LicenseInvalid),
         }
     }

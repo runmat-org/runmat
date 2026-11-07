@@ -92,7 +92,7 @@ impl ThermalOperatorAssembly {
                             (coefficient.canonical_value() * difference * point.area_weight_m2)
                                 .abs();
                     })
-                    .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+                    .map_err(ThermalAssemblyError::from)?;
             }
         }
         let prescribed_scale = residual

@@ -85,6 +85,7 @@ fn evaluate(
         .collect::<Result<Vec<_>, DelaunayVolumeQualityError>>()?;
     let boundary_nodes = boundary_node_identities(provenance);
     let protected_facets = protected_facet_identities(provenance);
+    let node_size = node_size::NodeSizeField::new(request, provenance)?;
     let mut cells = Vec::with_capacity(topology.tetrahedra.len());
     let mut baseline = base_quality.tetrahedra.iter().peekable();
     let mut reused = 0;
@@ -109,6 +110,19 @@ fn evaluate(
         let old = baseline
             .peek()
             .filter(|old| self::key(old.node_identities) == key);
+        let region_id = cell.region_id.clone().ok_or_else(|| {
+            error(
+                DelaunayVolumeQualityErrorKind::InvalidTopology,
+                Some(index),
+                "every evaluated tetrahedron must have one assigned region",
+            )
+        })?;
+        let corner_metrics = node_size.corner_metrics(
+            &topology.nodes,
+            cell.vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize]),
+            &region_id,
+        )?;
         if let Some(old) = old.filter(|old| {
             old.node_identities == identities
                 && cell
@@ -127,13 +141,13 @@ fn evaluate(
                 retained.refinement_violation_ratio,
                 retained.optimization_violation_ratio,
             ) = evaluation::violation_ratios(
-                evaluation::volume_owned_maximum_metric_edge_length(
+                node_size::volume_owned_maximum_integrated_edge_length(
                     cell.vertex_indices.map(|vertex| {
                         topology.nodes[vertex as usize]
                             .coordinates_m
                             .canonical_value()
                     }),
-                    retained.resolved_metric,
+                    corner_metrics,
                     protected_edge_mask(identities, &protected_facets),
                 ),
                 retained.metric_radius_edge_ratio,
@@ -149,13 +163,8 @@ fn evaluate(
             topology,
             index,
             evaluation::TetrahedronEvaluationContext {
-                region_id: cell.region_id.clone().ok_or_else(|| {
-                    error(
-                        DelaunayVolumeQualityErrorKind::InvalidTopology,
-                        Some(index),
-                        "every evaluated tetrahedron must have one assigned region",
-                    )
-                })?,
+                corner_metrics,
+                region_id,
                 boundary_node_count: identities
                     .iter()
                     .filter(|id| boundary_nodes.contains(id))

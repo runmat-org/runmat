@@ -33,7 +33,13 @@ impl VisibilityKernel {
                 let interior = topology.node(topology.cell(*cell_index).vertex_indices[*opposite]);
                 Ok(BoundaryFace {
                     nodes,
-                    metric: crate::cdt::volume_quality::PreparedJacobian::new(metrics(*face)?),
+                    metric: crate::cdt::volume_quality::PreparedJacobian::new(metrics(*face)?)
+                        .map_err(|cause| {
+                            error(
+                                DelaunayVolumeSliverErrorKind::Accounting(cause),
+                                "visibility metric numerical accounting failed",
+                            )
+                        })?,
                     expected: orient_volume_nodes([nodes[0], nodes[1], nodes[2], interior]),
                 })
             })
@@ -53,18 +59,26 @@ impl VisibilityKernel {
         }
         Ok(true)
     }
-    pub(super) fn score(&self, point: [f64; 3]) -> f64 {
+    pub(super) fn score(&self, point: [f64; 3]) -> Result<f64, DelaunayVolumeSliverError> {
         self.faces
             .iter()
-            .map(|face| {
+            .try_fold(f64::INFINITY, |minimum, face| {
                 let [a, b, c] = face.nodes.map(|node| node.coordinates_m.canonical_value());
-                face.metric
-                    .as_ref()
-                    .and_then(|metric| metric.score([a, b, c, point]))
-                    .unwrap_or(0.)
+                let score = match face.metric.as_ref() {
+                    Some(metric) => metric
+                        .score([a, b, c, point])
+                        .map_err(|cause| {
+                            error(
+                                DelaunayVolumeSliverErrorKind::Accounting(cause),
+                                "visibility score numerical accounting failed",
+                            )
+                        })?
+                        .unwrap_or(0.),
+                    None => 0.0,
+                };
+                Ok(minimum.min(score))
             })
-            .min_by(f64::total_cmp)
-            .unwrap_or(0.0)
+            .map(|minimum| if minimum.is_infinite() { 0.0 } else { minimum })
     }
     pub(super) fn best_trial(
         &self,
@@ -86,13 +100,17 @@ impl VisibilityKernel {
                 }
             }
         }
+        let usage = runmat_simulation_usage::UsageContext::capture();
         let results = runmat_cpu_execution::ordered_map(
             &candidates,
             |&candidate| -> Result<Option<SmoothingTrial>, DelaunayVolumeSliverError> {
+                let _usage = usage
+                    .as_ref()
+                    .map(runmat_simulation_usage::UsageContext::enter);
                 if !self.contains(candidate)? {
                     return Ok(None);
                 }
-                let score = self.score(candidate);
+                let score = self.score(candidate)?;
                 Ok((score > best_score).then_some(SmoothingTrial {
                     score,
                     point: candidate,
@@ -137,7 +155,8 @@ mod tests {
         };
         let metric = crate::cdt::volume_quality::PreparedJacobian::new(
             MetricTensor3::isotropic_length_m(1.).unwrap(),
-        );
+        )
+        .unwrap();
         let kernel = VisibilityKernel {
             faces: vec![
                 BoundaryFace {

@@ -18,3 +18,4 @@ pub(super) use generate::{discretize_edge, discretize_edge_with_parameters};
 pub(super) use math::{
     average_metric, metric_length, normalize, point_segment_distance, sub, tangent_angle,
 };
+pub(super) use pcurves::face_uses_for_parameters;

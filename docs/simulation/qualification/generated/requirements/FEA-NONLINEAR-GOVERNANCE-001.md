@@ -1,6 +1,6 @@
 # FEA-NONLINEAR-GOVERNANCE-001: Converged nonlinear states, supported laws and independent qualification
 
-0 PASS, 2 PARTIAL, 0 FAIL, 48 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 3 PARTIAL, 0 FAIL, 47 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## operator_constitutive_contact
 
@@ -25,7 +25,7 @@ Evidence kind: AccuracyAcceptance. Criterion: Validate contact as a nonlinear in
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| nonlinear_structural | tet4 | numerical_kernel | OPEN |  |
+| nonlinear_structural | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-execution[lib]::tests::accuracy_plan_binding_tests::nonlinear_accuracy_context_binds_the_authored_accuracy_plan` (crates/runmat-analysis/execution/src/tests/accuracy_plan_binding.rs:46) - The nonlinear accuracy source context accepts a completed block only under the authored accuracy plan and rejects a re-identified plan or loosened criterion; co...<br>`runmat-analysis-fea[lib]::execution::nonlinear_solid::tests::default_nonlinear_plan_is_decided_by_achieved_tangent_solve_residuals` (crates/runmat-analysis/fea/src/execution/nonlinear_solid/tests.rs:205) - The default structural-nonlinear accuracy plan (mandatory algebraic global-equilibrium residual bound) is decided by the achieved tangent-solve residual the rec... |
 | nonlinear_structural | tet10 | numerical_kernel | OPEN |  |
 | nonlinear_structural | tet4 | public_study | OPEN |  |
 | nonlinear_structural | tet10 | public_study | OPEN |  |

@@ -26,6 +26,29 @@ impl AnalysisKernel for SerialStructuralAnalysisKernel {
             )),
         }
     }
+
+    fn execute_with_capacity<'a>(
+        &'a self,
+        invocation: AnalysisKernelInvocation<'a>,
+        capacity: &'a dyn AsyncCapacityOwner,
+    ) -> AnalysisKernelFuture<'a> {
+        Box::pin(async move {
+            match invocation.kind {
+                AnalysisWorkKind::Solve => {
+                    structural_linear::execute_with_capacity(invocation, Some(capacity)).await
+                }
+                _ => self.execute(invocation),
+            }
+        })
+    }
+
+    fn execute_reserved_with_capacity<'a>(
+        &'a self,
+        invocation: ReservedAnalysisKernelInvocation<'a>,
+        capacity: &'a dyn AsyncCapacityOwner,
+    ) -> AnalysisKernelFuture<'a> {
+        self.execute_with_capacity(invocation.into_invocation(), capacity)
+    }
 }
 #[doc(hidden)]
 pub fn execute_structural_linear_kernel(
@@ -86,4 +109,7 @@ fn constraint_plan_manifest_identity(
 }
 
 mod host;
-pub use host::{execute_serial_structural_sequence, SerialAnalysisHost};
+pub use host::{
+    execute_serial_structural_sequence, execute_serial_structural_sequence_with_capacity,
+    SerialAnalysisHost, SerialAnalysisServices,
+};

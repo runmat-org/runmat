@@ -95,13 +95,6 @@ impl FeaRunAdmission for ResourceBoundHost {
         if remaining == 0 {
             return Err(super::FeaRunDenied::LeaseExpired);
         }
-        let held_ceiling = u64::try_from(
-            remaining
-                .checked_mul(u128::from(request.allocated_cpu_millicores))
-                .ok_or(super::FeaRunDenied::LicenseInvalid)?
-                .div_ceil(1000),
-        )
-        .map_err(|_| super::FeaRunDenied::LicenseInvalid)?;
         let permit = self
             .provider
             .as_ref()
@@ -110,7 +103,6 @@ impl FeaRunAdmission for ResourceBoundHost {
         Ok(Box::new(ResourceBoundPermit {
             permit,
             deadline_unix_millis: self.deadline_unix_millis,
-            held_ceiling,
         }))
     }
     fn allocated_cpu_capacity_millicores(&self) -> Option<u64> {
@@ -139,13 +131,11 @@ impl FeaRunAdmission for ResourceBoundHost {
 struct ResourceBoundPermit {
     permit: Box<dyn super::FeaRunPermit>,
     deadline_unix_millis: u64,
-    held_ceiling: u64,
 }
 impl ResourceBoundPermit {
     fn clamp(&self, mut budget: super::FeaRunBudget) -> super::FeaRunBudget {
         budget.expires_at_unix_millis =
             budget.expires_at_unix_millis.min(self.deadline_unix_millis);
-        budget.held_core_millis = budget.held_core_millis.min(self.held_ceiling);
         budget
     }
 }
@@ -155,7 +145,7 @@ impl super::FeaRunPermit for ResourceBoundPermit {
     }
     fn heartbeat(
         &self,
-        usage: &runmat_execution::resource::ResourceUsage,
+        usage: &super::FeaRunUsage,
     ) -> Result<super::FeaRunBudget, super::FeaRunDenied> {
         let budget = self.clamp(self.permit.heartbeat(usage)?);
         budget.validate()?;
@@ -164,9 +154,18 @@ impl super::FeaRunPermit for ResourceBoundPermit {
     fn settle(
         self: Box<Self>,
         outcome: super::FeaRunOutcome,
-        usage: &runmat_execution::resource::ResourceUsage,
+        usage: &super::FeaRunUsage,
     ) -> Result<(), super::FeaRunDenied> {
         self.permit.settle(outcome, usage)
+    }
+    fn request_grant(
+        &self,
+        usage: &super::FeaRunUsage,
+        required: runmat_simulation_usage::OperationCount,
+    ) -> Result<super::FeaRunBudget, super::FeaRunDenied> {
+        let budget = self.clamp(self.permit.request_grant(usage, required)?);
+        budget.validate()?;
+        Ok(budget)
     }
 }
 

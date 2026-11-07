@@ -16,7 +16,7 @@ pub(super) fn analyze<T: FactorScalar>(
 ) -> SolverResult<SymbolicFactorization> {
     let (columns, transposed) = matrix.as_columns();
     let symbolic = factorize_symbolic_lu(columns.faer_symbolic(), Default::default())?;
-    let estimate = nominal_estimate::<T>(matrix, &symbolic)?;
+    let (estimate, reference) = nominal_estimate::<T>(matrix, &symbolic)?;
     Ok(SymbolicFactorization {
         kind: FactorKind::Lu,
         workspace: options.workspace,
@@ -25,17 +25,24 @@ pub(super) fn analyze<T: FactorScalar>(
         estimate,
         scalar_bytes: std::mem::size_of::<T>(),
         complex: T::IS_COMPLEX,
-        inner: SymbolicInner::Lu(symbolic),
+        inner: SymbolicInner::Lu {
+            symbolic,
+            reference,
+        },
     })
 }
 
 /// LU fill depends on pivoting; quote twice the Cholesky fill of the symmetrized pattern under
 /// minimum degree (exact for structurally symmetric matrices pivoting on the diagonal, and a
-/// documented nominal figure otherwise).
+/// documented nominal figure otherwise). The same symmetrized fill fixes the LU reference
+/// schedule used for simulation-work metering.
 fn nominal_estimate<T: FactorScalar>(
     matrix: SparseInput<'_, T>,
     symbolic: &SymbolicLu<usize>,
-) -> SolverResult<FactorEstimate> {
+) -> SolverResult<(
+    FactorEstimate,
+    Result<super::DirectReferenceWork, super::ReferenceWorkError>,
+)> {
     let (columns, _) = matrix.as_columns();
     let n = columns.ncols();
     let graph = crate::ordering::Graph::from_matrix(columns.as_transpose_csr());
@@ -66,6 +73,10 @@ fn nominal_estimate<T: FactorScalar>(
         faer::sparse::linalg::cholesky::SymmetricOrdering::Amd,
         Default::default(),
     )?;
+    let reference = super::reference_work::general_columns(
+        super::reference_work::cholesky_column_heights(&cholesky),
+        T::IS_COMPLEX,
+    );
     let entries = 2 * cholesky.len_val() as u64;
     let scalar = std::mem::size_of::<T>() as u64;
     let par = par::faer_par();
@@ -76,19 +87,20 @@ fn nominal_estimate<T: FactorScalar>(
         let est = cholesky.len_val() as f64;
         est * est / n.max(1) as f64
     };
-    Ok(FactorEstimate {
+    let estimate = FactorEstimate {
         dimension: n,
         factor_entries: entries,
         factor_bytes: entries * (scalar + 8) + (n as u64) * 64,
         workspace_bytes: workspace,
         flops: 2.0 * lower_flops * if T::IS_COMPLEX { 4.0 } else { 1.0 },
         nominal: true,
-    })
+    };
+    Ok((estimate, reference))
 }
 
 fn symbolic_of(symbolic: &SymbolicFactorization) -> &SymbolicLu<usize> {
     match &symbolic.inner {
-        SymbolicInner::Lu(inner) => inner,
+        SymbolicInner::Lu { symbolic, .. } => symbolic,
         SymbolicInner::Cholesky(_) => unreachable!("LU on a symmetric analysis"),
     }
 }

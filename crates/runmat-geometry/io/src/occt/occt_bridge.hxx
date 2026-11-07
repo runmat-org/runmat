@@ -7,6 +7,13 @@
 namespace runmat_geometry_io {
 namespace occt_backend {
 
+// Largest curve/pcurve gap, in metres, that import admits as representation noise of exported
+// CAD and records by raising the edge's tolerance (see admit_measured_edge_tolerances). It also
+// bounds how far, in 3D, an evaluated pcurve may run past its face's trimmed parameter domain
+// before evaluation clamps it (incidence validation still holds the clamped point to the edge
+// tolerance). 1 um is a hundredth of a 0.1 mm mesh chordal deviation.
+inline constexpr double kAdmissibleEdgeGapM = 1.0e-6;
+
 enum class OcctCadFormat : std::uint8_t;
 enum class OcctFeatureKind : std::uint8_t;
 enum class OcctFeatureEntityKind : std::uint8_t;

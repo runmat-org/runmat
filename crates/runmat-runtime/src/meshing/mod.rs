@@ -37,11 +37,33 @@ pub struct MeshingExecutionOutput {
 }
 
 #[derive(Debug, thiserror::Error)]
+pub enum MeshingExecutionProviderError {
+    #[error("meshing stage failed: {0}")]
+    Failure(#[source] Box<runmat_meshing_core::MeshingFailure>),
+    #[error("meshing host failed: {0}")]
+    Host(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("{0}")]
+    Message(String),
+}
+
+impl From<String> for MeshingExecutionProviderError {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
+
+impl From<&str> for MeshingExecutionProviderError {
+    fn from(message: &str) -> Self {
+        Self::Message(message.into())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
 pub enum MeshingExecutionError {
     #[error("{0}")]
     Admission(#[from] crate::analysis::fea_run_admission::FeaRunDenied),
     #[error("{0}")]
-    Provider(String),
+    Provider(#[from] MeshingExecutionProviderError),
     #[error("{primary}")]
     WithLeaseFailure {
         primary: Box<MeshingExecutionError>,
@@ -66,7 +88,9 @@ impl MeshingExecutionError {
 }
 
 pub type MeshingExecutionProvider = Arc<
-    dyn Fn(&MeshingExecutionRequest) -> Result<MeshingExecutionOutput, String>
+    dyn Fn(
+            &MeshingExecutionRequest,
+        ) -> Result<MeshingExecutionOutput, MeshingExecutionProviderError>
         + Send
         + Sync
         + 'static,
@@ -111,7 +135,11 @@ pub async fn execute_meshing_async(
             output
                 .evidence
                 .validate(&output.artifact)
-                .map_err(|error| MeshingExecutionError::Provider(error.to_string()))?;
+                .map_err(|error| {
+                    MeshingExecutionError::Provider(MeshingExecutionProviderError::Message(
+                        error.to_string(),
+                    ))
+                })?;
             Ok(output)
         })
         .await;
@@ -124,9 +152,9 @@ pub async fn execute_meshing_async(
     let result = checked
         .map_err(|failure| match failure {
             FeaRunExecutionError::Denied(denied) => MeshingExecutionError::Admission(denied),
-            FeaRunExecutionError::Cancelled => {
-                MeshingExecutionError::Provider("FEA run cancelled.".into())
-            }
+            FeaRunExecutionError::Cancelled => MeshingExecutionError::Provider(
+                MeshingExecutionProviderError::Message("FEA run cancelled.".into()),
+            ),
         })
         .and_then(|result| result);
     MeshingExecutionError::merge_lease(result, scope.settle(outcome).err())
@@ -198,13 +226,13 @@ pub fn execute_meshing(
 
 fn execute_meshing_admitted(
     request: &MeshingExecutionRequest,
-) -> Result<MeshingExecutionOutput, String> {
+) -> Result<MeshingExecutionOutput, MeshingExecutionProviderError> {
     let provider = provider_slot()
         .read()
-        .map_err(|_| "meshing execution provider lock poisoned".to_string())?
+        .map_err(|_| MeshingExecutionProviderError::Message("meshing execution provider lock poisoned".into()))?
         .clone()
         .ok_or_else(|| {
-            "this host cannot execute meshing; use a native RunMat host or configure compatible execution capacity".to_string()
+            MeshingExecutionProviderError::Message("this host cannot execute meshing; use a native RunMat host or configure compatible execution capacity".into())
         })?;
     provider(request)
 }

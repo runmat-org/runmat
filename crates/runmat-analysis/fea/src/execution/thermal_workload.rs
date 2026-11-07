@@ -16,8 +16,9 @@ mod source_identity;
 mod state_profiles;
 #[cfg(test)]
 mod validation_tests;
-pub(crate) const LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+/// Run data (it carries element heat sources): the platform ceiling, with the run's admitted
+/// budget governing the size where the workload is produced.
+pub(crate) const LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 
 /// Placement and solver mesh are separate from authored numerical intent. This local numerical
 /// entry is not a scheduler admission, a distributed solve, or a production qualification.

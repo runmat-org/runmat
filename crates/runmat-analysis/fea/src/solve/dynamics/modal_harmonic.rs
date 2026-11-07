@@ -29,6 +29,8 @@ pub enum ModalHarmonicError {
     Singular,
     #[error("modal harmonic solve was cancelled")]
     Cancelled,
+    #[error("modal harmonic numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
 }
 
 /// Solve `(K - omega^2 M + i omega C) q = f` without discarding modal coupling.
@@ -121,6 +123,7 @@ fn solve_operators(
             }
             super::dense::DenseSolveError::NonFinite => ModalHarmonicError::NonFinite,
             super::dense::DenseSolveError::Singular => ModalHarmonicError::Singular,
+            super::dense::DenseSolveError::Usage(error) => ModalHarmonicError::Usage(error),
         })?;
     let displacement_real = solution[..size].to_vec();
     let displacement_imaginary = solution[size..].to_vec();

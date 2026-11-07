@@ -445,6 +445,7 @@ pub use geometry_export::{
     measure_geometry_scene_observation, render_geometry_observation_snapshot,
     render_geometry_scene_observation_snapshot, render_geometry_scene_snapshot,
     render_geometry_scene_snapshot_with_camera_state,
+    render_geometry_scene_snapshot_with_camera_state_scaled,
 };
 
 #[cfg(feature = "plot-core")]

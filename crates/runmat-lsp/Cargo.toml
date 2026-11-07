@@ -1,6 +1,6 @@
 [package]
 name = "runmat-lsp"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 description = "Language Server Protocol implementation for RunMat editors and tooling"
 license-file = "../../LICENSE.md"
@@ -32,9 +32,9 @@ runmat-lexer = { workspace = true }
 runmat-design-syntax = { workspace = true }
 # The design compilers: `.part`, `.assembly`, `.drawing`, `.circuit` and `.circuit.layout` diagnostics,
 # hover values and completion come from their front ends and regeneration.
-runmat-cad = { path = "../runmat-cad", version = "=0.6.2" }
-runmat-circuit = { path = "../runmat-circuit", version = "=0.6.2" }
-runmat-design-tools = { path = "../runmat-design-tools", version = "=0.6.2", default-features = false }
+runmat-cad = { path = "../runmat-cad", version = "=0.7.0" }
+runmat-circuit = { path = "../runmat-circuit", version = "=0.7.0" }
+runmat-design-tools = { path = "../runmat-design-tools", version = "=0.7.0", default-features = false }
 runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
 runmat-package = { workspace = true }

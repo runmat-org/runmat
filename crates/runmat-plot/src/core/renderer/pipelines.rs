@@ -454,12 +454,14 @@ impl WgpuRenderer {
             })
     }
 
-    /// Create triangle rendering pipeline
+    /// Create triangle rendering pipeline. Without depth writes it draws blended surfaces
+    /// after opaque ones (see [`Self::pipeline_for`]).
     pub(super) fn create_triangle_pipeline(
         &self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        depth_write_enabled: bool,
     ) -> wgpu::RenderPipeline {
-        self.create_triangle_pipeline_variant(emission, false)
+        self.create_triangle_pipeline_variant(emission, false, depth_write_enabled)
     }
 
     pub(super) fn create_grid_plane_pipeline(

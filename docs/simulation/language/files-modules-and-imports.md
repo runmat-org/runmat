@@ -1,4 +1,4 @@
-# Files, modules, and imports
+# Files, modules and imports
 
 Each `.fea` file is a module. A module may declare several geometries, meshes, materials, models,
 studies, sweeps, and execution policies. There is no one-study-per-file rule and no file-wide

@@ -61,7 +61,9 @@ pub(crate) use schedule::{
 };
 pub(crate) use state::SecondOrderState;
 
-pub(crate) fn rebuild_transient_balance(result: &mut TransientSolveResult) -> Result<(), String> {
+pub(crate) fn rebuild_transient_balance(
+    result: &mut TransientSolveResult,
+) -> Result<(), TransientSolveError<crate::contracts::FeaRunError>> {
     let snapshot_count = result.time_points_s.len();
     if snapshot_count == 0
         || result.displacement_snapshots.len() != snapshot_count
@@ -70,7 +72,10 @@ pub(crate) fn rebuild_transient_balance(result: &mut TransientSolveResult) -> Re
         || result.assembly_snapshots.len() != snapshot_count
         || result.accepted_time_steps_s.len() + 1 != snapshot_count
     {
-        return Err("transient balance reconstruction inputs have inconsistent lengths".into());
+        return Err(balance::DynamicBalanceError::InvalidHistory(
+            "transient balance reconstruction inputs have inconsistent lengths".into(),
+        )
+        .into_transient_solve());
     }
     let states = (0..snapshot_count)
         .map(|index| {
@@ -79,18 +84,27 @@ pub(crate) fn rebuild_transient_balance(result: &mut TransientSolveResult) -> Re
                 result.velocity_snapshots[index].clone(),
                 result.acceleration_snapshots[index].clone(),
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| {
+                balance::DynamicBalanceError::InvalidHistory(error.to_string())
+                    .into_transient_solve()
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     let mut history = TransientBalanceHistory::start(&result.assembly_snapshots[0], &states[0])
-        .map_err(|error| error.to_string())?;
+        .map_err(balance::DynamicBalanceError::into_transient_solve)?;
     for (index, published_state) in states.iter().enumerate().skip(1) {
-        let interval = result
-            .integration_intervals
-            .get(index - 1)
-            .ok_or_else(|| "transient integration interval history is incomplete".to_string())?;
-        let integration_start_state = interval.start_state()?;
-        let integration_end_state = interval.end_state()?;
+        let interval = result.integration_intervals.get(index - 1).ok_or_else(|| {
+            balance::DynamicBalanceError::InvalidHistory(
+                "transient integration interval history is incomplete".into(),
+            )
+            .into_transient_solve()
+        })?;
+        let integration_start_state = interval.start_state().map_err(|error| {
+            balance::DynamicBalanceError::InvalidHistory(error).into_transient_solve()
+        })?;
+        let integration_end_state = interval.end_state().map_err(|error| {
+            balance::DynamicBalanceError::InvalidHistory(error).into_transient_solve()
+        })?;
         history
             .push_step(TransientBalanceStep {
                 integration_start_summary: &interval.start_summary,
@@ -101,7 +115,7 @@ pub(crate) fn rebuild_transient_balance(result: &mut TransientSolveResult) -> Re
                 published_state,
                 time_step_s: result.accepted_time_steps_s[index - 1],
             })
-            .map_err(|error| error.to_string())?;
+            .map_err(balance::DynamicBalanceError::into_transient_solve)?;
     }
     result.reaction_snapshots = history.reaction_snapshots().to_vec();
     result.strain_energy_snapshots = history.strain_energy_j().to_vec();
@@ -251,6 +265,14 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
     let schedule =
         canonical_transient_schedule(interval_count, start_time_s, end_time_s, step_boundaries)
             .map_err(|detail| TransientSolveError::Schedule { detail })?;
+    let mut typed_physical_state =
+        |time_s, approach, summary: &AssemblySummary, state: &SecondOrderState| {
+            map_physical_state(time_s, approach, summary, state).map_err(|error| {
+                TransientSolveError::PhysicalMapping {
+                    detail: error.to_string(),
+                }
+            })
+        };
     let (initial, block) = solve_complete(
         advance::TransientAdvanceContext {
             initial_summary: summary,
@@ -264,7 +286,7 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
             velocity: initial_velocity,
         },
         &mut assembly_at,
-        &mut map_physical_state,
+        &mut typed_physical_state,
     )?;
     let total_steps = block.samples.len();
     emit_phase(

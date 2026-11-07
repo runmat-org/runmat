@@ -13,7 +13,7 @@ use std::borrow::Cow;
 pub(crate) const PREFIX: &[u8] = b"runmat-meshing-indexed-face-partition/v2\0";
 const DOMAIN: &str = "exact-face-partition-result/indexed-v2";
 const DEFAULT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(256 * 1024 * 1024, 10_000_000, 1024 * 1024, 64);
+    CanonicalLimits::platform_content(1024 * 1024, 64);
 
 pub struct PartitionEncoding<'a> {
     schema_version: u16,

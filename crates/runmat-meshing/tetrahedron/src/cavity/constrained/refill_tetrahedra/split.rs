@@ -129,13 +129,18 @@ pub fn split_refill_tetrahedra_across_shared_face_at_barycentric(
             let points = child_node_ids.map(|node_id| split_node_map[&node_id]);
             match raw_refill_tetrahedron_with_rejection_reason(child_node_ids, points, options) {
                 Ok(child) => split_tetrahedra.push(child),
-                Err(reason) => {
+                Err(RefillTetrahedronError::Rejected(reason)) => {
                     return Err(
                         ConstrainedCavityRefillTetrahedronSplitError::RejectedChildTetrahedron {
                             node_ids: child_node_ids,
                             reason,
                         },
                     );
+                }
+                Err(RefillTetrahedronError::Accounting(error)) => {
+                    return Err(ConstrainedCavityRefillTetrahedronSplitError::Accounting(
+                        error,
+                    ));
                 }
             }
         }

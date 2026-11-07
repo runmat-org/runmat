@@ -40,7 +40,17 @@ pub(super) fn choose(
     Err(error(
         DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
         Some(context.constraint_index),
-        "no representable off-centre split clears both child diametral spheres",
+        format!(
+            "no representable off-centre split clears both child diametral spheres: segment \
+             {:?}-{:?}, interval {:?}-{:?}, witness {:?} ({:?}), hints {preferred:?}, radial \
+             origin {radial_origin:?}",
+            context.first_coordinates,
+            context.last_coordinates,
+            endpoints[0].coordinates_m.canonical_value(),
+            endpoints[1].coordinates_m.canonical_value(),
+            witness.coordinates_m.canonical_value(),
+            witness.construction,
+        ),
     ))
 }
 

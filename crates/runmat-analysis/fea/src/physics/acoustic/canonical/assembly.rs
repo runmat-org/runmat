@@ -164,6 +164,8 @@ impl AcousticAssembly {
         )
         .map_err(|error| match error {
             ElementAssemblyError::Element { error, .. } => error,
+            ElementAssemblyError::Admission(error) => error,
+            ElementAssemblyError::Accounting(error) => AcousticHarmonicError::Accounting(error),
             other => AcousticHarmonicError::Operator(other.to_string()),
         })?;
         let mut matrices = assembled.matrices.into_iter();

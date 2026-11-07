@@ -1,6 +1,7 @@
 //! Small-strain canonical-solid equilibrium. Trial point histories are never committed
 //! by an iteration or a rejected line-search/cutback candidate.
 use runmat_execution::Digest;
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use thiserror::Error;
 
 use crate::{
@@ -43,6 +44,8 @@ pub(crate) enum SolidNewtonError {
     General(#[from] crate::solve::general::GeneralSolveError),
     #[error("canonical solid Newton cancelled")]
     Cancelled,
+    #[error("simulation usage admission failed: {0}")]
+    Usage(#[from] LedgerError),
     #[error(
         "canonical solid increment at factor {factor} failed after {cutbacks} cutbacks: {reason}"
     )]
@@ -106,6 +109,7 @@ impl SolidNewtonProblem<'_> {
     ) -> Result<NonlinearSolidEvaluation, SolidNewtonError> {
         self.basis.evaluate(u, committed).map_err(|e| match e {
             NonlinearSolidError::Cancelled => SolidNewtonError::Cancelled,
+            NonlinearSolidError::Accounting(error) => SolidNewtonError::Usage(error),
             other => SolidNewtonError::Evaluation(other.to_string()),
         })
     }
@@ -115,21 +119,38 @@ impl SolidNewtonProblem<'_> {
         evaluation: &NonlinearSolidEvaluation,
         factor: f64,
     ) -> Result<Vec<f64>, SolidNewtonError> {
-        let full = evaluation
-            .internal_force
-            .iter()
-            .zip(self.physical_force)
-            .map(|(internal, force)| internal - factor * force)
-            .collect::<Vec<_>>();
+        let full = measured_solid(
+            || {
+                solid_count(
+                    evaluation
+                        .internal_force
+                        .len()
+                        .min(self.physical_force.len()),
+                    2,
+                )
+            },
+            || {
+                Ok(evaluation
+                    .internal_force
+                    .iter()
+                    .zip(self.physical_force)
+                    .map(|(internal, force)| internal - factor * force)
+                    .collect::<Vec<_>>())
+            },
+        )?;
         if full.iter().any(|v| !v.is_finite()) {
             return Err(SolidNewtonError::Evaluation(
                 "physical residual overflow".into(),
             ));
         }
-        let reduced = self
-            .reduction
-            .transpose_apply(&full)
-            .map_err(constraint_error)?;
+        let reduced = measured_solid(
+            || solid_count(self.reduction.recovery_coefficients.len(), 2),
+            || {
+                self.reduction
+                    .transpose_apply(&full)
+                    .map_err(constraint_error)
+            },
+        )?;
         if reduced.iter().any(|v| !v.is_finite()) {
             return Err(SolidNewtonError::Evaluation(
                 "reduced residual overflow".into(),
@@ -137,6 +158,24 @@ impl SolidNewtonProblem<'_> {
         }
         Ok(reduced)
     }
+}
+
+fn solid_count(elements: usize, per_element: u64) -> Result<OperationCount, LedgerError> {
+    OperationCount::from_operations(
+        u64::try_from(elements).map_err(|_| LedgerError::CountOverflow)?,
+    )
+    .checked_mul(per_element)
+    .map_err(LedgerError::from)
+}
+
+fn measured_solid<R>(
+    quote: impl FnOnce() -> Result<OperationCount, LedgerError>,
+    run: impl FnOnce() -> Result<R, SolidNewtonError>,
+) -> Result<R, SolidNewtonError> {
+    if UsageContext::capture().is_none() {
+        return run();
+    }
+    crate::algebra::capacity::measured_sync(UsageCategory::Solve, quote()?, run)
 }
 
 fn constraint_error(error: impl std::fmt::Display) -> SolidNewtonError {

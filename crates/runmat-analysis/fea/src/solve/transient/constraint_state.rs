@@ -1,10 +1,12 @@
 use crate::{
     assembly::AssemblySummary,
     constraints::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix},
+    solve::affine::affine_expand_work,
 };
 
 use super::{
-    effective_solve::EffectiveDynamicsSolveError,
+    effective_solve::{measured, measured_affine, EffectiveDynamicsSolveError},
+    newmark::count,
     state::{SecondOrderState, SecondOrderStateError},
 };
 
@@ -25,9 +27,7 @@ pub(super) fn canonicalize_homogeneous_solution(
             .iter()
             .map(|dof| solution[*dof])
             .collect::<Vec<_>>();
-        *solution = reduction
-            .expand_linear(&independent)
-            .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?;
+        *solution = expand_homogeneous_solution(&reduction, &independent)?;
     } else {
         for (value, constrained) in solution.iter_mut().zip(summary.operator.constrained_dofs()) {
             if *constrained {
@@ -36,6 +36,27 @@ pub(super) fn canonicalize_homogeneous_solution(
         }
     }
     Ok(())
+}
+
+pub(super) fn expand_homogeneous_solution(
+    reduction: &AffineConstraintReduction,
+    independent: &[f64],
+) -> Result<Vec<f64>, EffectiveDynamicsSolveError> {
+    measured_affine(
+        || {
+            affine_expand_work(reduction, None)?
+                .checked_add(
+                    count(reduction.full_dof_count, 1)
+                        .map_err(crate::algebra::ScopedSpmvError::Usage)?,
+                )
+                .map_err(|error| crate::algebra::ScopedSpmvError::Usage(error.into()))
+        },
+        || {
+            reduction
+                .expand_linear(independent)
+                .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)
+        },
+    )
 }
 
 pub(super) fn homogeneous_constraints(
@@ -166,10 +187,17 @@ pub(super) fn project_vector(
     full: &[f64],
 ) -> Result<Vec<f64>, EffectiveDynamicsSolveError> {
     if let Some(matrix) = summary.constraint_matrix.as_ref() {
-        return matrix
+        let reduction = matrix
             .affine_reduction()
-            .and_then(|reduction| reduction.transpose_apply(full))
-            .map_err(EffectiveDynamicsSolveError::InvalidConstraintState);
+            .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?;
+        return measured(
+            || count(reduction.recovery_coefficients.len(), 2),
+            || {
+                reduction
+                    .transpose_apply(full)
+                    .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)
+            },
+        );
     }
     Ok(full
         .iter()

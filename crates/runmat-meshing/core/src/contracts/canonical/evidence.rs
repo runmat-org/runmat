@@ -274,19 +274,48 @@ pub struct MeshingResourceUsage {
 
 impl MeshingResourceUsage {
     fn validate_against(&self, budget: &MeshingResourceBudget) -> Result<(), MeshingContractError> {
-        if self.generated_nodes > budget.maximum_nodes
-            || self.generated_elements > budget.maximum_elements
-            || self.peak_memory_bytes > budget.maximum_memory_bytes
-            || self.peak_scratch_bytes > budget.maximum_scratch_bytes
-            || self.wall_time_ms > budget.maximum_wall_time_ms
-            || self.artifact_bytes > budget.maximum_artifact_bytes
-            || self.search_work > budget.maximum_search_work
-            || self.maximum_recursion_depth > budget.maximum_recursion_depth
-            || self.iterations > budget.maximum_iterations
-        {
+        let exceeded = [
+            ("nodes", self.generated_nodes, budget.maximum_nodes),
+            ("elements", self.generated_elements, budget.maximum_elements),
+            (
+                "memory_bytes",
+                self.peak_memory_bytes,
+                budget.maximum_memory_bytes,
+            ),
+            (
+                "scratch_bytes",
+                self.peak_scratch_bytes,
+                budget.maximum_scratch_bytes,
+            ),
+            (
+                "wall_time_ms",
+                self.wall_time_ms,
+                budget.maximum_wall_time_ms,
+            ),
+            (
+                "artifact_bytes",
+                self.artifact_bytes,
+                budget.maximum_artifact_bytes,
+            ),
+            ("search_work", self.search_work, budget.maximum_search_work),
+            (
+                "recursion_depth",
+                u64::from(self.maximum_recursion_depth),
+                u64::from(budget.maximum_recursion_depth),
+            ),
+            ("iterations", self.iterations, budget.maximum_iterations),
+        ]
+        .into_iter()
+        .filter(|(_, used, limit)| used > limit)
+        .map(|(name, used, limit)| format!("{name} {used} > {limit}"))
+        .collect::<Vec<_>>();
+        if !exceeded.is_empty() {
             return Err(MeshingContractError::invalid(
                 "meshing resource usage",
-                "successful evidence exceeds a resolved hard budget",
+                format!(
+                    "successful evidence exceeds a resolved hard budget: {}",
+                    exceeded.join(", ")
+                ),
             ));
         }
         Ok(())

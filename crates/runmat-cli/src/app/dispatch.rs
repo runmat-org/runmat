@@ -248,12 +248,29 @@ async fn execute_command(
             case,
             views,
             out,
+            presentation,
         } => {
-            boxed_command(|| fea::snapshot(file, study, step, case, views, out, cli, config)).await
+            boxed_command(|| {
+                fea::snapshot(
+                    file,
+                    study,
+                    step,
+                    case,
+                    views,
+                    out,
+                    presentation,
+                    cli,
+                    config,
+                )
+            })
+            .await
         }
-        Commands::RenderSnapshot { snapshot, out } => {
-            boxed_command(|| fea::render_snapshot(snapshot, out)).await
-        }
+        Commands::RenderSnapshot {
+            snapshot,
+            out,
+            views,
+            presentation,
+        } => boxed_command(|| fea::render_snapshot(snapshot, out, views, presentation)).await,
         Commands::VerifySnapshot { snapshot, out } => fea::verify_snapshot(snapshot, out),
         Commands::Reassess {
             file,

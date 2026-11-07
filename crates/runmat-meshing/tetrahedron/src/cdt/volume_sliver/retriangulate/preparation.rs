@@ -36,7 +36,13 @@ pub(super) fn prepare<'a>(
         .next()
         .expect("one region was established");
 
-    let (cavity_tetrahedra, local_selected) = local_cavity_inventory(topology, &selected);
+    let (cavity_tetrahedra, local_selected) =
+        local_cavity_inventory(topology, &selected).map_err(|cause| {
+            error(
+                DelaunayVolumeSliverErrorKind::Accounting(cause),
+                "vertex-star numerical accounting failed",
+            )
+        })?;
     let cavity = match constrained_cavity_from_selected_tetrahedra(
         &cavity_tetrahedra,
         &local_selected,
@@ -94,7 +100,7 @@ pub(super) fn prepare<'a>(
 fn local_cavity_inventory(
     topology: &DelaunayVolumeTopology,
     selected: &[usize],
-) -> (Vec<CavityTetrahedron>, Vec<usize>) {
+) -> Result<(Vec<CavityTetrahedron>, Vec<usize>), runmat_simulation_usage::LedgerError> {
     let inventory = selected
         .iter()
         .copied()
@@ -121,7 +127,7 @@ fn local_cavity_inventory(
                     .coordinates_m
                     .canonical_value()
             });
-            CavityTetrahedron {
+            Ok(CavityTetrahedron {
                 tetrahedron_id: index as u32,
                 component_id: 0,
                 node_ids: tetrahedron.vertex_indices,
@@ -133,11 +139,11 @@ fn local_cavity_inventory(
                     .collect(),
                 volume_m3: tetrahedron_volume(points),
                 aspect_ratio: tetrahedron_edge_aspect_ratio(points),
-                exact_scaled_jacobian: tetrahedron_scaled_jacobian(points),
-            }
+                exact_scaled_jacobian: tetrahedron_scaled_jacobian(points)?,
+            })
         })
-        .collect();
-    (tetrahedra, local_selected)
+        .collect::<Result<Vec<_>, runmat_simulation_usage::LedgerError>>()?;
+    Ok((tetrahedra, local_selected))
 }
 
 #[cfg(test)]

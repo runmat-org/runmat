@@ -355,8 +355,18 @@ fn test_set_view_angles_preserves_distance() {
     camera.set_view_angles_deg(90.0, 0.0);
     let offset = camera.position - camera.target;
     assert!((offset.length() - 2.0).abs() < 1e-5);
-    assert!(offset.x.abs() < 1e-4);
-    assert!((offset.y - 2.0).abs() < 1e-4);
+    assert!((offset.x - 2.0).abs() < 1e-4);
+    assert!(offset.y.abs() < 1e-4);
+}
+
+#[test]
+fn view_angles_follow_matlab_azimuth_convention() {
+    let close = |a: Vec3, b: Vec3| (a - b).length() < 1.0e-5;
+    assert!(close(Camera::view_direction_deg(0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)));
+    assert!(close(Camera::view_direction_deg(90.0, 0.0), Vec3::new(1.0, 0.0, 0.0)));
+    assert!(close(Camera::view_direction_deg(0.0, 90.0), Vec3::Z));
+    let default = Camera::view_direction_deg(-37.5, 30.0);
+    assert!(default.x < 0.0 && default.y < 0.0 && default.z > 0.0);
 }
 
 #[test]

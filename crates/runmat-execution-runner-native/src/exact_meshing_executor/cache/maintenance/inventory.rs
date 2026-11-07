@@ -17,6 +17,7 @@ pub(super) struct Inventory {
     oldest: VecDeque<PathBuf>,
     objects: BTreeMap<String, Object>,
     orphaned: Vec<PathBuf>,
+    abandoned: Vec<PathBuf>,
     bytes: u64,
     index_bytes: u64,
     references: usize,
@@ -33,12 +34,13 @@ impl Inventory {
             oldest: VecDeque::new(),
             objects: BTreeMap::new(),
             orphaned: Vec::new(),
+            abandoned: Vec::new(),
             bytes: 0,
             index_bytes: 0,
             references: 0,
         };
         let mut paths = Vec::new();
-        for path in files(index, check)? {
+        for path in files(index, &mut result.abandoned, check)? {
             check()?;
             let modified = std::fs::metadata(&path)
                 .map_err(error)?
@@ -68,7 +70,7 @@ impl Inventory {
                 check,
             )?;
         }
-        for path in files(objects, check)? {
+        for path in files(objects, &mut result.abandoned, check)? {
             if !result
                 .objects
                 .contains_key(path.file_name().unwrap().to_str().unwrap())
@@ -149,6 +151,20 @@ impl Inventory {
             check()?;
             std::fs::remove_file(path).map_err(error)?;
         }
+        // Each name is unique to one dead writer, so unlinking it cannot race a
+        // live publication; another reclaimer may already have removed it.
+        for path in self.abandoned.drain(..) {
+            check()?;
+            match std::fs::remove_file(&path) {
+                Ok(()) => tracing::info!(
+                    event_code = "meshing.cache.abandoned_publication_reclaimed",
+                    path = %path.display(),
+                    "removed a publication staging file whose writer process has exited"
+                ),
+                Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => {}
+                Err(failure) => return Err(error(failure)),
+            }
+        }
         Ok(())
     }
     pub fn evict_oldest(
@@ -210,8 +226,12 @@ fn add(total: u64, bytes: u64) -> Result<u64, MeshingStageExecutionError> {
         .checked_add(bytes)
         .ok_or_else(|| error("cache byte count overflow"))
 }
+/// Canonical receipts or objects in `root`. Publication staging files left by
+/// a writer that has exited go to `abandoned`; staging files of a writer that
+/// may still run are skipped. Every other name is refused.
 fn files(
     root: &Path,
+    abandoned: &mut Vec<PathBuf>,
     check: &dyn Fn() -> Result<(), MeshingStageExecutionError>,
 ) -> Result<Vec<PathBuf>, MeshingStageExecutionError> {
     let mut result = Vec::new();
@@ -219,17 +239,30 @@ fn files(
         if position.is_multiple_of(128) {
             check()?;
         }
+        if position >= MAXIMUM_REFERENCES.saturating_mul(2) {
+            return Err(error("cache filesystem inventory exceeds lifecycle bound"));
+        }
         let entry = entry.map_err(error)?;
         let name = entry.file_name();
         let name = name
             .to_str()
             .ok_or_else(|| error("cache filename is not an identity"))?;
-        if name.len() != 64
-            || !name
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-            || !entry.file_type().map_err(error)?.is_file()
-        {
+        let regular = entry.file_type().map_err(error)?.is_file();
+        if regular {
+            if let Some(writer) = publication_writer(name) {
+                if writer_has_exited(writer) {
+                    abandoned.push(entry.path());
+                } else {
+                    tracing::info!(
+                        event_code = "meshing.cache.publication_in_progress",
+                        path = %entry.path().display(),
+                        "skipped a publication staging file whose writer may still run"
+                    );
+                }
+                continue;
+            }
+        }
+        if !is_identity(name) || !regular {
             return Err(error(
                 "cache lifecycle encountered a noncanonical object or receipt",
             ));
@@ -240,4 +273,48 @@ fn files(
         result.push(entry.path());
     }
     Ok(result)
+}
+fn is_identity(name: &str) -> bool {
+    name.len() == 64
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+/// The writer pid of a staging file named exactly as
+/// `runmat_filesystem` atomic creation names it:
+/// `.<64 lowercase hex>.publish-<pid>-<lowercase hyphenated UUIDv4>`.
+fn publication_writer(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix('.')?;
+    let (target, rest) = rest.split_at_checked(64)?;
+    let rest = rest.strip_prefix(".publish-")?;
+    let (pid, nonce) = rest.split_once('-')?;
+    if !is_identity(target)
+        || pid.is_empty()
+        || pid.starts_with('0')
+        || !pid.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let pid = pid.parse::<u32>().ok()?;
+    let uuid = uuid::Uuid::try_parse(nonce).ok()?;
+    (uuid.get_version_num() == 4 && uuid.hyphenated().to_string() == nonce).then_some(pid)
+}
+/// True only when no process with `pid` exists. Pid reuse can make an exited
+/// writer look alive, which only delays reclamation; it never makes a running
+/// writer look exited. A reused pid's publisher stages under a fresh UUID name.
+#[cfg(unix)]
+fn writer_has_exited(pid: u32) -> bool {
+    let Ok(raw) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if raw <= 0 || pid == std::process::id() {
+        return false;
+    }
+    // SAFETY: signal 0 performs only the existence and permission check.
+    let result = unsafe { libc::kill(raw, 0) };
+    result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+#[cfg(not(unix))]
+fn writer_has_exited(_pid: u32) -> bool {
+    false
 }

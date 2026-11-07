@@ -109,6 +109,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for MeshingKernelDispa
                 witnesses: Vec::new(),
                 request_values: Vec::new(),
                 achieved_values: Vec::new(),
+                accounting_error: None,
                 remediation: "register a production kernel for this meshing stage shape".into(),
             })),
         }

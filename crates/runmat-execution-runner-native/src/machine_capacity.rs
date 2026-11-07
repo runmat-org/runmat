@@ -25,6 +25,61 @@ pub(crate) fn memory_bytes() -> io::Result<u64> {
     }
 }
 
+/// The memory one process-isolated analysis worker of a local run may use: the run's pool,
+/// less the memory this coordinating process holds now.
+///
+/// `pool_bytes` is the run's admitted capacity, read once when the run was configured
+/// (`NativeExecutionConfig::local_memory_capacity_bytes`). The coordinator keeps its mesh, model
+/// and prepared inputs resident while the worker solves, so the worker cannot also have them.
+/// A run reads this once, after meshing and before planning, and uses the same value for path
+/// selection, the output policy and the worker envelope.
+pub(crate) fn worker_memory_bytes(pool_bytes: u64) -> io::Result<u64> {
+    worker_budget(pool_bytes, process_footprint()?)
+}
+
+fn worker_budget(pool_bytes: u64, coordinator_bytes: u64) -> io::Result<u64> {
+    match pool_bytes.checked_sub(coordinator_bytes) {
+        Some(budget) if budget > 0 => Ok(budget),
+        _ => Err(io::Error::other(format!(
+            "the coordinating process holds {coordinator_bytes} bytes of the run's \
+             {pool_bytes}-byte memory pool; no memory is left for an analysis worker"
+        ))),
+    }
+}
+
+/// Record this process's footprint at a coordinator phase boundary (info level).
+pub(crate) fn trace_footprint(phase: &'static str) {
+    if let Ok((bytes, peak)) = footprint_and_peak() {
+        tracing::info!(
+            phase,
+            footprint_bytes = bytes,
+            peak_footprint_bytes = peak,
+            "coordinator memory"
+        );
+    }
+}
+
+/// This process's physical footprint.
+pub(crate) fn process_footprint() -> io::Result<u64> {
+    footprint_and_peak().map(|(bytes, _)| bytes)
+}
+
+#[cfg(target_os = "macos")]
+fn footprint_and_peak() -> io::Result<(u64, u64)> {
+    macos::process_footprint()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn footprint_and_peak() -> io::Result<(u64, u64)> {
+    let pid = sysinfo::get_current_pid().map_err(io::Error::other)?;
+    let mut system = sysinfo::System::new();
+    system.refresh_process_specifics(pid, sysinfo::ProcessRefreshKind::new().with_memory());
+    system
+        .process(pid)
+        .map(|process| (process.memory(), process.memory()))
+        .ok_or_else(|| io::Error::other("this process's resident memory is not readable"))
+}
+
 /// Execution ceilings for one local meshing run: sized from the memory this host admits for work
 /// (the same authority as publication staging and the thread plan) and from the requested mesh
 /// size. They bound whether the run completes, never what it produces.
@@ -34,8 +89,10 @@ pub fn meshing_execution_ceilings(
     meshing_execution_ceilings_for(memory_bytes().unwrap_or(0), limits)
 }
 
-/// Ceilings for a pool that admits `capacity_bytes` of memory: use the pool's own admitted
-/// capacity (one snapshot) so every task the run submits fits the pool.
+/// Ceilings for a run admitted `capacity_bytes` of memory: the pool's own admitted capacity,
+/// lowered to the run's authored per-worker memory when one is set, so every task the run submits
+/// fits what the run is admitted to use. The run carries no wall-time budget for meshing, so the
+/// wall-time ceiling is unbounded.
 pub fn meshing_execution_ceilings_for(
     capacity_bytes: u64,
     limits: &runmat_meshing_core::MeshingSizeLimits,
@@ -138,6 +195,16 @@ mod tests {
         assert_eq!(usable_memory(2_000, Some(16_000)), 2_000);
         assert_eq!(usable_memory(16_000, None), 16_000);
         assert_eq!(usable_memory(16_000, Some(0)), 0);
+    }
+    #[test]
+    fn a_worker_gets_the_pool_less_what_the_coordinator_holds() {
+        const GB: u64 = 1_000_000_000;
+        assert_eq!(worker_budget(22 * GB, 3 * GB).unwrap(), 19 * GB);
+        assert!(worker_budget(3 * GB, 3 * GB).is_err());
+        assert!(worker_budget(2 * GB, 3 * GB).is_err());
+        assert!(process_footprint().unwrap() > 0);
+        let pool = memory_bytes().unwrap();
+        assert!(worker_memory_bytes(pool).unwrap() < pool);
     }
     #[test]
     fn automatic_and_explicit_study_allocations_share_machine_capacity() {

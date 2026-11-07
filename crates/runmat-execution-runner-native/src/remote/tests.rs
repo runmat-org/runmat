@@ -39,6 +39,8 @@ use super::driver::run_remote_driver;
 
 mod mixed_recovery;
 
+use super::test_ids::{test_driver_lease_id, test_org_id, TEST_ORG_ID};
+
 #[derive(Default)]
 struct FakeState {
     downloads: BTreeMap<String, Vec<u8>>,
@@ -278,10 +280,10 @@ async fn remote_driver_commits_verified_externalized_results() {
         authority: DriverAuthority {
             server_url: "https://control.invalid".into(),
             run_id: run_id.into(),
-            org_id: "org-1".into(),
+            org_id: test_org_id(),
             project_id: "project-1".into(),
             allocation_lease_id: "allocation-1".into(),
-            driver_lease_id: "driver-1".into(),
+            driver_lease_id: test_driver_lease_id(1),
             fencing_token: 1,
             credential: "driver-secret".into(),
         },
@@ -371,10 +373,10 @@ async fn replacement_restores_a_verified_run_scoped_object_closure() {
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: "org-1".into(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
-        driver_lease_id: "driver-2".into(),
+        driver_lease_id: test_driver_lease_id(2),
         fencing_token: 2,
         credential: "credential".into(),
     };
@@ -407,10 +409,10 @@ async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: "org-1".into(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
-        driver_lease_id: "driver-4".into(),
+        driver_lease_id: test_driver_lease_id(4),
         fencing_token: 4,
         credential: "credential".into(),
     };
@@ -935,16 +937,16 @@ async fn run_encrypted_remote_request_with_prior_sequence(
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: "org-1".into(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
-        driver_lease_id: format!("driver-{driver_fence}"),
+        driver_lease_id: test_driver_lease_id(driver_fence),
         fencing_token: driver_fence,
         credential: "driver-secret".into(),
     };
     let prior_checkpoint = prior_checkpoint_sequence.map(|sequence| {
         let prior_authority = DriverAuthority {
-            driver_lease_id: "driver-1".into(),
+            driver_lease_id: test_driver_lease_id(1),
             fencing_token: 1,
             ..authority.clone()
         };
@@ -1158,7 +1160,7 @@ fn endpoint_material(
         entropy,
         EndpointIdentityEvidence {
             schema_version: 1,
-            org_id: "org-1".into(),
+            org_id: TEST_ORG_ID.into(),
             cluster_id: "cluster-1".into(),
             node_id: "node-1".into(),
             allocation_lease_id: "allocation-1".into(),

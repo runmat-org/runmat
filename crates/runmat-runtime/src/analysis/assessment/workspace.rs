@@ -10,6 +10,11 @@ impl Workspace {
             maximum: source.workspace_limit().map_err(store_error)?,
         })
     }
+    /// Bytes one run's evidence may occupy: the captured run allowance when the publication
+    /// supplies one, otherwise the standalone reassessment's explicit limit.
+    pub(super) fn run_artifact_bytes(&self, standalone: u64) -> u64 {
+        self.maximum.unwrap_or(standalone)
+    }
     pub(super) fn admit(&self, inventory: &impl serde::Serialize) -> Result<u64, Error> {
         let Some(maximum) = self.maximum else {
             return Ok(0);

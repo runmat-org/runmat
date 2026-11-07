@@ -2,7 +2,22 @@ use anyhow::Result;
 use serde::Serialize;
 use std::path::Path;
 mod camera;
+mod legend;
+mod presentation;
 mod profiles;
+pub(super) use legend::authored_bound_units;
+pub(super) use presentation::Presentation;
+
+/// What a view's legend is written in terms of: the unit each assessment states its bound in
+/// (by assessment id) and each run's assessment results (by run id).
+#[derive(Default)]
+pub(super) struct LegendTerms {
+    pub display_units: std::collections::BTreeMap<String, String>,
+    pub assessments: std::collections::BTreeMap<
+        String,
+        Vec<runmat_runtime::analysis::assessment::PublishedStudyAssessment>,
+    >,
+}
 pub(super) use profiles::CaptureProfile;
 
 #[derive(Serialize)]
@@ -20,6 +35,10 @@ pub(super) struct View {
     pub deformation_field: Option<String>,
     pub scalar_scale: f64,
     pub unit: String,
+    /// The unit the legend is written in when it differs from `unit`: the one the study's
+    /// assessment of this quantity states its bound in. `minimum` and `maximum` stay in `unit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_unit: Option<String>,
     pub scene: String,
     pub poster: String,
     pub deformation_scale: f64,
@@ -41,6 +60,13 @@ pub(super) struct View {
     /// One camera shared by every view, framed on the union of their bounds; serialized as
     /// the state itself (always set before the views are returned).
     pub initial_camera: Option<runmat_runtime::builtins::plotting::PlotSurfaceCameraState>,
+    /// The scene's title: what the view's result is of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    /// CAD files drawn around the result as translucent context geometry. They show shape
+    /// only; the result covers only the solved mesh.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub context: Vec<presentation::ContextRecord>,
 }
 
 /// A view whose scene is already written: what its poster pass still needs.
@@ -56,8 +82,10 @@ pub(super) struct VolumeView {
 struct Encoded {
     minimum: Option<f64>,
     maximum: Option<f64>,
+    display_unit: Option<String>,
     position_error_m: f64,
     bounds: runmat_plot::core::BoundingBox,
+    result_bounds: runmat_plot::core::BoundingBox,
     bytes: Vec<u8>,
     deformation_scale: f64,
     scalar_scale: f64,
@@ -65,9 +93,60 @@ struct Encoded {
     volume: Option<runmat_runtime::analysis::field_scene::volume::VolumeViewError>,
 }
 
+/// How finely one view is drawn.
+#[derive(Clone, Copy)]
+struct Detail {
+    surface: runmat_runtime::analysis::SurfaceDetail,
+    cap_triangle_budget: usize,
+}
+
+enum Attempt {
+    Fits(Encoded),
+    /// The encoded scene is `required` bytes and the consumer accepts `maximum`; `cap` is the
+    /// section cap drawn (triangles, evaluation grid) for a section view.
+    TooLarge {
+        required: usize,
+        maximum: usize,
+        cap: Option<(usize, usize)>,
+    },
+}
+
+/// The next lighter drawing of a view whose scene is `required` bytes against a `maximum`
+/// budget, or `None` when the view is already at its lightest. A surface view drops to corner
+/// triangles. A section view scales its cap's triangle budget by the share of the payload that
+/// must go (with a 10% margin); bytes outside the cap stay, so the loop repeats until the cap is
+/// one polygon per cut element.
+fn lighter(
+    detail: Detail,
+    volume: bool,
+    required: usize,
+    maximum: usize,
+    cap: Option<(usize, usize)>,
+) -> Option<Detail> {
+    use runmat_runtime::analysis::SurfaceDetail;
+    if !volume {
+        return (detail.surface == SurfaceDetail::Full).then_some(Detail {
+            surface: SurfaceDetail::Corners,
+            ..detail
+        });
+    }
+    let (triangles, subdivisions) = cap?;
+    if subdivisions <= 1 {
+        return None;
+    }
+    let scale = 0.9 * maximum as f64 / required as f64;
+    Some(Detail {
+        cap_triangle_budget: ((triangles as f64 * scale) as usize).min(triangles.saturating_sub(1)),
+        ..detail
+    })
+}
+
 struct Written {
     view: View,
+    /// The whole scene, context geometry included.
     bounds: runmat_plot::core::BoundingBox,
+    /// The result alone.
+    result_bounds: runmat_plot::core::BoundingBox,
 }
 
 /// Mesh coordinates and element corners of one run, kept only while its views are captured.
@@ -79,11 +158,13 @@ type MeshEntities = (Vec<[f64; 3]>, Vec<Vec<usize>>);
 /// Views stream: each scene is built, encoded and written before the next one is built, so
 /// at most one view's geometry is in memory. Posters are drawn in a second pass from the
 /// written scenes (the persisted representation, the same one the live viewer loads) with one
-/// camera framed on the union of every view's bounds.
+/// camera framed on the union of every view's bounds (or of their results alone).
 pub(super) async fn capture(
     output: &Path,
     profile: CaptureProfile,
     solver_mesh: impl Fn(&str) -> Option<String>,
+    presentation: &Presentation,
+    terms: &LegendTerms,
 ) -> Result<Vec<View>> {
     use runmat_runtime::analysis::field_scene::extrema;
     use runmat_runtime::builtins::plotting;
@@ -119,7 +200,7 @@ pub(super) async fn capture(
             })
             .transpose()
             .map_err(anyhow::Error::msg)?;
-        let encode = |detail| -> Result<Encoded> {
+        let encode = |detail: Detail| -> Result<Attempt> {
             let (mut scene, deformation_scale, surface, volume) = match spec.volume {
                 Some(volume) => {
                     let solver_mesh = mesh_path.as_deref().ok_or_else(|| {
@@ -140,6 +221,8 @@ pub(super) async fn capture(
                                 .map(|extrema| (extrema.minimum.value, extrema.maximum.value)),
                             legend: spec.legend.clone(),
                             unit: spec.unit.clone(),
+                            plane: presentation.section,
+                            cap_triangle_budget: detail.cap_triangle_budget,
                         };
                     let (scene, error) =
                         runmat_runtime::analysis::field_scene::volume::build_volume_scene(
@@ -165,13 +248,17 @@ pub(super) async fn capture(
                             // Posters show the deformed body alone; an undeformed overlay drawn
                             // over a shape a few micrometres away only fights it for depth.
                             false,
-                            detail,
+                            detail.surface,
                         )
                         .map_err(anyhow::Error::msg)?;
                     (scene, deformation_scale, Some(surface), None)
                 }
             };
+            let result_bounds = scene.bounds;
+            presentation.dress(&mut scene);
             let mut scalar_scale = 1.0;
+            let mut range = None;
+            let mut display_unit = None;
             if let Some(legend) = scene
                 .overlay
                 .as_mut()
@@ -185,51 +272,101 @@ pub(super) async fn capture(
                     legend.minimum *= scalar_scale;
                     legend.maximum = 1.0;
                 }
+                range = Some((legend.minimum, legend.maximum));
+                if !spec.relative {
+                    display_unit = legend::present(
+                        legend,
+                        &spec.unit,
+                        &terms.display_units,
+                        terms
+                            .assessments
+                            .get(run_id)
+                            .map(Vec::as_slice)
+                            .unwrap_or_default(),
+                    )?;
+                }
             }
-            let legend = scene
-                .overlay
-                .as_ref()
-                .and_then(|overlay| overlay.scalar_legend.as_ref());
-            Ok(Encoded {
-                minimum: legend.map(|legend| legend.minimum),
-                maximum: legend.map(|legend| legend.maximum),
+            let bytes = match plotting::encode_geometry_figure_scene_within(
+                &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
+                presentation.max_scene_bytes,
+            ) {
+                Ok(bytes) => bytes,
+                Err(plotting::GeometrySceneEncodeError::PayloadTooLarge { required, maximum }) => {
+                    return Ok(Attempt::TooLarge {
+                        required,
+                        maximum,
+                        cap: volume
+                            .as_ref()
+                            .and_then(|volume| volume.cap_triangles.zip(volume.cap_subdivisions)),
+                    })
+                }
+                Err(error) => return Err(anyhow::Error::msg(error.to_string())),
+            };
+            Ok(Attempt::Fits(Encoded {
+                minimum: range.map(|range| range.0),
+                maximum: range.map(|range| range.1),
+                display_unit,
                 position_error_m: runmat_plot::event::FigureScene::geometry_position_error_m(
                     &scene,
                 ),
                 bounds: scene.bounds,
-                bytes: plotting::encode_geometry_figure_scene(
-                    &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
-                )?,
+                result_bounds,
+                bytes,
                 deformation_scale,
                 scalar_scale,
                 surface,
                 volume,
-            })
+            }))
         };
-        // A dense quadratic surface can exceed the scene payload limit; it is then drawn with one
-        // triangle per quadratic face, and the view states what that leaves out. Values, legend
-        // and extrema stay those of the full solution.
+        // A scene larger than the consumer's budget (`--max-scene-bytes`) is drawn lighter until
+        // it fits: a dense quadratic surface with one triangle per quadratic face, a section cap
+        // on a coarser evaluation grid (down to one polygon per cut element). The view states
+        // what that leaves out; values, legend and extrema stay those of the full solution.
         use runmat_runtime::analysis::SurfaceDetail;
         let Encoded {
             minimum,
             maximum,
+            display_unit,
             position_error_m,
             bounds,
+            result_bounds,
             bytes,
             deformation_scale,
             scalar_scale,
             surface,
             volume,
-        } = match encode(SurfaceDetail::Full) {
-            Ok(encoded) => encoded,
-            Err(error) if error.to_string().contains("exceeding limit") => {
+        } = {
+            let mut detail = Detail {
+                surface: SurfaceDetail::Full,
+                cap_triangle_budget:
+                    runmat_runtime::analysis::field_scene::volume::DEFAULT_CAP_TRIANGLE_BUDGET,
+            };
+            loop {
+                let (required, maximum, cap) = match encode(detail)? {
+                    Attempt::Fits(encoded) => break encoded,
+                    Attempt::TooLarge {
+                        required,
+                        maximum,
+                        cap,
+                    } => (required, maximum, cap),
+                };
+                detail = match lighter(detail, spec.volume.is_some(), required, maximum, cap) {
+                    Some(lighter) => lighter,
+                    None => anyhow::bail!(
+                        "snapshot view '{}': its lightest scene is {required} bytes and the \
+                         scene budget is {maximum} bytes; raise --max-scene-bytes or select \
+                         other views with --view",
+                        spec.id
+                    ),
+                };
                 log::info!(
-                    "snapshot view '{}': {error}; drawing corner triangles",
-                    spec.id
+                    "snapshot view '{}': scene is {required} bytes, budget {maximum}; drawing \
+                     {:?} surface, section cap of at most {} triangles",
+                    spec.id,
+                    detail.surface,
+                    detail.cap_triangle_budget
                 );
-                encode(SurfaceDetail::Corners)?
             }
-            Err(error) => return Err(error),
         };
         let id = spec.id;
         let scene_path = format!("{id}.scene.json");
@@ -246,6 +383,7 @@ pub(super) async fn capture(
             .map(|deformation| deformation.field_id);
         written.push(Written {
             bounds,
+            result_bounds,
             view: View {
                 poster: format!("{id}.png"),
                 id,
@@ -256,6 +394,7 @@ pub(super) async fn capture(
                 deformation_field,
                 scalar_scale,
                 unit: spec.unit,
+                display_unit,
                 scene: scene_path,
                 deformation_scale,
                 minimum,
@@ -280,11 +419,24 @@ pub(super) async fn capture(
                 }),
                 // Set once every view's bounds are known.
                 initial_camera: None,
+                caption: presentation.caption.clone(),
+                context: presentation.records(),
             },
         });
     }
     drop(mesh);
-    let camera = camera::shared_camera(written.iter().map(|view| view.bounds));
+    let camera = camera::shared_camera(
+        written.iter().map(|view| match presentation.frame {
+            presentation::Frame::All => view.bounds,
+            presentation::Frame::Result => view.result_bounds,
+        }),
+        written.iter().map(|view| view.bounds),
+        presentation.frame_padding,
+        presentation
+            .view_angle
+            .map(|(azimuth, elevation)| camera::view_direction(azimuth, elevation)),
+        presentation.aspect_ratio(),
+    );
     let mut result = Vec::with_capacity(written.len());
     for Written { mut view, .. } in written {
         // Render the persisted representation: the poster and live view must share
@@ -293,11 +445,13 @@ pub(super) async fn capture(
         let handle = plotting::import_geometry_scene_payload(&bytes)?
             .ok_or_else(|| anyhow::anyhow!("snapshot scene did not contain geometry"))?;
         drop(bytes);
-        let poster = plotting::render_geometry_scene_snapshot_with_camera_state(
+        let poster = plotting::render_geometry_scene_snapshot_with_camera_state_scaled(
             handle,
-            1200,
-            750,
+            presentation.poster_width,
+            presentation.poster_height,
             camera.clone(),
+            presentation.pixels_per_point(),
+            Some(presentation.theme_config()),
         )
         .await;
         plotting::close_geometry_scene(handle);
@@ -326,5 +480,35 @@ pub(super) fn peak_resident_mib() -> u64 {
         maximum / (1024 * 1024)
     } else {
         maximum / 1024
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{lighter, Detail};
+    use runmat_runtime::analysis::SurfaceDetail;
+
+    const FULL: Detail = Detail {
+        surface: SurfaceDetail::Full,
+        cap_triangle_budget: 600_000,
+    };
+
+    #[test]
+    fn a_surface_view_drops_to_corner_triangles_once() {
+        let corners = lighter(FULL, false, 30, 16, None).unwrap();
+        assert_eq!(corners.surface, SurfaceDetail::Corners);
+        assert!(lighter(corners, false, 20, 16, None).is_none());
+    }
+
+    #[test]
+    fn a_section_view_scales_its_cap_to_the_budget_until_one_polygon_per_element() {
+        // The six-bolt busbar section: 29.7 MB against the 16 MiB app limit.
+        let next = lighter(FULL, true, 29_675_503, 16_777_216, Some((500_000, 2))).unwrap();
+        assert!(next.cap_triangle_budget < 500_000 * 16_777_216 / 29_675_503);
+        // A cap already one polygon per cut element is the lightest section.
+        assert!(lighter(next, true, 20_000_000, 16_777_216, Some((120_000, 1))).is_none());
+        // The budget always shrinks, even when the payload is barely over.
+        let barely = lighter(FULL, true, 101, 100, Some((1_000, 4))).unwrap();
+        assert!(barely.cap_triangle_budget < 1_000);
     }
 }

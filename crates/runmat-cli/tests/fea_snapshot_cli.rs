@@ -102,6 +102,75 @@ study modes {
 }
 "#;
 
+/// A thermal solve whose only temperature boundary holds 303.15 K, so the solved field is
+/// uniform, then a thermomechanical preload from that solved state. The preload contract
+/// requires a prestress consumer, so a one-mode prestressed modal step closes the chain. The prescribed-field
+/// variant below is the same structural problem with the temperature given directly.
+const SOLVED_THERMAL_STRESS: &str = r#"
+model structure {
+    thermal { reference_temperature = 293.15 K }
+    thermomechanical { reference_temperature = 293.15 K }
+    assign material.steel to geometry.part.region.body
+    constraint base { structural.fixed { target = geometry.part.region.support } }
+    constraint hot {
+        thermal.temperature { target = geometry.part.region.hot; value = 303.15 K }
+    }
+}
+study solved_thermal_stress {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.structure
+    analysis heat { thermal steady {} retain heated }
+    analysis preload after analysis.heat {
+        thermomechanical preload { temperature = analysis.heat.state.heated }
+    }
+    analysis modes after analysis.preload {
+        structural prestressed_modal {
+            prestress = analysis.preload.state.geometric_stiffness
+            modes = 1
+        }
+    }
+    output displacement = analysis.preload.field.node.displacement
+    output stress = analysis.preload.field.element.von_mises_stress
+    output peak_stress = max(output.stress, over = geometry.part.region.body)
+}
+"#;
+
+const PRESCRIBED_THERMAL_STRESS: &str = r#"
+model heated {
+    thermal { reference_temperature = 293.15 K }
+    thermomechanical { reference_temperature = 293.15 K }
+    assign material.steel to geometry.part.region.body
+    constraint base { structural.fixed { target = geometry.part.region.support } }
+    load operating_temperature {
+        temperature_field on geometry.part.region.body = 303.15 K
+    }
+    load_case operating { include load.operating_temperature }
+}
+study prescribed_thermal_stress {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.heated
+    analysis coupled { thermomechanical steady {} }
+}
+"#;
+
+const ACOUSTIC_HARMONIC: &str = r#"
+model driven {
+    assign material.air to geometry.part.region.body
+    constraint drive {
+        acoustic.pressure { target = geometry.part.region.support; value = 1 Pa }
+    }
+}
+study cavity_response {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.driven
+    analysis harmonic { acoustic harmonic { frequencies = [100, 200] Hz } }
+    output pressure = analysis.harmonic.field.node.acoustic_pressure
+}
+"#;
+
 const STRUCTURAL_MODAL: &str = r#"
 model supported {
     assign material.steel to geometry.part.region.body
@@ -422,5 +491,80 @@ fn structural_modal_snapshot_shows_only_mode_shapes_and_verifies() {
         .output()
         .unwrap();
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("no view 'stress'"));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("no view 'stress'"), "stderr: {stderr}");
+}
+
+/// Run `runmat verify-snapshot` on a captured snapshot and require it to pass.
+fn verify(project: &TempDir, snapshot: &str) -> Value {
+    let out = project.path().join("out/verify.json");
+    let verified = Command::new(env!("CARGO_BIN_EXE_runmat"))
+        .current_dir(project.path())
+        .args(["verify-snapshot", snapshot, "--out"])
+        .arg(&out)
+        .env_remove("RUNMAT_CONFIG")
+        .env("RUNMAT_FEA_ARTIFACT_ROOT", project.path().join("artifacts"))
+        .env(
+            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+            project.path().join("study-artifacts"),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        verified.status.success(),
+        "verify-snapshot failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&verified.stdout),
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    serde_json::from_slice(&fs::read(&out).unwrap()).unwrap()
+}
+
+/// A harmonic acoustic sweep saves the render tiles of its solver mesh with the frequency
+/// record, so the snapshot replays its geometry and verify-snapshot passes cold.
+#[test]
+fn acoustic_harmonic_snapshot_saves_render_tiles_and_verifies() {
+    let project = project(ACOUSTIC_HARMONIC);
+    let snapshot = snapshot(&project, &[]);
+    assert_eq!(snapshot["step"], "harmonic");
+    assert!(!view_ids(&snapshot).is_empty(), "no views");
+    check_scenes(&project, &snapshot);
+    let report = verify(&project, "out/snapshot.json");
+    assert!(!report.is_null());
+}
+
+/// Thermal stress from a solved temperature field: the preload step publishes displacement and
+/// stress as outputs and snapshot views, and its displacement equals that of the same structure
+/// under the same temperature prescribed directly.
+#[test]
+fn thermomechanical_preload_publishes_stress_from_the_solved_temperature() {
+    let solved = project(SOLVED_THERMAL_STRESS);
+    let preload = snapshot(&solved, &["--step", "preload"]);
+    assert_eq!(preload["step"], "preload");
+    let stress = view(&preload, "stress");
+    let displacement = view(&preload, "displacement");
+    let peak = stress["maximum"].as_f64().unwrap();
+    assert!(peak > 0.0, "{stress}");
+    assert!(
+        displacement["maximum"].as_f64().unwrap() > 0.0,
+        "{displacement}"
+    );
+    check_scenes(&solved, &preload);
+    verify(&solved, "out/snapshot.json");
+
+    // The same structure under the same temperature, prescribed directly, gives the same
+    // displacement. The stress views differ by recovery: a structural preload shows nodal
+    // (averaged) von Mises stress, a thermomechanical steady step element von Mises stress, so
+    // the comparison is on the displacement, which both recover at the nodes.
+    let prescribed = project(PRESCRIBED_THERMAL_STRESS);
+    let reference = snapshot(&prescribed, &[]);
+    let solved_peak = displacement["maximum"].as_f64().unwrap();
+    let expected = view(&reference, "displacement")["maximum"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        (solved_peak - expected).abs() <= 1e-9 * expected,
+        "solved-temperature displacement {solved_peak} m, prescribed-temperature {expected} m"
+    );
+    assert_eq!(stress["field"], "structural.nodal_von_mises", "{stress}");
+    assert!(view(&reference, "stress")["maximum"].as_f64().unwrap() >= peak);
 }

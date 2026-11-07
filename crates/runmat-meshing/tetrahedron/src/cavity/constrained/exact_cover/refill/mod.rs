@@ -53,18 +53,23 @@ pub(in super::super) fn boundary_node_exact_cover_refill_candidate(
                     {
                         continue;
                     }
-                    if let Ok(tetrahedron) = raw_refill_tetrahedron_with_rejection_reason(
+                    let tetrahedron = match raw_refill_tetrahedron_with_rejection_reason(
                         tetrahedron_node_ids,
                         points,
                         options,
                     ) {
-                        if touches_boundary
-                            && candidate_keys.insert(sorted_tetrahedron_nodes(tetrahedron.node_ids))
-                        {
-                            candidates.push(tetrahedron.clone());
+                        Ok(tetrahedron) => tetrahedron,
+                        Err(RefillTetrahedronError::Rejected(_)) => continue,
+                        Err(RefillTetrahedronError::Accounting(cause)) => {
+                            return Err(ConstrainedCavityValidationError::Accounting(cause));
                         }
-                        all_candidates.push(tetrahedron);
+                    };
+                    if touches_boundary
+                        && candidate_keys.insert(sorted_tetrahedron_nodes(tetrahedron.node_ids))
+                    {
+                        candidates.push(tetrahedron.clone());
                     }
+                    all_candidates.push(tetrahedron);
                 }
             }
         }

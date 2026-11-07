@@ -1016,7 +1016,7 @@ impl WebRenderer {
                         // Make overlay text more readable in the IDE.
                         font_scale: 1.25,
                         show_axes: true,
-                        show_title: self.plot_renderer.geometry_overlay().is_none(),
+                        show_title: self.plot_renderer.shows_geometry_title(),
                         title: self.plot_renderer.overlay_title().cloned(),
                         x_label: self.plot_renderer.overlay_x_label().cloned(),
                         y_label: self.plot_renderer.overlay_y_label().cloned(),

@@ -351,6 +351,10 @@ impl CharArray {
         }
         let rows = normalized[0];
         let cols = normalized[1];
+        // Each vector page has the same physical order in both layouts.
+        if rows == 1 || cols == 1 {
+            return finish(data, shape);
+        }
         let pages = character_len(&normalized[2..])
             .ok_or_else(|| "Char page shape exceeds platform limits".to_string())?;
         let pages = if normalized.len() <= 2 { 1 } else { pages };
@@ -472,9 +476,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(value.data()[1].raw(), 0xD800);
-        let rebuilt =
-            CharArray::from_column_major(value.to_column_major(), value.shape.clone()).unwrap();
+        let column_major = value.to_column_major();
+        let original_data = column_major.as_ptr();
+        let rebuilt = CharArray::from_column_major(column_major, value.shape.clone()).unwrap();
         assert_eq!(rebuilt, value);
+        assert_eq!(rebuilt.data().as_ptr(), original_data);
         assert_eq!(rebuilt.shape.as_ptr(), value.shape.as_ptr());
         assert_eq!(
             value.try_row_string(),

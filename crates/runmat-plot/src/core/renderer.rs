@@ -42,6 +42,9 @@ pub struct WgpuRenderer {
     /// Device pixels per CSS pixel for screen-space stroke widths.
     pub pixels_per_point: f32,
     triangle_pipeline: Option<wgpu::RenderPipeline>,
+    /// Blended surfaces drawn after opaque ones: depth-tested, without depth writes, so a
+    /// translucent surface never hides what lies behind it.
+    translucent_triangle_pipeline: Option<wgpu::RenderPipeline>,
     /// Instanced prototypes and depth-probed edge strokes.
     extra_pipelines: instanced_pipeline::ExtraPipelines,
 
@@ -467,6 +470,7 @@ impl WgpuRenderer {
             edge_stroke_no_depth_pipeline: None,
             pixels_per_point: 1.0,
             triangle_pipeline: None,
+            translucent_triangle_pipeline: None,
             extra_pipelines: Default::default(),
             direct_line_pipeline: None,
             direct_triangle_pipeline: None,
@@ -704,7 +708,11 @@ impl WgpuRenderer {
             }
             PipelineType::Triangles => {
                 if self.triangle_pipeline.is_none() {
-                    self.triangle_pipeline = Some(self.create_triangle_pipeline(emission));
+                    self.triangle_pipeline = Some(self.create_triangle_pipeline(emission, true));
+                }
+                if self.translucent_triangle_pipeline.is_none() {
+                    self.translucent_triangle_pipeline =
+                        Some(self.create_triangle_pipeline(emission, false));
                 }
             }
             PipelineType::Scatter3 => {
@@ -731,6 +739,20 @@ impl WgpuRenderer {
             PipelineType::Triangles => self.triangle_pipeline.as_ref().unwrap(),
             PipelineType::Scatter3 => self.get_pipeline(PipelineType::Points),
             PipelineType::Textured => self.image_pipeline.as_ref().unwrap(),
+        }
+    }
+
+    /// The pipeline that draws `render_data`. With `translucent_last` (the scene draws blended
+    /// surfaces after opaque ones), a blended surface draws without depth writes.
+    pub fn pipeline_for(
+        &self,
+        render_data: &crate::core::RenderData,
+        translucent_last: bool,
+    ) -> &wgpu::RenderPipeline {
+        if translucent_last && crate::core::scene::is_translucent_surface(render_data) {
+            self.translucent_triangle_pipeline.as_ref().unwrap()
+        } else {
+            self.get_pipeline(render_data.pipeline_type)
         }
     }
 

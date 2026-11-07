@@ -107,7 +107,7 @@ pub use static_profiles::{
     structural_state_profiles_output_resource_facts,
 };
 mod admission;
-pub use accuracy::preflight_fluid_accuracy_source;
+pub use accuracy::fluid_accuracy_source_workspace;
 pub use accuracy::{
     build_accuracy_resource_plan, build_accuracy_resource_plan_with_source_workspace,
 };
@@ -147,7 +147,9 @@ mod structural_facts;
 mod symbolic;
 mod thermal;
 mod thermal_backend_evidence;
-pub use thermal::{build_thermal_resource_plan, PreparedThermalResourceFacts};
+pub use thermal::{
+    build_thermal_resource_plan, build_thermal_resource_plan_from, PreparedThermalResourceFacts,
+};
 mod thermal_field_construction;
 mod thermal_history;
 mod thermal_manifest_catalog;
@@ -163,7 +165,9 @@ pub use thermal_metadata::ThermalMetadataResourceFacts;
 mod thermal_observations;
 pub use thermal_observations::ThermalObservationResourceFacts;
 mod thermal_operator;
-pub use thermal_operator::ThermalOperatorResourceFacts;
+pub use thermal_operator::{ThermalOperatorResourceFacts, ThermalSolvePath};
+#[cfg(test)]
+pub(crate) use thermal_operator::tests as thermal_operator_tests;
 mod thermal_preassembly;
 mod thermal_realization;
 pub use thermal_realization::ThermalRealizationResourceFacts;

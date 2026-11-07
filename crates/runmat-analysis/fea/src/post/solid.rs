@@ -1,6 +1,8 @@
+use crate::algebra::coercivity::NumericalCapacityError;
 use crate::assembly::{
     elements::solid::{
-        strain_displacement_matrix, Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
+        strain_displacement_matrix, Tetrahedron10CapacityError, Tetrahedron10ElementGeometry,
+        Tetrahedron4ElementGeometry,
     },
     SolidRecoveryElementSummary, SolidRecoveryGeometry,
 };
@@ -8,6 +10,7 @@ use crate::planning::resource::{
     execute_scoped_chunks, LocalExecutionPlan, ScopedLocalExecutionError,
 };
 use crate::progress::{cancellation_token, FeaCancellationToken};
+use runmat_simulation_usage::{AsyncCapacityOwner, OperationCount};
 
 use super::error::StructuralFieldRecoveryError;
 
@@ -70,81 +73,132 @@ fn recover_solid_fields_checked(
     cancellation: &FeaCancellationToken,
     retain_points: bool,
 ) -> Result<SolidRecoveredFields, StructuralFieldRecoveryError> {
+    let future = recover_solid_fields_checked_with_capacity::<std::convert::Infallible>(
+        elements,
+        displacement,
+        cancellation,
+        retain_points,
+        None,
+    );
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    match std::future::Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result.map_err(|error| match error {
+            NumericalCapacityError::Numerical(error) => error,
+            NumericalCapacityError::Admission(never) => match never {},
+        }),
+        std::task::Poll::Pending => unreachable!("immediate solid recovery cannot suspend"),
+    }
+}
+
+async fn recover_solid_fields_checked_with_capacity<A>(
+    elements: &[SolidRecoveryElementSummary],
+    displacement: &[f64],
+    cancellation: &FeaCancellationToken,
+    retain_points: bool,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<SolidRecoveredFields, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
     let mut fields = SolidRecoveredFields::with_element_capacity(elements.len(), retain_points);
     for element in elements {
         if cancellation.is_cancelled() {
-            return Err(StructuralFieldRecoveryError::Cancelled);
+            return Err(StructuralFieldRecoveryError::Cancelled.into());
         }
-        let recovered = recover_element_strain(element, displacement)?;
-        let point_stress = recovered
-            .strain
-            .iter()
-            .enumerate()
-            .map(|(point, &point_strain)| {
-                recover_element_stress(
-                    element,
-                    point_strain,
-                    thermal_eigenstrain_at(element, point),
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let (element_strain, element_stress, energy) = if let Some(thermal) =
-            &element.solved_thermal_quadrature
-        {
-            thermal_integrals::integrate(element, thermal, displacement)?
-        } else {
-            let volume = recovered.integration_weight_m3.iter().sum::<f64>();
-            if !volume.is_finite() || volume <= 0.0 {
-                return Err(StructuralFieldRecoveryError::NonFiniteResult {
-                    element_id: element.element_id.clone(),
-                });
+        let recovered = recover_element_strain_with_capacity(element, displacement, owner).await?;
+        let mut point_stress = Vec::with_capacity(RECOVERY_POINT_COUNT);
+        for (point, &point_strain) in recovered.strain.iter().enumerate() {
+            // One response completes 23 outer operations. Its Lamé and shear
+            // material primitives reserve another 6 + 3 inside the response.
+            if let Some(owner) = owner {
+                owner
+                    .ensure_capacity(OperationCount::from_operations(23 + 6 + 3))
+                    .await
+                    .map_err(NumericalCapacityError::Admission)?;
             }
-            let element_strain = std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
-                recovered
-                    .strain
-                    .iter()
-                    .zip(recovered.integration_weight_m3)
-                    .map(|(value, weight)| value[component] * weight)
-                    .sum::<f64>()
-                    / volume
-            });
-            let element_stress = std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
-                point_stress
-                    .iter()
-                    .zip(recovered.integration_weight_m3)
-                    .map(|(value, weight)| value[component] * weight)
-                    .sum::<f64>()
-                    / volume
-            });
-            let energy = recovered
-                .strain
-                .iter()
-                .zip(&point_stress)
-                .zip(recovered.integration_weight_m3)
-                .enumerate()
-                .map(|(point, ((point_strain, point_stress), weight))| {
-                    let eigenstrain = thermal_eigenstrain_at(element, point);
-                    0.5 * weight
-                        * point_strain
+            point_stress.push(
+                crate::algebra::capacity::measured(
+                    owner,
+                    runmat_simulation_usage::UsageCategory::Solve,
+                    OperationCount::from_operations(23),
+                    || {
+                        recover_element_stress(
+                            element,
+                            point_strain,
+                            thermal_eigenstrain_at(element, point),
+                        )
+                    },
+                )
+                .await?,
+            );
+        }
+        let (element_strain, element_stress, energy) =
+            if let Some(thermal) = &element.solved_thermal_quadrature {
+                thermal_integrals::integrate_with_capacity(element, thermal, displacement, owner)
+                    .await?
+            } else {
+                crate::algebra::capacity::measured(
+                    owner,
+                    runmat_simulation_usage::UsageCategory::Solve,
+                    OperationCount::from_operations(179),
+                    || {
+                        let volume = recovered.integration_weight_m3.iter().sum::<f64>();
+                        if !volume.is_finite() || volume <= 0.0 {
+                            return Err(StructuralFieldRecoveryError::NonFiniteResult {
+                                element_id: element.element_id.clone(),
+                            });
+                        }
+                        let element_strain =
+                            std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
+                                recovered
+                                    .strain
+                                    .iter()
+                                    .zip(recovered.integration_weight_m3)
+                                    .map(|(value, weight)| value[component] * weight)
+                                    .sum::<f64>()
+                                    / volume
+                            });
+                        let element_stress =
+                            std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
+                                point_stress
+                                    .iter()
+                                    .zip(recovered.integration_weight_m3)
+                                    .map(|(value, weight)| value[component] * weight)
+                                    .sum::<f64>()
+                                    / volume
+                            });
+                        let energy = recovered
+                            .strain
                             .iter()
+                            .zip(&point_stress)
+                            .zip(recovered.integration_weight_m3)
                             .enumerate()
-                            .zip(point_stress)
-                            .map(|((component, strain), stress)| {
-                                (strain - if component < 3 { eigenstrain } else { 0.0 }) * stress
+                            .map(|(point, ((point_strain, point_stress), weight))| {
+                                let eigenstrain = thermal_eigenstrain_at(element, point);
+                                0.5 * weight
+                                    * point_strain
+                                        .iter()
+                                        .enumerate()
+                                        .zip(point_stress)
+                                        .map(|((component, strain), stress)| {
+                                            (strain - if component < 3 { eigenstrain } else { 0.0 })
+                                                * stress
+                                        })
+                                        .sum::<f64>()
                             })
                             .sum::<f64>()
-                })
-                .sum::<f64>()
-                / volume;
-            (element_strain, element_stress, energy)
-        };
+                            / volume;
+                        Ok((element_strain, element_stress, energy))
+                    },
+                )
+                .await?
+            };
         if !energy.is_finite()
             || element_strain.iter().any(|value| !value.is_finite())
             || element_stress.iter().any(|value| !value.is_finite())
         {
             return Err(StructuralFieldRecoveryError::NonFiniteResult {
                 element_id: element.element_id.clone(),
-            });
+            }
+            .into());
         }
         fields.strain.extend(element_strain);
         fields.stress.extend(element_stress);
@@ -174,7 +228,11 @@ pub(super) fn recover_solid_fields_with_plan(
     if elements.is_empty() || plan.is_serial() {
         return recover_solid_fields_checked(elements, displacement, &cancellation, retain_points);
     }
+    let usage = runmat_simulation_usage::UsageContext::capture();
     let partitions = execute_scoped_chunks(plan, elements.len() as u64, |chunk| {
+        let _usage = usage
+            .as_ref()
+            .map(runmat_simulation_usage::UsageContext::enter);
         recover_solid_fields_checked(
             &elements[chunk.start() as usize..chunk.end_exclusive() as usize],
             displacement,
@@ -198,15 +256,46 @@ pub(super) fn recover_solid_fields_with_plan(
     Ok(combined)
 }
 
-fn recover_element_strain(
+pub(super) async fn recover_solid_fields_with_plan_and_capacity<A>(
+    elements: &[SolidRecoveryElementSummary],
+    displacement: &[f64],
+    plan: LocalExecutionPlan,
+    retain_points: bool,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<SolidRecoveredFields, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
+    match owner {
+        None => recover_solid_fields_with_plan(elements, displacement, plan, retain_points)
+            .map_err(NumericalCapacityError::Numerical),
+        Some(owner) => {
+            let cancellation = cancellation_token();
+            recover_solid_fields_checked_with_capacity(
+                elements,
+                displacement,
+                &cancellation,
+                retain_points,
+                Some(owner),
+            )
+            .await
+        }
+    }
+}
+
+async fn recover_element_strain_with_capacity<A>(
     element: &SolidRecoveryElementSummary,
     displacement: &[f64],
-) -> Result<ElementRecoveryPoints, StructuralFieldRecoveryError> {
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<ElementRecoveryPoints, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
     match &element.geometry {
         SolidRecoveryGeometry::Tetrahedron4 {
             node_indices,
             coordinates_m,
         } => {
+            if let Some(owner) = owner {
+                owner
+                    .ensure_capacity(OperationCount::from_operations(120))
+                    .await
+                    .map_err(NumericalCapacityError::Admission)?;
+            }
             let element_displacement = gather_displacement::<4, 12>(node_indices, displacement)?;
             let b = strain_displacement_matrix(Tetrahedron4ElementGeometry {
                 nodes_m: coordinates_m.canonical_value(),
@@ -215,13 +304,27 @@ fn recover_element_strain(
                 element_id: element.element_id.clone(),
                 source,
             })?;
-            let strain = std::array::from_fn(|component| {
-                b[component]
-                    .iter()
-                    .zip(element_displacement)
-                    .map(|(shape, value)| shape * value)
-                    .sum()
-            });
+            let strain = crate::algebra::capacity::measured(
+                owner,
+                runmat_simulation_usage::UsageCategory::Solve,
+                OperationCount::from_operations(6 * (12 + 11)),
+                || {
+                    Ok::<_, StructuralFieldRecoveryError>(std::array::from_fn(|component| {
+                        b[component]
+                            .iter()
+                            .zip(element_displacement)
+                            .map(|(shape, value)| shape * value)
+                            .sum()
+                    }))
+                },
+            )
+            .await?;
+            if let Some(owner) = owner {
+                owner
+                    .ensure_capacity(OperationCount::from_operations(24))
+                    .await
+                    .map_err(NumericalCapacityError::Admission)?;
+            }
             let volume = Tetrahedron4ElementGeometry {
                 nodes_m: coordinates_m.canonical_value(),
             }
@@ -230,26 +333,57 @@ fn recover_element_strain(
                 element_id: element.element_id.clone(),
                 source,
             })?;
-            Ok(ElementRecoveryPoints {
-                strain: [strain; RECOVERY_POINT_COUNT],
-                integration_weight_m3: [volume / RECOVERY_POINT_COUNT as f64; RECOVERY_POINT_COUNT],
-            })
+            crate::algebra::capacity::measured(
+                owner,
+                runmat_simulation_usage::UsageCategory::Solve,
+                OperationCount::from_operations(1),
+                || {
+                    Ok::<_, StructuralFieldRecoveryError>(ElementRecoveryPoints {
+                        strain: [strain; RECOVERY_POINT_COUNT],
+                        integration_weight_m3: [volume / RECOVERY_POINT_COUNT as f64;
+                            RECOVERY_POINT_COUNT],
+                    })
+                },
+            )
+            .await
         }
         SolidRecoveryGeometry::Tetrahedron10 {
             node_indices,
             coordinates_m,
-        } => Tetrahedron10ElementGeometry {
-            nodes_m: coordinates_m.canonical_value(),
+        } => {
+            let geometry = Tetrahedron10ElementGeometry {
+                nodes_m: coordinates_m.canonical_value(),
+            };
+            let displacement = gather_displacement::<10, 30>(node_indices, displacement)?;
+            let points = match owner {
+                Some(owner) => geometry
+                    .quadrature_strain_with_capacity(displacement, owner)
+                    .await
+                    .map_err(|error| match error {
+                        Tetrahedron10CapacityError::Numerical(source) => {
+                            NumericalCapacityError::Numerical(
+                                StructuralFieldRecoveryError::Tetrahedron10 {
+                                    element_id: element.element_id.clone(),
+                                    source,
+                                },
+                            )
+                        }
+                        Tetrahedron10CapacityError::Admission(error) => {
+                            NumericalCapacityError::Admission(error)
+                        }
+                    })?,
+                None => geometry.quadrature_strain(displacement).map_err(|source| {
+                    StructuralFieldRecoveryError::Tetrahedron10 {
+                        element_id: element.element_id.clone(),
+                        source,
+                    }
+                })?,
+            };
+            Ok(ElementRecoveryPoints {
+                strain: points.map(|point| point.strain),
+                integration_weight_m3: points.map(|point| point.integration_weight_m3),
+            })
         }
-        .quadrature_strain(gather_displacement::<10, 30>(node_indices, displacement)?)
-        .map(|points| ElementRecoveryPoints {
-            strain: points.map(|point| point.strain),
-            integration_weight_m3: points.map(|point| point.integration_weight_m3),
-        })
-        .map_err(|source| StructuralFieldRecoveryError::Tetrahedron10 {
-            element_id: element.element_id.clone(),
-            source,
-        }),
     }
 }
 

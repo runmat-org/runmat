@@ -16,6 +16,7 @@ pub(super) fn current() -> Option<Arc<RunState>> {
 }
 
 pub(super) fn run<T>(state: Arc<RunState>, operation: impl FnOnce() -> T) -> T {
+    let _usage = state.accounting.enter();
     struct Restore(Option<Arc<RunState>>);
     impl Drop for Restore {
         fn drop(&mut self) {

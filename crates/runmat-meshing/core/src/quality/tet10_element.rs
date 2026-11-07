@@ -18,6 +18,60 @@
 //! analysis assembles stiffness from the moments the same function returns, so an element the
 //! mesher publishes is one analysis can integrate.
 use crate::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
+
+pub enum Tet10CapacityError<E> {
+    Invalidity(Tet10ElementInvalidity),
+    Admission(E),
+}
+
+impl<E> From<LedgerError> for Tet10CapacityError<E> {
+    fn from(error: LedgerError) -> Self {
+        Self::Invalidity(Tet10ElementInvalidity::Accounting(error))
+    }
+}
+
+impl<E> From<Tet10ElementInvalidity> for Tet10CapacityError<E> {
+    fn from(error: Tet10ElementInvalidity) -> Self {
+        Self::Invalidity(error)
+    }
+}
+
+async fn ensure_capacity<E>(
+    owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+    count: OperationCount,
+) -> Result<(), Tet10CapacityError<E>> {
+    if let Some(owner) = owner {
+        owner
+            .ensure_capacity(count)
+            .await
+            .map_err(Tet10CapacityError::Admission)?;
+    }
+    Ok(())
+}
+
+fn immediate<R>(
+    future: impl std::future::Future<Output = Result<R, Tet10CapacityError<std::convert::Infallible>>>,
+) -> Result<R, Tet10ElementInvalidity> {
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    match std::future::Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result.map_err(|error| match error {
+            Tet10CapacityError::Invalidity(error) => error,
+            Tet10CapacityError::Admission(never) => match never {},
+        }),
+        std::task::Poll::Pending => unreachable!("immediate Tet10 owner cannot suspend"),
+    }
+}
+
+fn immediate_ledger<R>(
+    future: impl std::future::Future<Output = Result<R, Tet10CapacityError<std::convert::Infallible>>>,
+) -> Result<R, LedgerError> {
+    immediate(future).map_err(|error| match error {
+        Tet10ElementInvalidity::Accounting(error) => error,
+        _ => unreachable!("ledger-only Tet10 phase returned geometry invalidity"),
+    })
+}
 
 use super::boundary_face::{
     GAUSS_LEGENDRE_EIGHT_UNIT, GAUSS_LEGENDRE_SIXTEEN_UNIT, GAUSS_LEGENDRE_TWELVE_UNIT,
@@ -118,6 +172,8 @@ impl Tet10StiffnessMoments {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tet10ElementInvalidity {
+    /// Numerical work could not be admitted before its next batch.
+    Accounting(LedgerError),
     /// Nonfinite coordinates, or a Jacobian determinant certified nonpositive somewhere.
     InvertedOrDegenerate,
     /// The Jacobian is not certified to keep the scale-relative margin.
@@ -126,98 +182,209 @@ pub enum Tet10ElementInvalidity {
     UnconvergedStiffnessQuadrature,
 }
 
-/// Whether the element passes the shared rule.
-pub fn is_valid_tetrahedron10_element(coordinates: &[[f64; 3]; 10]) -> bool {
-    tetrahedron10_stiffness_moments(coordinates).is_ok()
+/// Whether the element passes the shared rule. Grant denial remains a typed
+/// failure and cannot be mistaken for invalid geometry.
+pub fn is_valid_tetrahedron10_element(coordinates: &[[f64; 3]; 10]) -> Result<bool, LedgerError> {
+    match tetrahedron10_stiffness_moments(coordinates) {
+        Ok(_) => Ok(true),
+        Err(Tet10ElementInvalidity::Accounting(error)) => Err(error),
+        Err(_) => Ok(false),
+    }
 }
 
 /// The element's Jacobian margin, or `None` for nonfinite coordinates or a determinant that is
-/// nonpositive at a corner.
-pub fn tetrahedron10_jacobian_margin(coordinates: &[[f64; 3]; 10]) -> Option<Tet10JacobianMargin> {
+/// nonpositive at a corner. Numerical admission failure is returned separately.
+pub fn tetrahedron10_jacobian_margin(
+    coordinates: &[[f64; 3]; 10],
+) -> Result<Option<Tet10JacobianMargin>, LedgerError> {
+    tetrahedron10_jacobian_margin_for_category(coordinates, UsageCategory::Meshing)
+}
+
+pub fn tetrahedron10_jacobian_margin_for_category(
+    coordinates: &[[f64; 3]; 10],
+    category: UsageCategory,
+) -> Result<Option<Tet10JacobianMargin>, LedgerError> {
+    immediate_ledger(tetrahedron10_jacobian_margin_with_capacity::<
+        std::convert::Infallible,
+    >(coordinates, category, None))
+}
+
+pub async fn tetrahedron10_jacobian_margin_with_capacity<E>(
+    coordinates: &[[f64; 3]; 10],
+    category: UsageCategory,
+    owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+) -> Result<Option<Tet10JacobianMargin>, Tet10CapacityError<E>> {
     if coordinates.iter().flatten().any(|value| !value.is_finite()) {
-        return None;
+        return Ok(None);
     }
-    let maximum_jacobian = SAMPLE_POINTS
-        .iter()
-        .map(|barycentric| determinant(jacobian(coordinates, *barycentric)))
-        .fold(f64::NEG_INFINITY, f64::max);
+    ensure_capacity(owner, OperationCount::from_operations(15 * 277)).await?;
+    let usage = UsageContext::capture();
+    // Fifteen sample Jacobians: reference gradients (92), nine ten-term
+    // Jacobian dots (171), and determinant (14) each.
+    let mut sample_batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(15 * 277))
+        })
+        .transpose()?;
+    let maximum_jacobian =
+        SAMPLE_POINTS
+            .iter()
+            .try_fold(f64::NEG_INFINITY, |maximum, barycentric| {
+                let value = determinant(jacobian(coordinates, *barycentric));
+                if let Some(batch) = &mut sample_batch {
+                    batch.complete(OperationCount::from_operations(277))?;
+                }
+                Ok::<_, LedgerError>(maximum.max(value))
+            })?;
     if !maximum_jacobian.is_finite() || maximum_jacobian <= 0.0 {
-        return None;
+        return Ok(None);
     }
+    ensure_capacity(owner, OperationCount::from_operations(1)).await?;
+    let mut target_batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(1))
+        })
+        .transpose()?;
     let target = TET10_MINIMUM_JACOBIAN_RATIO * maximum_jacobian;
+    if let Some(batch) = &mut target_batch {
+        batch.complete(OperationCount::from_operations(1))?;
+    }
     let reference = [
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.0],
         [0.0, 0.0, 0.0, 1.0],
     ];
-    let minimum_jacobian_lower_bound = cell_lower_bound(coordinates, reference, target, 0)?;
-    Some(Tet10JacobianMargin {
+    let Some(minimum_jacobian_lower_bound) =
+        cell_lower_bound_with_capacity(coordinates, reference, target, 0, category, owner).await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(Tet10JacobianMargin {
         minimum_jacobian_lower_bound,
         maximum_jacobian,
-    })
+    }))
 }
 
 /// Applies the whole rule and returns the converged stiffness moments of a valid element.
 pub fn tetrahedron10_stiffness_moments(
     coordinates: &[[f64; 3]; 10],
 ) -> Result<Tet10StiffnessMoments, Tet10ElementInvalidity> {
-    let margin = tetrahedron10_jacobian_margin(coordinates)
+    tetrahedron10_stiffness_moments_for_category(coordinates, UsageCategory::Meshing)
+}
+
+/// Selects the owner category while retaining the same shared reference rule.
+pub fn tetrahedron10_stiffness_moments_for_category(
+    coordinates: &[[f64; 3]; 10],
+    category: UsageCategory,
+) -> Result<Tet10StiffnessMoments, Tet10ElementInvalidity> {
+    immediate(tetrahedron10_stiffness_moments_with_capacity::<
+        std::convert::Infallible,
+    >(coordinates, category, None))
+}
+
+pub async fn tetrahedron10_stiffness_moments_with_capacity<E>(
+    coordinates: &[[f64; 3]; 10],
+    category: UsageCategory,
+    owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+) -> Result<Tet10StiffnessMoments, Tet10CapacityError<E>> {
+    let margin = tetrahedron10_jacobian_margin_with_capacity(coordinates, category, owner)
+        .await?
         .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
-    if !margin.is_valid() {
-        return Err(
-            if margin.minimum_jacobian_lower_bound <= 0.0
-                && SAMPLE_POINTS
-                    .iter()
-                    .any(|point| determinant(jacobian(coordinates, *point)) <= 0.0)
-            {
-                Tet10ElementInvalidity::InvertedOrDegenerate
-            } else {
-                Tet10ElementInvalidity::InsufficientJacobianMargin
-            },
-        );
+    ensure_capacity(owner, OperationCount::from_operations(1)).await?;
+    let usage = UsageContext::capture();
+    let mut validity_batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(1))
+        })
+        .transpose()
+        .map_err(Tet10ElementInvalidity::Accounting)?;
+    let valid = margin.is_valid();
+    if let Some(batch) = &mut validity_batch {
+        batch
+            .complete(OperationCount::from_operations(1))
+            .map_err(Tet10ElementInvalidity::Accounting)?;
     }
-    if tetrahedron10_is_affine(coordinates) {
-        let moments = integrate(
+    if !valid {
+        return Err((if margin.minimum_jacobian_lower_bound <= 0.0
+            && sampled_nonpositive_with_capacity(coordinates, category, owner).await?
+        {
+            Tet10ElementInvalidity::InvertedOrDegenerate
+        } else {
+            Tet10ElementInvalidity::InsufficientJacobianMargin
+        })
+        .into());
+    }
+    if admitted_is_affine_with_capacity(coordinates, category, owner).await? {
+        let moments = integrate_with_capacity(
             coordinates,
             TETRAHEDRON_FOUR_POINT_RULE
                 .iter()
                 .map(|point| (*point, 1.0 / 24.0)),
+            4,
+            0,
+            category,
+            owner,
         )
+        .await?
         .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
         return Ok(Tet10StiffnessMoments {
             rule: Tet10StiffnessRule::Affine,
             moments,
         });
     }
-    let eight = integrate(
+    let eight = integrate_with_capacity(
         coordinates,
         tensor_tetrahedron_rule(&GAUSS_LEGENDRE_EIGHT_UNIT),
+        8 * 8 * 8,
+        13,
+        category,
+        owner,
     )
+    .await?
     .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
-    let twelve = integrate(
+    let twelve = integrate_with_capacity(
         coordinates,
         tensor_tetrahedron_rule(&GAUSS_LEGENDRE_TWELVE_UNIT),
+        12 * 12 * 12,
+        13,
+        category,
+        owner,
     )
+    .await?
     .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
-    if converged(&eight, &twelve) {
+    if converged_with_capacity(&eight, &twelve, category, owner).await? {
         return Ok(Tet10StiffnessMoments {
             rule: Tet10StiffnessRule::GaussTwelve,
             moments: twelve,
         });
     }
-    let sixteen = integrate(
+    let sixteen = integrate_with_capacity(
         coordinates,
         tensor_tetrahedron_rule(&GAUSS_LEGENDRE_SIXTEEN_UNIT),
+        16 * 16 * 16,
+        13,
+        category,
+        owner,
     )
+    .await?
     .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
-    if converged(&twelve, &sixteen) {
+    if converged_with_capacity(&twelve, &sixteen, category, owner).await? {
         Ok(Tet10StiffnessMoments {
             rule: Tet10StiffnessRule::GaussSixteen,
             moments: sixteen,
         })
     } else {
-        Err(Tet10ElementInvalidity::UnconvergedStiffnessQuadrature)
+        Err(Tet10ElementInvalidity::UnconvergedStiffnessQuadrature.into())
     }
 }
 
@@ -232,6 +399,73 @@ pub fn tetrahedron10_is_affine(coordinates: &[[f64; 3]; 10]) -> bool {
                     == 0.5 * (coordinates[*left][axis] + coordinates[*right][axis])
             })
         })
+}
+
+async fn admitted_is_affine_with_capacity<E>(
+    coordinates: &[[f64; 3]; 10],
+    category: UsageCategory,
+    owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+) -> Result<bool, Tet10CapacityError<E>> {
+    ensure_capacity(owner, OperationCount::from_operations(36)).await?;
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(36))
+        })
+        .transpose()?;
+    let mut axes = 0_u64;
+    let mut affine = true;
+    for (edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
+        for axis in 0..3 {
+            axes += 1;
+            if coordinates[4 + edge][axis]
+                != 0.5 * (coordinates[*left][axis] + coordinates[*right][axis])
+            {
+                affine = false;
+                break;
+            }
+        }
+        if !affine {
+            break;
+        }
+    }
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(axes * 2))?;
+    }
+    Ok(affine)
+}
+
+async fn sampled_nonpositive_with_capacity<E>(
+    coordinates: &[[f64; 3]; 10],
+    category: UsageCategory,
+    owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+) -> Result<bool, Tet10CapacityError<E>> {
+    ensure_capacity(owner, OperationCount::from_operations(15 * 277)).await?;
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(15 * 277))
+        })
+        .transpose()?;
+    let mut visited = 0_u64;
+    let mut nonpositive = false;
+    for point in SAMPLE_POINTS {
+        visited += 1;
+        if determinant(jacobian(coordinates, point)) <= 0.0 {
+            nonpositive = true;
+            break;
+        }
+    }
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(visited * 277))?;
+    }
+    Ok(nonpositive)
 }
 
 /// Collapsed (Duffy) tensor Gauss rule on the reference tetrahedron: barycentric points and
@@ -298,16 +532,43 @@ const PERMUTATIONS: [[usize; 3]; 6] = [
 /// the cell. A cell whose bound misses `target` is bisected along its longest edge, up to
 /// [`MAXIMUM_BISECTION_DEPTH`]. Returns `None` when a corner value (an actual determinant) is
 /// nonpositive or a coefficient is nonfinite.
-fn cell_lower_bound(
+async fn cell_lower_bound_with_capacity<E>(
     coordinates: &[[f64; 3]; 10],
     cell: [[f64; 4]; 4],
     target: f64,
     depth: usize,
-) -> Option<f64> {
+    category: UsageCategory,
+    owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+) -> Result<Option<f64>, Tet10CapacityError<E>> {
     // det(J) is multilinear in J's rows and each row is affine on the cell, so the Bernstein
     // coefficient of a degree-three multi-index averages the determinants of the six row
     // assignments drawn from the cell's vertex Jacobians.
-    let vertices = cell.map(|vertex| jacobian(coordinates, vertex));
+    ensure_capacity(owner, OperationCount::from_operations(4 * 263)).await?;
+    let usage = UsageContext::capture();
+    let mut vertex_batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(4 * 263))
+        })
+        .transpose()?;
+    let mut vertices = [[[0.0; 3]; 3]; 4];
+    for (entry, vertex) in vertices.iter_mut().zip(cell) {
+        *entry = jacobian(coordinates, vertex);
+        if let Some(batch) = &mut vertex_batch {
+            batch.complete(OperationCount::from_operations(263))?;
+        }
+    }
+    ensure_capacity(owner, OperationCount::from_operations(20 * 90)).await?;
+    let mut coefficient_batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(20 * 90))
+        })
+        .transpose()?;
     let mut lowest = f64::INFINITY;
     for first in 0..4 {
         for second in first..4 {
@@ -324,20 +585,57 @@ fn cell_lower_bound(
                     })
                     .sum::<f64>()
                     / 6.0;
+                if let Some(batch) = &mut coefficient_batch {
+                    batch.complete(OperationCount::from_operations(90))?;
+                }
                 if !coefficient.is_finite() || (first == third && coefficient <= 0.0) {
-                    return None;
+                    return Ok(None);
                 }
                 lowest = lowest.min(coefficient);
             }
         }
     }
     if lowest >= target || depth >= MAXIMUM_BISECTION_DEPTH {
-        return Some(lowest);
+        return Ok(Some(lowest));
     }
+    ensure_capacity(owner, OperationCount::from_operations(74)).await?;
+    let mut bisect_batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(74))
+        })
+        .transpose()?;
     let (left, right) = bisect(cell);
-    let left = cell_lower_bound(coordinates, left, target, depth + 1)?;
-    let right = cell_lower_bound(coordinates, right, target, depth + 1)?;
-    Some(left.min(right))
+    if let Some(batch) = &mut bisect_batch {
+        batch.complete(OperationCount::from_operations(74))?;
+    }
+    let Some(left) = Box::pin(cell_lower_bound_with_capacity(
+        coordinates,
+        left,
+        target,
+        depth + 1,
+        category,
+        owner,
+    ))
+    .await?
+    else {
+        return Ok(None);
+    };
+    let Some(right) = Box::pin(cell_lower_bound_with_capacity(
+        coordinates,
+        right,
+        target,
+        depth + 1,
+        category,
+        owner,
+    ))
+    .await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(left.min(right)))
 }
 
 fn bisect(mut cell: [[f64; 4]; 4]) -> ([[f64; 4]; 4], [[f64; 4]; 4]) {
@@ -362,17 +660,39 @@ fn bisect(mut cell: [[f64; 4]; 4]) -> ([[f64; 4]; 4], [[f64; 4]; 4]) {
     (cell, right)
 }
 
-fn integrate(
+async fn integrate_with_capacity<E>(
     coordinates: &[[f64; 3]; 10],
     rule: impl Iterator<Item = ([f64; 4], f64)>,
-) -> Option<Box<[f64; TET10_GRADIENT_MOMENT_COUNT]>> {
+    point_count: u64,
+    rule_ops: u64,
+    category: UsageCategory,
+    owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+) -> Result<Option<Box<[f64; TET10_GRADIENT_MOMENT_COUNT]>>, Tet10CapacityError<E>> {
+    // At each point: two reference-gradient evaluations (2×92), nine
+    // ten-term Jacobian dots (171), determinant (14), inverse cofactors (36),
+    // ten physical gradients (150), weight scale (1), 30 left scales (30),
+    // and 900 moment multiply/add updates (1800): 2386 operations.
+    // A generated Duffy point additionally has 13 real operations.
+    let per_point = OperationCount::from_operations(2_386 + rule_ops);
+    let maximum = per_point
+        .checked_mul(point_count)
+        .map_err(LedgerError::from)?;
+    ensure_capacity(owner, maximum).await?;
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| usage.ledger().reserve(category, maximum))
+        .transpose()?;
     let mut moments = Box::new([0.0; TET10_GRADIENT_MOMENT_COUNT]);
     for (barycentric, weight) in rule {
         let reference = tetrahedron10_reference_gradients(barycentric);
         let j = jacobian(coordinates, barycentric);
         let det = determinant(j);
         if !det.is_finite() || det <= 0.0 {
-            return None;
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(369 + rule_ops))?;
+            }
+            return Ok(None);
         }
         // ∇ξN = J g for J[reference][physical], so the physical gradient is g = J⁻¹ ∇ξN.
         let inverse = [
@@ -411,23 +731,50 @@ fn integrate(
                 }
             }
         }
+        if let Some(batch) = &mut batch {
+            batch.complete(per_point)?;
+        }
     }
-    moments
+    Ok(moments
         .iter()
         .all(|value| value.is_finite())
-        .then_some(moments)
+        .then_some(moments))
 }
 
-fn converged(
+async fn converged_with_capacity<E>(
     previous: &[f64; TET10_GRADIENT_MOMENT_COUNT],
     next: &[f64; TET10_GRADIENT_MOMENT_COUNT],
-) -> bool {
+    category: UsageCategory,
+    owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+) -> Result<bool, Tet10CapacityError<E>> {
     let scale = next.iter().map(|value| value.abs()).fold(0.0_f64, f64::max);
-    scale.is_finite()
-        && scale > 0.0
-        && previous.iter().zip(next).all(|(left, right)| {
-            (left - right).abs() <= STIFFNESS_MOMENT_RELATIVE_TOLERANCE * scale
+    if !scale.is_finite() || scale <= 0.0 {
+        return Ok(false);
+    }
+    ensure_capacity(owner, OperationCount::from_operations(1 + 900)).await?;
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(category, OperationCount::from_operations(1 + 900))
         })
+        .transpose()?;
+    let tolerance = STIFFNESS_MOMENT_RELATIVE_TOLERANCE * scale;
+    let mut count = 1_u64;
+    let mut matches = true;
+    for (left, right) in previous.iter().zip(next) {
+        count += 1;
+        if (left - right).abs() > tolerance {
+            matches = false;
+            break;
+        }
+    }
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(count))?;
+    }
+    Ok(matches)
 }
 
 /// Corners, edge midpoints, face centroids and the centroid.
@@ -452,6 +799,8 @@ const SAMPLE_POINTS: [[f64; 4]; 15] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_simulation_usage::UsageLedger;
+    use std::sync::Arc;
 
     fn straight() -> [[f64; 3]; 10] {
         let corners = [
@@ -467,6 +816,23 @@ mod tests {
                 std::array::from_fn(|axis| 0.5 * (corners[left][axis] + corners[right][axis]));
         }
         nodes
+    }
+
+    #[test]
+    fn admitted_affine_tet10_validity_and_moments_conserve_work() {
+        // Margin: 15 sampled Jacobians, one target scale, four cell-vertex
+        // Jacobians, and 20 six-permutation coefficients. Then one ratio
+        // scale, 18 midpoint checks, and four full integration points.
+        let limit =
+            OperationCount::from_operations(15 * 277 + 1 + 4 * 263 + 20 * 90 + 1 + 36 + 4 * 2_386);
+        let ledger = Arc::new(UsageLedger::new(limit, limit).unwrap());
+        let context = UsageContext::new(Arc::clone(&ledger));
+        context.run_sync(|| {
+            tetrahedron10_stiffness_moments(&straight()).unwrap();
+        });
+        let snapshot = ledger.snapshot().unwrap();
+        assert_eq!(snapshot.completed.meshing, limit);
+        assert_eq!(snapshot.reserved, OperationCount::ZERO);
     }
 
     #[test]
@@ -499,7 +865,7 @@ mod tests {
         assert_ne!(moments.rule, Tet10StiffnessRule::Affine);
         let mut strong = straight();
         strong[4][0] += 0.24;
-        assert!(!is_valid_tetrahedron10_element(&strong));
+        assert!(!is_valid_tetrahedron10_element(&strong).unwrap());
         let mut inverted = straight();
         inverted[3][2] = -1.0;
         assert_eq!(

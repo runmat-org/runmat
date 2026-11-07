@@ -20,6 +20,7 @@ pub(super) fn response_error(
     error: SolidResponseError,
 ) -> StructuralFieldRecoveryError {
     match error {
+        SolidResponseError::Accounting(error) => StructuralFieldRecoveryError::Accounting(error),
         SolidResponseError::InvalidMaterial => StructuralFieldRecoveryError::InvalidMaterial {
             element_id: element.element_id.clone(),
         },

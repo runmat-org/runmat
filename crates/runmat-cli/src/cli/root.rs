@@ -15,7 +15,7 @@ use crate::cli::ColorMode;
 use crate::cli::TestArgs;
 use crate::cli::{
     BatchCommand, ClusterCommand, ExecutionTargetArgs, FeaRootArgs, JobCommand, MexArgs,
-    NativeInterfaceCommand, NodeArgs, PackageCommand,
+    NativeInterfaceCommand, NodeArgs, PackageCommand, SnapshotPresentationArgs,
 };
 
 #[derive(Parser, Clone)]
@@ -410,6 +410,8 @@ pub enum Commands {
         /// Snapshot metadata output; scenes and previews are written beside it
         #[arg(long)]
         out: PathBuf,
+        #[command(flatten)]
+        presentation: SnapshotPresentationArgs,
     },
     /// Render an original saved numerical result without meshing or solving
     #[command(hide = true)]
@@ -417,6 +419,11 @@ pub enum Commands {
         snapshot: PathBuf,
         #[arg(long)]
         out: PathBuf,
+        /// Render only this saved view (repeatable; default: every saved view)
+        #[arg(long = "view")]
+        views: Vec<String>,
+        #[command(flatten)]
+        presentation: SnapshotPresentationArgs,
     },
     /// Verify a documentation project's original saved field pages without execution
     #[command(hide = true)]

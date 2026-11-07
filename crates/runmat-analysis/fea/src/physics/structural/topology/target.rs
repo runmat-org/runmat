@@ -172,12 +172,7 @@ fn solid_nodes(
     }
     for element in &mesh.topology.volume_elements {
         storage::check_cancelled()?;
-        if target.matches_persistent_entity(&element.region_id)
-            || element
-                .provenance
-                .iter()
-                .any(|entity| target.matches_persistent_entity(entity))
-        {
+        if target.selects_volume_element(&element.region_id, &element.provenance) {
             for node_id in &element.node_ids {
                 nodes.push(*node_by_id.get(node_id).ok_or_else(|| {
                     MixedStructuralTargetError::InvalidTopology(format!(
@@ -240,12 +235,7 @@ fn solid_candidate_count(
     }
     for element in &mesh.topology.volume_elements {
         storage::check_cancelled()?;
-        if target.matches_persistent_entity(&element.region_id)
-            || element
-                .provenance
-                .iter()
-                .any(|e| target.matches_persistent_entity(e))
-        {
+        if target.selects_volume_element(&element.region_id, &element.provenance) {
             count = storage::count_add(count, element.node_ids.len())?;
         }
     }

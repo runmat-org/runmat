@@ -82,6 +82,7 @@ pub use validate_signals::validate_physical_signals;
 
 pub use field::{
     AnalysisField, AnalysisFieldLayout, AnalysisFieldValues, DeviceFieldRef, FieldOrdinal,
+    FieldStatistic,
 };
 pub use problem::acoustic_impedance::AcousticImpedanceLaw;
 pub use problem::authored_constraints::{
@@ -251,7 +252,8 @@ pub use study::sequence::{
     SequenceDependencyReason, StateCompleteness, StateId, StateInput, StateKind, StateOutput,
     StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
     StepObjectActivation, StepObjectRef, StructuralKinematics, StructuralNonlinearSettings,
-    StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
+    StructuralRandomResponseSettings, ModalStaticCorrection, StructuralModalBasisSettings,
+    StructuralModalFrequencySettings, TopologyTransitionPolicy, TransitionId,
     ValidatedAnalysisSequence,
 };
 pub use study::{

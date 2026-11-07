@@ -36,11 +36,11 @@ pub(in crate::builtins::deep_learning::model) fn preflight_network_compute_owner
     };
     let mut device = None;
     for (handle, operand) in operands() {
-        if matches!(
-            gpu_helpers::resolve_resident_compute_owner(handle),
-            Err(ResidentComputeDecline::InvalidOwner)
-        ) || device.is_some_and(|device| device != handle.device_id())
-        {
+        match gpu_helpers::resolve_resident_compute_owner(handle) {
+            Ok(_) | Err(ResidentComputeDecline::PolicyDenied) => {}
+            Err(decline) => return Err(decline.with_domain_error(invalid_owner(function, operand))),
+        }
+        if device.is_some_and(|device| device != handle.device_id()) {
             return Err(ResidentComputeDecline::InvalidOwner
                 .with_domain_error(invalid_owner(function, operand)));
         }

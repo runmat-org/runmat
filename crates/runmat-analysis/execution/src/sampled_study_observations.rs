@@ -16,7 +16,7 @@ use runmat_analysis_fea::{
         field::RecoveredFieldSample,
         observation::{
             ObservationFieldCatalog, ObservationPublicationCatalog, ObservationPublicationEntry,
-            ObservationSamplePublication,
+            ObservationSamplePublication, ResolvedObservation,
         },
     },
 };
@@ -90,6 +90,25 @@ impl SampledStudyObservations {
             policy.inventory_limits(),
         )
     }
+    /// Observations the fan-out sampled, in plan order. An observation whose schedule excludes
+    /// this sample (for example one frequency of a sweep) has no partitions and no reduction.
+    fn sampled_observations(&self) -> impl Iterator<Item = &ResolvedObservation> + '_ {
+        let fanout = self.fanout.as_ref();
+        fanout
+            .into_iter()
+            .flat_map(|fanout| fanout.source_request.plan.observations.iter())
+            .filter(move |observation| {
+                fanout.is_some_and(|fanout| {
+                    fanout.partitions.iter().any(|task| {
+                        task.partition_plan.observation_id == observation.spec.observation_id
+                    })
+                })
+            })
+    }
+    /// Reductions this fan-out needs before assembly: one per sampled observation.
+    pub fn reduction_count(&self) -> usize {
+        self.sampled_observations().count()
+    }
     pub fn prepare_reduction(
         &self,
         revision: &ProgramRevision,
@@ -97,14 +116,15 @@ impl SampledStudyObservations {
     ) -> AnalysisBridgeResult<PreparedObservationReduction> {
         let ordinal = self.reduced.len();
         let fanout = self.fanout.as_ref().expect("prepared fanout");
-        let observation = &fanout.source_request.plan.observations[ordinal];
+        let observation = self
+            .sampled_observations()
+            .nth(ordinal)
+            .ok_or_else(|| invalid("sampled reduction ordinal outside fanout"))?;
         let selected = fanout
             .partitions
             .iter()
             .enumerate()
-            .filter(|(_, task)| {
-                task.partition_plan.observation_id == observation.spec.observation_id
-            })
+            .filter(|(_, task)| task.partition_plan.observation_id == observation.spec.observation_id)
             .collect::<Vec<_>>();
         let first = selected
             .first()

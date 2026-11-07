@@ -87,10 +87,13 @@ pub use quality::boundary_face::{
 };
 pub use quality::tet10_element::{
     is_valid_tetrahedron10_element, tensor_tetrahedron_rule, tetrahedron10_is_affine,
-    tetrahedron10_jacobian_margin, tetrahedron10_reference_gradients,
-    tetrahedron10_stiffness_moments, Tet10ElementInvalidity, Tet10JacobianMargin,
-    Tet10StiffnessMoments, Tet10StiffnessRule, STIFFNESS_MOMENT_RELATIVE_TOLERANCE,
-    TET10_GRADIENT_MOMENT_COUNT, TET10_MINIMUM_JACOBIAN_RATIO, TETRAHEDRON_FOUR_POINT_RULE,
+    tetrahedron10_jacobian_margin, tetrahedron10_jacobian_margin_for_category,
+    tetrahedron10_jacobian_margin_with_capacity, tetrahedron10_reference_gradients,
+    tetrahedron10_stiffness_moments, tetrahedron10_stiffness_moments_for_category,
+    tetrahedron10_stiffness_moments_with_capacity, Tet10CapacityError, Tet10ElementInvalidity,
+    Tet10JacobianMargin, Tet10StiffnessMoments, Tet10StiffnessRule,
+    STIFFNESS_MOMENT_RELATIVE_TOLERANCE, TET10_GRADIENT_MOMENT_COUNT, TET10_MINIMUM_JACOBIAN_RATIO,
+    TETRAHEDRON_FOUR_POINT_RULE,
 };
 pub use quality::ElementQuality;
 pub use quality::{predicate, spatial_index, tolerance};

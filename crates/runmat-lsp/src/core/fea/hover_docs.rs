@@ -100,6 +100,14 @@ pub(super) fn authoring_doc(name: &str) -> Option<AuthoringDoc> {
             "Fraction of critical damping used by the selected dynamic procedure.",
             "This is dimensionless. A value of `0.02` represents two percent critical damping.",
         ),
+        "residual_vectors" => (
+            "Global directions whose inertia residual vectors a structural modal extraction adds to its basis.",
+            "Each direction adds the static response to a unit acceleration in that direction, with the retained modes removed. Modal-reduced steps that consume the basis solve in modes plus residual vectors.",
+        ),
+        "static_correction" => (
+            "Static correction of a modal-reduced frequency sweep: `applied_loads` or `none`.",
+            "`applied_loads` adds the static response to the sweep's applied load to the reduced space, so the quasi-static part of the response is exact and the modal truncation measure falls sharply below the first retained mode.",
+        ),
         "time_step" => (
             "Nominal integration increment for a transient procedure.",
             "Choose it to resolve the fastest retained dynamics and any sharp changes in applied signals.",

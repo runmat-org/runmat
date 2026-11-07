@@ -114,8 +114,40 @@ impl ElectricalAssembly {
                 let element = &projection.elements[index];
                 let coefficient = coefficients[index];
                 let width = element.node_indices.len();
+                // Fifteen quadrature points; each node pair has a three-term
+                // gradient dot (5), coefficient/measure scales (2), and one
+                // accumulation. Reserve the whole element before matrix writes.
+                let pairs = u64::try_from(width)
+                    .ok()
+                    .and_then(|width| width.checked_mul(width))
+                    .ok_or(ElectricalStaticError::Accounting(
+                        runmat_simulation_usage::LedgerError::CountOverflow,
+                    ))?;
+                let per_point = pairs
+                    .checked_mul(8)
+                    .ok_or(ElectricalStaticError::Accounting(
+                        runmat_simulation_usage::LedgerError::CountOverflow,
+                    ))?;
+                let maximum =
+                    per_point
+                        .checked_mul(15)
+                        .ok_or(ElectricalStaticError::Accounting(
+                            runmat_simulation_usage::LedgerError::CountOverflow,
+                        ))?;
+                let usage = runmat_simulation_usage::UsageContext::capture();
+                let mut batch = usage
+                    .as_ref()
+                    .map(|usage| {
+                        usage.ledger().reserve(
+                            runmat_simulation_usage::UsageCategory::Assembly,
+                            runmat_simulation_usage::OperationCount::from_operations(maximum),
+                        )
+                    })
+                    .transpose()
+                    .map_err(ElectricalStaticError::Accounting)?;
+                let mut visited = 0_u64;
                 let local = out.matrix(0);
-                projection
+                let quadrature = projection
                     .visit_element_quadrature(element, |point| {
                         let gradients = point.physical_shape_gradients();
                         for i in 0..width {
@@ -128,8 +160,22 @@ impl ElectricalAssembly {
                                 local[i * width + j] += coefficient * dot * point.volume_weight_m3;
                             }
                         }
+                        visited += 1;
                     })
-                    .map_err(|error| ElectricalStaticError::Topology(error.to_string()))
+                    .map_err(|error| match error {
+                        crate::topology::AnalysisProjectionError::Accounting(error) => {
+                            ElectricalStaticError::Accounting(error)
+                        }
+                        other => ElectricalStaticError::Topology(other.to_string()),
+                    });
+                if let Some(batch) = &mut batch {
+                    batch
+                        .complete(runmat_simulation_usage::OperationCount::from_operations(
+                            visited * per_point,
+                        ))
+                        .map_err(ElectricalStaticError::Accounting)?;
+                }
+                quadrature
             },
             |view: &ElementView<'_, f64>| {
                 let element = &projection.elements[view.element];
@@ -142,6 +188,8 @@ impl ElectricalAssembly {
         )
         .map_err(|error| match error {
             ElementAssemblyError::Element { error, .. } => error,
+            ElementAssemblyError::Admission(error) => error,
+            ElementAssemblyError::Accounting(error) => ElectricalStaticError::Accounting(error),
             other => ElectricalStaticError::Operator(other.to_string()),
         })?;
         let mut stiffness = RealSparseAssembler::from_planned_values(

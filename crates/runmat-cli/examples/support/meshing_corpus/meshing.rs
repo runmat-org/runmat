@@ -33,6 +33,7 @@ struct SuccessfulExecution {
 #[derive(Debug)]
 enum MeshRunError {
     Source(NativeMeshingSourceError),
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidResult(String),
 }
 
@@ -46,6 +47,7 @@ impl std::fmt::Display for MeshRunError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source(error) => error.fmt(formatter),
+            Self::Accounting(error) => write!(formatter, "mesh quality accounting failed: {error}"),
             Self::InvalidResult(error) => write!(
                 formatter,
                 "completed meshing result failed artifact/evidence validation: {error}"
@@ -265,7 +267,8 @@ fn measure_quality(artifact: &SolverMeshArtifact) -> Result<MeshQualityReport, M
         };
         let points = [point(0)?, point(1)?, point(2)?, point(3)?];
         let volume = tetrahedron_volume(points);
-        let scaled_jacobian = tetrahedron_scaled_jacobian(points);
+        let scaled_jacobian =
+            tetrahedron_scaled_jacobian(points).map_err(MeshRunError::Accounting)?;
         let edge_aspect_ratio = tetrahedron_edge_aspect_ratio(points);
         let (_, radius_squared) = tetrahedron_circumsphere(
             points,
@@ -326,8 +329,12 @@ fn minimum_edge_length(points: [[f64; 3]; 4]) -> f64 {
 }
 
 fn classify_run_error(error: &MeshRunError) -> Option<ObservedFailure> {
-    let MeshRunError::Source(error) = error else {
-        return None;
+    let error = match error {
+        MeshRunError::Accounting(cause) => {
+            return Some(ObservedFailure::Accounting { cause: *cause });
+        }
+        MeshRunError::InvalidResult(_) => return None,
+        MeshRunError::Source(error) => error,
     };
     if let Some(admission) = error.admission_error() {
         return classify_admission(admission)

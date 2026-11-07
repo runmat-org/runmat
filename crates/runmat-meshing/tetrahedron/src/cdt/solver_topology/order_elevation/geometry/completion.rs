@@ -11,7 +11,6 @@ pub(super) fn complete_boundary_surface_parameters(
         surface_uses,
         exact_edges,
         evaluation,
-        options,
         cancellation,
     } = completion;
     let temporaries = GeometryAllocationScope::new(evaluation.control);
@@ -44,9 +43,15 @@ pub(super) fn complete_boundary_surface_parameters(
         let slot = node_slot(&topology.nodes, node_id)?;
         let node = &mut topology.nodes[slot];
         let parameter = curve_parameter(node, id)?;
+        // Pcurve images lie on the trim boundary by construction; only agreement is checked.
         for uv in pcurve_uvs(id, parameter, &usage, evaluation)? {
-            let point = evaluate_surface(&usage, uv, evaluation, options)?;
-            require_matching_points(input, node.coordinates_m.canonical_value(), point)?;
+            let point = evaluate_surface_point(&usage, uv, evaluation)?;
+            require_matching_curve_points(
+                input,
+                evaluation.sources.edge(id)?,
+                node.coordinates_m.canonical_value(),
+                point,
+            )?;
             insert_surface_parameter(node, &usage, uv, retained)?;
         }
     }

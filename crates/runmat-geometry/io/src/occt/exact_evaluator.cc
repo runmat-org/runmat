@@ -386,7 +386,9 @@ OcctPcurveDerivativesPayload exact_pcurve_derivatives(
   OcctPcurveDerivativesPayload result;
   const Geom2dAdaptor_Curve curve(pcurve_value.curve);
   result.parameter_unit = (curve.GetType() == GeomAbs_Circle || curve.GetType() == GeomAbs_Ellipse) ? 2 : 0;
-  const BRepAdaptor_Surface surface(face(*value, face_key), Standard_True);
+  // Only the surface type is read here; an unrestricted adaptor skips the per-call UV-bounds
+  // pass over the face's wires, which dominated dense pcurve sampling.
+  const BRepAdaptor_Surface surface(face(*value, face_key), Standard_False);
   result.parameter_scale = value->meters_per_source_unit;
   result.u_parameter_unit = 0;
   result.v_parameter_unit = 0;

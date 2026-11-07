@@ -17,6 +17,7 @@ impl PlotRenderer {
         self.geometry_hidden_owner_node_ids.clear();
         // Clear existing scene
         self.scene.clear();
+        self.scene.set_translucent_last(false);
         self.scene_buffer_cache.borrow_mut().clear();
 
         // Convert figure to scene nodes
@@ -157,6 +158,7 @@ impl PlotRenderer {
         }
 
         self.scene.clear();
+        self.scene.set_translucent_last(true);
         self.scene_buffer_cache.borrow_mut().clear();
         self.geometry_node_owner_ids.clear();
         if !same_scene_identity {
@@ -593,6 +595,71 @@ impl PlotRenderer {
         self.current_3d_display_bounds_for_axes(axes_index)
     }
 
+    /// The initial 3-D view before any `view` call: MATLAB's default `view(-37.5, 30)` for
+    /// plots, and the CAD isometric view from (+x, -y, +z) for geometry.
+    pub(super) fn default_3d_view_direction(&self, axes_index: usize) -> Vec3 {
+        if self.axes_shows_geometry(axes_index) {
+            Vec3::new(1.0, -1.0, 1.0)
+        } else {
+            Camera::view_direction_deg(-37.5, 30.0)
+        }
+    }
+
+    /// Whether this axes shows CAD geometry (a geometry scene or a geometry mesh), whose axes
+    /// are anchored at the world origin like a CAD view.
+    pub(super) fn axes_shows_geometry(&self, axes_index: usize) -> bool {
+        self.last_geometry_scene.is_some()
+            || self.last_figure.as_ref().is_some_and(|f| {
+                f.plots().enumerate().any(|(idx, plot)| {
+                    f.plot_axes_indices().get(idx).copied().unwrap_or(0) == axes_index
+                        && matches!(plot, crate::plots::PlotElement::Mesh(_))
+                })
+            })
+    }
+
+    /// The 3-D axis frame of one axes: where its three axis lines start, how long they are, and
+    /// the tick values along them. The renderer draws the lines and tick marks from it and the
+    /// overlay labels the same ticks, so both read this one function.
+    ///
+    /// Plots (`surf`, `mesh`, `plot3`, ...) anchor the axes at the lower corner of the axis
+    /// limits and tick the limits on each axis, as MATLAB's plot box does: a surface over spot
+    /// 60..140 shows ticks from 60 to 140 along its own edge. CAD geometry keeps a world-origin
+    /// triad that reaches the far edge of the model.
+    pub fn axis_frame_3d(&self, axes_index: usize) -> Option<AxisFrame3d> {
+        let bounds = if self.last_geometry_scene.is_some() {
+            self.last_geometry_scene.as_ref().map(|scene| scene.bounds)
+        } else {
+            self.display_bounds_3d_for_axes(axes_index)
+        }?;
+        let mut frame = AxisFrame3d::from_bounds(
+            bounds.min,
+            bounds.max,
+            self.axes_shows_geometry(axes_index),
+        )?;
+        if !frame.world_origin {
+            // Stand the z-axis on the bottom corner that sits leftmost on screen, as MATLAB's
+            // plot box does, so it frames the data instead of crossing in front of it.
+            if let Some(camera) = self.axes_cameras.get(axes_index) {
+                let forward = camera.target - camera.position;
+                let right = forward.cross(camera.up);
+                let scale = camera.axis_scale;
+                let leftmost = [
+                    Vec3::new(bounds.min.x, bounds.min.y, bounds.min.z),
+                    Vec3::new(bounds.max.x, bounds.min.y, bounds.min.z),
+                    Vec3::new(bounds.min.x, bounds.max.y, bounds.min.z),
+                    Vec3::new(bounds.max.x, bounds.max.y, bounds.min.z),
+                ]
+                .into_iter()
+                .filter(|corner| right.is_finite() && right.length_squared() > 0.0 && corner.is_finite())
+                .min_by(|a, b| (*a * scale).dot(right).total_cmp(&(*b * scale).dot(right)));
+                if let Some(corner) = leftmost {
+                    frame.z_base = corner;
+                }
+            }
+        }
+        Some(frame)
+    }
+
     /// A tick step per data axis for the 3-D origin triad: a nice value near `target_px` on
     /// screen along that axis.
     pub(crate) fn world_axis_steps(
@@ -631,10 +698,20 @@ impl PlotRenderer {
                     && matches!(plot, crate::plots::PlotElement::Mesh(_))
             })
         });
-        let fixed_aspect =
-            meta.is_some_and(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual");
-        if fixed_aspect || has_geometry_mesh {
+        if has_geometry_mesh {
             return Vec3::splat(1.0 / largest);
+        }
+        if let Some(meta) =
+            meta.filter(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual")
+        {
+            // One data unit along axis k is `ratio[k]` long relative to the others; the largest
+            // relative extent fills the unit box and the limits stay as they are.
+            let ratio = if meta.data_aspect_ratio_mode == "manual" {
+                meta.data_aspect_ratio.map(|r| (r.abs() as f32).max(1.0e-12))
+            } else {
+                [1.0; 3]
+            };
+            return data_aspect_axis_scale(size, ratio);
         }
         let axis = |extent: f32| {
             if extent > largest * 1.0e-6 {
@@ -658,7 +735,7 @@ impl PlotRenderer {
                 cam.axis_scale = self.axes_3d_axis_scale(idx, bounds);
                 cam.target = center * cam.axis_scale;
                 cam.up = Vec3::Z;
-                cam.position = cam.target + Vec3::new(1.0, -1.0, 1.0);
+                cam.position = cam.target + self.default_3d_view_direction(idx);
                 cam.fit_bounds(bounds.min, bounds.max);
                 self.axes_cameras[idx] = cam;
                 applied = true;

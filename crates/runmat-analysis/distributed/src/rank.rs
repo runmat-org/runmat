@@ -430,7 +430,7 @@ fn assemble(
                 &coordinates,
                 &mut element_matrix,
             )
-            .map_err(DistributedError::Kernel)?;
+            .map_err(DistributedError::from)?;
         for (s, &a) in connectivity.iter().enumerate() {
             for (t, &b) in connectivity.iter().enumerate() {
                 positions[s * n + t] = adjacency[a as usize]
@@ -599,7 +599,7 @@ impl Subdomain<'_> {
                     &nodal,
                     &mut values[element * width..(element + 1) * width],
                 )
-                .map_err(DistributedError::Kernel)?;
+                .map_err(DistributedError::from)?;
         }
         Ok(SubdomainElementResults {
             elements: self.input.global_elements[..owned_elements].to_vec(),

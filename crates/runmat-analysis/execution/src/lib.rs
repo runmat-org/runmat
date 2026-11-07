@@ -551,9 +551,10 @@ pub use semantic_state_object_access::{
 };
 pub use serial::{
     execute_reserved_serial_analysis, execute_serial_analysis,
-    execute_serial_analysis_host_response, AnalysisKernel, AnalysisKernelInvocation,
-    AnalysisKernelOutput, AnalysisKernelOutputPartition, AnalysisKernelPayload,
-    AnalysisOutputPolicy, CompletedAnalysisWorkload, ReservedAnalysisKernelInvocation,
+    execute_serial_analysis_host_response, execute_serial_analysis_host_response_with_capacity,
+    AnalysisKernel, AnalysisKernelFuture, AnalysisKernelInvocation, AnalysisKernelOutput,
+    AnalysisKernelOutputPartition, AnalysisKernelPayload, AnalysisOutputPolicy, AsyncCapacityOwner,
+    CompletedAnalysisWorkload, ReservedAnalysisKernelInvocation,
 };
 pub use signal_input::{validate_signal_input_payload, ResolvedSignalArtifact};
 pub use signal_materialization::{
@@ -704,8 +705,9 @@ pub use nonlinear_field_recovery::{
 
 mod serial_kernel;
 pub use serial_kernel::{
-    execute_serial_structural_sequence, execute_state_publication_kernel,
-    execute_structural_linear_kernel, SerialAnalysisHost, SerialStructuralAnalysisKernel,
+    execute_serial_structural_sequence, execute_serial_structural_sequence_with_capacity,
+    execute_state_publication_kernel, execute_structural_linear_kernel, SerialAnalysisHost,
+    SerialAnalysisServices, SerialStructuralAnalysisKernel,
 };
 
 /// Source-bound artifact authority shared by checked-source execution hosts.

@@ -97,6 +97,7 @@ pub trait AnalysisArtifactStore: Send + Sync {
         step: &AnalysisStudyStepRunData,
         object_catalog: &runmat_execution::value::PublishedObjectCatalog,
         artifact_roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, String>;
     fn load_structural_frequency(
@@ -108,6 +109,7 @@ pub trait AnalysisArtifactStore: Send + Sync {
         step: &AnalysisStudyStepRunData,
         object_catalog: &runmat_execution::value::PublishedObjectCatalog,
         artifact_roots: &crate::analysis::FrequencySampleArtifactRootInventory,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, String>;
     fn load_acoustic_frequency(

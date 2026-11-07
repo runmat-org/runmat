@@ -43,7 +43,7 @@ pub(super) fn distribute_heat_rate_sources(
             .filter(|element| match &excitation.target {
                 ExcitationTarget::WholeModel => true,
                 ExcitationTarget::Region(target) => {
-                    target.matches_persistent_entity(&element.region_id)
+                    target.selects_volume_element(&element.region_id, &element.provenance)
                 }
                 _ => false,
             })

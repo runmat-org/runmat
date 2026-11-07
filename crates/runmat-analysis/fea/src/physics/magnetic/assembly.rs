@@ -157,6 +157,8 @@ impl<'a> MagneticAssembly<'a> {
         let execution = crate::planning::resource::LocalExecutionPlan::serial();
         let operator_error = |e: ElementAssemblyError<MagnetostaticError>| match e {
             ElementAssemblyError::Element { error, .. } => error,
+            ElementAssemblyError::Admission(error) => error,
+            ElementAssemblyError::Accounting(error) => MagnetostaticError::Accounting(error),
             other => MagnetostaticError::Operator(other.to_string()),
         };
         let edge_indices = |index: usize| {

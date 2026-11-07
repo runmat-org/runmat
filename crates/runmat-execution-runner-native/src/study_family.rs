@@ -100,6 +100,10 @@ pub(crate) struct FamilyStudyContext<'a> {
     pub artifact_access: &'a ArtifactAccess,
     pub program_revision: &'a ProgramRevision,
     pub local_execution: LocalExecutionPlan,
+    /// The memory one analysis worker of this run may use, read once per run by the placement
+    /// (locally: the run's pool less what the coordinating process holds). Path selection, the
+    /// output policy and the worker envelope all use this value.
+    pub worker_memory_bytes: u64,
 }
 
 /// Coordinator preparation for one family, ready for any analysis task pool.
@@ -123,18 +127,13 @@ pub(crate) struct PlannedFamilyStudy {
 
 impl PlannedFamilyStudy {
     /// Process-isolated task envelope derived from the authored step accuracy resources. Its
-    /// memory is the effective ceiling, min(authored, machine capacity).
+    /// memory is the effective ceiling, min(authored, the run's worker memory).
     pub fn local_resources(
         &self,
         local_execution: LocalExecutionPlan,
-        inventory: ObjectInventoryLimits,
-        machine_memory_bytes: Option<u64>,
+        worker_memory_bytes: u64,
     ) -> Result<ResourceRequest, String> {
-        let machine = match machine_memory_bytes {
-            Some(capacity) => capacity,
-            None => crate::machine_capacity::memory_bytes().map_err(|error| error.to_string())?,
-        };
-        let memory = self.maximum_resident_bytes.min(machine);
+        let memory = self.maximum_resident_bytes.min(worker_memory_bytes);
         let resources = ResourceRequest {
             cpu_millicores: local_execution
                 .checked_cpu_millicores()
@@ -142,7 +141,7 @@ impl PlannedFamilyStudy {
             memory_bytes: memory,
             scratch_bytes: memory,
             max_wall_millis: self.maximum_wall_millis,
-            max_artifact_bytes: inventory.max_total_bytes,
+            max_artifact_bytes: ObjectInventoryLimits::admitted(memory).max_total_bytes,
             max_egress_bytes: 0,
             max_relay_bytes: 0,
             accelerators: Vec::new(),
@@ -169,11 +168,7 @@ pub(crate) fn plan_family_study(
             kind.label()
         ));
     }
-    let output_policy = AnalysisOutputPolicy::new(
-        runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
-        ObjectInventoryLimits::default(),
-    )
-    .map_err(|error| error.to_string())?;
+    let output_policy = admitted_output_policy(context.study, context.worker_memory_bytes)?;
     let capabilities = BTreeSet::from([AnalysisCapabilityRequirement::ProcessIsolation]);
     let mesh = context.mesh.clone();
     let access = context.artifact_access.clone();
@@ -201,6 +196,15 @@ pub(crate) fn plan_family_study(
             }
             if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
                 compiled = electrothermal_heat_study(&compiled, context.mesh, policy)?;
+            }
+            // The thermal plan selects its solve path (the proving factor, or the conduction
+            // multigrid when the factor does not fit) within the step's resident ceiling. Run it
+            // under the run's admitted budget, min(authored, the run's worker memory), so the
+            // plan, the worker's re-derivation and the worker envelope agree.
+            let machine = context.worker_memory_bytes;
+            for step in &mut compiled.model.sequence.steps {
+                let budget = step.accuracy.resources.resident_byte_budget().min(machine);
+                step.accuracy.resources.set_resident_byte_budget(budget);
             }
             let product = plan_thermal_study_product_with_fields(
                 compiled,
@@ -296,8 +300,7 @@ pub(crate) fn plan_family_study(
             (
                 FamilyStudyPreparation::Electrical(Box::new(ElectricalStudyPreparation {
                     local_execution: context.local_execution,
-                    machine_memory_bytes: crate::machine_capacity::memory_bytes()
-                        .map_err(|error| error.to_string())?,
+                    machine_memory_bytes: context.worker_memory_bytes,
                     policy,
                     product,
                     mesh,
@@ -445,6 +448,27 @@ fn electrothermal_heat_study(
         ));
     }
     Ok(thermal)
+}
+
+/// Output inventory admitted by the study's memory budget: min(authored step resident ceiling,
+/// the run's worker memory), within the platform ceilings. The output reservation then checks
+/// each task's exact requirement against the same budget.
+fn admitted_output_policy(
+    study: &runmat_analysis_core::RealizedStudy,
+    machine: u64,
+) -> Result<AnalysisOutputPolicy, String> {
+    let authored = study
+        .sequence
+        .steps
+        .iter()
+        .map(|step| step.accuracy.resources.resident_byte_budget())
+        .min()
+        .unwrap_or(u64::MAX);
+    AnalysisOutputPolicy::new(
+        runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
+        ObjectInventoryLimits::admitted(authored.min(machine)),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn single_step(model: &AnalysisModel, kind: StudyFamilyKind) -> Result<(u64, u64), String> {

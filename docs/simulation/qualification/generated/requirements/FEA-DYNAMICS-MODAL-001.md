@@ -12,8 +12,8 @@ Evidence kind: IndependentReference. Criterion: Use the physical structural stif
 | modal_structural | tet10 | numerical_kernel | OPEN |  |
 | modal_structural | beam | numerical_kernel | OPEN |  |
 | modal_structural | shell | numerical_kernel | OPEN |  |
-| modal_structural | tet4 | public_study | PARTIAL | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_modal_frequency_and_retained_response_have_independent_evidence` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:310) - Axial affine Tet4 slab rod frequency refinement and modal truncation against direct harmonic response. Does not cover beam/shell modes, repeated eigenspaces, ev... |
-| modal_structural | tet10 | public_study | PARTIAL | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_tet10_modal_frequency_and_retained_response_have_independent_evidence` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:325) - Axial affine Tet10 slab rod frequency refinement and modal truncation against direct harmonic response; beam and shell modes, repeated eigenspaces and remote en... |
+| modal_structural | tet4 | public_study | PARTIAL | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_modal_frequency_and_retained_response_have_independent_evidence` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:315) - Axial affine Tet4 slab rod frequency refinement and modal truncation against direct harmonic response. Does not cover beam/shell modes, repeated eigenspaces, ev... |
+| modal_structural | tet10 | public_study | PARTIAL | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_tet10_modal_frequency_and_retained_response_have_independent_evidence` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:330) - Axial affine Tet10 slab rod frequency refinement and modal truncation against direct harmonic response; beam and shell modes, repeated eigenspaces and remote en... |
 | modal_structural | beam | public_study | OPEN |  |
 | modal_structural | shell | public_study | OPEN |  |
 | modal_structural | canonical_mixed_topology | native_process | OPEN |  |
@@ -76,7 +76,7 @@ Evidence kind: IndependentReference. Criterion: Evidence includes axial bar and 
 | modal_structural | beam | numerical_kernel | OPEN |  |
 | modal_structural | shell | numerical_kernel | OPEN |  |
 | modal_structural | tet4 | public_study | OPEN |  |
-| modal_structural | tet10 | public_study | PARTIAL | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_tet10_modal_frequency_and_retained_response_have_independent_evidence` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:325) - Axial rod modal frequency against the continuum reference with retained-response truncation checked against direct harmonic response; no beam modes, repeated mo... |
+| modal_structural | tet10 | public_study | PARTIAL | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_tet10_modal_frequency_and_retained_response_have_independent_evidence` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:330) - Axial rod modal frequency against the continuum reference with retained-response truncation checked against direct harmonic response; no beam modes, repeated mo... |
 | modal_structural | beam | public_study | OPEN |  |
 | modal_structural | shell | public_study | OPEN |  |
 | modal_structural | canonical_mixed_topology | native_process | OPEN |  |

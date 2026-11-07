@@ -45,19 +45,34 @@ impl DyadicNode {
         }
         // The unreduced sum may need one extra bit even when the resulting
         // parameter fits the admitted representation. Reduce before admission.
-        let left = u128::from(self.numerator) << (exponent - self.exponent);
-        let right = u128::from(right.numerator) << (exponent - right.exponent);
-        let mut numerator = left + right;
+        let lower = u128::from(self.numerator) << (exponent - self.exponent);
+        let upper = u128::from(right.numerator) << (exponent - right.exponent);
+        let mut numerator = lower + upper;
         let mut exponent = exponent + 1;
         while exponent > 0 && numerator.is_multiple_of(2) {
             numerator /= 2;
             exponent -= 1;
         }
         if exponent >= 63 {
+            // The exact midpoint is finer than the representation, but a coarser dyadic point
+            // can still lie strictly inside the interval: take the coarsest one in its middle
+            // half, or else strictly inside it.
+            if let Some(inner) = self.coarsest_inner(right) {
+                return Ok(inner);
+            }
             return Err(error(
                 DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
                 Some(context.constraint_index),
-                format!("dyadic midpoint requires exponent {exponent} after exact reduction"),
+                format!(
+                    "dyadic midpoint requires exponent {exponent} after exact reduction; interval \
+                     {}/2^{} to {}/2^{} on segment {:?}-{:?}",
+                    self.numerator,
+                    self.exponent,
+                    right.numerator,
+                    right.exponent,
+                    context.first_coordinates,
+                    context.last_coordinates
+                ),
             ));
         }
         Ok(Self {
@@ -71,6 +86,49 @@ impl DyadicNode {
             })?,
             exponent,
         })
+    }
+
+    /// The dyadic parameter with the smallest exponent (at most 62) in the middle half of the
+    /// open interval to `right`, or strictly inside it when the middle half holds none.
+    fn coarsest_inner(self, right: Self) -> Option<Self> {
+        let exponent = self.exponent.max(right.exponent);
+        if exponent > 62 {
+            return None;
+        }
+        let lower = u128::from(self.numerator) << (exponent - self.exponent);
+        let upper = u128::from(right.numerator) << (exponent - right.exponent);
+        let (lower, upper) = (lower.min(upper), lower.max(upper));
+        let width = upper - lower;
+        if width < 2 {
+            return None;
+        }
+        let ranges = [
+            ((lower + width / 4).max(lower + 1), (upper - width / 4).min(upper - 1)),
+            (lower + 1, upper - 1),
+        ];
+        for (from, to) in ranges {
+            if from > to {
+                continue;
+            }
+            for coarse in 0..=exponent {
+                let step = 1_u128 << (exponent - coarse);
+                let candidate = from.div_ceil(step) * step;
+                if candidate <= to && candidate > lower && candidate < upper {
+                    let mut numerator = candidate >> (exponent - coarse);
+                    let mut reduced = coarse;
+                    while reduced > 0 && numerator.is_multiple_of(2) {
+                        numerator /= 2;
+                        reduced -= 1;
+                    }
+                    return Some(Self {
+                        identity: StableDigest::ZERO,
+                        numerator: u64::try_from(numerator).ok()?,
+                        exponent: reduced,
+                    });
+                }
+            }
+        }
+        None
     }
 
     #[cfg(test)]
@@ -142,7 +200,7 @@ impl DyadicNode {
         Ok(Some(canonical(accepted)))
     }
 
-    fn search_near_parameter(
+    pub(super) fn search_near_parameter(
         self,
         right: Self,
         parameter: f64,

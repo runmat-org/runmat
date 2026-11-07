@@ -232,13 +232,19 @@ async fn run_meshing_worker(
             .unwrap_or_else(|error| failure(error.to_string()))
         };
         match scope {
-            Some(scope) => scope
-                .run_checked_sync(run)
-                .map_err(|error| NativeExecutionError::Protocol(error.to_string())),
-            None => Ok(match host {
-                Some(host) => host.run_sync(run),
-                None => run(),
-            }),
+            Some(scope) => {
+                let response = scope
+                    .run_checked_sync(run)
+                    .map_err(|error| NativeExecutionError::Protocol(error.to_string()));
+                (response, Some(scope))
+            }
+            None => (
+                Ok(match host {
+                    Some(host) => host.run_sync(run),
+                    None => run(),
+                }),
+                None,
+            ),
         }
     });
     let frame_limits = FrameLimits {
@@ -298,10 +304,21 @@ async fn run_meshing_worker(
     {
         return Err(NativeExecutionError::Protocol(error));
     }
+    let (response, scope) = response;
     let response = response?;
     if let Some(control) = scope_control {
         control
             .check()
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    }
+    if let Some(scope) = scope {
+        let outcome = if matches!(&response, ProgramExecutionResponse::Failure { .. }) {
+            runmat_runtime::analysis::fea_run_admission::FeaRunOutcome::Failed
+        } else {
+            runmat_runtime::analysis::fea_run_admission::FeaRunOutcome::Completed
+        };
+        scope
+            .settle(outcome)
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     }
     Ok(response)

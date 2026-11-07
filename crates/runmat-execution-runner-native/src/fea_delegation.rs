@@ -6,6 +6,8 @@ use runmat_runtime::analysis::fea_run_admission::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+mod owner;
+pub(crate) use owner::ChildGrant;
 
 pub(crate) type Source = Arc<dyn FeaRunDelegationSource>;
 pub(crate) const MAX_GRANT_BYTES: u64 = 16 * 1024;
@@ -22,19 +24,22 @@ pub(crate) struct WorkerFeaGrant {
     pub(crate) parent: FeaRunDelegation,
 }
 impl WorkerFeaGrant {
-    pub(crate) fn new(
-        source: &Source,
-        assignment: &ProgramExecutionAssignment,
+    pub(crate) fn install_with_parent(
+        &self,
+        actual: &ProgramExecutionAssignment,
         resources: &runmat_execution::resource::ResourceRequest,
-    ) -> Result<Self, String> {
-        let parent = source.snapshot().map_err(|error| error.to_string())?;
-        let grant = Self {
-            assignment: assignment.clone(),
-            resources: resources.clone(),
-            parent,
-        };
-        grant.validate(assignment, resources)?;
-        Ok(grant)
+        client: &Arc<crate::fea_proxy::Client>,
+    ) -> Result<FeaRunScope, String> {
+        self.validate(actual, resources)?;
+        let permit = client
+            .delegated_permit(self.parent.budget)
+            .map_err(|error| error.to_string())?;
+        FeaRunScope::from_private_worker_permit(
+            self.parent.clone(),
+            u64::from(resources.cpu_millicores),
+            permit,
+        )
+        .map_err(|error| error.to_string())
     }
     fn validate(
         &self,
@@ -62,6 +67,7 @@ impl WorkerFeaGrant {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn install(
         &self,
         actual: &ProgramExecutionAssignment,
@@ -209,6 +215,7 @@ pub(crate) fn test_grant() -> WorkerFeaGrant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_simulation_usage::{OperationCount, UsageContext};
     pub(super) fn fixture() -> WorkerFeaGrant {
         let request = runmat_runtime::analysis::fea_run_admission::FeaRunRequest::local(
             runmat_runtime::analysis::fea_run_admission::FeaRunKind::MeshAndSolve,
@@ -247,7 +254,8 @@ mod tests {
                 },
                 request,
                 budget: FeaRunBudget {
-                    held_core_millis: 1_000_000,
+                    budget_ops: OperationCount::from_operations(1_000_000),
+                    granted_ops: OperationCount::from_operations(100_000),
                     expires_at_unix_millis: now + 60_000,
                     heartbeat_millis: 30_000,
                 },
@@ -274,17 +282,27 @@ mod tests {
         assert!(grant.validate(&grant.assignment, &grant.resources).is_err());
     }
     #[test]
-    fn private_grant_binds_assignment_and_cpu_without_resetting_parent_clock() {
+    fn private_grant_binds_assignment_and_cpu_with_child_physical_usage() {
         let grant = fixture();
         let scope = grant.install(&grant.assignment, &grant.resources).unwrap();
         assert_eq!(scope.run_sync(FeaRunScope::current_allocation), Some(1000));
-        assert!(scope.usage().cpu_core_millis >= 1000);
+        let physical = scope.usage().unwrap().resources;
+        assert_eq!(physical.cpu_core_millis, physical.wall_millis);
+        assert_eq!(
+            scope.usage().unwrap().completed_ops.total().unwrap(),
+            OperationCount::ZERO
+        );
         let mut other = grant.assignment.clone();
         other.attempt_id = runmat_execution::identity::AttemptId::derive(&[b"different"]);
         assert!(grant.install(&other, &grant.resources).is_err());
         let mut altered = grant.clone();
         altered.parent.allocation_ceiling_millicores = 500;
         assert!(altered
+            .install(&grant.assignment, &grant.resources)
+            .is_err());
+        let mut expired = grant.clone();
+        expired.parent.budget.expires_at_unix_millis = 1;
+        assert!(expired
             .install(&grant.assignment, &grant.resources)
             .is_err());
     }
@@ -295,7 +313,10 @@ mod tests {
         let observer = LeaseObserver::default();
         observer.install(&grant, &scope).unwrap();
         let mut budget = grant.parent.budget;
-        budget.held_core_millis += 1000;
+        budget.granted_ops = budget
+            .granted_ops
+            .checked_add(OperationCount::from_operations(1000))
+            .unwrap();
         budget.expires_at_unix_millis += 1000;
         let bytes = serde_json::to_vec(&crate::protocol::WorkerDriverMessage::FeaLeaseUpdate {
             run_id: grant.parent.request.run_id.clone(),
@@ -305,14 +326,14 @@ mod tests {
         .unwrap();
         assert!(observer.observe(&bytes));
         let retained = scope.run_sync(|| {
-            FeaRunScope::current_delegation_source()
+            UsageContext::capture()
                 .unwrap()
-                .unwrap()
+                .ledger()
                 .snapshot()
                 .unwrap()
         });
-        assert_eq!(retained.budget, budget);
-        assert_eq!(retained.origin, grant.parent.origin);
+        assert_eq!(retained.budget, budget.budget_ops);
+        assert_eq!(retained.granted, budget.granted_ops);
         let wrong = serde_json::to_vec(&crate::protocol::WorkerDriverMessage::FeaLeaseUpdate {
             run_id: grant.parent.request.run_id.clone(),
             attempt_id: runmat_execution::identity::AttemptId::derive(&[b"wrong"]),

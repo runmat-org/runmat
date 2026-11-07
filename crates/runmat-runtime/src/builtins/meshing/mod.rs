@@ -40,7 +40,25 @@ fn meshing_runtime_error(failure: crate::meshing::MeshingExecutionError) -> crat
             .with_builtin(GENERATE_NAME)
             .with_identifier(denied.error_code())
             .build(),
-        MeshingExecutionError::Provider(message) => error(GENERATE_NAME, message),
+        MeshingExecutionError::Provider(source) => {
+            let accounting_cause = match &source {
+                crate::meshing::MeshingExecutionProviderError::Failure(failure)
+                    if failure.category
+                        == runmat_meshing_core::MeshingFailureCategory::NumericalAccounting =>
+                {
+                    failure.accounting_error
+                }
+                _ => None,
+            };
+            let identifier = accounting_cause.map_or("RunMat:meshing:InvalidInput", |cause| {
+                crate::analysis::fea_run_admission::FeaRunDenied::Accounting(cause).error_code()
+            });
+            build_runtime_error(format!("{GENERATE_NAME}: {source}"))
+                .with_builtin(GENERATE_NAME)
+                .with_identifier(identifier)
+                .with_source(source)
+                .build()
+        }
         MeshingExecutionError::WithLeaseFailure { primary, lease } => {
             crate::runtime_error::complete_with_cleanup::<()>(
                 Err(meshing_runtime_error(*primary)),

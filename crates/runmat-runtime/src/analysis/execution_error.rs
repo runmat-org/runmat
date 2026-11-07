@@ -28,6 +28,8 @@ pub(super) fn map_fea_run_error(
         ])
     };
     match err {
+        FeaRunError::Usage(cause) => super::fea_run_admission::FeaRunDenied::Accounting(cause)
+            .into_operation_error(operation.name(), operation.version(), context),
         FeaRunError::Cancelled => operation_error(
             operation.name(),
             operation.version(),
@@ -73,6 +75,7 @@ pub(super) fn map_fea_run_error(
                 | ResourcePlanningError::CanonicalWireCapacity { .. }
                 | ResourcePlanningError::AccuracyCeiling { .. }
                 | ResourcePlanningError::StaticSolveCeiling { .. }
+                | ResourcePlanningError::ThermalSolveCeiling { .. }
                 | ResourcePlanningError::Inventory(_)
                 | ResourcePlanningError::Capability(_)
                 | ResourcePlanningError::Accelerator { .. } => OperationErrorType::Capacity,

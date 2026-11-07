@@ -21,6 +21,8 @@ pub enum ModalProjectionError {
     NonPositiveMass,
     #[error("the projected structural operators are not symmetric")]
     AsymmetricOperator,
+    #[error("modal projection numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
 }
 
 /// Dense reduced K/M/C operators derived from one immutable modal basis and full-order assembly.
@@ -39,18 +41,49 @@ pub struct ModalReducedSystem {
 }
 
 impl ModalReducedSystem {
+    /// Project onto the retained eigenmodes of `basis` only.
     pub fn project(
         summary: &AssemblySummary,
         basis: &ModalBasisArtifact,
     ) -> Result<Self, ModalProjectionError> {
-        basis
-            .validate_for(summary)
-            .map_err(|error| ModalProjectionError::IncompatibleBasis(error.to_string()))?;
         let mode_shapes = basis
             .modes()
             .iter()
             .map(|mode| mode.dof_shape().to_vec())
             .collect::<Vec<_>>();
+        Self::project_shapes(summary, basis, mode_shapes)
+    }
+
+    /// Project onto the retained eigenmodes, then the basis residual vectors, then
+    /// `static_corrections` (mass-orthonormal static responses appended by the caller).
+    pub fn project_enriched(
+        summary: &AssemblySummary,
+        basis: &ModalBasisArtifact,
+        static_corrections: Vec<Vec<f64>>,
+    ) -> Result<Self, ModalProjectionError> {
+        let mode_shapes = basis
+            .modes()
+            .iter()
+            .map(|mode| mode.dof_shape().to_vec())
+            .chain(
+                basis
+                    .residual_vectors()
+                    .iter()
+                    .map(|residual| residual.dof_shape().to_vec()),
+            )
+            .chain(static_corrections)
+            .collect::<Vec<_>>();
+        Self::project_shapes(summary, basis, mode_shapes)
+    }
+
+    fn project_shapes(
+        summary: &AssemblySummary,
+        basis: &ModalBasisArtifact,
+        mode_shapes: Vec<Vec<f64>>,
+    ) -> Result<Self, ModalProjectionError> {
+        basis
+            .validate_for(summary)
+            .map_err(|error| ModalProjectionError::IncompatibleBasis(error.to_string()))?;
         let stiffness = project_operator(summary.operator.operators().stiffness(), &mode_shapes)?;
         let mass = project_operator(summary.operator.operators().mass(), &mode_shapes)?;
         let mass_applied_mode_shapes =
@@ -207,6 +240,7 @@ impl ModalReducedSystem {
             }
             super::dense::DenseSolveError::NonFinite => ModalProjectionError::NonFinite,
             super::dense::DenseSolveError::Singular => ModalProjectionError::NonPositiveMass,
+            super::dense::DenseSolveError::Usage(error) => ModalProjectionError::Usage(error),
         })?;
         runmat_types::physical::Quantity::try_new(values)
             .map_err(|_| ModalProjectionError::NonFinite)
@@ -540,6 +574,97 @@ mod tests {
             }
         }
     }
+    /// Full-space relative balance of a modal-reduced harmonic solve at `omega` (rad/s).
+    fn reduced_balance(
+        summary: &AssemblySummary,
+        imaginary_load: &[f64],
+        reduced: &ModalReducedSystem,
+        omega: f64,
+    ) -> f64 {
+        let load = super::super::ModalHarmonicLoad {
+            real: reduced
+                .project_load(&reduced.load_field(summary.operator.load()).unwrap())
+                .unwrap(),
+            imaginary: reduced
+                .project_load(&reduced.load_field(imaginary_load).unwrap())
+                .unwrap(),
+        };
+        let response = super::super::solve_modal_harmonic(reduced, omega, &load).unwrap();
+        assert!(response.relative_residual <= 1.0e-12);
+        let real = reduced
+            .expand_state(&response.displacement_real)
+            .unwrap()
+            .into_canonical_storage();
+        let imaginary = reduced
+            .expand_state(&response.displacement_imaginary)
+            .unwrap()
+            .into_canonical_storage();
+        let physical = super::super::evaluate_harmonic_physical_state(
+            summary,
+            omega,
+            &real,
+            &imaginary,
+            summary.operator.load(),
+            imaginary_load,
+        )
+        .unwrap();
+        physical
+            .balance
+            .closure_metrics(&physical.reaction)
+            .unwrap()
+            .1
+    }
+
+    // witness: FEA-DYNAMICS-RESPONSE-001/direct_modal_procedures @ linear_structural_dynamics/tet4/numerical_kernel; coverage: partial; boundary: applied-load static correction cuts the full-space truncation balance of a one-mode modal-reduced harmonic solve of the physical Tet4 slab rod below its first mode
+    #[test]
+    fn applied_load_static_correction_collapses_the_modal_truncation_balance() {
+        use crate::pipeline::modal::rod_qualification as rod;
+        let mesh = rod::rod_mesh(2, false);
+        let model = rod::rod_model(&mesh, &[1.0]);
+        // k = 1 drives the rod at 10 rad/s, below its first axial mode (2.5 Hz).
+        let assembly = rod::assemble(&model, &mesh, 1.0);
+        let omega = rod::WAVE_SPEED;
+        let modal = crate::run_modal_with_options(
+            &rod::modal_model(&model),
+            crate::ComputeBackend::Cpu,
+            crate::ModalSolveOptions {
+                solver_mesh: Some(mesh.clone()),
+                truncation: crate::pipeline::modal_governance::ModalTruncationPolicy::requested(1),
+                ..crate::ModalSolveOptions::default()
+            },
+        )
+        .unwrap();
+        let summary = &assembly.real;
+        let modes_only = ModalReducedSystem::project(summary, &modal.basis).unwrap();
+        let truncated = reduced_balance(summary, &assembly.imaginary_load, &modes_only, omega);
+
+        let retained = modal
+            .basis
+            .modes()
+            .iter()
+            .map(|mode| mode.dof_shape())
+            .collect::<Vec<_>>();
+        let corrections = crate::pipeline::modal_residual::applied_load_static_corrections(
+            summary,
+            &retained,
+            &[summary.operator.load(), &assembly.imaginary_load],
+        )
+        .unwrap();
+        // The real and imaginary traction share one spatial pattern: one correction vector.
+        assert_eq!(corrections.len(), 1);
+        let corrected =
+            ModalReducedSystem::project_enriched(summary, &modal.basis, corrections).unwrap();
+        assert_eq!(corrected.mode_count(), modes_only.mode_count() + 1);
+        let enriched = reduced_balance(summary, &assembly.imaginary_load, &corrected, omega);
+        eprintln!("rod one-mode truncation balance {truncated} -> static-corrected {enriched}");
+        assert!(truncated > 1.0e-3, "modes-only truncation balance={truncated}");
+        // At omega / omega_1 = 0.64 the correction leaves only the dynamic part of the missing
+        // response: measured 0.396 -> 0.00545 (73x).
+        assert!(
+            enriched <= 2.0e-2 * truncated,
+            "static correction must cut the truncation balance by 50x: {truncated} -> {enriched}"
+        );
+    }
 }
 
 /// Closed semantic roles admitted by modal state projection/reconstruction.
@@ -554,4 +679,5 @@ impl ModalCoordinateQuantity for runmat_types::physical::kind::Velocity {
 }
 impl ModalCoordinateQuantity for runmat_types::physical::kind::Acceleration {
     const DERIVATIVE_ORDER: u8 = 2;
+
 }

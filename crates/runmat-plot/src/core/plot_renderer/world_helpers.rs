@@ -4,8 +4,8 @@
 use super::*;
 
 impl PlotRenderer {
-    /// The helper lines (triad and ticks, in data units) and the ground grid's quad buffers,
-    /// for a 3D axes whose grid is on. Records the triad's steps for the overlay's labels.
+    /// The helper lines (axis lines and ticks, in data units) and the ground grid's quad
+    /// buffers for a 3D axes. The overlay labels the same ticks from [`Self::axis_frame_3d`].
     pub(super) fn world_helpers_3d(
         &mut self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
@@ -182,6 +182,19 @@ impl PlotRenderer {
             helper_vertices.push(Vertex::new(b, color));
         };
 
+        // World-axis helper for spatial awareness at model scale. Each axis has its own
+        // tick step, since 3-D axes may scale each data axis differently.
+        // Each axis reaches the far edge of the data from the origin, with about four
+        // ticks; without data bounds, the step follows the on-screen scale instead.
+        let frame = self.axis_frame_3d(axes_index).unwrap_or_else(|| {
+            // No finite bounds: size the triad from the on-screen scale at the origin.
+            let steps = Self::world_axis_steps(&project_to_px, center, &nice_step);
+            let lens = steps.map(|step| {
+                (step as f32 * 5.0)
+                    .clamp((step as f32).min(0.5), (dx.max(dy) * 0.6).max(step as f32))
+            });
+            AxisFrame3d::origin_triad(steps, lens)
+        });
         // Procedural ground grid (depth-tested, no depth writes).
         let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
         let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
@@ -210,29 +223,53 @@ impl PlotRenderer {
             if !show_minor_grid {
                 minor_alpha = 0.0;
             }
+            // A plot's grid fills the floor of its axis limits with lines at its tick values,
+            // as MATLAB's plot box does. CAD geometry keeps the view-filling ground grid that
+            // fades out around the model.
+            let grid_steps = if frame.world_origin {
+                GridPlaneExtent {
+                    min: (min_x, min_y),
+                    max: (max_x, max_y),
+                    major: [major_step as f32; 2],
+                    minor: [minor_step as f32; 2],
+                    fade: [
+                        (0.85 * dx.max(dy)).max(major_step as f32),
+                        (1.40 * dx.max(dy)).max((major_step as f32) * 2.0),
+                    ],
+                }
+            } else {
+                let major = [frame.steps[0] as f32, frame.steps[1] as f32];
+                GridPlaneExtent {
+                    min: (frame.origin.x, frame.origin.y),
+                    max: (frame.origin.x + frame.lens[0], frame.origin.y + frame.lens[1]),
+                    major,
+                    minor: major.map(|step| step / 5.0),
+                    fade: [f32::MAX * 0.5, f32::MAX],
+                }
+            };
             self.wgpu_renderer.ensure_grid_plane_pipeline(emission);
             self.wgpu_renderer.update_grid_uniforms_for_axes(
                 emission,
                 axes_index,
                 crate::core::renderer::GridUniforms {
-                    major_step: major_step as f32,
-                    minor_step: minor_step as f32,
-                    fade_start: (0.85 * dx.max(dy)).max(major_step as f32),
-                    fade_end: (1.40 * dx.max(dy)).max((major_step as f32) * 2.0),
+                    major_step_x: grid_steps.major[0],
+                    minor_step_x: grid_steps.minor[0],
+                    fade_start: grid_steps.fade[0],
+                    fade_end: grid_steps.fade[1],
                     camera_pos: position_data.to_array(),
-                    _pad0: 0.0,
+                    major_step_y: grid_steps.major[1],
                     target_pos: [target_data.x, target_data.y, plane_level],
-                    _pad1: 0.0,
+                    minor_step_y: grid_steps.minor[1],
                     major_color: [major_rgb[0], major_rgb[1], major_rgb[2], major_alpha],
                     minor_color: [minor_rgb[0], minor_rgb[1], minor_rgb[2], minor_alpha],
                 },
             );
 
             let quad_vertices = [
-                Vertex::new(on_grid(min_x, min_y), Vec4::ONE),
-                Vertex::new(on_grid(max_x, min_y), Vec4::ONE),
-                Vertex::new(on_grid(max_x, max_y), Vec4::ONE),
-                Vertex::new(on_grid(min_x, max_y), Vec4::ONE),
+                Vertex::new(on_grid(grid_steps.min.0, grid_steps.min.1), Vec4::ONE),
+                Vertex::new(on_grid(grid_steps.max.0, grid_steps.min.1), Vec4::ONE),
+                Vertex::new(on_grid(grid_steps.max.0, grid_steps.max.1), Vec4::ONE),
+                Vertex::new(on_grid(grid_steps.min.0, grid_steps.max.1), Vec4::ONE),
             ];
             let quad_indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
             let vb = self
@@ -244,64 +281,48 @@ impl PlotRenderer {
             grid_plane_buffers = Some((vb, ib));
         }
 
-        // World-axis helper for spatial awareness at model scale. Each axis has its own
-        // tick step, since 3-D axes may scale each data axis differently.
-        // Each axis reaches the far edge of the data from the origin, with about four
-        // ticks; without data bounds, the step follows the on-screen scale instead.
-        let (axis_steps, axis_lens) = match scene_bounds {
-            Some(bounds) if bounds.min.is_finite() && bounds.max.is_finite() => {
-                let reach = bounds.min.abs().max(bounds.max.abs());
-                let reach = [reach.x, reach.y, reach.z];
-                let steps = reach.map(|r| nice_step((r as f64 / 4.0).max(1e-9)));
-                let lens = [0, 1, 2].map(|k| reach[k].max(steps[k] as f32));
-                (steps, lens)
-            }
-            _ => {
-                let steps = Self::world_axis_steps(&project_to_px, center, &nice_step);
-                let lens = steps.map(|step| {
-                    (step as f32 * 5.0)
-                        .clamp((step as f32).min(0.5), (dx.max(dy) * 0.6).max(step as f32))
-                });
-                (steps, lens)
-            }
-        };
-        let origin = Vec3::new(0.0, 0.0, 0.0);
-        let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
-        let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
-        let col_z = Vec4::new(0.35, 0.62, 0.98, 0.85);
-        push_line(origin, origin + Vec3::new(axis_lens[0], 0.0, 0.0), col_x);
-        push_line(origin, origin + Vec3::new(0.0, axis_lens[1], 0.0), col_y);
-        push_line(origin, origin + Vec3::new(0.0, 0.0, axis_lens[2]), col_z);
+        // A result scene leaves the world triad out (see `shows_world_triad`).
+        if self.shows_world_triad(axes_index) {
+            let origin = frame.origin;
+            let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
+            let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
+            let col_z = Vec4::new(0.35, 0.62, 0.98, 0.85);
+            push_line(origin, origin + Vec3::new(frame.lens[0], 0.0, 0.0), col_x);
+            push_line(origin, origin + Vec3::new(0.0, frame.lens[1], 0.0), col_y);
+            push_line(
+                frame.z_base,
+                frame.z_base + Vec3::new(0.0, 0.0, frame.lens[2]),
+                col_z,
+            );
 
-        // Dynamic tick marks on the origin triad (major step only). Labels are drawn in the
-        // overlay so they stay crisp; these marks provide a depth-correct anchor in the scene.
-        self.world_axis_triads
-            .insert(axes_index, (axis_steps, axis_lens));
-        let max_ticks = 6usize;
-        let mut add_ticks = |axis: Vec3, perp: Vec3, step: f64, axis_len: f32, col: Vec4| {
-            if step <= 0.0 {
-                return;
-            }
-            // `f32::clamp` panics if min > max; keep the minimum below the maximum.
-            let tick_max = (step as f32 * 0.25).max(1.0e-6);
-            let tick_min = 0.01_f32.min(tick_max);
-            let tick_len = (axis_len * 0.04).clamp(tick_min, tick_max);
-            for i in 1..=max_ticks {
-                let t = (i as f32) * (step as f32);
-                if t >= axis_len * 0.999 {
-                    break;
+            // Tick marks on the axis lines (major step only). Labels are drawn in the overlay
+            // from the same frame so they stay crisp; these marks anchor them in depth.
+            for (axis_index, (axis, perp, perp_index, col)) in [
+                (Vec3::X, Vec3::Y, 1, col_x),
+                (Vec3::Y, Vec3::X, 0, col_y),
+                (Vec3::Z, Vec3::X, 0, col_z),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                // A tick mark extends along the perpendicular axis, so its length is measured in
+                // that axis's units: 3-D axes may scale x, y and z differently.
+                let perp_len = frame.lens[perp_index];
+                let perp_step = frame.steps[perp_index] as f32;
+                // `f32::clamp` panics if min > max; keep the minimum below the maximum.
+                let tick_max = (perp_step * 0.25).max(1.0e-6);
+                let tick_min = (perp_len * 0.002).min(tick_max);
+                let tick_len = (perp_len * 0.02).clamp(tick_min, tick_max);
+                for (offset, _value) in frame.ticks(axis_index) {
+                    let p = frame.axis_start(axis_index) + axis * offset;
+                    push_line(
+                        p - perp * tick_len,
+                        p + perp * tick_len,
+                        Vec4::new(col.x, col.y, col.z, col.w * 0.85),
+                    );
                 }
-                let p = origin + axis * t;
-                push_line(
-                    p - perp * tick_len,
-                    p + perp * tick_len,
-                    Vec4::new(col.x, col.y, col.z, col.w * 0.85),
-                );
             }
-        };
-        add_ticks(Vec3::X, Vec3::Y, axis_steps[0], axis_lens[0], col_x);
-        add_ticks(Vec3::Y, Vec3::X, axis_steps[1], axis_lens[1], col_y);
-        add_ticks(Vec3::Z, Vec3::X, axis_steps[2], axis_lens[2], col_z);
+        }
 
         (helper_vertices, grid_plane_buffers)
     }

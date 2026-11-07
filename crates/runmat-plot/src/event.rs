@@ -59,6 +59,14 @@ pub struct FigureSnapshot {
     pub plots: Vec<PlotDescriptor>,
 }
 
+fn orientation_triad_default() -> bool {
+    true
+}
+
+fn orientation_triad_is_default(shown: &bool) -> bool {
+    *shown
+}
+
 /// Full replay scene payload capable of reconstructing a figure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +77,13 @@ pub struct FigureScene {
     pub geometry_overlay: Option<crate::geometry_scene::GeometrySceneOverlay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub geometry_lines: Vec<GeometryLines>,
+    /// A geometry scene's corner orientation triad (see
+    /// [`crate::geometry_scene::GeometryScene::show_orientation_triad`]); written only when off.
+    #[serde(
+        default = "orientation_triad_default",
+        skip_serializing_if = "orientation_triad_is_default"
+    )]
+    pub geometry_orientation_triad: bool,
     pub schema_version: u32,
     pub layout: FigureLayout,
     pub metadata: FigureMetadata,

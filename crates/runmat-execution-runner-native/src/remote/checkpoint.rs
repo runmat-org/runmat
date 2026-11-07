@@ -231,10 +231,10 @@ mod tests {
         DriverAuthority {
             server_url: "https://control.invalid".into(),
             run_id: "run".into(),
-            org_id: "org".into(),
+            org_id: crate::remote::test_ids::test_org_id(),
             project_id: "project".into(),
             allocation_lease_id: "allocation".into(),
-            driver_lease_id: format!("driver-{fence}"),
+            driver_lease_id: crate::remote::test_ids::test_driver_lease_id(fence),
             fencing_token: fence,
             credential: "credential".into(),
         }

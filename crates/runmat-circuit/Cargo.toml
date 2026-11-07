@@ -1,6 +1,6 @@
 [package]
 name = "runmat-circuit"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -14,9 +14,9 @@ repository = "https://github.com/runmat-org/runmat"
 # The shared design grammar (the `.circuit` front end in `syntax`).
 runmat-design-syntax = { workspace = true }
 runmat-types = { workspace = true }
-runmat-rules = { path = "../runmat-rules", version = "=0.6.2" }
+runmat-rules = { path = "../runmat-rules", version = "=0.7.0" }
 # Design-command descriptor types (one schema for CAD and PCB commands) and the JSON writer.
-runmat-design-commands = { path = "../runmat-design-commands", version = "=0.6.2" }
+runmat-design-commands = { path = "../runmat-design-commands", version = "=0.7.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

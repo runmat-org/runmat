@@ -284,6 +284,7 @@ fn image_mode_surface_scene_roundtrip_preserves_color_grid() {
         geometry_overlay: None,
         geometry_physical_context: None,
         geometry_lines: Vec::new(),
+        geometry_orientation_triad: true,
         layout: snapshot.layout,
         metadata: snapshot.metadata,
         plots: vec![ScenePlot::Surface {

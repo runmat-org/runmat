@@ -75,5 +75,5 @@ Evidence kind: ExecutionEquivalence. Criterion: The same study yields identical 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | public_study | PARTIAL | `runmat[test:fea_determinism]::a_study_gives_identical_results_across_runs_workers_and_threads` (crates/runmat-cli/tests/fea_determinism.rs:114) - A loaded structural static study run through the CLI repeatedly and with explicit worker and thread counts (1x1, 4x1, 2x4) gives identical mesh identity, solver... |
+| shared_infrastructure | canonical_mixed_topology | public_study | PARTIAL | `runmat[test:fea_determinism]::a_study_gives_identical_results_across_runs_workers_and_threads` (crates/runmat-cli/tests/fea_determinism.rs:138) - A loaded structural static study run through the CLI repeatedly and with explicit worker and thread counts (1x1, 4x1, 2x4) gives identical mesh identity, solver... |
 

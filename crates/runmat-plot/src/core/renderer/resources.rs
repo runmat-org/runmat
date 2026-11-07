@@ -14,6 +14,7 @@ impl WgpuRenderer {
             self.edge_stroke_pipeline = None;
             self.edge_stroke_no_depth_pipeline = None;
             self.triangle_pipeline = None;
+            self.translucent_triangle_pipeline = None;
             self.extra_pipelines = Default::default();
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -44,6 +45,7 @@ impl WgpuRenderer {
             self.edge_stroke_pipeline = None;
             self.edge_stroke_no_depth_pipeline = None;
             self.triangle_pipeline = None;
+            self.translucent_triangle_pipeline = None;
             self.extra_pipelines = Default::default();
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;

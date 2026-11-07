@@ -1,7 +1,9 @@
 use super::*;
 use runmat_execution::resource::ResourceRequest;
+use runmat_simulation_usage::{CompletedUsage, LedgerError, OperationCount};
 use std::sync::Mutex;
 use std::time::Instant;
+mod roles;
 
 struct Active {
     root: u64,
@@ -9,7 +11,8 @@ struct Active {
     started: Instant,
     last_wall: u64,
     permit: Box<dyn FeaRunPermit>,
-    held_ceiling: u64,
+    budget: FeaRunBudget,
+    last_completed: CompletedUsage,
 }
 impl Active {
     fn observed(&self) -> ResourceUsage {
@@ -26,8 +29,6 @@ struct State {
 #[derive(Clone, Copy)]
 struct Evidence {
     budget: FeaRunBudget,
-    started: Instant,
-    cpu: u64,
 }
 /// The parent retains one real permit. Blocking host calls never hold the
 /// evidence lock checked by the async owner/cancellation loop.
@@ -42,6 +43,7 @@ pub struct Parent {
     evidence: Mutex<Option<Evidence>>,
     denied: Mutex<Option<FeaRunDenied>>,
     stopped: Mutex<Option<Instant>>,
+    delegated: Option<Arc<crate::fea_delegation::ChildGrant>>,
 }
 impl Parent {
     pub fn new(
@@ -51,37 +53,19 @@ impl Parent {
         original_deadline: Option<u64>,
         invocation_bytes: u64,
     ) -> Result<Arc<Self>, String> {
-        assignment.validate().map_err(|e| e.to_string())?;
-        assignment
-            .resources
-            .validate_for_request(&resources)
-            .map_err(|e| e.to_string())?;
-        resources.validate().map_err(|e| e.to_string())?;
-        if resources.memory_bytes < storage_bytes(0, StorageRole::Proxy)? {
-            return Err("FEA proxy metadata exceeds worker reservation".into());
-        }
-        let deadline = now()
-            .checked_add(resources.max_wall_millis)
-            .ok_or("FEA proxy deadline overflow")?;
-        let deadline = original_deadline.map_or(deadline, |original| original.min(deadline));
-        let root_minimum_bytes = storage_bytes(invocation_bytes, StorageRole::FirstRoot)?;
-        Ok(Arc::new(Self {
+        Self::with_role(
             provider,
             assignment,
             resources,
-            deadline,
-            started: Instant::now(),
-            root_minimum_bytes,
-            state: Mutex::new(State {
-                sequence: 0,
-                active: None,
-            }),
-            evidence: Mutex::new(None),
-            denied: Mutex::new(None),
-            stopped: Mutex::new(None),
-        }))
+            original_deadline,
+            invocation_bytes,
+            StorageRole::Proxy,
+        )
     }
     pub fn check(&self) -> Result<(), FeaRunDenied> {
+        if let Some(owner) = &self.delegated {
+            owner.budget()?;
+        }
         if self
             .stopped
             .lock()
@@ -105,16 +89,6 @@ impl Parent {
         }
         if let Some(evidence) = *self.evidence.lock().unwrap_or_else(|e| e.into_inner()) {
             evidence.budget.validate()?;
-            let wall = evidence
-                .started
-                .elapsed()
-                .as_millis()
-                .min(u128::from(u64::MAX)) as u64;
-            if usage(evidence.cpu, wall).cpu_core_millis >= evidence.budget.held_core_millis {
-                return Err(FeaRunDenied::AllowanceUsed {
-                    refills_at_unix_seconds: None,
-                });
-            }
         }
         Ok(())
     }
@@ -136,35 +110,82 @@ impl Parent {
             .unwrap_or_else(|e| e.into_inner())
             .get_or_insert_with(Instant::now);
     }
-    fn clamp(
-        &self,
-        mut budget: FeaRunBudget,
-        held_ceiling: u64,
-    ) -> Result<FeaRunBudget, FeaRunDenied> {
+    fn clamp(&self, mut budget: FeaRunBudget) -> Result<FeaRunBudget, FeaRunDenied> {
         budget.expires_at_unix_millis = budget.expires_at_unix_millis.min(self.deadline);
-        budget.held_core_millis = budget.held_core_millis.min(held_ceiling);
         budget.validate()?;
         Ok(budget)
     }
     fn cumulative(
         &self,
         active: &mut Active,
-        reported: &ResourceUsage,
-    ) -> Result<ResourceUsage, FeaRunDenied> {
+        reported: &FeaRunUsage,
+    ) -> Result<FeaRunUsage, FeaRunDenied> {
         let observed = active.observed();
-        let expected = usage(active.cpu, reported.wall_millis);
-        if reported.wall_millis < active.last_wall
-            || reported.wall_millis > self.resources.max_wall_millis
-            || reported.wall_millis > observed.wall_millis.saturating_add(1)
-            || reported != &expected
+        let expected = usage(active.cpu, reported.resources.wall_millis);
+        if reported.resources.wall_millis < active.last_wall
+            || reported.resources.wall_millis > self.resources.max_wall_millis
+            || reported.resources.wall_millis > observed.wall_millis.saturating_add(1)
+            || reported.resources != expected
         {
             return Err(FeaRunDenied::LicenseInvalid);
         }
-        active.last_wall = reported.wall_millis;
-        Ok(usage(
-            active.cpu,
-            observed.wall_millis.max(reported.wall_millis),
-        ))
+        if !reported
+            .completed_ops
+            .is_monotonic_since(active.last_completed)
+        {
+            return Err(LedgerError::NonMonotonicUsage.into());
+        }
+        if reported.completed_ops.total().map_err(LedgerError::from)? > active.budget.granted_ops {
+            return Err(LedgerError::InvalidReservation.into());
+        }
+        active.last_wall = reported.resources.wall_millis;
+        active.last_completed = reported.completed_ops;
+        Ok(FeaRunUsage {
+            completed_ops: reported.completed_ops,
+            resources: usage(
+                active.cpu,
+                observed.wall_millis.max(reported.resources.wall_millis),
+            ),
+        })
+    }
+    fn renew(
+        &self,
+        state: &mut State,
+        root: u64,
+        usage: &FeaRunUsage,
+        required: Option<OperationCount>,
+    ) -> Result<Reply, FeaRunDenied> {
+        let active = state.active.as_mut().ok_or(FeaRunDenied::LicenseInvalid)?;
+        if active.root != root {
+            return Err(FeaRunDenied::LicenseInvalid);
+        }
+        let cumulative = self.cumulative(active, usage)?;
+        if let Some(required) = required {
+            if required > active.budget.budget_ops {
+                return Err(LedgerError::BudgetExceeded {
+                    required,
+                    budget: active.budget.budget_ops,
+                }
+                .into());
+            }
+        }
+        let renewed = match required {
+            Some(required) => active.permit.request_grant(&cumulative, required)?,
+            None => active.permit.heartbeat(&cumulative)?,
+        };
+        self.check()?;
+        let budget = self.clamp(renewed)?;
+        if budget.budget_ops != active.budget.budget_ops
+            || budget.granted_ops < active.budget.granted_ops
+            || budget.expires_at_unix_millis < active.budget.expires_at_unix_millis
+            || budget.heartbeat_millis != active.budget.heartbeat_millis
+        {
+            return Err(FeaRunDenied::LicenseInvalid);
+        }
+        active.budget = budget;
+        *self.evidence.lock().unwrap_or_else(|e| e.into_inner()) = Some(Evidence { budget });
+        self.check()?;
+        Ok(Reply::Budget { budget })
     }
     /// Run on the blocking adapter lane; all parent I/O/physical-stop ticks stay runnable.
     pub fn call(&self, call: Call) -> Reply {
@@ -205,14 +226,11 @@ impl Parent {
                 if self.resources.memory_bytes < self.root_minimum_bytes {
                     return Err(FeaRunDenied::LicenseInvalid);
                 }
+                let provider = self.provider.as_ref().map_err(Clone::clone)?;
                 if state.active.is_some()
-                    || request.site != FeaRunSite::Local
+                    || request.site != provider.site()
                     || request.allocated_cpu_millicores > u64::from(self.resources.cpu_millicores)
                 {
-                    return Err(FeaRunDenied::LicenseInvalid);
-                }
-                let provider = self.provider.as_ref().map_err(Clone::clone)?;
-                if provider.site() != FeaRunSite::Local {
                     return Err(FeaRunDenied::LicenseInvalid);
                 }
                 let remaining = self.deadline.saturating_sub(now()).min(
@@ -223,9 +241,8 @@ impl Parent {
                 if remaining == 0 {
                     return Err(FeaRunDenied::LeaseExpired);
                 }
-                let held_ceiling =
-                    usage(request.allocated_cpu_millicores, remaining).cpu_core_millis;
                 let permit = provider.admit(&request)?;
+                let initial = permit.budget();
                 let started = Instant::now();
                 state.active = Some(Active {
                     root: call.sequence,
@@ -233,40 +250,26 @@ impl Parent {
                     started,
                     last_wall: 0,
                     permit,
-                    held_ceiling,
+                    budget: initial,
+                    last_completed: CompletedUsage::default(),
                 });
-                let initial = state
+                let budget = self.clamp(initial)?;
+                state
                     .active
-                    .as_ref()
+                    .as_mut()
                     .expect("retained original permit")
-                    .permit
-                    .budget();
-                let budget = self.clamp(initial, held_ceiling)?;
-                *self.evidence.lock().unwrap_or_else(|e| e.into_inner()) = Some(Evidence {
-                    budget,
-                    started,
-                    cpu: request.allocated_cpu_millicores,
-                });
+                    .budget = budget;
+                *self.evidence.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Evidence { budget });
                 self.check()?;
                 Ok(Reply::Budget { budget })
             }
-            Operation::Heartbeat { root, usage } => {
-                let active = state.active.as_mut().ok_or(FeaRunDenied::LicenseInvalid)?;
-                if active.root != root {
-                    return Err(FeaRunDenied::LicenseInvalid);
-                }
-                let cumulative = self.cumulative(active, &usage)?;
-                let renewed = active.permit.heartbeat(&cumulative)?;
-                self.check()?; // a late transport reply cannot revive an expired original hold
-                let budget = self.clamp(renewed, active.held_ceiling)?;
-                *self.evidence.lock().unwrap_or_else(|e| e.into_inner()) = Some(Evidence {
-                    budget,
-                    started: active.started,
-                    cpu: active.cpu,
-                });
-                self.check()?;
-                Ok(Reply::Budget { budget })
-            }
+            Operation::Heartbeat { root, usage } => self.renew(&mut state, root, &usage, None),
+            Operation::RequestGrant {
+                root,
+                usage,
+                required,
+            } => self.renew(&mut state, root, &usage, Some(required)),
             Operation::Settle {
                 root,
                 outcome,
@@ -297,7 +300,7 @@ impl Parent {
 /// the fallback exactly once, including a host error or unwinding call.
 struct FailedSettlement {
     permit: Option<Box<dyn FeaRunPermit>>,
-    observed: ResourceUsage,
+    observed: FeaRunUsage,
 }
 impl FailedSettlement {
     fn settle(&mut self) {
@@ -330,7 +333,10 @@ impl Drop for Parent {
                 .saturating_duration_since(active.started)
                 .as_millis()
                 .min(u128::from(u64::MAX)) as u64;
-            let observed = usage(active.cpu, wall.max(active.last_wall));
+            let observed = FeaRunUsage {
+                completed_ops: active.last_completed,
+                resources: usage(active.cpu, wall.max(active.last_wall)),
+            };
             let mut settlement = FailedSettlement {
                 permit: Some(active.permit),
                 observed,

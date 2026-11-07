@@ -60,10 +60,11 @@ pub fn exact_provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dy
 
 /// A pre-effect resident compute lookup must distinguish execution policy
 /// from a missing, stale or differently assigned physical owner.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum ResidentComputeDecline {
     PolicyDenied,
     InvalidOwner,
+    InvalidSource(runmat_accelerate_api::ProviderExecutionError),
 }
 
 #[derive(Debug)]
@@ -81,19 +82,25 @@ impl std::error::Error for ResidentComputePolicyDenied {
     }
 }
 impl ResidentComputeDecline {
-    /// Preserve the domain diagnostic and its entire original cause chain.
+    /// Retain the domain diagnostic and the original ownership failure.
     /// Only a proven, pre-effect policy decline requests dispatcher migration.
     pub fn with_domain_error(self, mut error: crate::RuntimeError) -> crate::RuntimeError {
-        error.gpu_gather_retry = match self {
-            Self::PolicyDenied => crate::GpuGatherRetry::Requested,
-            Self::InvalidOwner => crate::GpuGatherRetry::Never,
-        };
-        if self == Self::PolicyDenied {
-            error.source = Some(Box::new(ResidentComputePolicyDenied {
-                original_source: error.source.take(),
-            }));
+        match self {
+            Self::PolicyDenied => {
+                error.gpu_gather_retry = crate::GpuGatherRetry::Requested;
+                error.source = Some(Box::new(ResidentComputePolicyDenied {
+                    original_source: error.source.take(),
+                }));
+                error
+            }
+            Self::InvalidOwner => {
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
+            }
+            Self::InvalidSource(source) => {
+                crate::runtime_error::with_provider_execution_source(error, source)
+            }
         }
-        error
     }
 }
 
@@ -105,18 +112,18 @@ pub fn resolve_resident_compute_owner(
     handle: &GpuTensorHandle,
 ) -> Result<&'static dyn AccelProvider, ResidentComputeDecline> {
     let readback = runmat_accelerate_api::numeric_readback_for_handle(handle)
-        .map_err(|_| ResidentComputeDecline::InvalidOwner)?;
+        .map_err(|source| ResidentComputeDecline::InvalidSource(source.into()))?;
     if let Some(provider) = exact_provider_for_handle(handle) {
         // First registration can supersede a scoped owner between lookups.
         // Computation must use the same facade whose source was validated.
         readback
             .authorize_provider(provider)
-            .map_err(|_| ResidentComputeDecline::InvalidOwner)?;
+            .map_err(|source| ResidentComputeDecline::InvalidSource(source.into()))?;
         return Ok(provider);
     }
     let has_wgpu_access = readback
         .owner_has_wgpu_access()
-        .map_err(|_| ResidentComputeDecline::InvalidOwner)?;
+        .map_err(|source| ResidentComputeDecline::InvalidSource(source.into()))?;
     Err(
         if crate::context::current_acceleration_policy()
             .is_some_and(|policy| !policy.permits_provider_metadata(has_wgpu_access))
@@ -177,21 +184,23 @@ fn require_resident_compute_set<'a>(
     error: impl FnOnce() -> crate::RuntimeError,
 ) -> crate::BuiltinResult<()> {
     let mut policy_denied = false;
-    let mut invalid = false;
+    let mut invalid = None;
     let mut first_device = None;
     for handle in handles {
         match resolve_resident_compute_owner(handle) {
             Ok(_) => {}
-            Err(ResidentComputeDecline::InvalidOwner) => invalid = true,
             Err(ResidentComputeDecline::PolicyDenied) => policy_denied = true,
+            Err(decline) => {
+                invalid.get_or_insert(decline);
+            }
         }
         if require_same_owner && first_device.is_some_and(|first| first != handle.device_id()) {
-            invalid = true;
+            invalid.get_or_insert(ResidentComputeDecline::InvalidOwner);
         }
         first_device.get_or_insert(handle.device_id());
     }
-    if invalid {
-        Err(ResidentComputeDecline::InvalidOwner.with_domain_error(error()))
+    if let Some(decline) = invalid {
+        Err(decline.with_domain_error(error()))
     } else if policy_denied {
         Err(ResidentComputeDecline::PolicyDenied.with_domain_error(error()))
     } else {

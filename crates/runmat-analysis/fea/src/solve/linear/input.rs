@@ -47,7 +47,7 @@ pub(crate) fn solve_structural_system(
     backend_kind: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
-) -> LinearSolveResult {
+) -> Result<LinearSolveResult, ScopedSpmvError> {
     solve_structural_system_with_preparation(
         summary,
         preconditioner_kind,
@@ -136,7 +136,7 @@ pub(crate) fn solve_structural_system_reusing(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     reuse: &mut crate::algebra::LinearPreparationReuse,
-) -> LinearSolveResult {
+) -> Result<LinearSolveResult, ScopedSpmvError> {
     solve_structural_system_with_preparation(
         summary,
         preconditioner_kind,
@@ -154,15 +154,15 @@ fn solve_structural_system_with_preparation(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     reuse: Option<&mut crate::algebra::LinearPreparationReuse>,
-) -> LinearSolveResult {
+) -> Result<LinearSolveResult, ScopedSpmvError> {
     if let Err(message) = summary.validate_physical_inputs(initial_guess) {
-        return super::rejected_system_result(
+        return Ok(super::rejected_system_result(
             summary.operator,
             backend_kind,
             preconditioner_kind,
             "FEA_INVALID_PHYSICAL_LAYOUT",
             message,
-        );
+        ));
     }
     if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
         return match reuse {
@@ -187,7 +187,10 @@ fn solve_structural_system_with_preparation(
         let reduction = match matrix.affine_reduction() {
             Ok(reduction) => reduction,
             Err(error) => {
-                return super::admission::rejected_constraint_system(summary, error.to_string())
+                return Ok(super::admission::rejected_constraint_system(
+                    summary,
+                    error.to_string(),
+                ))
             }
         };
         return match reuse {
@@ -230,7 +233,6 @@ fn solve_structural_system_with_preparation(
                 initial_guess,
                 settings,
             )
-            .expect("reference sparse application is infallible for a prepared system")
         }
     }
 }

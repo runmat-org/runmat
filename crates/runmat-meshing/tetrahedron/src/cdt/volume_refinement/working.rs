@@ -33,6 +33,9 @@ impl From<DelaunayVolumeRefinementStepOptions> for VolumeStateOptions {
 impl From<VolumeStateError> for DelaunayVolumeRefinementStepError {
     fn from(failure: VolumeStateError) -> Self {
         let kind = match failure.kind {
+            VolumeStateErrorKind::Accounting(cause) => {
+                DelaunayVolumeRefinementStepErrorKind::Accounting(cause)
+            }
             VolumeStateErrorKind::InvalidOptions => {
                 DelaunayVolumeRefinementStepErrorKind::InvalidOptions
             }

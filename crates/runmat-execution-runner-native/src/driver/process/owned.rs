@@ -177,96 +177,6 @@ impl RetainedLaunchStorage {
     }
 }
 
-#[cfg(test)]
-mod layout_claim_tests {
-    use super::RetainedLaunchStorage;
-    use runmat_runtime::context::host_allocation::HostControlAllocationOwner;
-    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
-    use runmat_runtime::context::{
-        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
-        RuntimeServicePorts,
-    };
-    use std::{cell::Cell, rc::Rc};
-
-    struct Parallel(ManagedHostEffectLedger);
-    impl RuntimeParallelService for Parallel {
-        fn supports(&self, _: ParallelCapability) -> bool {
-            false
-        }
-        fn placement_resources(&self) -> RuntimeParallelResources {
-            let snapshot = self.0.snapshot();
-            RuntimeParallelResources {
-                memory_available_bytes: Some(snapshot.free_bytes()),
-                epoch: snapshot.epoch,
-                ..Default::default()
-            }
-        }
-        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
-            Some(self.0.clone())
-        }
-    }
-
-    #[test]
-    fn launch_backing_retires_before_original_growth_claim_is_refunded() {
-        let ledger = ManagedHostEffectLedger::new_with_epoch(4096, 7);
-        let cancellation = runmat_execution::cancellation::CancellationSource::new();
-        let runtime = RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ))
-        .with_service_ports(
-            RuntimeServicePorts::default().with_parallel(Rc::new(Parallel(ledger.clone()))),
-        )
-        .with_cancellation_token(cancellation.token());
-        let owner = HostControlAllocationOwner::capture(&runtime)
-            .unwrap()
-            .unwrap();
-        struct Backing {
-            ledger: ManagedHostEffectLedger,
-            dropped: Rc<Cell<bool>>,
-        }
-        impl Drop for Backing {
-            fn drop(&mut self) {
-                assert!(self.ledger.snapshot().live_claimed_bytes > 0);
-                self.dropped.set(true);
-            }
-        }
-        let dropped = Rc::new(Cell::new(false));
-        let retained = RetainedLaunchStorage::with_envelope_growth(Some(&owner), || {
-            assert!(
-                ledger.snapshot().live_claimed_bytes
-                    >= crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH as u64
-            );
-            Box::new(Backing {
-                ledger: ledger.clone(),
-                dropped: dropped.clone(),
-            })
-        })
-        .unwrap();
-        assert!(!dropped.get());
-        assert!(
-            ledger.snapshot().live_claimed_bytes
-                >= crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH as u64
-        );
-        drop(retained);
-        assert!(dropped.get());
-        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
-        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
-        cancellation.cancel(runmat_execution::CancellationReason::User);
-        let factory_called = Cell::new(false);
-        assert!(
-            RetainedLaunchStorage::with_envelope_growth(Some(&owner), || {
-                factory_called.set(true);
-            })
-            .is_err()
-        );
-        assert!(
-            !factory_called.get(),
-            "revoked original owner must refuse before constructing backing"
-        );
-        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
-    }
-}
-
 pub(super) async fn run_process(
     driver: &ProcessOwner<'_>,
     mut request: WorkerLaunchRequest,
@@ -286,7 +196,7 @@ pub(super) async fn run_process(
         driver.attempt.task.console,
     )
     .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    let fea_proxy = if fea_parent.is_none() {
+    let mut fea_proxy = if fea_parent.is_none() {
         let minimum =
             crate::fea_proxy::storage_bytes(invocation, crate::fea_proxy::StorageRole::Proxy)
                 .map_err(TransferFailure::Infrastructure)?;
@@ -314,9 +224,6 @@ pub(super) async fn run_process(
     } else {
         None
     };
-    let _fea_proxy_close = fea_proxy
-        .as_ref()
-        .map(|proxy| crate::fea_proxy::Close(proxy.clone()));
     if fea_proxy.is_some() {
         request = match request {
             WorkerLaunchRequest::Reserved(request) => WorkerLaunchRequest::ReservedFeaProxy {
@@ -354,8 +261,18 @@ pub(super) async fn run_process(
                 "inherited FEA controls exceed original worker memory".into(),
             ));
         }
-        let grant = crate::fea_delegation::WorkerFeaGrant::new(source, assignment, resources)
-            .map_err(TransferFailure::Infrastructure)?;
+        let (mut grant, grant_owner) =
+            crate::fea_delegation::ChildGrant::new(source, assignment, resources)
+                .map_err(TransferFailure::Infrastructure)?;
+        fea_proxy = Some(
+            crate::fea_proxy::Parent::from_delegation(
+                &mut grant,
+                grant_owner,
+                driver.attempt.task.deadline_unix_millis,
+                invocation,
+            )
+            .map_err(TransferFailure::Infrastructure)?,
+        );
         let owner = completion.control_allocation_owner();
         let retained = match request {
             WorkerLaunchRequest::Reserved(request) => {
@@ -387,6 +304,9 @@ pub(super) async fn run_process(
         RetainedLaunchStorage::unclaimed(request)
     };
     let request = &retained_request.request;
+    let _fea_proxy_close = fea_proxy
+        .as_ref()
+        .map(|proxy| crate::fea_proxy::Close(std::sync::Arc::clone(proxy)));
     #[cfg(windows)]
     if matches!(request, WorkerLaunchRequest::StagedGraph(_)) {
         let own_executable = std::env::current_exe()
@@ -534,6 +454,11 @@ pub(super) async fn run_process(
     // Until full-tree retirement is observed, even an error leaves launch unconfirmed.
     *termination = AttemptExecutionTermination::Unconfirmed;
     *retirement = LocalRetirementEvidence::Unconfirmed;
+    if let Some(proxy) = &fea_proxy {
+        proxy
+            .may_execute()
+            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+    }
     let child = match command.spawn().await {
         Ok(child) => child,
         Err(error) if graph_scratch.is_some() => {
@@ -692,8 +617,8 @@ pub(super) async fn run_process(
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
                 if let Some(proxy) = &fea_proxy { proxy.check().map_err(|denied| TransferFailure::Infrastructure(denied.to_string()))?; }
                 if let Some(source) = &fea_parent {
-                    let snapshot = match source.snapshot() {
-                        Ok(snapshot) => snapshot,
+                    let budget = match fea_proxy.as_ref().ok_or_else(|| TransferFailure::Infrastructure("FEA child lost its retained grant owner".into()))?.delegated_budget() {
+                        Ok(budget) => budget,
                         Err(denied) => {
                             if let Some(grant) = request.fea_grant() {
                                 let update = WorkerDriverMessage::FeaLeaseUpdate { run_id: grant.parent.request.run_id.clone(), attempt_id: grant.assignment.attempt_id,
@@ -704,18 +629,15 @@ pub(super) async fn run_process(
                         }
                     };
                     if source.cancellation_token().is_cancelled() { return Err(TransferFailure::Cancelled); }
-                    if last_fea_budget != Some(snapshot.budget) {
+                    if last_fea_budget != Some(budget) {
                         let grant = request.fea_grant().ok_or_else(|| TransferFailure::Infrastructure("FEA renewal lacks its original child grant".into()))?;
-                        if snapshot.origin != grant.parent.origin || snapshot.request != grant.parent.request {
-                            return Err(TransferFailure::Infrastructure("FEA renewal changed its original parent identity".into()));
-                        }
-                        let update = WorkerDriverMessage::FeaLeaseUpdate { run_id: snapshot.request.run_id, attempt_id: grant.assignment.attempt_id,
-                            update: crate::fea_delegation::FeaLeaseUpdate::Renewed { budget: snapshot.budget } };
+                        let update = WorkerDriverMessage::FeaLeaseUpdate { run_id: grant.parent.request.run_id.clone(), attempt_id: grant.assignment.attempt_id,
+                            update: crate::fea_delegation::FeaLeaseUpdate::Renewed { budget } };
                         let payload = serde_json::to_vec(&update).map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
                         tokio::time::timeout(Duration::from_secs(1), write_payload(&mut writer, &payload, limits)).await
                             .map_err(|_| TransferFailure::Infrastructure("FEA renewal delivery exceeded its bound".into()))?
                             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-                        last_fea_budget = Some(snapshot.budget);
+                        last_fea_budget = Some(budget);
                     }
                 }
                 if completion.is_cancelled() {
@@ -931,7 +853,7 @@ pub(super) async fn run_process(
         }
     }
     if let Some(source) = &fea_parent {
-        source.snapshot().map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+        source.current_budget().map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
         if source.cancellation_token().is_cancelled() { return Err(TransferFailure::Cancelled); }
     }
     if let Some(proxy) = &fea_proxy { proxy.terminal_check().map_err(|denied| TransferFailure::Infrastructure(denied.to_string()))?; }
@@ -1073,6 +995,37 @@ pub(super) async fn run_process(
         }
     };
     let (outcome, drain_result) = tokio::join!(owner, drain);
+    let outcome = if *retirement == LocalRetirementEvidence::FullTreeRetired {
+        match fea_proxy
+            .as_ref()
+            .map(|proxy| proxy.retire_delegated(outcome.is_ok()))
+            .transpose()
+        {
+            Ok(_) => outcome,
+            Err(error) => {
+                if matches!(
+                    &outcome,
+                    Err(_)
+                        | Ok(WorkerResponse::Failure { .. })
+                        | Ok(WorkerResponse::RuntimeFailure { .. })
+                ) {
+                    // Retain the original failure's type, identifier and source
+                    // frames. The delegated hold remains owned by its ledger;
+                    // this diagnostic cannot certify incomplete accounting.
+                    tracing::error!(
+                        admission_code = error.error_code(),
+                        error = %error,
+                        "Delegated simulation accounting cleanup failed after worker failure"
+                    );
+                    outcome
+                } else {
+                    Err(TransferFailure::Infrastructure(error.to_string()))
+                }
+            }
+        }
+    } else {
+        outcome
+    };
     // Finish existing output/retirement precedence before attaching the final
     // original transport diagnostic. This closure has no producer or await.
     let outcome = (|| {
@@ -1136,4 +1089,94 @@ pub(super) async fn run_process(
         outcome
     })();
     deferred_exchange.finish(outcome, &stderr)
+}
+
+#[cfg(test)]
+mod layout_claim_tests {
+    use super::RetainedLaunchStorage;
+    use runmat_runtime::context::host_allocation::HostControlAllocationOwner;
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+    use runmat_runtime::context::{
+        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+        RuntimeServicePorts,
+    };
+    use std::{cell::Cell, rc::Rc};
+
+    struct Parallel(ManagedHostEffectLedger);
+    impl RuntimeParallelService for Parallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..Default::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn launch_backing_retires_before_original_growth_claim_is_refunded() {
+        let ledger = ManagedHostEffectLedger::new_with_epoch(4096, 7);
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(Parallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        let owner = HostControlAllocationOwner::capture(&runtime)
+            .unwrap()
+            .unwrap();
+        struct Backing {
+            ledger: ManagedHostEffectLedger,
+            dropped: Rc<Cell<bool>>,
+        }
+        impl Drop for Backing {
+            fn drop(&mut self) {
+                assert!(self.ledger.snapshot().live_claimed_bytes > 0);
+                self.dropped.set(true);
+            }
+        }
+        let dropped = Rc::new(Cell::new(false));
+        let retained = RetainedLaunchStorage::with_envelope_growth(Some(&owner), || {
+            assert!(
+                ledger.snapshot().live_claimed_bytes
+                    >= crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH as u64
+            );
+            Box::new(Backing {
+                ledger: ledger.clone(),
+                dropped: dropped.clone(),
+            })
+        })
+        .unwrap();
+        assert!(!dropped.get());
+        assert!(
+            ledger.snapshot().live_claimed_bytes
+                >= crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH as u64
+        );
+        drop(retained);
+        assert!(dropped.get());
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        let factory_called = Cell::new(false);
+        assert!(
+            RetainedLaunchStorage::with_envelope_growth(Some(&owner), || {
+                factory_called.set(true);
+            })
+            .is_err()
+        );
+        assert!(
+            !factory_called.get(),
+            "revoked original owner must refuse before constructing backing"
+        );
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
 }

@@ -135,13 +135,15 @@ impl SourceResidency {
         // Only immutable handle/lease metadata is retained between scalar
         // readback and publication. Reauthenticate every original source.
         for handle in &self.handles {
-            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|_| invalid())?;
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+                crate::runtime_error::with_provider_execution_source(invalid(), source.into())
+            })?;
         }
         let handle = self.handles.first().ok_or_else(invalid)?;
         match gpu_helpers::resolve_resident_compute_owner(handle) {
             Ok(owner) => Ok(Some(owner)),
             Err(ResidentComputeDecline::PolicyDenied) => Ok(None),
-            Err(ResidentComputeDecline::InvalidOwner) => Err(invalid()),
+            Err(decline) => Err(decline.with_domain_error(invalid())),
         }
     }
 }

@@ -311,7 +311,11 @@ fn invalid_identity_arity_geometry_and_inputs_are_rejected() {
     projection.nodes[1].stable_identity = projection.nodes[0].stable_identity;
     assert!(TetrahedralEdgeSpace::derive(&projection).is_err());
     let folded = [[0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]];
-    assert!(visit_volume_rule(ElementOrder::Tet4, &folded, [([0.25; 4], 1.0)], |_| {}).is_none());
+    assert!(
+        visit_volume_rule(ElementOrder::Tet4, &folded, [([0.25; 4], 1.0)], |_| {})
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

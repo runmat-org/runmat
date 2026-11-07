@@ -263,6 +263,20 @@ impl PreparedStructuralStudyIntent {
                                 == options.maximum_intervals_per_block
                             && options.solver_mesh_artifact_path.is_none() => {}
                         (
+                            runmat_analysis_fea::execution::StructuralStepWorkload::ModalFrequency {
+                                template,
+                            },
+                            crate::analysis::AnalysisSolverOptions::StructuralFrequency(options),
+                        ) if template.step_id == step.procedure_step.step_id
+                            && template.backend == step.authored_execution.backend
+                            && template.observation_execution
+                                == ObservationExecutionPolicy::scalable()
+                            && step.procedure_step.solution_space
+                                == runmat_analysis_core::SolutionSpace::ModalReduced
+                            && options.solver
+                                == crate::analysis::AnalysisStructuralFrequencySolver::ModalReduced
+                            && options.solver_mesh_artifact_path.is_none() => {}
+                        (
                             runmat_analysis_fea::execution::StructuralStepWorkload::ModalResponseSpectrum {
                                 template,
                             },

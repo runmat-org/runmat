@@ -126,6 +126,7 @@ impl AnalysisProjection {
             &coordinates[..element.node_indices.len()],
             visit,
         )
+        .map_err(AnalysisProjectionError::Accounting)?
         .ok_or(AnalysisProjectionError::InvalidElementGeometry {
             element_id: element.element_id,
         })
@@ -323,6 +324,8 @@ pub enum BoundaryNormalOrientation {
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum AnalysisProjectionError {
+    #[error("analysis projection numerical accounting failed: {0}")]
+    Accounting(#[from] runmat_simulation_usage::LedgerError),
     #[error("analysis projection construction cancelled")]
     Cancelled,
     #[error("edge space does not match canonical projection: {0}")]

@@ -3,27 +3,40 @@ use async_trait::async_trait;
 use super::worker_pool::DriverWorkerPool;
 use super::ResourceRequest;
 use crate::{TransportError, TransportResult};
+use runmat_server_client::ids::{ExecutionDriverLeaseId, OrgId};
 
+/// Server-issued authority for one remote driver lease. The organization and
+/// driver-lease identifiers are typed, so an authority that holds a malformed
+/// identifier cannot be constructed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriverAuthority {
     pub server_url: String,
     pub run_id: String,
-    pub org_id: String,
+    pub org_id: OrgId,
     pub project_id: String,
     pub allocation_lease_id: String,
-    pub driver_lease_id: String,
+    pub driver_lease_id: ExecutionDriverLeaseId,
     pub fencing_token: u64,
     pub credential: String,
 }
 
 impl DriverAuthority {
+    /// Parses a Server-issued organization identifier (`org_` + 32 lowercase hex).
+    pub fn parse_org_id(value: &str) -> TransportResult<OrgId> {
+        OrgId::parse(value).map_err(|_| TransportError::MalformedAuthority("org id"))
+    }
+
+    /// Parses a Server-issued driver-lease identifier (`drv_` + 32 lowercase hex).
+    pub fn parse_driver_lease_id(value: &str) -> TransportResult<ExecutionDriverLeaseId> {
+        ExecutionDriverLeaseId::parse(value)
+            .map_err(|_| TransportError::MalformedAuthority("driver lease id"))
+    }
+
     pub fn validate(&self) -> TransportResult<()> {
         if self.server_url.trim().is_empty()
             || self.run_id.is_empty()
-            || self.org_id.is_empty()
             || self.project_id.is_empty()
             || self.allocation_lease_id.is_empty()
-            || self.driver_lease_id.is_empty()
             || self.fencing_token == 0
             || self.credential.is_empty()
             || self.credential.len() > 256
@@ -228,5 +241,44 @@ pub trait DriverControlPlane: Send + Sync {
         Err(TransportError::Unavailable(
             "remote worker authorization is not implemented".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authority_identifiers_parse_in_the_server_issued_form() {
+        let org = DriverAuthority::parse_org_id("org_00000000000000000000000000000001").unwrap();
+        assert_eq!(org.as_str(), "org_00000000000000000000000000000001");
+        let lease =
+            DriverAuthority::parse_driver_lease_id("drv_0000000000000000000000000000000a").unwrap();
+        assert_eq!(lease.as_str(), "drv_0000000000000000000000000000000a");
+    }
+
+    #[test]
+    fn malformed_authority_identifiers_name_the_field() {
+        for value in [
+            "org-1",
+            "00000000000000000000000000000001",
+            "drv_00000000000000000000000000000001",
+        ] {
+            let error = DriverAuthority::parse_org_id(value).unwrap_err();
+            assert_eq!(error, TransportError::MalformedAuthority("org id"));
+            assert_eq!(error.to_string(), "driver authority has a malformed org id");
+        }
+        for value in [
+            "driver-1",
+            "drv_0000000000000000000000000000000A",
+            "org_00000000000000000000000000000001",
+        ] {
+            let error = DriverAuthority::parse_driver_lease_id(value).unwrap_err();
+            assert_eq!(error, TransportError::MalformedAuthority("driver lease id"));
+            assert_eq!(
+                error.to_string(),
+                "driver authority has a malformed driver lease id"
+            );
+        }
     }
 }

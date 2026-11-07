@@ -472,7 +472,7 @@ impl FluidSteadyWorkload {
             let coupled = source
                 .fluid_structure(self, mesh)?
                 .solve_transient(schedule.points_s())
-                .map_err(invalid)?;
+                .map_err(super::fluid_structure_error)?;
             return FluidSteadySolverResult::from_fluid_structure_transient(
                 self, &source, mesh, coupled,
             );
@@ -481,11 +481,11 @@ impl FluidSteadyWorkload {
             let coupled = source
                 .fluid_structure(self, mesh)?
                 .solve()
-                .map_err(invalid)?;
+                .map_err(super::fluid_structure_error)?;
             return FluidSteadySolverResult::from_fluid_structure(self, &source, mesh, coupled);
         }
         if self.coupling() == FluidCoupling::ConjugateHeat && self.is_transient() {
-            let flow = source.problem(self)?.solve().map_err(invalid)?;
+            let flow = source.problem(self)?.solve().map_err(super::fluid_error)?;
             let schedule =
                 super::FluidTransientSchedule::derive(&self.model, &self.model.sequence.steps[0])?;
             let times = schedule.points_s();
@@ -528,7 +528,7 @@ impl FluidSteadyWorkload {
             );
         }
         if self.coupling() == FluidCoupling::ConjugateHeat {
-            let flow = source.problem(self)?.solve().map_err(invalid)?;
+            let flow = source.problem(self)?.solve().map_err(super::fluid_error)?;
             let energy = source
                 .conjugate_heat(self, flow.face_volume_flux_m3_per_s.canonical_values())?
                 .solve()
@@ -540,7 +540,7 @@ impl FluidSteadyWorkload {
             let original = view.prepare(mesh)?.execute()?;
             return FluidSteadySolverResult::from_transient(self, &source, original);
         }
-        let original = source.problem(self)?.solve().map_err(invalid)?;
+        let original = source.problem(self)?.solve().map_err(super::fluid_error)?;
         FluidSteadySolverResult::from_original(self, &source, original)
     }
 

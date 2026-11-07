@@ -111,9 +111,17 @@ impl PlotRenderer {
         );
 
         // 3D helpers: a horizontal world grid and world-axis ticks. Keeping the
-        // grid on XY gives it a stable meaning as the camera moves. Built before the scene's
-        // render items borrow the scene.
-        let world_helpers = (!is_2d && self.overlay_show_grid_for_axes(axes_index)).then(|| {
+        // grid on XY gives it a stable meaning as the camera moves. `axis off` hides them all;
+        // a plot keeps its axis lines under `grid off`, while CAD geometry's world triad follows
+        // the grid toggle. Built before the scene's render items borrow the scene.
+        let axes_visible = self
+            .overlay_axes_style_for_axes(axes_index)
+            .is_none_or(|style| style.visible);
+        let world_helpers = (!is_2d
+            && axes_visible
+            && (self.overlay_show_grid_for_axes(axes_index)
+                || !self.axes_shows_geometry(axes_index)))
+        .then(|| {
             self.world_helpers_3d(
                 emission,
                 &cam,
@@ -632,7 +640,8 @@ impl PlotRenderer {
                             _ => None,
                         };
                         let pipeline = variant.unwrap_or_else(|| {
-                            self.wgpu_renderer.get_pipeline(render_data.pipeline_type)
+                            self.wgpu_renderer
+                                .pipeline_for(render_data, self.scene.translucent_last())
                         });
                         render_pass.set_pipeline(pipeline);
                         render_pass.set_bind_group(

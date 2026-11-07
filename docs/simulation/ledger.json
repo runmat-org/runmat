@@ -362,6 +362,21 @@
       ]
     },
     {
+      "id": "structural.modal-reduced.residual-vectors",
+      "title": "Modal residual vectors and applied-load static correction for modal-reduced structural steps",
+      "kind": "language",
+      "area": "structural",
+      "status": "release",
+      "requirements": [
+        "FEA-DYNAMICS-RESPONSE-001"
+      ],
+      "verification": [],
+      "docs": [
+        "language/reference/procedures.md",
+        "physics/structural.md"
+      ]
+    },
+    {
       "id": "thermal.static",
       "title": "Thermal static",
       "kind": "procedure",
@@ -894,7 +909,7 @@
         "solution_space": "direct"
       },
       "status": "pending",
-      "acceptance": "`runmat check` and `runmat run` admit `thermomechanical transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "acceptance": "`runmat check` and `runmat run` admit `thermomechanical transient` through ANALYSIS_IDENTITIES; thermal stress publishes over the time history of a transient thermal analysis (FEA-COUPLING-THERMOELASTIC-002), and a canonical example (one braking stop) runs on the release CLI with a receipt compared to a reference.",
       "owner": "q-em",
       "gaps": [
         "G-B9",
@@ -904,10 +919,13 @@
         "ANALYSIS_IDENTITIES row thermomechanical/transient status runs",
         "runmat run <example>.fea (thermomechanical transient)"
       ],
-      "requirements": [],
+      "requirements": [
+        "FEA-COUPLING-THERMOELASTIC-002"
+      ],
       "verification": [],
       "docs": [
-        "language/reference/procedures.md"
+        "language/reference/procedures.md",
+        "physics/thermomechanical.md"
       ]
     },
     {
@@ -1265,6 +1283,47 @@
       "verification": [],
       "docs": [
         "language/reference/procedures.md"
+      ]
+    },
+    {
+      "id": "fluid-structure-interaction.solid-stress",
+      "title": "Structural stress on the solid of an FSI study (`von_mises_stress`, `stress`)",
+      "kind": "output",
+      "area": "fluid-structure-interaction",
+      "status": "pending",
+      "acceptance": "A fluid_structure_interaction steady or transient analysis publishes element stress and von Mises stress on the solid region from the converged displacement; outputs and snapshot views read them, and a cantilever paddle in channel flow matches the beam root stress of its fluid force resultant.",
+      "owner": "q-fluid",
+      "gaps": [],
+      "witness": [
+        "runmat run docs/simulation/examples/fsi-compliant-tube.fea with output stress"
+      ],
+      "requirements": [
+        "FEA-COUPLING-FSI-001",
+        "FEA-COUPLING-FSI-002"
+      ],
+      "verification": [],
+      "docs": [
+        "physics/fluid-structure-interaction.md"
+      ]
+    },
+    {
+      "id": "fluid-structure-interaction.one-way-fluid-loads",
+      "title": "One-way fluid loads into a structural study (`pressure` and wall shear from a solved flow)",
+      "kind": "load",
+      "area": "fluid-structure-interaction",
+      "status": "pending",
+      "acceptance": "A structural static or transient analysis takes the pressure and wall shear stress of an earlier fluid analysis as a load on the wetted faces (`after analysis.<flow>`); the mapped total force and moment equal the fluid resultant, and a study checks and runs.",
+      "owner": "q-fluid",
+      "gaps": [],
+      "witness": [
+        "runmat run <one-way-fluid-load>.fea"
+      ],
+      "requirements": [
+        "FEA-COUPLING-FSI-002"
+      ],
+      "verification": [],
+      "docs": [
+        "physics/fluid-structure-interaction.md"
       ]
     },
     {
@@ -2383,13 +2442,14 @@
       "title": "Pressure drop output (`pressure_drop`) between two face regions",
       "kind": "output",
       "area": "fluid",
-      "status": "pending",
+      "status": "release",
       "acceptance": "`pressure_drop` is a cataloged output operation; cold-plate, cold-plate sweep and filter studies check and run.",
       "owner": "q-fluid",
       "gaps": [
         "REG-FLUID-019"
       ],
       "witness": [
+        "check_cli plane_poiseuille_example_publishes_the_analytic_pressure_drop: 36.85 Pa vs developed 36 Pa (L/h = 30, +2.4%, band +/-5%), runmat-build-mac:~/logs/q-sim-pages-5/poi.log (2026-11-06)",
         "evidence: runmat-build-mac:~/logs/q-site-examples/check/fluid-flow_cold-plate.fea.log",
         "evidence: runmat-build-mac:~/logs/q-site-examples/check/fluid-flow_cold-plate-sweep.fea.log",
         "evidence: runmat-build-mac:~/logs/q-site-examples/check/fluid-flow_filter.fea.log",
@@ -13650,6 +13710,24 @@
               ]
             }
           ]
+        },
+        {
+          "id": "heat_generation",
+          "criterion": "Volumetric heat generation and total-power heat sources on named regions integrate to the declared heat rate.",
+          "evidence_kind": "physical_balance",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
         }
       ],
       "dependencies": []
@@ -13719,6 +13797,132 @@
               ],
               "executions": [
                 "public_study"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conduction_multigrid",
+          "criterion": "An AMG-preconditioned CG steady conduction solve, chosen when the factor does not fit the admitted budget, agrees with the proving direct factorization within its tolerance.",
+          "evidence_kind": "execution_equivalence",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conduction_multigrid_usage",
+          "criterion": "A ledger refusal inside the multigrid conduction solve stays a typed usage refusal.",
+          "evidence_kind": "rejection_invariant",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conduction_multigrid_anchor",
+          "criterion": "A conduction model with a body that has no prescribed temperature or positive convection is refused as undetermined before the multigrid path solves.",
+          "evidence_kind": "rejection_invariant",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conduction_multigrid_plan",
+          "criterion": "Solver selection compares the whole preassembly totals of the factor and multigrid paths against the admitted budget.",
+          "evidence_kind": "resource_admission",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "steady_reservation",
+          "criterion": "The steady thermal reservation stays at or above the measured whole-run heap peak.",
+          "evidence_kind": "resource_admission",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "support_derivation_memory",
+          "criterion": "Thermal support-pattern derivation stays within its distinct-entry planning law.",
+          "evidence_kind": "resource_admission",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "support_derivation_memory_interface",
+          "criterion": "Support-pattern derivation with finite-conductance interfaces stays within its planning law.",
+          "evidence_kind": "resource_admission",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
               ]
             }
           ]
@@ -17649,6 +17853,85 @@
         }
       ],
       "dependencies": []
+    },
+    {
+      "id": "FEA-COUPLING-THERMOELASTIC-002",
+      "title": "Thermal stress over a time history (thermomechanical transient)",
+      "stages": [
+        "thermal",
+        "dynamics"
+      ],
+      "acceptance": "A transient thermal analysis drives the structure at every stored time: stress, strain and displacement publish as a time history from the solved temperature of each step (for example one braking stop), with the thermal and structural time axes and state lineage attributable.",
+      "owners": [
+        "crates/runmat-analysis/fea/src/pipeline/thermo_mechanical/solved.rs",
+        "crates/runmat-analysis/fea/src/assembly/thermoelastic_load.rs"
+      ],
+      "obligations": [
+        {
+          "id": "time_history_transition",
+          "criterion": "Each structural step consumes the solved temperature of the matching thermal time (quasi-static, or with inertia in a structural transient); a uniform temperature ramp in a free bar reproduces alpha * dT expansion at every stored time, and a clamped bar reproduces -E * alpha * dT stress.",
+          "evidence_kind": "independent_reference",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermoelastic",
+                "thermal_transient"
+              ],
+              "meshes": [
+                "tet4",
+                "tet10"
+              ],
+              "executions": [
+                "numerical_kernel",
+                "public_study"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "transient_thermal_stress_reference",
+          "criterion": "Thermal stress under a surface heat pulse on a slab agrees with the classical one-dimensional transient thermoelastic solution (peak surface stress and its time) within the declared tolerance under refinement in space and time.",
+          "evidence_kind": "independent_reference",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermoelastic",
+                "thermal_transient"
+              ],
+              "meshes": [
+                "tet4",
+                "tet10"
+              ],
+              "executions": [
+                "numerical_kernel",
+                "public_study"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "time_history_publication",
+          "criterion": "`thermomechanical transient` checks and runs from `runmat run`, publishes temperature, displacement and stress fields at every stored time, supports peak-over-time outputs and assessments, and snapshots select a time.",
+          "evidence_kind": "public_run",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermoelastic"
+              ],
+              "meshes": [
+                "tet4",
+                "tet10"
+              ],
+              "executions": [
+                "public_study"
+              ]
+            }
+          ]
+        }
+      ],
+      "dependencies": [
+        "FEA-COUPLING-THERMOELASTIC-001 (solved-temperature transition) and the thermal transient time axis remain mandatory."
+      ]
     },
     {
       "id": "FEA-COUPLING-ELECTROTHERMAL-001",

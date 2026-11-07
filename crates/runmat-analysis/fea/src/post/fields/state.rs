@@ -4,6 +4,9 @@ use crate::{
 };
 
 use super::VECTOR_COMPONENT_COUNT;
+use crate::algebra::{capacity::measured, coercivity::NumericalCapacityError};
+use crate::post::error::StructuralFieldRecoveryError;
+use runmat_simulation_usage::{AsyncCapacityOwner, LedgerError, OperationCount, UsageCategory};
 
 pub(super) fn recover_reaction_force(
     summary: &AssemblySummary,
@@ -30,6 +33,36 @@ pub(super) fn recover_reaction_force(
         reactions[target] = internal - rhs;
     }
     reactions
+}
+
+pub(super) fn reaction_reference_work(
+    summary: &AssemblySummary,
+    node_count: usize,
+) -> Result<OperationCount, StructuralFieldRecoveryError> {
+    let mut operations = 0_u64;
+    for (dof, constrained) in summary.operator.constrained_dofs().iter().enumerate() {
+        if !*constrained && !is_affine_constraint_dof(summary, dof) {
+            continue;
+        }
+        let Some(address) = summary.structural_dof_layout.address(dof) else {
+            continue;
+        };
+        let translation = translational_component(address.kind).is_some_and(|component| {
+            address.node_index * VECTOR_COMPONENT_COUNT + component
+                < node_count * VECTOR_COMPONENT_COUNT
+        });
+        let rotation = summary.structural_rotational_dof_count != 0
+            && rotational_component(address.kind).is_some_and(|component| {
+                address.node_index * VECTOR_COMPONENT_COUNT + component
+                    < summary.structural_dof_layout.node_count() * VECTOR_COMPONENT_COUNT
+            });
+        if translation || rotation {
+            operations = operations
+                .checked_add(1)
+                .ok_or(LedgerError::CountOverflow)?;
+        }
+    }
+    Ok(OperationCount::from_operations(operations))
 }
 
 pub(super) fn recover_rotation(summary: &AssemblySummary, solution: &[f64]) -> Vec<f64> {
@@ -151,13 +184,87 @@ pub(super) struct StructuralResidualMetrics {
     pub(super) equation_scale: f64,
 }
 
-pub(super) fn recover_residual_metrics(
+pub(super) async fn recover_residual_metrics_with_capacity<A>(
     summary: &AssemblySummary,
     displacement: &[f64],
-) -> StructuralResidualMetrics {
-    let mut solution = displacement.to_vec();
-    solution.resize(summary.dof_count, 0.0);
-    let applied = apply_k(&summary.operator, &solution);
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<StructuralResidualMetrics, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
+    if displacement.len() != summary.dof_count {
+        return Err(StructuralFieldRecoveryError::DisplacementShapeMismatch {
+            expected: summary.dof_count,
+            actual: displacement.len(),
+        }
+        .into());
+    }
+    if summary.physical_load.len() != summary.dof_count {
+        return Err(StructuralFieldRecoveryError::InvalidPhysicalLayout {
+            reason: "residual load does not match the structural DOF count".into(),
+        }
+        .into());
+    }
+    let matrix = summary.operator.operators().stiffness();
+    let count = |length: usize| {
+        u64::try_from(length)
+            .map_err(|_| StructuralFieldRecoveryError::Accounting(LedgerError::CountOverflow))
+    };
+    let mut work = OperationCount::ZERO;
+    for row in 0..matrix.rows() {
+        work = work
+            .checked_add(
+                OperationCount::direct_real_dot(count(matrix.pattern().row_range(row).len())?)
+                    .map_err(LedgerError::from)
+                    .map_err(StructuralFieldRecoveryError::from)?,
+            )
+            .map_err(LedgerError::from)
+            .map_err(StructuralFieldRecoveryError::from)?;
+    }
+    work = work
+        .checked_add(OperationCount::from_operations(count(summary.dof_count)?))
+        .map_err(LedgerError::from)
+        .map_err(StructuralFieldRecoveryError::from)?;
+    let norm_length = if let Some(reduction) = &summary.affine_constraint_reduction {
+        reduction
+            .validate()
+            .map_err(StructuralFieldRecoveryError::from)?;
+        if reduction.full_dof_count != summary.dof_count {
+            return Err(StructuralFieldRecoveryError::ConstraintProjection(
+                crate::constraints::ConstraintAlgebraError::OperatorDimensionMismatch,
+            )
+            .into());
+        }
+        work = work
+            .checked_add(
+                OperationCount::from_operations(count(reduction.recovery_coefficients.len())?)
+                    .checked_mul(4)
+                    .map_err(LedgerError::from)
+                    .map_err(StructuralFieldRecoveryError::from)?,
+            )
+            .map_err(LedgerError::from)
+            .map_err(StructuralFieldRecoveryError::from)?;
+        reduction.reduced_dof_count
+    } else {
+        summary.dof_count
+    };
+    let norms = OperationCount::direct_real_dot(count(norm_length)?)
+        .and_then(|work| work.checked_mul(2))
+        .and_then(|work| work.checked_add(OperationCount::from_operations(3)))
+        .map_err(LedgerError::from)
+        .map_err(StructuralFieldRecoveryError::from)?;
+    work = work
+        .checked_add(norms)
+        .map_err(LedgerError::from)
+        .map_err(StructuralFieldRecoveryError::from)?;
+    measured(owner, UsageCategory::Solve, work, || {
+        recover_residual_metrics_unmetered(summary, displacement)
+    })
+    .await
+}
+
+fn recover_residual_metrics_unmetered(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+) -> Result<StructuralResidualMetrics, StructuralFieldRecoveryError> {
+    let applied = apply_k(&summary.operator, displacement);
     let mut full_residual = applied
         .iter()
         .zip(summary.physical_load.iter())
@@ -173,16 +280,13 @@ pub(super) fn recover_residual_metrics(
             }
         }
     }
-    let residual = summary
-        .affine_constraint_reduction
-        .as_ref()
-        .and_then(|reduction| reduction.transpose_apply(&full_residual).ok())
-        .unwrap_or(full_residual);
-    let scaled_rhs = summary
-        .affine_constraint_reduction
-        .as_ref()
-        .and_then(|reduction| reduction.transpose_apply(&summary.physical_load).ok())
-        .unwrap_or_else(|| summary.physical_load.clone());
+    let (residual, scaled_rhs) = match &summary.affine_constraint_reduction {
+        Some(reduction) => (
+            reduction.transpose_apply(&full_residual)?,
+            reduction.transpose_apply(&summary.physical_load)?,
+        ),
+        None => (full_residual, summary.physical_load.clone()),
+    };
     let residual_norm = residual
         .iter()
         .map(|value| value * value)
@@ -194,10 +298,10 @@ pub(super) fn recover_residual_metrics(
         .sum::<f64>()
         .sqrt()
         .max(1.0);
-    StructuralResidualMetrics {
+    Ok(StructuralResidualMetrics {
         normalized_residual_norm: residual_norm / equation_scale,
         equation_scale,
-    }
+    })
 }
 
 fn is_affine_constraint_dof(summary: &AssemblySummary, dof: usize) -> bool {

@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{AnalysisModel, StructuralElementKind};
@@ -573,6 +574,7 @@ fn pattern_from_row_builder(
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
 }
 
+#[cfg(test)]
 pub(super) fn pattern_from_rows(
     rows: Vec<BTreeSet<usize>>,
     columns: usize,

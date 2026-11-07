@@ -702,6 +702,25 @@ private:
 
 #[test]
 fn modern_cpp_data_api_preserves_aggregate_complex_and_layout_semantics() {
+    // Copy counters are process-wide. Keep exact per-invocation assertions
+    // independent of other MEX tests running concurrently in the harness.
+    const CHILD: &str = "RUNMAT_MEX_AGGREGATE_COPY_CHILD";
+    if std::env::var_os(CHILD).as_deref() != Some(std::ffi::OsStr::new("1")) {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "modern_cpp_data_api_preserves_aggregate_complex_and_layout_semantics",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "isolated MEX aggregate-copy test failed: {status}"
+        );
+        return;
+    }
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("modern_aggregate_api.cpp");
     fs::write(
@@ -760,9 +779,13 @@ public:
     let module = MexModule::load(&artifact.module).unwrap();
     let layout_copies_before =
         runmat_value::host_copy_metrics(runmat_value::HostCopyReason::MemoryLayoutConversion);
+    let storage_copies_before =
+        runmat_value::host_copy_metrics(runmat_value::HostCopyReason::ForeignStorageConversion);
     let result = module.invoke(&[], 6, module.api_mode()).unwrap();
     let layout_copies_after =
         runmat_value::host_copy_metrics(runmat_value::HostCopyReason::MemoryLayoutConversion);
+    let storage_copies_after =
+        runmat_value::host_copy_metrics(runmat_value::HostCopyReason::ForeignStorageConversion);
     assert_eq!(
         layout_copies_after.operations,
         layout_copies_before.operations + 1
@@ -770,6 +793,14 @@ public:
     assert_eq!(
         layout_copies_after.bytes,
         layout_copies_before.bytes + 6 * std::mem::size_of::<f64>() as u64
+    );
+    assert_eq!(
+        storage_copies_after.operations,
+        storage_copies_before.operations + 2
+    );
+    assert_eq!(
+        storage_copies_after.bytes,
+        storage_copies_before.bytes + (4 + 6) * std::mem::size_of::<u16>() as u64
     );
 
     let Value::Cell(cell) = &result.outputs[0] else {

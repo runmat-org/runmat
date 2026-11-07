@@ -3,8 +3,24 @@
 //! Kernel owners supply counts from defined reference algorithms. This crate has
 //! no account policy, wall-time conversion, implicit counters or allocation hooks.
 
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
+
+mod ledger;
+mod usage;
+mod decimal;
+mod total;
+mod measurement;
+mod context;
+mod async_capacity;
+pub use async_capacity::AsyncCapacityOwner;
+pub use context::{UsageContext, UsageContextGuard};
+pub use ledger::{
+    grant_target, DelegatedReservation, GrantRenewal, LedgerError, LedgerSnapshot, UsageLedger, WorkReservation,
+};
+pub use measurement::{InvalidMeasurementVersion, MeasurementVersion};
+pub use total::OperationTotal;
+pub use usage::{CompletedUsage, UsageCategory};
 
 /// An exact nonnegative number of reference floating-point operations.
 ///
@@ -65,26 +81,7 @@ impl Serialize for OperationCount {
 
 impl<'de> Deserialize<'de> for OperationCount {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct CountVisitor;
-        impl de::Visitor<'_> for CountVisitor {
-            type Value = OperationCount;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a canonical decimal operation-count string fitting u64")
-            }
-
-            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-                if value.is_empty()
-                    || value.len() > 20
-                    || (value.len() > 1 && value.starts_with('0'))
-                    || !value.bytes().all(|byte| byte.is_ascii_digit())
-                {
-                    return Err(E::custom("invalid decimal operation count"));
-                }
-                value.parse::<u64>().map(OperationCount).map_err(E::custom)
-            }
-        }
-        deserializer.deserialize_str(CountVisitor)
+        decimal::deserialize(deserializer, 20).map(Self)
     }
 }
 
@@ -93,7 +90,7 @@ pub struct CountOverflow;
 
 impl fmt::Display for CountOverflow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("simulation operation count exceeds u64")
+        f.write_str("simulation operation count exceeds its integer range")
     }
 }
 

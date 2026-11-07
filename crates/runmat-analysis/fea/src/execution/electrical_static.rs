@@ -32,7 +32,7 @@ pub use receipt::{
 mod tests;
 
 const PREFIX: &[u8] = b"runmat-electrical-static-workload/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -171,8 +171,17 @@ impl ElectricalStaticWorkload {
             conductivity.as_deref(),
             self.sample_point(),
         )
-        .map_err(invalid)?;
+        .map_err(electrical_failure)?;
         ElectricalStaticSolverResult::new(self, mesh, formulation, response)
+    }
+}
+
+fn electrical_failure(error: crate::physics::electrical::ElectricalStaticError) -> AnalysisExecutionError {
+    match error {
+        crate::physics::electrical::ElectricalStaticError::Accounting(cause) => {
+            AnalysisExecutionError::Usage(cause)
+        }
+        other => invalid(other),
     }
 }
 

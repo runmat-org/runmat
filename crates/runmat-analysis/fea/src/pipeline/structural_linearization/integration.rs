@@ -4,7 +4,9 @@
 use super::*;
 use crate::assembly::{
     dofs::StructuralDofLayout,
+    elements::solid::material::SolidMaterialError,
     elements::solid::response::response_at_volume_point,
+    elements::solid::response::SolidResponseError,
     elements::solid::{tetrahedron10_is_affine, Tetrahedron10ElementGeometry},
     SolidRecoveryElementSummary,
 };
@@ -153,11 +155,11 @@ fn integrate_rule<const D: usize>(
     let lambda = element
         .material
         .lame_lambda_pa()
-        .map_err(|error| element_error(&element.element_id, error))?;
+        .map_err(|error| material_error(&element.element_id, error))?;
     let mu = element
         .material
         .shear_modulus_pa()
-        .map_err(|error| element_error(&element.element_id, error))?;
+        .map_err(|error| material_error(&element.element_id, error))?;
     let constitutive_scale = 3.0 * (lambda.abs() + 2.0 * mu.abs());
     let mut failure = None;
     let mut visit = |point: VolumeQuadraturePoint| {
@@ -167,7 +169,12 @@ fn integrate_rule<const D: usize>(
         let response = match response_at_volume_point(element, displacement, &point) {
             Ok(response) => response,
             Err(error) => {
-                failure = Some(element_error(&element.element_id, error));
+                failure = Some(match error {
+                    SolidResponseError::Accounting(error) => {
+                        StructuralLinearizationError::Accounting(error)
+                    }
+                    other => element_error(&element.element_id, other),
+                });
                 return;
             }
         };
@@ -219,6 +226,7 @@ fn integrate_rule<const D: usize>(
     } else {
         visit_volume_quadrature(order, coordinates, &mut visit)
     };
+    let valid = valid.map_err(StructuralLinearizationError::Accounting)?;
     if let Some(error) = failure {
         return Err(error);
     }
@@ -236,6 +244,13 @@ fn integrate_rule<const D: usize>(
         ));
     }
     Ok(output)
+}
+
+fn material_error(element_id: &str, error: SolidMaterialError) -> StructuralLinearizationError {
+    match error {
+        SolidMaterialError::Accounting(error) => StructuralLinearizationError::Accounting(error),
+        other => element_error(element_id, other),
+    }
 }
 
 fn converged<const D: usize>(previous: &Integrated<D>, next: &Integrated<D>) -> bool {

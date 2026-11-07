@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 
 use runmat_analysis_distributed::{
     extract_rank_inputs, gather_outputs, partition_elements, read_bytes, run_rank, write_bytes,
-    DistributedSolution, ElementKernel, FaerCholeskyFactory, FieldKind, KrylovSettings,
-    PartitionOptions, PartitionQuality, PartitionedProblem, ProcessPlan, RankOutput,
-    SubdomainInput, SubdomainLayout, TcpCommunicator, TcpRendezvous,
+    DistributedSolution, ElementKernel, ElementKernelError, FaerCholeskyFactory, FieldKind,
+    KrylovSettings, PartitionOptions, PartitionQuality, PartitionedProblem, ProcessPlan,
+    RankOutput, SubdomainInput, SubdomainLayout, TcpCommunicator, TcpRendezvous,
 };
 use runmat_analysis_fea::assembly::elements::solid::{
     elasticity_matrix, global_stiffness_matrix, tetrahedron10_global_stiffness_matrix,
@@ -181,7 +181,7 @@ impl ElementKernel for ElasticKernel {
         material: u32,
         coordinates: &[[f64; 3]],
         matrix: &mut [f64],
-    ) -> Result<(), String> {
+    ) -> Result<(), ElementKernelError> {
         let material = self.material(material)?;
         match self.order {
             ElementOrder::Tet4 => {
@@ -223,7 +223,7 @@ impl ElementKernel for ElasticKernel {
         coordinates: &[[f64; 3]],
         solution: &[f64],
         result: &mut [f64],
-    ) -> Result<(), String> {
+    ) -> Result<(), ElementKernelError> {
         let d = elasticity_matrix(self.material(material)?).map_err(|error| error.to_string())?;
         let mut strain = [0.0f64; 6];
         let mut volume = 0.0;
@@ -249,6 +249,7 @@ impl ElementKernel for ElasticKernel {
                 volume += weight;
             },
         )
+        .map_err(ElementKernelError::from)?
         .ok_or("element is degenerate or inverted")?;
         for (row, value) in result.iter_mut().enumerate().take(6) {
             *value = (0..6)
@@ -289,7 +290,7 @@ impl ElementKernel for ConductionKernel {
         material: u32,
         coordinates: &[[f64; 3]],
         matrix: &mut [f64],
-    ) -> Result<(), String> {
+    ) -> Result<(), ElementKernelError> {
         let conductivity = self.conductivity(material)?;
         let n = node_count(self.order);
         runmat_analysis_fea::topology::visit_tetrahedron_volume_quadrature(
@@ -308,7 +309,8 @@ impl ElementKernel for ConductionKernel {
                 }
             },
         )
-        .ok_or_else(|| "element is degenerate or inverted".to_string())
+        .map_err(ElementKernelError::from)?
+        .ok_or_else(|| ElementKernelError::Detail("element is degenerate or inverted".into()))
     }
 
     fn result_width(&self) -> usize {
@@ -322,7 +324,7 @@ impl ElementKernel for ConductionKernel {
         coordinates: &[[f64; 3]],
         solution: &[f64],
         result: &mut [f64],
-    ) -> Result<(), String> {
+    ) -> Result<(), ElementKernelError> {
         let conductivity = self.conductivity(material)?;
         let mut flux = [0.0f64; 3];
         let mut volume = 0.0;
@@ -339,6 +341,7 @@ impl ElementKernel for ConductionKernel {
                 volume += point.volume_weight_m3;
             },
         )
+        .map_err(ElementKernelError::from)?
         .ok_or("element is degenerate or inverted")?;
         for axis in 0..3 {
             result[axis] = flux[axis] / volume;
@@ -411,6 +414,12 @@ pub fn solve_cooperatively(
     settings: KrylovSettings,
     launch: &CooperativeLaunch,
 ) -> NativeExecutionResult<CooperativeSolveReport> {
+    // This experimental rank launcher has no authenticated FEA child grant or
+    // shared ledger. Refuse before partitioning or spawning any rank under an
+    // admitted run; the standalone benchmark remains ordinary offline work.
+    if runmat_simulation_usage::UsageContext::capture().is_some() {
+        return Err(NativeExecutionError::UnsupportedMeteredCooperative);
+    }
     let processes = launch.processes.clamp(1, subdomains.max(1));
     let started = Instant::now();
     if kernel.field() != problem.field
@@ -477,6 +486,11 @@ pub fn solve_cooperatively(
                     let reply = read_bytes(&mut control).map_err(distributed)?;
                     match reply.split_first() {
                         Some((0, output)) => RankOutput::decode(output).map_err(distributed),
+                        Some((2, encoded)) => {
+                            let cause = serde_json::from_slice::<runmat_simulation_usage::LedgerError>(encoded)
+                                .map_err(|error| NativeExecutionError::Protocol(format!("cooperative process {process} returned invalid operation-accounting cause: {error}")))?;
+                            Err(NativeExecutionError::Usage(cause))
+                        }
                         Some((_, message)) => Err(NativeExecutionError::Protocol(format!(
                             "cooperative process {process} failed: {}",
                             String::from_utf8_lossy(message)
@@ -623,8 +637,21 @@ pub fn run_cooperative_rank_from_env() -> NativeExecutionResult<()> {
             bytes
         }
         Err(error) => {
-            let mut bytes = vec![1u8];
-            bytes.extend(error.to_string().into_bytes());
+            let mut bytes = Vec::new();
+            match error {
+                runmat_analysis_distributed::DistributedError::Usage(cause) => {
+                    bytes.push(2);
+                    bytes.extend(serde_json::to_vec(&cause).map_err(|error| {
+                        NativeExecutionError::Protocol(format!(
+                            "cannot encode rank operation-accounting cause: {error}"
+                        ))
+                    })?);
+                }
+                detail => {
+                    bytes.push(1);
+                    bytes.extend(detail.to_string().into_bytes());
+                }
+            }
             bytes
         }
     };
@@ -634,9 +661,61 @@ pub fn run_cooperative_rank_from_env() -> NativeExecutionResult<()> {
 }
 
 fn distributed(error: runmat_analysis_distributed::DistributedError) -> NativeExecutionError {
-    NativeExecutionError::Protocol(error.to_string())
+    match error {
+        runmat_analysis_distributed::DistributedError::Usage(cause) => {
+            NativeExecutionError::Usage(cause)
+        }
+        detail => NativeExecutionError::Protocol(detail.to_string()),
+    }
 }
 
 fn io(error: std::io::Error) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_simulation_usage::{OperationCount, UsageContext, UsageLedger};
+    use std::sync::Arc;
+
+    #[test]
+    fn admitted_cooperative_route_refuses_before_partition_or_rank_launch() {
+        let problem = PartitionedProblem {
+            mesh: runmat_analysis_distributed::PartitionMesh {
+                coordinates: Vec::new(),
+                nodes_per_element: 0,
+                element_nodes: Vec::new(),
+            },
+            element_materials: Vec::new(),
+            field: FieldKind::Scalar,
+            prescribed: Vec::new(),
+            loads: Vec::new(),
+        };
+        let kernel = CooperativeKernelSpec::Conduction {
+            order: ElementOrder::Tet4,
+            conductivities: vec![1.0],
+        };
+        let launch = CooperativeLaunch {
+            executable: PathBuf::from("unused-cooperative-rank"),
+            worker_arguments: Vec::new(),
+            processes: 1,
+            threads_per_rank: 1,
+            bind: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            timeout: Duration::from_secs(1),
+        };
+        let capacity = OperationCount::from_operations(10);
+        let usage = UsageContext::new(Arc::new(UsageLedger::new(capacity, capacity).unwrap()));
+        let admitted = usage.run_sync(|| {
+            solve_cooperatively(&problem, &kernel, 1, KrylovSettings::default(), &launch)
+        });
+        assert!(matches!(
+            admitted,
+            Err(NativeExecutionError::UnsupportedMeteredCooperative)
+        ));
+        assert!(matches!(
+            solve_cooperatively(&problem, &kernel, 1, KrylovSettings::default(), &launch),
+            Err(NativeExecutionError::Protocol(_))
+        ));
+    }
 }

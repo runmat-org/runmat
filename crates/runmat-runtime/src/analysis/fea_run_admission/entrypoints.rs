@@ -79,7 +79,7 @@ pub(crate) fn settle_result<T>(
 
 /// Keep the domain's original typed cause. The context boundary carries one
 /// complete secondary envelope, rather than concatenating diagnostic strings.
-pub(crate) fn merge_lease_error<T>(
+pub fn merge_lease_error<T>(
     result: Result<T, OperationErrorEnvelope>,
     lease_error: Option<OperationErrorEnvelope>,
 ) -> Result<T, OperationErrorEnvelope> {
@@ -219,13 +219,12 @@ pub fn test_admission() -> std::sync::Arc<dyn super::FeaRunAdmission> {
     impl super::FeaRunAdmission for TestAdmission {
         fn admit(
             &self,
-            request: &FeaRunRequest,
+            _: &FeaRunRequest,
         ) -> Result<Box<dyn super::FeaRunPermit>, super::FeaRunDenied> {
-            let held = (u128::from(request.allocated_cpu_millicores) * 3_600_000).div_ceil(1000);
             Ok(Box::new(TestPermit {
                 budget: super::FeaRunBudget {
-                    held_core_millis: u64::try_from(held)
-                        .map_err(|_| super::FeaRunDenied::LicenseInvalid)?,
+                    budget_ops: runmat_simulation_usage::OperationCount::from_operations(u64::MAX),
+                    granted_ops: runmat_simulation_usage::OperationCount::from_operations(u64::MAX),
                     expires_at_unix_millis: (runmat_time::unix_timestamp_ms() as u64)
                         .saturating_add(3_600_000),
                     heartbeat_millis: 30_000,
@@ -239,14 +238,14 @@ pub fn test_admission() -> std::sync::Arc<dyn super::FeaRunAdmission> {
         }
         fn heartbeat(
             &self,
-            _: &runmat_execution::resource::ResourceUsage,
+            _: &super::FeaRunUsage,
         ) -> Result<super::FeaRunBudget, super::FeaRunDenied> {
             Ok(self.budget())
         }
         fn settle(
             self: Box<Self>,
             _: FeaRunOutcome,
-            _: &runmat_execution::resource::ResourceUsage,
+            _: &super::FeaRunUsage,
         ) -> Result<(), super::FeaRunDenied> {
             Ok(())
         }

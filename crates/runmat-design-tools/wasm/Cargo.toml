@@ -1,6 +1,6 @@
 [package]
 name = "runmat-design-tools-wasm"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -13,7 +13,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-runmat-design-tools = { path = "..", version = "=0.6.2" }
+runmat-design-tools = { path = "..", version = "=0.7.0" }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2"
 

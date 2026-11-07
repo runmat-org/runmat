@@ -150,7 +150,7 @@ pub(super) async fn read_response(
 mod tests {
     use super::*;
     use runmat_execution::{
-        resource::{ResourceRequest, ResourceUsage},
+        resource::ResourceRequest,
         ProgramExecutionAssignment,
     };
     use runmat_runtime::analysis::fea_run_admission::*;
@@ -170,7 +170,8 @@ mod tests {
                 pid: self.pid,
                 settled: self.settled.clone(),
                 budget: FeaRunBudget {
-                    held_core_millis: 60_000,
+                    budget_ops: runmat_simulation_usage::OperationCount::from_operations(u64::MAX),
+                    granted_ops: runmat_simulation_usage::OperationCount::from_operations(u64::MAX),
                     expires_at_unix_millis: std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
@@ -185,13 +186,13 @@ mod tests {
         fn budget(&self) -> FeaRunBudget {
             self.budget
         }
-        fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+        fn heartbeat(&self, _: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
             Ok(self.budget)
         }
         fn settle(
             self: Box<Self>,
             outcome: FeaRunOutcome,
-            _: &ResourceUsage,
+            _: &FeaRunUsage,
         ) -> Result<(), FeaRunDenied> {
             assert_eq!(outcome, FeaRunOutcome::Failed);
             assert!(

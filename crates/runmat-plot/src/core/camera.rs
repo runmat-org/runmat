@@ -318,11 +318,18 @@ impl Camera {
         self.view_proj_dirty = true;
     }
 
-    pub fn set_view_angles_deg(&mut self, azimuth_deg: f32, elevation_deg: f32) {
-        let distance = (self.position - self.target).length().max(0.1);
+    /// The unit direction from the target to the viewpoint of MATLAB's `view(az, el)`: azimuth
+    /// is measured from the negative y-axis, counterclockwise seen from +z, so `view(0, 0)`
+    /// looks along +y, `view(90, 0)` along -x, and the default `view(-37.5, 30)` from -x, -y.
+    pub fn view_direction_deg(azimuth_deg: f32, elevation_deg: f32) -> Vec3 {
         let az = azimuth_deg.to_radians();
         let el = elevation_deg.to_radians();
-        let dir = Vec3::new(el.cos() * az.cos(), el.cos() * az.sin(), el.sin());
+        Vec3::new(el.cos() * az.sin(), -el.cos() * az.cos(), el.sin())
+    }
+
+    pub fn set_view_angles_deg(&mut self, azimuth_deg: f32, elevation_deg: f32) {
+        let distance = (self.position - self.target).length().max(0.1);
+        let dir = Self::view_direction_deg(azimuth_deg, elevation_deg);
         self.up = Vec3::Z;
         self.position = self.target + dir * distance;
         self.view_proj_dirty = true;

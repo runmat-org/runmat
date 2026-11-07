@@ -31,10 +31,10 @@ use super::{
 
 const TRANSIENT_WORKLOAD_PREFIX: &[u8] = b"runmat-structural-transient-workload/v2\0";
 const TRANSIENT_WORKLOAD_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 const TRANSIENT_IDENTITY_PREFIX: &[u8] = b"runmat-structural-transient-identity/v1\0";
 const TRANSIENT_IDENTITY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Numerical coordinate space and typed upstream state for structural transient response.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -275,8 +275,14 @@ impl StructuralTransientCheckpointScope {
                         "modal transient state does not contain a modal basis".into(),
                     )
                 })?;
-                let reduced = ModalReducedSystem::project(input.initial_assembly, basis)
-                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                let reduced = ModalReducedSystem::project(input.initial_assembly, basis).map_err(
+                    |error| match error {
+                        crate::solve::dynamics::ModalProjectionError::Usage(error) => {
+                            AnalysisExecutionError::Usage(error)
+                        }
+                        other => AnalysisExecutionError::Invalid(other.to_string()),
+                    },
+                )?;
                 (
                     StructuralTransientCoordinateSpace::ModalReduced {
                         basis_state,

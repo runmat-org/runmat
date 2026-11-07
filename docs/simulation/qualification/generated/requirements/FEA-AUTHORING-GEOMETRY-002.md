@@ -8,7 +8,7 @@ Evidence kind: SemanticRealization. Criterion: A geometry declaration has exactl
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-ops[lib]::feature::tests::derived_geometry_requires_the_exact_declared_source` (crates/runmat-geometry/ops/src/feature/tests.rs:427) - A derived geometry requires the exact declared source revision; the closed-form check that imported, constructed and generated forms are mutually exclusive is n... |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-ops[lib]::feature::tests::derived_geometry_requires_the_exact_declared_source` (crates/runmat-geometry/ops/src/feature/tests.rs:435) - A derived geometry requires the exact declared source revision; the closed-form check that imported, constructed and generated forms are mutually exclusive is n... |
 
 ## imported_geometry
 
@@ -24,7 +24,7 @@ Evidence kind: SemanticRealization. Criterion: The construction form is a typed 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-ops[lib]::feature::tests::unsupported_operations_and_provider_bounds_fail_before_execution` (crates/runmat-geometry/ops/src/feature/tests.rs:156) - Unsupported operations and provider bounds fail before execution; the full bounded operation set is not enumerated. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-ops[lib]::feature::tests::unsupported_operations_and_provider_bounds_fail_before_execution` (crates/runmat-geometry/ops/src/feature/tests.rs:164) - Unsupported operations and provider bounds fail before execution; the full bounded operation set is not enumerated. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -48,7 +48,7 @@ Evidence kind: SemanticRealization. Criterion: General procedural construction r
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::generated_geometry_freezes_function_provenance_and_typed_arguments` (crates/runmat-analysis/language/tests/programs.rs:586) - Generated geometry freezes imported-function provenance and typed arguments at check.<br>`runmat-geometry-ops[lib]::feature::tests::generated_geometry_receives_resolved_arguments` (crates/runmat-geometry/ops/src/feature/tests.rs:482) - Generated geometry receives resolved arguments at the provider boundary; materialization of the function result is covered by the OCCT tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::generated_geometry_freezes_function_provenance_and_typed_arguments` (crates/runmat-analysis/language/tests/programs.rs:666) - Generated geometry freezes imported-function provenance and typed arguments at check.<br>`runmat-geometry-ops[lib]::feature::tests::generated_geometry_receives_resolved_arguments` (crates/runmat-geometry/ops/src/feature/tests.rs:490) - Generated geometry receives resolved arguments at the provider boundary; materialization of the function result is covered by the OCCT tests. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -60,7 +60,7 @@ Evidence kind: SemanticRealization. Criterion: Feature-derived selection must so
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::evaluator::tests::persistent_entity_names_reject_ambiguous_coincident_topology` (crates/runmat-geometry/io/src/occt/evaluator/tests.rs:554) - Persistent entity names reject ambiguous coincident topology on the OCCT evaluator; feature-derived naming across booleans is covered by the feature tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::evaluator::tests::persistent_entity_names_reject_ambiguous_coincident_topology` (crates/runmat-geometry/io/src/occt/evaluator/tests.rs:574) - Persistent entity names reject ambiguous coincident topology on the OCCT evaluator; feature-derived naming across booleans is covered by the feature tests. |
 
 ## feature_lineage_inventory
 
@@ -68,7 +68,7 @@ Evidence kind: SemanticRealization. Criterion: Every feature result publishes th
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::feature_tests::boolean_history_projects_authored_regions_to_the_final_exact_topology` (crates/runmat-geometry/io/src/occt/feature_tests.rs:217) - Boolean history projects authored regions onto the final exact topology.<br>`runmat-geometry-io[lib]::occt::feature_tests::feature_lineage_merges_shared_ancestors_across_boolean_branches` (crates/runmat-geometry/io/src/occt/feature_tests.rs:293) - Feature lineage merges shared ancestors across boolean branches; the full per-operation entity inventory and canonical order are not asserted. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::feature_tests::boolean_history_projects_authored_regions_to_the_final_exact_topology` (crates/runmat-geometry/io/src/occt/feature_tests.rs:223) - Boolean history projects authored regions onto the final exact topology.<br>`runmat-geometry-io[lib]::occt::feature_tests::feature_lineage_merges_shared_ancestors_across_boolean_branches` (crates/runmat-geometry/io/src/occt/feature_tests.rs:299) - Feature lineage merges shared ancestors across boolean branches; the full per-operation entity inventory and canonical order are not asserted. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -80,7 +80,7 @@ Evidence kind: SemanticRealization. Criterion: Imported, constructed, derived, a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::feature_tests::constructed_materialization_and_result_regions_share_the_exact_artifact` (crates/runmat-geometry/io/src/occt/feature_tests.rs:167) - Constructed materialization and result regions share one exact artifact; derived and generated closure are covered by sibling tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::feature_tests::constructed_materialization_and_result_regions_share_the_exact_artifact` (crates/runmat-geometry/io/src/occt/feature_tests.rs:173) - Constructed materialization and result regions share one exact artifact; derived and generated closure are covered by sibling tests. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -100,7 +100,7 @@ Evidence kind: SemanticRealization. Criterion: A mesh declaration either referen
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::mesh_request_binds_geometry_and_lowers_units_into_canonical_settings` (crates/runmat-analysis/language/tests/programs.rs:274) - A mesh request binds geometry and lowers its units into canonical settings; the reference-an-existing-mesh alternative is not asserted. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::mesh_request_binds_geometry_and_lowers_units_into_canonical_settings` (crates/runmat-analysis/language/tests/programs.rs:285) - A mesh request binds geometry and lowers its units into canonical settings; the reference-an-existing-mesh alternative is not asserted. |
 
 ## inspected_selector_semantics
 
@@ -108,7 +108,7 @@ Evidence kind: SemanticRealization. Criterion: The initial selector surface maps
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::name_selectors_must_match_names_the_source_carries` (crates/runmat-analysis/language/tests/programs.rs:447) - Name selectors must match names the inspected source carries; tag and id selector forms are covered elsewhere. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::name_selectors_must_match_names_the_source_carries` (crates/runmat-analysis/language/tests/programs.rs:462) - Name selectors must match names the inspected source carries; tag and id selector forms are covered elsewhere.<br>`runmat-analysis-language[test:programs]::edge_and_vertex_name_selectors_must_match_names_the_source_carries` (crates/runmat-analysis/language/tests/programs.rs:506) - Edge and vertex name selectors are checked against the edge and vertex names the inspected source carries, like face and solid names. |
 
 ## selector_inspection
 
@@ -116,7 +116,7 @@ Evidence kind: SemanticRealization. Criterion: The inspection result and interac
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::name_selectors_must_match_names_the_source_carries` (crates/runmat-analysis/language/tests/programs.rs:447) - Selection by name resolves only against imported metadata; the interactive view exposure is not covered. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::name_selectors_must_match_names_the_source_carries` (crates/runmat-analysis/language/tests/programs.rs:462) - Selection by name resolves only against imported metadata; the interactive view exposure is not covered. |
 
 ## region_role_rejection
 
@@ -124,7 +124,7 @@ Evidence kind: SemanticRealization. Criterion: Consumers cannot reinterpret a de
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-core[lib]::model::authoring_tests::feature_region_selectors_must_resolve_in_the_authored_graph` (crates/runmat-geometry/core/src/model/authoring_tests.rs:115) - Feature region selectors must resolve in the authored graph; consumer reinterpretation of roles is checked in the property-assignment tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-core[lib]::model::authoring_tests::feature_region_selectors_must_resolve_in_the_authored_graph` (crates/runmat-geometry/core/src/model/authoring_tests.rs:117) - Feature region selectors must resolve in the authored graph; consumer reinterpretation of roles is checked in the property-assignment tests. |
 
 ## ap242_exchange
 
@@ -140,7 +140,7 @@ Evidence kind: SemanticRealization. Criterion: Imported parameters have stable s
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:ap242_exchange]::imported_cad_parameters_reject_wrong_dimensions_and_unqualified_writes` (crates/runmat-analysis/language/tests/ap242_exchange.rs:78) - Fixture host parameter metadata: wrong dimensions/unqualified write rejection only; no CAD kernel regeneration. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:ap242_exchange]::imported_cad_parameters_reject_wrong_dimensions_and_unqualified_writes` (crates/runmat-analysis/language/tests/ap242_exchange.rs:80) - Fixture host parameter metadata: wrong dimensions/unqualified write rejection only; no CAD kernel regeneration. |
 
 ## qualified_parameter_regeneration
 
@@ -148,7 +148,7 @@ Evidence kind: SemanticRealization. Criterion: Changing an imported parameter is
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:ap242_exchange]::source_regeneration_fails_during_checking_without_qualified_write_capability` (crates/runmat-analysis/language/tests/ap242_exchange.rs:114) - Source regeneration fails at check without a qualified write capability; the qualified success path is not exercised. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:ap242_exchange]::source_regeneration_fails_during_checking_without_qualified_write_capability` (crates/runmat-analysis/language/tests/ap242_exchange.rs:116) - Source regeneration fails at check without a qualified write capability; the qualified success path is not exercised. |
 
 ## explicit_material_adoption
 
@@ -156,7 +156,7 @@ Evidence kind: SemanticRealization. Criterion: AP242 material and product proper
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:ap242_exchange]::cad_material_adoption_is_explicit_typed_and_provenance_bearing` (crates/runmat-analysis/language/tests/ap242_exchange.rs:198) - CAD material adoption is explicit, typed and provenance-bearing; mapping to every constitutive law is not covered. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:ap242_exchange]::cad_material_adoption_is_explicit_typed_and_provenance_bearing` (crates/runmat-analysis/language/tests/ap242_exchange.rs:200) - CAD material adoption is explicit, typed and provenance-bearing; mapping to every constitutive law is not covered. |
 
 ## physical_material_graph
 
@@ -164,7 +164,7 @@ Evidence kind: SemanticRealization. Criterion: The primary physical-material gra
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::ap242::profile::tests::retains_the_standard_legacy_material_designation_as_an_explicit_alternate` (crates/runmat-geometry/io/src/ap242/profile.rs:463) - The standard legacy material designation is retained as an explicit alternate to the recommended-practice graph; the primary graph walk is covered by the resolv... |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::ap242::profile::tests::retains_the_standard_legacy_material_designation_as_an_explicit_alternate` (crates/runmat-geometry/io/src/ap242/profile.rs:461) - The standard legacy material designation is retained as an explicit alternate to the recommended-practice graph; the primary graph walk is covered by the resolv... |
 
 ## adopted_property_provenance
 
@@ -172,7 +172,7 @@ Evidence kind: SemanticRealization. Criterion: Every adopted property retains it
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:ap242_exchange]::cad_material_adoption_is_explicit_typed_and_provenance_bearing` (crates/runmat-analysis/language/tests/ap242_exchange.rs:198) - Adopted properties retain provenance; entity ids, document references and uncertainty are not all asserted. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:ap242_exchange]::cad_material_adoption_is_explicit_typed_and_provenance_bearing` (crates/runmat-analysis/language/tests/ap242_exchange.rs:200) - Adopted properties retain provenance; entity ids, document references and uncertainty are not all asserted. |
 
 ## truthful_exchange_export
 

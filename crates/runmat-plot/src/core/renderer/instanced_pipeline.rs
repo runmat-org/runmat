@@ -57,7 +57,7 @@ impl WgpuRenderer {
     pub fn ensure_extra_pipelines(&mut self, emission: &runmat_accelerate_api::WgpuEmission<'_>) {
         self.ensure_depth_probe_layout(emission);
         if self.extra_pipelines.triangles_instanced.is_none() {
-            let pipeline = self.create_triangle_pipeline_variant(emission, true);
+            let pipeline = self.create_triangle_pipeline_variant(emission, true, true);
             self.extra_pipelines.triangles_instanced = Some(pipeline);
         }
         for instanced in [false, true] {
@@ -143,6 +143,7 @@ impl WgpuRenderer {
         &self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
         instanced: bool,
+        depth_write_enabled: bool,
     ) -> wgpu::RenderPipeline {
         let source = if instanced {
             shaders::vertex::triangle::instanced()
@@ -188,10 +189,25 @@ impl WgpuRenderer {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: Self::depth_format(),
-                depth_write_enabled: true,
+                depth_write_enabled,
                 depth_compare: self.depth_compare(),
                 stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
+                // Translucent surfaces sit a hair behind coincident opaque ones: where context
+                // geometry touches a result face, the result shows untinted instead of
+                // z-fighting with it.
+                bias: if depth_write_enabled {
+                    wgpu::DepthBiasState::default()
+                } else {
+                    let away = match self.depth_mode {
+                        DepthMode::Standard => 1,
+                        DepthMode::ReversedZ => -1,
+                    };
+                    wgpu::DepthBiasState {
+                        constant: 8 * away,
+                        slope_scale: 2.0 * away as f32,
+                        clamp: 0.0,
+                    }
+                },
             }),
             multisample: wgpu::MultisampleState {
                 count: self.msaa_sample_count,

@@ -214,19 +214,44 @@ impl AssembledRealSystem {
         reuse: Option<&mut LinearPreparationReuse>,
         admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<PreparedRealLinearSystem, RealSystemError> {
+        let future = self.prepare_linear_with_reuse_owned(reuse, admission, |_, _| {
+            std::future::ready(Ok::<(), std::convert::Infallible>(()))
+        });
+        let mut future = std::pin::pin!(future);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match std::future::Future::poll(future.as_mut(), &mut context) {
+            std::task::Poll::Ready(result) => result.map_err(|error| match error {
+                super::coercivity::NumericalCapacityError::Numerical(error) => error,
+                super::coercivity::NumericalCapacityError::Admission(never) => match never {},
+            }),
+            std::task::Poll::Pending => unreachable!("immediate linear-preparation owner cannot suspend"),
+        }
+    }
+
+    pub(crate) async fn prepare_linear_with_reuse_owned<O, F, A>(
+        &self,
+        reuse: Option<&mut LinearPreparationReuse>,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
+        before_factor: O,
+    ) -> Result<PreparedRealLinearSystem, super::coercivity::NumericalCapacityError<RealSystemError, A>>
+    where
+        O: FnMut(super::coercivity::NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+        F: std::future::Future<Output = Result<(), A>>,
+    {
         let stiffness = self.operators.stiffness();
         let rhs = self.linear_rhs();
         let matrix = stiffness
             .with_identity_constraints(&self.constrained_dofs)
             .map_err(|_| RealSystemError::ShapeMismatch)?;
-        PreparedRealLinearSystem::try_new_with_reuse(
+        PreparedRealLinearSystem::try_new_with_reuse_owned(
             matrix,
             rhs,
             self.constrained_dofs.clone(),
             self.nullspace_evidence.as_ref(),
             reuse,
             admission,
-        )
+            before_factor,
+        ).await
     }
 
     pub fn prepare_modal(&self) -> Result<PreparedModalSystem, RealSystemError> {
@@ -401,14 +426,21 @@ impl PreparedRealLinearSystem {
     ) -> Result<Self, RealSystemError> {
         Self::try_new_with_reuse(matrix, rhs, constrained_dofs, source, None, None)
     }
-    pub(crate) fn try_new_admitted(
+    pub(crate) async fn try_new_admitted_with_owner<O, F, A>(
         matrix: RealSparseMatrix,
         rhs: Vec<f64>,
         constrained_dofs: Vec<bool>,
         reuse: Option<&mut LinearPreparationReuse>,
         admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
-    ) -> Result<Self, RealSystemError> {
-        Self::try_new_with_reuse(matrix, rhs, constrained_dofs, None, reuse, admission)
+        before_factor: O,
+    ) -> Result<Self, super::coercivity::NumericalCapacityError<RealSystemError, A>>
+    where
+        O: FnMut(super::coercivity::NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+        F: std::future::Future<Output = Result<(), A>>,
+    {
+        Self::try_new_with_reuse_owned(
+            matrix, rhs, constrained_dofs, None, reuse, admission, before_factor,
+        ).await
     }
     fn try_new_with_reuse(
         matrix: RealSparseMatrix,
@@ -418,23 +450,55 @@ impl PreparedRealLinearSystem {
         reuse: Option<&mut LinearPreparationReuse>,
         admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<Self, RealSystemError> {
+        let future = Self::try_new_with_reuse_owned(
+            matrix, rhs, constrained_dofs, source, reuse, admission,
+            |_, _| std::future::ready(Ok::<(), std::convert::Infallible>(())),
+        );
+        let mut future = std::pin::pin!(future);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match std::future::Future::poll(future.as_mut(), &mut context) {
+            std::task::Poll::Ready(result) => result.map_err(|error| match error {
+                super::coercivity::NumericalCapacityError::Numerical(error) => error,
+                super::coercivity::NumericalCapacityError::Admission(never) => match never {},
+            }),
+            std::task::Poll::Pending => unreachable!("immediate prepared-system owner cannot suspend"),
+        }
+    }
+
+    async fn try_new_with_reuse_owned<O, F, A>(
+        matrix: RealSparseMatrix,
+        rhs: Vec<f64>,
+        constrained_dofs: Vec<bool>,
+        source: Option<&NullspaceEliminationEvidence>,
+        reuse: Option<&mut LinearPreparationReuse>,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
+        before_factor: O,
+    ) -> Result<Self, super::coercivity::NumericalCapacityError<RealSystemError, A>>
+    where
+        O: FnMut(super::coercivity::NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+        F: std::future::Future<Output = Result<(), A>>,
+    {
         if matrix.rows() != matrix.columns()
             || rhs.len() != matrix.rows()
             || constrained_dofs.len() != matrix.rows()
         {
-            return Err(RealSystemError::ShapeMismatch);
+            return Err(RealSystemError::ShapeMismatch.into());
         }
         if let Some(index) = rhs.iter().position(|value| !value.is_finite()) {
-            return Err(RealSystemError::NonFiniteLoad { index });
+            return Err(RealSystemError::NonFiniteLoad { index }.into());
         }
         let admissibility = Some(
             match reuse {
-                Some(reuse) => reuse.prepare_admitted(&matrix, &rhs, source, admission),
+                Some(reuse) => reuse.prepare_admitted_with_owner(
+                    &matrix, &rhs, source, admission, before_factor,
+                ).await,
                 None => {
-                    PreparedSolverAdmissibility::prove_admitted(&matrix, &rhs, source, admission)
+                    PreparedSolverAdmissibility::prove_admitted_with_owner(
+                        &matrix, &rhs, source, admission, before_factor,
+                    ).await
                 }
             }
-            .map_err(RealSystemError::Coercivity)?,
+            .map_err(|error| error.map_numerical(RealSystemError::Coercivity))?,
         );
         Ok(Self {
             matrix,

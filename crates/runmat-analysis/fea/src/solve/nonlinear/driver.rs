@@ -86,6 +86,7 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
 fn map_error(error: SolidNewtonError) -> FeaRunError {
     match error {
         SolidNewtonError::Cancelled => FeaRunError::Cancelled,
+        SolidNewtonError::Usage(error) => FeaRunError::Usage(error),
         SolidNewtonError::Invalid(reason) => FeaRunError::InvalidModel(reason),
         other => FeaRunError::Solve(other.to_string()),
     }
@@ -94,6 +95,9 @@ fn map_error(error: SolidNewtonError) -> FeaRunError {
 fn map_assembly_error(error: crate::assembly::nonlinear_solid::NonlinearSolidError) -> FeaRunError {
     match error {
         crate::assembly::nonlinear_solid::NonlinearSolidError::Cancelled => FeaRunError::Cancelled,
+        crate::assembly::nonlinear_solid::NonlinearSolidError::Accounting(error) => {
+            FeaRunError::Usage(error)
+        }
         other => FeaRunError::Assembly(other.to_string()),
     }
 }

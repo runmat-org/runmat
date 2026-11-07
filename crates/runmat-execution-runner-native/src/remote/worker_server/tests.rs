@@ -133,6 +133,19 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
     )
     .unwrap();
     let (_finished_sender, finished) = tokio::sync::watch::channel(false);
+    let (fea_control, _fea_calls) = super::super::fea_control::WorkerControl::new(
+        runmat_execution::ProgramExecutionAssignment {
+            scope_id: runmat_execution::ExecutionScopeId::derive(&[b"reservation-scope"]),
+            pool_id: runmat_execution::PoolId::derive(&[b"reservation-pool"]),
+            task_id: runmat_execution::TaskId::derive(&[b"reservation-task"]),
+            attempt_id,
+            worker_id: runmat_execution::identity::WorkerId::derive(&[b"reservation-worker"]),
+            backend: runmat_execution::PoolBackend::Remote,
+            resources: Default::default(),
+        },
+        u64::from(resources.cpu_millicores),
+        runmat_execution::cancellation::CancellationSource::new().token(),
+    );
     state.attempts.insert(
         attempt_id,
         ActiveAttempt {
@@ -160,6 +173,7 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
             resources,
             cancellation: Default::default(),
             collective: None,
+            fea_control,
             cooperative: true,
             finished,
             request_digest: runmat_execution::Digest::sha256(b"reservation-lifecycle-request"),

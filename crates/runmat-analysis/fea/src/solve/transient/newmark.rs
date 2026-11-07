@@ -1,3 +1,4 @@
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use thiserror::Error;
 
 use crate::algebra::{
@@ -45,6 +46,68 @@ pub(super) enum NewmarkError {
     EffectiveOperator(RealSparseMatrixError),
     #[error("the completed Newmark state is invalid: {0}")]
     InvalidState(SecondOrderStateError),
+    #[error("simulation usage admission failed: {0}")]
+    Usage(#[from] LedgerError),
+}
+
+pub(super) fn count(elements: usize, per_element: u64) -> Result<OperationCount, LedgerError> {
+    OperationCount::from_operations(
+        u64::try_from(elements).map_err(|_| LedgerError::CountOverflow)?,
+    )
+    .checked_mul(per_element)
+    .map_err(LedgerError::from)
+}
+
+fn measured<R>(
+    quote: impl FnOnce() -> Result<OperationCount, LedgerError>,
+    run: impl FnOnce() -> Result<R, NewmarkError>,
+) -> Result<R, NewmarkError> {
+    let Some(context) = UsageContext::capture() else {
+        return run();
+    };
+    drop(context);
+    let work = quote()?;
+    crate::algebra::capacity::measured_sync(UsageCategory::Solve, work, run)
+}
+
+pub(super) fn spmv_work(matrix: &RealSparseMatrix) -> Result<OperationCount, LedgerError> {
+    crate::algebra::capacity::real_spmv_work(matrix)
+}
+
+/// Three scaled sparse terms form one support-based reference sum. Each stored
+/// term has one product, and each union column adds its later terms. Backend
+/// zero-product skips do not change the logical reference count.
+fn effective_operator_work(
+    mass: &RealSparseMatrix,
+    damping: &RealSparseMatrix,
+    stiffness: &RealSparseMatrix,
+) -> Result<OperationCount, LedgerError> {
+    let matrices = [mass, damping, stiffness];
+    let mut work = OperationCount::from_operations(2); // γ·dt and β·dt²
+    for row in 0..mass.rows() {
+        let mut cursors = matrices.map(|matrix| matrix.pattern().row_range(row).start);
+        let ends = matrices.map(|matrix| matrix.pattern().row_range(row).end);
+        loop {
+            let column = (0..matrices.len())
+                .filter(|&index| cursors[index] < ends[index])
+                .map(|index| matrices[index].pattern().column(cursors[index]))
+                .min();
+            let Some(column) = column else { break };
+            let mut entries = 0u64;
+            for index in 0..matrices.len() {
+                if cursors[index] < ends[index]
+                    && matrices[index].pattern().column(cursors[index]) == column
+                {
+                    cursors[index] += 1;
+                    entries += 1;
+                }
+            }
+            work = work
+                .checked_add(OperationCount::direct_real_dot(entries)?)
+                .map_err(LedgerError::from)?;
+        }
+    }
+    Ok(work)
 }
 
 impl NewmarkEffectiveStep {
@@ -75,15 +138,26 @@ impl NewmarkEffectiveStep {
         {
             return Err(NewmarkError::NonFiniteInput);
         }
-        let (mut displacement, mut velocity, mut acceleration) = state.into_parts();
-        let displacement_scale =
-            AverageAccelerationNewmark::BETA * self.predictor.time_step_s.powi(2);
-        let velocity_scale = AverageAccelerationNewmark::GAMMA * self.predictor.time_step_s;
-        for (index, correction) in acceleration_correction.iter().copied().enumerate() {
-            displacement[index] = correction.mul_add(displacement_scale, displacement[index]);
-            velocity[index] = correction.mul_add(velocity_scale, velocity[index]);
-            acceleration[index] += correction;
-        }
+        let (displacement, velocity, acceleration) = measured(
+            || {
+                count(acceleration_correction.len(), 5)?
+                    .checked_add(OperationCount::from_operations(3))
+                    .map_err(LedgerError::from)
+            },
+            || {
+                let (mut displacement, mut velocity, mut acceleration) = state.into_parts();
+                let displacement_scale =
+                    AverageAccelerationNewmark::BETA * self.predictor.time_step_s.powi(2);
+                let velocity_scale = AverageAccelerationNewmark::GAMMA * self.predictor.time_step_s;
+                for (index, correction) in acceleration_correction.iter().copied().enumerate() {
+                    displacement[index] =
+                        correction.mul_add(displacement_scale, displacement[index]);
+                    velocity[index] = correction.mul_add(velocity_scale, velocity[index]);
+                    acceleration[index] += correction;
+                }
+                Ok((displacement, velocity, acceleration))
+            },
+        )?;
         SecondOrderState::try_new(displacement, velocity, acceleration)
             .map_err(NewmarkError::InvalidState)
     }
@@ -98,28 +172,33 @@ impl NewmarkEffectiveStep {
         if acceleration.iter().any(|value| !value.is_finite()) {
             return Err(NewmarkError::NonFiniteInput);
         }
-        let displacement = self
-            .predictor
-            .displacement
-            .iter()
-            .zip(&acceleration)
-            .map(|(predicted, acceleration)| {
-                predicted
-                    + AverageAccelerationNewmark::BETA
-                        * self.predictor.time_step_s.powi(2)
-                        * acceleration
-            })
-            .collect();
-        let velocity = self
-            .predictor
-            .velocity
-            .iter()
-            .zip(&acceleration)
-            .map(|(predicted, acceleration)| {
-                predicted
-                    + AverageAccelerationNewmark::GAMMA * self.predictor.time_step_s * acceleration
-            })
-            .collect();
+        let (displacement, velocity) = measured(
+            || {
+                count(acceleration.len(), 4)?
+                    .checked_add(OperationCount::from_operations(3))
+                    .map_err(LedgerError::from)
+            },
+            || {
+                let displacement_scale =
+                    AverageAccelerationNewmark::BETA * self.predictor.time_step_s.powi(2);
+                let velocity_scale = AverageAccelerationNewmark::GAMMA * self.predictor.time_step_s;
+                let displacement = self
+                    .predictor
+                    .displacement
+                    .iter()
+                    .zip(&acceleration)
+                    .map(|(predicted, acceleration)| predicted + displacement_scale * acceleration)
+                    .collect();
+                let velocity = self
+                    .predictor
+                    .velocity
+                    .iter()
+                    .zip(&acceleration)
+                    .map(|(predicted, acceleration)| predicted + velocity_scale * acceleration)
+                    .collect();
+                Ok((displacement, velocity))
+            },
+        )?;
         SecondOrderState::try_new(displacement, velocity, acceleration)
             .map_err(NewmarkError::InvalidState)
     }
@@ -133,53 +212,82 @@ pub(super) fn prepare_average_acceleration_step(
 ) -> Result<NewmarkEffectiveStep, NewmarkError> {
     validate_inputs(operators, state, time_step_s, load)?;
 
-    let displacement = state
-        .displacement()
-        .iter()
-        .zip(state.velocity())
-        .zip(state.acceleration())
-        .map(|((displacement, velocity), acceleration)| {
-            displacement
-                + time_step_s * velocity
-                + time_step_s.powi(2) * (0.5 - AverageAccelerationNewmark::BETA) * acceleration
-        })
-        .collect::<Vec<_>>();
-    let velocity = state
-        .velocity()
-        .iter()
-        .zip(state.acceleration())
-        .map(|(velocity, acceleration)| {
-            velocity + time_step_s * (1.0 - AverageAccelerationNewmark::GAMMA) * acceleration
-        })
-        .collect::<Vec<_>>();
+    let (displacement, velocity, time_step_square) = measured(
+        || {
+            count(state.dof_count(), 6)?
+                .checked_add(OperationCount::from_operations(5))
+                .map_err(LedgerError::from)
+        },
+        || {
+            let time_step_square = time_step_s.powi(2);
+            let displacement_acceleration_scale =
+                time_step_square * (0.5 - AverageAccelerationNewmark::BETA);
+            let velocity_acceleration_scale =
+                time_step_s * (1.0 - AverageAccelerationNewmark::GAMMA);
+            let displacement = state
+                .displacement()
+                .iter()
+                .zip(state.velocity())
+                .zip(state.acceleration())
+                .map(|((displacement, velocity), acceleration)| {
+                    displacement
+                        + time_step_s * velocity
+                        + displacement_acceleration_scale * acceleration
+                })
+                .collect::<Vec<_>>();
+            let velocity = state
+                .velocity()
+                .iter()
+                .zip(state.acceleration())
+                .map(|(velocity, acceleration)| {
+                    velocity + velocity_acceleration_scale * acceleration
+                })
+                .collect::<Vec<_>>();
+            Ok((displacement, velocity, time_step_square))
+        },
+    )?;
 
-    let damping_force =
-        spmv(operators.damping(), &velocity).map_err(|_| NewmarkError::DimensionMismatch)?;
-    let elastic_force =
-        spmv(operators.stiffness(), &displacement).map_err(|_| NewmarkError::DimensionMismatch)?;
-    let right_hand_side = load
-        .iter()
-        .zip(damping_force)
-        .zip(elastic_force)
-        .map(|((load, damping), elastic)| load - damping - elastic)
-        .collect::<Vec<_>>();
+    let damping_force = measured(
+        || spmv_work(operators.damping()),
+        || spmv(operators.damping(), &velocity).map_err(|_| NewmarkError::DimensionMismatch),
+    )?;
+    let elastic_force = measured(
+        || spmv_work(operators.stiffness()),
+        || spmv(operators.stiffness(), &displacement).map_err(|_| NewmarkError::DimensionMismatch),
+    )?;
+    let right_hand_side = measured(
+        || count(load.len(), 2),
+        || {
+            Ok(load
+                .iter()
+                .zip(damping_force)
+                .zip(elastic_force)
+                .map(|((load, damping), elastic)| load - damping - elastic)
+                .collect::<Vec<_>>())
+        },
+    )?;
 
-    let effective_operator = RealSparseMatrix::scaled_sum(
-        &[
-            (1.0, operators.mass()),
-            (
-                AverageAccelerationNewmark::GAMMA * time_step_s,
-                operators.damping(),
-            ),
-            (
-                AverageAccelerationNewmark::BETA * time_step_s.powi(2),
-                operators.stiffness(),
-            ),
-        ],
-        OperatorRole::EffectiveTangent,
-        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-    )
-    .map_err(NewmarkError::EffectiveOperator)?
+    let effective_operator = measured(
+        || effective_operator_work(operators.mass(), operators.damping(), operators.stiffness()),
+        || {
+            RealSparseMatrix::scaled_sum(
+                &[
+                    (1.0, operators.mass()),
+                    (
+                        AverageAccelerationNewmark::GAMMA * time_step_s,
+                        operators.damping(),
+                    ),
+                    (
+                        AverageAccelerationNewmark::BETA * time_step_square,
+                        operators.stiffness(),
+                    ),
+                ],
+                OperatorRole::EffectiveTangent,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .map_err(NewmarkError::EffectiveOperator)
+        },
+    )?
     .with_contribution(ContributionProvenance {
         domain: ContributionDomain::TimeIntegration,
         contribution_id: ContributionId("average_acceleration_newmark".into()),
@@ -219,6 +327,8 @@ mod tests {
     use super::*;
     use crate::algebra::{MatrixProperties, OperatorRole};
     use crate::contracts::StructuralDynamicBalanceSnapshot;
+    use runmat_simulation_usage::UsageLedger;
+    use std::sync::Arc;
 
     fn scalar_operators(mass: f64, damping: f64, stiffness: f64) -> CanonicalRealOperators {
         CanonicalRealOperators::try_new(
@@ -242,6 +352,42 @@ mod tests {
             .unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn scalar_newmark_batches_refuse_before_effects_and_conserve_completed_work() {
+        let operators = scalar_operators(2.0, 3.0, 5.0);
+        let state = SecondOrderState::try_new(vec![1.0], vec![2.0], vec![3.0]).unwrap();
+        let original = state.clone();
+        // Predictor 5+6, two one-entry CSR dots, RHS 2, and scaled sum
+        // 2 scalar scales + 3 products + 2 additions: 22. Completion is 7;
+        // correction is 8. No enclosing solve adds these batches again.
+        let ledger = Arc::new(
+            UsageLedger::new(OperationCount::from_operations(37), OperationCount::ZERO).unwrap(),
+        );
+        let context = UsageContext::new(Arc::clone(&ledger));
+        context.run_sync(|| {
+            assert!(matches!(
+                prepare_average_acceleration_step(&operators, &state, 0.1, &[7.0]),
+                Err(NewmarkError::Usage(LedgerError::MoreGrantRequired { .. }))
+            ));
+            assert_eq!(state, original);
+            assert_eq!(
+                ledger.snapshot().unwrap().completed.solve,
+                OperationCount::ZERO
+            );
+
+            ledger
+                .update_grant(OperationCount::from_operations(37))
+                .unwrap();
+            let step = prepare_average_acceleration_step(&operators, &state, 0.1, &[7.0]).unwrap();
+            let completed = step.complete(vec![1.0]).unwrap();
+            step.correct(completed, &[0.1]).unwrap();
+            assert_eq!(
+                ledger.snapshot().unwrap().completed.solve,
+                OperationCount::from_operations(37)
+            );
+        });
     }
 
     #[test]

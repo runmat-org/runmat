@@ -149,7 +149,8 @@ pub use study_placement::{
 pub use study_publication::*;
 pub use study_result::*;
 pub use study_step_execution::{
-    analysis_execute_study_step, analysis_execute_study_sweep_with_step_executor,
+    analysis_execute_study_step, analysis_execute_study_step_with_capacity,
+    analysis_execute_study_sweep_with_step_executor,
     analysis_execute_study_with_step_executor, analysis_validate_study_step_transfer,
     AnalysisStudyStepExecutor, AnalysisStudyStepFuture, AnalysisStudyStepHost,
     AnalysisStudyStepRequest, AnalysisStudyStepResult,
@@ -273,7 +274,7 @@ pub use study_numerical_result::StructuralStudyNumericalResult;
 pub use frequency_result::{
     StructuralFrequencyArtifactRootIndex, StructuralFrequencyFinalizedHistoryArtifactRoots,
     StructuralFrequencyHistoryArtifactRoot, StructuralStudyFrequencyNumericalResult,
-    StructuralStudyPrestressedFrequencyNumericalResult,
+    StructuralStudyModalFrequencyNumericalResult, StructuralStudyPrestressedFrequencyNumericalResult,
     StructuralStudyPrestressedFrequencyReductionResult,
     StructuralStudyPrestressedModalFrequencyReductionResult,
 };
@@ -353,7 +354,7 @@ pub use contracts::{
     AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
-    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef,
+    AnalysisFieldStorage, AnalysisFieldStorageRef,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
     AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
     AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
@@ -430,8 +431,8 @@ const ANALYSIS_PLAN_STUDY_OPERATION: &str = "fea.plan_study";
 const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "fea.plan_study/v1";
 const ANALYSIS_PLAN_STUDY_SWEEP_OPERATION: &str = "fea.plan_study_sweep";
 const ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION: &str = "fea.plan_study_sweep/v1";
-pub(crate) const ANALYSIS_RUN_STUDY_OPERATION: &str = "fea.run_study";
-pub(crate) const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "fea.run_study/v1";
+pub const ANALYSIS_RUN_STUDY_OPERATION: &str = "fea.run_study";
+pub const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "fea.run_study/v1";
 const ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION: &str = "fea.validate_study_sweep";
 const ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION: &str = "fea.validate_study_sweep/v1";
 pub(crate) const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "fea.run_study_sweep";
@@ -1447,8 +1448,11 @@ fn prepare_study_run(
     context: OperationContext,
 ) -> Result<PreparedStudySequence, OperationErrorEnvelope> {
     let mut prepared = prepare_study_semantics(spec, context)?;
-    let study_mesh = meshing::resolve_study_mesh(spec).map_err(|message| {
-        operation_error(
+    let study_mesh = meshing::resolve_study_mesh(spec).map_err(|error| match error {
+        meshing::StudyMeshingError::Execution(error) => {
+            meshing::async_meshing_error(error, &prepared.context)
+        }
+        meshing::StudyMeshingError::Message(message) => operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
             &prepared.context,
@@ -1460,7 +1464,7 @@ fn prepare_study_run(
             },
             message,
             BTreeMap::new(),
-        )
+        ),
     })?;
     prepared.solver_mesh_artifact_path = study_mesh.artifact_path;
     prepared.meshing_evidence_artifact_path = study_mesh.evidence_path;

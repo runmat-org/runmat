@@ -90,7 +90,7 @@ pub(super) fn solve_transient(
             &excitations,
             sample,
         )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        .map_err(super::thermal_assembly_failure)?;
         drop(excitations);
         operators.verify_matrix(&assembly.conductivity)?;
         operators.verify_matrix(&assembly.capacity)?;
@@ -142,7 +142,7 @@ pub(super) fn solve_transient(
                 &previous,
                 &reference_temperature_k,
             )
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            .map_err(super::thermal_assembly_failure)?;
         let relations = crate::physics::scalar_constraints::about_reference(
             &assembly.relations,
             &reference_temperature_k,
@@ -176,7 +176,7 @@ pub(super) fn solve_transient(
                     time_step_s,
                     reference,
                 )
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))
+                .map_err(super::thermal_assembly_failure)
         };
         let mut balance = recover_balance(solve.solution.canonical_values())?;
         if balance.relative_residual > input.residual_target {

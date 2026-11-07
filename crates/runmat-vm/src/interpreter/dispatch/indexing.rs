@@ -151,6 +151,39 @@ async fn read_scalar_like_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
+    // Primitive scalars have a canonical 1-by-1 indexed shape, including
+    // trailing singleton dimensions. The shared plan validates all selectors
+    // and preserves empty and repeated selections.
+    if dims > 0
+        && matches!(
+            base,
+            Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_)
+        )
+    {
+        let selectors = runmat_runtime::indexing::selectors::build_slice_selectors_in_context(
+            runtime,
+            dims,
+            colon_mask,
+            end_mask,
+            numeric,
+            &[1usize, 1usize],
+        )
+        .await?;
+        let plan = runmat_runtime::indexing::plan::build_index_plan_in_context(
+            runtime,
+            &selectors,
+            dims,
+            &[1usize, 1usize],
+        )?;
+        if plan.indices.as_slice() == [0] {
+            return Ok(base.clone());
+        }
+        return runmat_runtime::indexing::value::read_with_plan_in_context(
+            Some(runtime),
+            base.clone(),
+            &plan,
+        );
+    }
     if dims != 1 {
         return Err(crate::interpreter::errors::mex(
             "SliceNonTensor",

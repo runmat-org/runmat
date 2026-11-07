@@ -10,6 +10,7 @@ mod crypto;
 mod direct_admission;
 mod driver;
 mod fea_admission;
+mod fea_control;
 pub(crate) mod exact_meshing;
 pub(crate) mod exact_structural_study;
 pub(crate) mod exact_structural_sweep;
@@ -74,5 +75,7 @@ pub use worker_env::run_remote_worker_from_env;
 mod driver_replacement_tests;
 #[cfg(test)]
 mod pool_tests;
+#[cfg(test)]
+pub(crate) mod test_ids;
 #[cfg(test)]
 mod tests;

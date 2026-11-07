@@ -14,11 +14,60 @@ const RHS_DOMAIN: &str = "fea-coercivity-rhs";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 const SYMMETRY_RELATIVE_TOLERANCE: f64 = 1.0e-12;
 
+mod conduction;
 mod elastic;
 mod energy;
+
+pub use conduction::{ScalarConductionError, ScalarConductionProof};
 mod symbolic;
 
 pub(crate) use symbolic::CoercivityWorkEnvelope;
+
+/// Capacity is acquired before this exact symbolic phase runs. The direct solver's
+/// own reservation remains the only completed-work owner.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NumericalCapacityPhase {
+    SolidAssemblyBlock { elements: std::ops::Range<usize> },
+    Tet4AssemblyElement { element: usize },
+    Tet10AssemblyElement { element: usize },
+    ExplicitAssemblyElement { element: usize },
+    ExplicitAssemblyScatter { elements: std::ops::Range<usize> },
+    ThermoelasticLoadElement { element: usize },
+    CoercivityFactorization,
+    AffineRhsReduction,
+    AffineOperatorScatter,
+    AffineExpansion,
+    AffineRejectedNorm,
+    PcgPreconditionerSetup,
+    PcgBatch,
+    StaticBalance,
+    ConstraintRecovery,
+    FieldRecovery,
+    SolidRecoveryElement { element: usize },
+    SolvePrimitive,
+    DirectSolve(runmat_sparse_solvers::direct::DirectSolvePhase),
+}
+
+/// Keep an awaited host refusal separate from a numerical proof rejection.
+pub enum NumericalCapacityError<E, A> {
+    Numerical(E),
+    Admission(A),
+}
+
+impl<E, A> From<E> for NumericalCapacityError<E, A> {
+    fn from(error: E) -> Self {
+        Self::Numerical(error)
+    }
+}
+
+impl<E, A> NumericalCapacityError<E, A> {
+    pub fn map_numerical<F>(self, map: impl FnOnce(E) -> F) -> NumericalCapacityError<F, A> {
+        match self {
+            Self::Numerical(error) => NumericalCapacityError::Numerical(map(error)),
+            Self::Admission(error) => NumericalCapacityError::Admission(error),
+        }
+    }
+}
 
 /// A numeric Cholesky factorization of exactly the certified operator, shared between the
 /// coercivity proof and the direct solve (one factorization serves both).
@@ -72,6 +121,8 @@ pub enum CoercivityError {
     SymbolicOrdering,
     #[error("coercivity proof was cancelled")]
     Cancelled,
+    #[error("coercivity factorization usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
     #[error("coercivity evidence does not match its prepared operator or right-hand side")]
     BindingMismatch,
     #[error("coercivity evidence identity encoding failed: {0}")]
@@ -80,6 +131,8 @@ pub enum CoercivityError {
     Energy(#[from] super::EnergyError),
     #[error(transparent)]
     ElasticRigidity(#[from] super::ElasticRigidityError),
+    #[error(transparent)]
+    ScalarConduction(#[from] ScalarConductionError),
     #[error("anchored local energy did not establish coercivity: graph lower bound {}, error upper bound {}", f64::from_bits(*.graph_lower_bits), f64::from_bits(*.error_upper_bits))]
     EnergyIndeterminate {
         graph_lower_bits: u64,
@@ -123,6 +176,16 @@ enum CoercivityProof {
         components: u64,
         element_margin_rounding_factor_bits: u64,
         anchor_rank_ratio_bits: u64,
+        scalar_operations: u64,
+        resident_bytes: u64,
+    },
+    /// Positive conductivity, nonnegative convection and interface conductance, and an anchor on
+    /// every component of the operator graph ([`ScalarConductionProof`]): positive definite in
+    /// exact arithmetic, with no eigenvalue bound. The normwise backward error accepts the solve.
+    ScalarConduction {
+        components: u64,
+        prescribed_components: u64,
+        convection_components: u64,
         scalar_operations: u64,
         resident_bytes: u64,
     },
@@ -170,16 +233,45 @@ impl CoercivityCertificate {
                 scalar_operations,
                 resident_bytes,
                 ..
+            }
+            | CoercivityProof::ScalarConduction {
+                scalar_operations,
+                resident_bytes,
+                ..
             } => (dimension, 0, scalar_operations, resident_bytes),
         }
     }
 
     /// Proves strict positivity of the inertia by a sparse Cholesky factorization of the
     /// diagonally scaled operator and returns the factorization for reuse by the solve.
+    #[cfg(test)]
     pub(super) fn prove_admitted(
         matrix: &RealSparseMatrix,
         admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<(Self, SharedFactor), CoercivityError> {
+        let future = Self::prove_admitted_with_owner(matrix, admission, |_, _| {
+            std::future::ready(Ok::<(), std::convert::Infallible>(()))
+        });
+        let mut future = std::pin::pin!(future);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match std::future::Future::poll(future.as_mut(), &mut context) {
+            std::task::Poll::Ready(result) => result.map_err(|error| match error {
+                NumericalCapacityError::Numerical(error) => error,
+                NumericalCapacityError::Admission(never) => match never {},
+            }),
+            std::task::Poll::Pending => unreachable!("immediate factor owner cannot suspend"),
+        }
+    }
+
+    pub(super) async fn prove_admitted_with_owner<O, F, A>(
+        matrix: &RealSparseMatrix,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
+        mut before_factor: O,
+    ) -> Result<(Self, SharedFactor), NumericalCapacityError<CoercivityError, A>>
+    where
+        O: FnMut(NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+        F: std::future::Future<Output = Result<(), A>>,
+    {
         use runmat_sparse_solvers::direct::{
             DirectOptions, DirectSolver, DirectWorkspacePolicy, FactorKind, SymbolicFactorization,
         };
@@ -188,32 +280,9 @@ impl CoercivityCertificate {
             || matrix.columns() != dimension
             || matrix.properties().symmetry != MatrixSymmetry::Symmetric
         {
-            return Err(CoercivityError::IncompatibleOperator);
+            return Err(CoercivityError::IncompatibleOperator.into());
         }
-        let diagonal = matrix.diagonal_values();
-        if let Some(pivot) = diagonal
-            .iter()
-            .position(|value| !value.is_finite() || *value <= 0.0)
-        {
-            return Err(CoercivityError::NonPositivePivot { pivot });
-        }
-        for row in 0..dimension {
-            for entry in matrix.pattern().row_range(row) {
-                let column = matrix.pattern().column(entry);
-                let value = matrix.values()[entry];
-                let transpose = matrix.get(column, row);
-                // An entry of a symmetric positive operator is bounded by sqrt(a_ii a_jj); the
-                // roundoff of an assembled or reduced entry scales with that bound, not with the
-                // entry, which cancellation can make arbitrarily small.
-                let symmetry_scale = value
-                    .abs()
-                    .max(transpose.abs())
-                    .max((diagonal[row] * diagonal[column]).sqrt());
-                if (value - transpose).abs() > symmetry_scale * SYMMETRY_RELATIVE_TOLERANCE {
-                    return Err(CoercivityError::AsymmetricValues);
-                }
-            }
-        }
+        let diagonal = require_symmetric(matrix)?;
         let arrays = crate::solve::shared_sparse::CsrArrays::of(matrix);
         let options = DirectOptions {
             refinement_steps: 2,
@@ -227,14 +296,18 @@ impl CoercivityCertificate {
         let control = crate::solve::shared_sparse::control();
         let symbolic =
             SymbolicFactorization::analyze::<f64>(arrays.view().into(), &options, control)
-                .map_err(|_| CoercivityError::SymbolicOrdering)?;
+                .map_err(|error| match error {
+                    // A cancelled ordering is a terminal cancellation, not an ordering defect.
+                    runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
+                    _ => CoercivityError::SymbolicOrdering,
+                })?;
         let estimate = symbolic.estimate();
         if let Some(admission) = admission {
             if admission.dimension.0 != dimension as u64 {
                 return Err(CoercivityError::AdmissionDimension {
                     required: dimension as u64,
                     admitted: admission.dimension.0,
-                });
+                }.into());
             }
             let updates = symbolic::flop_count(&estimate);
             if estimate.factor_entries > admission.factor_nonzero_upper_bound.0
@@ -246,15 +319,28 @@ impl CoercivityCertificate {
                     factor_nonzero_limit: admission.factor_nonzero_upper_bound.0,
                     update_count: updates,
                     update_limit: admission.update_count_upper_bound.0,
-                });
+                }.into());
             }
             if estimate.peak_bytes() > admission.resident_bytes_upper_bound.0 {
                 return Err(CoercivityError::FactorAdmission {
                     required_bytes: estimate.peak_bytes(),
                     budget_bytes: admission.resident_bytes_upper_bound.0,
-                });
+                }.into());
             }
         }
+        let factor_work = symbolic.reference_work().map_err(|error| match error {
+            runmat_sparse_solvers::direct::ReferenceWorkError::Overflow(_) =>
+                CoercivityError::WorkOverflow,
+            _ => CoercivityError::SymbolicOrdering,
+        })?;
+        before_factor(
+            NumericalCapacityPhase::CoercivityFactorization,
+            factor_work
+                .factorization_operations()
+                .map_err(|_| CoercivityError::WorkOverflow)?,
+        )
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
         let solver = DirectSolver::<f64>::factorize(
             symbolic,
             arrays.view().into(),
@@ -278,6 +364,7 @@ impl CoercivityCertificate {
                 }
             }
             runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
+            runmat_sparse_solvers::SolverError::Usage(error) => CoercivityError::Usage(error),
             _ => CoercivityError::SymbolicOrdering,
         })?;
         // Scaled pivots l_jj² / a_jj are the pivots of D^{-1/2} A D^{-1/2}; a tiny one is a
@@ -288,7 +375,7 @@ impl CoercivityCertificate {
         for (index, (&pivot, &scale)) in pivots.iter().zip(&diagonal).enumerate() {
             let scaled = pivot / scale;
             if !scaled.is_finite() || scaled <= tolerance {
-                return Err(CoercivityError::NonPositivePivot { pivot: index });
+                return Err(CoercivityError::NonPositivePivot { pivot: index }.into());
             }
             minimum_scaled_pivot = minimum_scaled_pivot.min(scaled);
         }
@@ -335,6 +422,16 @@ impl CoercivityCertificate {
 
     fn proof_is_positive(&self) -> bool {
         let bits = match self.proof {
+            CoercivityProof::ScalarConduction {
+                components,
+                prescribed_components,
+                convection_components,
+                ..
+            } => {
+                return components > 0
+                    && prescribed_components.checked_add(convection_components)
+                        == Some(components)
+            }
             CoercivityProof::SparseCholesky {
                 minimum_scaled_pivot_bits,
                 ..
@@ -378,25 +475,53 @@ impl CoercivityCertificate {
 }
 
 impl PreparedSolverAdmissibility {
+    #[cfg(test)]
     pub(super) fn prove_admitted(
         matrix: &RealSparseMatrix,
         rhs: &[f64],
         source: Option<&NullspaceEliminationEvidence>,
         admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<Self, CoercivityError> {
+        let future = Self::prove_admitted_with_owner(matrix, rhs, source, admission, |_, _| {
+            std::future::ready(Ok::<(), std::convert::Infallible>(()))
+        });
+        let mut future = std::pin::pin!(future);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match std::future::Future::poll(future.as_mut(), &mut context) {
+            std::task::Poll::Ready(result) => result.map_err(|error| match error {
+                NumericalCapacityError::Numerical(error) => error,
+                NumericalCapacityError::Admission(never) => match never {},
+            }),
+            std::task::Poll::Pending => unreachable!("immediate proof owner cannot suspend"),
+        }
+    }
+
+    pub(super) async fn prove_admitted_with_owner<O, F, A>(
+        matrix: &RealSparseMatrix,
+        rhs: &[f64],
+        source: Option<&NullspaceEliminationEvidence>,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
+        before_factor: O,
+    ) -> Result<Self, NumericalCapacityError<CoercivityError, A>>
+    where
+        O: FnMut(NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+        F: std::future::Future<Output = Result<(), A>>,
+    {
         let source_prepared = source
             .map(|source| source.bind_prepared(matrix, rhs))
             .transpose()
             .map_err(|error| CoercivityError::Encoding(error.to_string()))?;
-        let (coercivity, factor) = CoercivityCertificate::prove_admitted(matrix, admission)?;
-        Self::bind(
+        let (coercivity, factor) =
+            CoercivityCertificate::prove_admitted_with_owner(matrix, admission, before_factor)
+                .await?;
+        Ok(Self::bind(
             coercivity,
             rhs,
             source_prepared
                 .as_ref()
                 .map(PreparedNullspaceEvidence::identity),
             Some(factor),
-        )
+        )?)
     }
 
     /// The Cholesky factorization that proved coercivity, when available.
@@ -480,6 +605,36 @@ impl PreparedSolverAdmissibility {
             ),
         )
     }
+}
+
+/// The diagonal of `matrix` after checking it positive and the values symmetric to a
+/// roundoff-relative tolerance.
+pub(super) fn require_symmetric(matrix: &RealSparseMatrix) -> Result<Vec<f64>, CoercivityError> {
+    let diagonal = matrix.diagonal_values();
+    if let Some(pivot) = diagonal
+        .iter()
+        .position(|value| !value.is_finite() || *value <= 0.0)
+    {
+        return Err(CoercivityError::NonPositivePivot { pivot });
+    }
+    for row in 0..matrix.rows() {
+        for entry in matrix.pattern().row_range(row) {
+            let column = matrix.pattern().column(entry);
+            let value = matrix.values()[entry];
+            let transpose = matrix.get(column, row);
+            // An entry of a symmetric positive operator is bounded by sqrt(a_ii a_jj); the
+            // roundoff of an assembled or reduced entry scales with that bound, not with the
+            // entry, which cancellation can make arbitrarily small.
+            let symmetry_scale = value
+                .abs()
+                .max(transpose.abs())
+                .max((diagonal[row] * diagonal[column]).sqrt());
+            if (value - transpose).abs() > symmetry_scale * SYMMETRY_RELATIVE_TOLERANCE {
+                return Err(CoercivityError::AsymmetricValues);
+            }
+        }
+    }
+    Ok(diagonal)
 }
 
 fn digest<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CoercivityError> {

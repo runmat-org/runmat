@@ -25,8 +25,9 @@ use serde::Serialize;
 /// The poster camera looks from this direction (snapshot `camera.rs`); a section removes the
 /// half of the part on this side so the cut faces the viewer.
 const VIEW_DIRECTION: [f64; 3] = [0.35, -1.0, 0.45];
-/// Triangles a section cap may hold before its refinement is reduced.
-const CAP_TRIANGLE_BUDGET: usize = 600_000;
+/// Triangles a section cap may hold before its refinement is reduced, when the consumer's
+/// payload budget does not ask for fewer.
+pub const DEFAULT_CAP_TRIANGLE_BUDGET: usize = 600_000;
 /// Opacity of the boundary drawn around streamlines and glyphs.
 const CONTEXT_ALPHA: f32 = 0.18;
 
@@ -51,6 +52,19 @@ pub struct VolumeViewRequest {
     pub range: Option<(f64, f64)>,
     pub legend: String,
     pub unit: String,
+    /// The section or glyph plane; the default plane when absent.
+    pub plane: Option<SectionPlaneChoice>,
+    /// Triangles the section cap may hold; its refinement is reduced until it fits (down to one
+    /// polygon per cut element). A consumer with a payload budget passes a smaller number.
+    pub cap_triangle_budget: usize,
+}
+
+/// An axis-aligned section plane: normal to `axis` (0 = x, 1 = y, 2 = z), at `fraction` of the
+/// mesh bounds along that axis (0 at the minimum, 1 at the maximum).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectionPlaneChoice {
+    pub axis: usize,
+    pub fraction: f64,
 }
 
 /// What a volume view leaves out of the solution, stated with the view.
@@ -68,6 +82,12 @@ pub struct VolumeViewError {
     pub integration_error_m: Option<f64>,
     /// Elements cut, lines traced or arrows drawn.
     pub count: usize,
+    /// Triangles drawn for the section cap, and the n of the n x n evaluation grid on each
+    /// triangle of a cut polygon (1 colors each cut polygon linearly between its corners).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap_triangles: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap_subdivisions: Option<usize>,
     /// The plane of a section or glyph view: origin and the normal pointing to the kept side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plane: Option<[[f64; 3]; 2]>,
@@ -88,14 +108,23 @@ pub fn build_volume_scene(
         .ok_or_else(|| format!("FEA run '{run_id}' has no boundary to draw"))?;
     drop(artifact);
     let field = load_solved_field(run_id, &request.field, &mesh)?;
-    let (origin, normal) = section_plane(&mesh);
+    let (origin, normal) = section_plane(&mesh, request.plane);
     let mut error = VolumeViewError::default();
     let mut chunks = Vec::new();
     let mut drawn = Vec::new();
     match request.kind {
         VolumeViewKind::Section => {
-            let cap = refined_cap(&mesh, &field, request.reduction, origin, normal);
+            let (cap, subdivisions) = refined_cap(
+                &mesh,
+                &field,
+                request.reduction,
+                origin,
+                normal,
+                request.cap_triangle_budget,
+            );
             error.display_error = Some(cap.display_error);
+            error.cap_triangles = Some(cap.triangles.triangle_count());
+            error.cap_subdivisions = Some(subdivisions);
             error.geometric_error_m = cap.geometric_error_m;
             error.count = cap.cut_elements;
             error.plane = Some([origin, normal]);
@@ -213,6 +242,8 @@ pub fn build_volume_scene(
             unit: request.unit.clone(),
             minimum: range.0,
             maximum: range.1,
+            limit: None,
+            note: None,
         }),
         region_count: 0,
         mapped_region_count: 0,
@@ -333,12 +364,20 @@ fn load_solved_field(
 /// The plane through the centre of the bounds across the part's thinnest axis: along a pipe,
 /// duct or busbar it shows the profile over the length. Its normal points away from the
 /// viewer, so the removed half is the one in front.
-fn section_plane(mesh: &TetMesh) -> ([f64; 3], [f64; 3]) {
+/// A chosen plane replaces the axis and its position along it.
+fn section_plane(mesh: &TetMesh, choice: Option<SectionPlaneChoice>) -> ([f64; 3], [f64; 3]) {
     let (min, max) = mesh.bounds();
-    let origin = [0, 1, 2].map(|axis| 0.5 * (min[axis] + max[axis]));
-    let axis = (0..3)
-        .min_by(|a, b| (max[*a] - min[*a]).total_cmp(&(max[*b] - min[*b])))
-        .unwrap_or(2);
+    let mut origin = [0, 1, 2].map(|axis| 0.5 * (min[axis] + max[axis]));
+    let axis = match choice {
+        Some(choice) => {
+            let axis = choice.axis.min(2);
+            origin[axis] = min[axis] + choice.fraction.clamp(0.0, 1.0) * (max[axis] - min[axis]);
+            axis
+        }
+        None => (0..3)
+            .min_by(|a, b| (max[*a] - min[*a]).total_cmp(&(max[*b] - min[*b])))
+            .unwrap_or(2),
+    };
     let mut normal = [0.0; 3];
     normal[axis] = if VIEW_DIRECTION[axis] > 0.0 {
         -1.0
@@ -356,7 +395,8 @@ fn refined_cap(
     reduction: Reduction,
     origin: [f64; 3],
     normal: [f64; 3],
-) -> runmat_plot::field_volume::SectionCap {
+    triangle_budget: usize,
+) -> (runmat_plot::field_volume::SectionCap, usize) {
     let mut subdivisions = match (field.support, mesh.order()) {
         (FieldSupport::Element, _) => 1,
         (FieldSupport::Node, TetOrder::Quadratic) => 4,
@@ -373,8 +413,8 @@ fn refined_cap(
                 subdivisions,
             },
         );
-        if cap.triangles.triangle_count() <= CAP_TRIANGLE_BUDGET || subdivisions == 1 {
-            return cap;
+        if cap.triangles.triangle_count() <= triangle_budget || subdivisions == 1 {
+            return (cap, subdivisions);
         }
         subdivisions /= 2;
     }

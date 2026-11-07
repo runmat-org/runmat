@@ -272,21 +272,49 @@ pub async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> 
             return Ok(token.clone());
         }
     }
-    if let (Some(refresh), Some(endpoint), Some(client_id)) = (
+    match refresh_stored_token(config, server_url, credential_store, refresh).await? {
+        Some(refreshed) => Ok(refreshed),
+        None => token.ok_or_else(|| SignInRequired.into()),
+    }
+}
+
+/// A new access token from the stored refresh token, whatever the stored expiry says: for a
+/// caller whose current token the server has just rejected. An API key (`RUNMAT_API_KEY`) or a
+/// sign-in without a refresh token cannot be refreshed and returns [`SignInRequired`].
+pub async fn refresh_auth_token(config: &mut RemoteConfig, server_url: &str) -> Result<String> {
+    if env::var("RUNMAT_API_KEY").is_ok_and(|value| !value.is_empty()) {
+        return Err(SignInRequired.into());
+    }
+    let credential_store = config.credential_store.unwrap_or(CredentialStoreMode::Auto);
+    let refresh = load_refresh_token(server_url, credential_store)?;
+    refresh_stored_token(config, server_url, credential_store, refresh)
+        .await?
+        .ok_or_else(|| SignInRequired.into())
+}
+
+/// Exchange `refresh` for a new access token and store both, with the new expiry. `None` when
+/// there is no refresh token or the sign-in has no token endpoint.
+async fn refresh_stored_token(
+    config: &mut RemoteConfig,
+    server_url: &str,
+    credential_store: CredentialStoreMode,
+    refresh: Option<String>,
+) -> Result<Option<String>> {
+    let (Some(refresh), Some(endpoint), Some(client_id)) = (
         refresh,
         config.token_endpoint.clone(),
         config.token_client_id.clone(),
-    ) {
-        let refreshed = refresh_access_token(&endpoint, &client_id, &refresh).await?;
-        store_token(server_url, &refreshed.access_token, credential_store)?;
-        if let Some(new_refresh) = refreshed.refresh_token.as_deref() {
-            store_refresh_token(server_url, new_refresh, credential_store)?;
-        }
-        config.token_expires_at = refreshed.expires_at;
-        config.save()?;
-        return Ok(refreshed.access_token);
+    ) else {
+        return Ok(None);
+    };
+    let refreshed = refresh_access_token(&endpoint, &client_id, &refresh).await?;
+    store_token(server_url, &refreshed.access_token, credential_store)?;
+    if let Some(new_refresh) = refreshed.refresh_token.as_deref() {
+        store_refresh_token(server_url, new_refresh, credential_store)?;
     }
-    token.ok_or_else(|| SignInRequired.into())
+    config.token_expires_at = refreshed.expires_at;
+    config.save()?;
+    Ok(Some(refreshed.access_token))
 }
 
 pub fn build_public_client(server_url: &str, token: &str) -> Result<public_api::Client> {

@@ -10,8 +10,8 @@ Evidence kind: ResourceAdmission. Criterion: Admit source/initial-field realizat
 |---|---|---|---|---|
 | thermal_steady | tet4 | public_study | OPEN |  |
 | thermal_steady | tet10 | public_study | OPEN |  |
-| thermal_transient | tet4 | public_study | PARTIAL | `runmat-analysis-fea[lib]::planning::resource::thermal_preassembly::tests::field_construction_scratch_is_composed_before_assembly` (crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs:30) - Both-order initial-field construction scratch contributes to the preassembly ceiling; no measured RSS or whole native pipeline evidence. |
-| thermal_transient | tet10 | public_study | PARTIAL | `runmat-analysis-fea[lib]::planning::resource::thermal_preassembly::tests::field_construction_scratch_is_composed_before_assembly` (crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs:30) - Both-order initial-field construction scratch contributes to the preassembly ceiling; no measured RSS or whole native pipeline evidence. |
+| thermal_transient | tet4 | public_study | PARTIAL | `runmat-analysis-fea[lib]::planning::resource::thermal_preassembly::tests::field_construction_scratch_is_composed_before_assembly` (crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs:36) - Both-order initial-field construction scratch contributes to the preassembly ceiling; no measured RSS or whole native pipeline evidence. |
+| thermal_transient | tet10 | public_study | PARTIAL | `runmat-analysis-fea[lib]::planning::resource::thermal_preassembly::tests::field_construction_scratch_is_composed_before_assembly` (crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs:36) - Both-order initial-field construction scratch contributes to the preassembly ceiling; no measured RSS or whole native pipeline evidence. |
 | thermal_steady | tet4 | native_process | OPEN |  |
 | thermal_steady | tet10 | native_process | OPEN |  |
 | thermal_transient | tet4 | native_process | OPEN |  |

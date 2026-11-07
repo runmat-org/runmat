@@ -1,3 +1,4 @@
+use runmat_simulation_usage::{OperationCount, UsageCategory, UsageContext};
 use serde::{Deserialize, Serialize};
 
 use super::{ShellElementError, ShellMaterial, ShellSection};
@@ -93,10 +94,7 @@ impl ShellConstitutive {
     }
 }
 
-pub(crate) fn homogeneous_constitutive(
-    section: ShellSection,
-    material: ShellMaterial,
-) -> ShellConstitutive {
+fn homogeneous_constitutive(section: ShellSection, material: ShellMaterial) -> ShellConstitutive {
     let plane_stress = isotropic_plane_stress(
         material.youngs_modulus_pa.canonical_value(),
         material.poisson_ratio.canonical_value(),
@@ -134,6 +132,31 @@ pub(crate) fn homogeneous_constitutive(
             plane_stress,
         }],
     }
+}
+
+/// Fallible execution boundary for production homogeneous constitutive work.
+pub(crate) fn admitted_homogeneous_constitutive(
+    section: ShellSection,
+    material: ShellMaterial,
+) -> Result<ShellConstitutive, ShellElementError> {
+    section.validate()?;
+    material.validate()?;
+    // Plane stress (8), top/bottom (4), three 3x3 scales (27), coupling
+    // factor (4), bending factor (6), transverse shear (4), drilling (2).
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Assembly, OperationCount::from_operations(55))
+        })
+        .transpose()?;
+    let constitutive = homogeneous_constitutive(section, material);
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(55))?;
+    }
+    Ok(constitutive)
 }
 
 pub(super) fn isotropic_plane_stress(youngs_modulus_pa: f64, poisson_ratio: f64) -> ShellMatrix3 {

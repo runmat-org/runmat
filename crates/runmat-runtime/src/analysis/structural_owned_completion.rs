@@ -66,6 +66,15 @@ pub fn analysis_complete_structural_study_op(
                 "thermal prestress requires typed compiled-study publication",
             ))
         }
+        StructuralStudyNumericalResult::StructuralModalFrequency(_) => {
+            return Err(structural_study_completion_failure(
+                &prepared,
+                "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                OperationErrorType::Contract,
+                OperationErrorSeverity::Fatal,
+                "modal-frequency studies complete through typed compiled-study publication",
+            ))
+        }
         StructuralStudyNumericalResult::LinearSequence(result) => result,
         StructuralStudyNumericalResult::StructuralTransient(_) => {
             return Err(structural_study_completion_failure(

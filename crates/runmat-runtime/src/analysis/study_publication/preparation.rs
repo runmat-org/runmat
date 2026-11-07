@@ -96,6 +96,9 @@ impl PublicationPreparation {
             Result::StructuralPrestressedFrequency(result) => self
                 .staging
                 .admit_source_objects(&result.frequency.object_catalog.objects),
+            Result::StructuralModalFrequency(result) => self
+                .staging
+                .admit_source_objects(&result.frequency.object_catalog.objects),
             Result::LinearSequence(_)
             | Result::StructuralModal(_)
             | Result::StructuralModalTransient(_)

@@ -276,10 +276,10 @@ mod tests {
         DriverAuthority {
             server_url: "https://control.invalid".into(),
             run_id: "run-release-fixture".into(),
-            org_id: "org-release-fixture".into(),
+            org_id: crate::remote::test_ids::test_org_id(),
             project_id: "project-release-fixture".into(),
             allocation_lease_id: "allocation-release-fixture".into(),
-            driver_lease_id: "driver-release-fixture".into(),
+            driver_lease_id: crate::remote::test_ids::test_driver_lease_id(1),
             fencing_token: 1,
             credential: "credential-release-fixture".into(),
         }

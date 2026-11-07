@@ -309,6 +309,7 @@ fn floating_point_identity_preserves_negative_zero_bits() {
             unit: None,
         }],
         achieved_values: Vec::new(),
+        accounting_error: None,
         remediation: "inspect the deterministic numerical witness".into(),
     };
     assert_ne!(

@@ -1,3 +1,4 @@
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -61,6 +62,8 @@ pub enum BeamElementError {
     InvalidSection,
     #[error("beam Young's modulus and shear modulus must be positive and finite")]
     InvalidMaterial,
+    #[error("beam numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
 }
 
 impl BeamSection {
@@ -91,25 +94,48 @@ impl BeamMaterial {
 
 impl BeamElementGeometry {
     pub fn local_frame(self) -> Result<BeamLocalFrame, BeamElementError> {
+        // Initial edge and norm (9), normalized x (4), reference projection
+        // (11), projection norm (6), normalized y (4), cross product z (9).
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage
+                    .ledger()
+                    .reserve(UsageCategory::Assembly, OperationCount::from_operations(43))
+            })
+            .transpose()?;
         let axis = sub(
             self.node_j_m.canonical_value(),
             self.node_i_m.canonical_value(),
         );
         let length_m = norm(axis);
         if !positive_finite(length_m) {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(9))?;
+            }
             return Err(BeamElementError::DegenerateLength);
         }
         let x = scale(axis, 1.0 / length_m);
         if !self.reference_axis.iter().all(|value| value.is_finite()) {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(13))?;
+            }
             return Err(BeamElementError::DegenerateReferenceAxis);
         }
         let reference_projection = sub(self.reference_axis, scale(x, dot(self.reference_axis, x)));
         let projection_norm = norm(reference_projection);
         if projection_norm <= 1.0e-12 || !projection_norm.is_finite() {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(30))?;
+            }
             return Err(BeamElementError::DegenerateReferenceAxis);
         }
         let y = scale(reference_projection, 1.0 / projection_norm);
         let z = cross(x, y);
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(43))?;
+        }
         Ok(BeamLocalFrame {
             x,
             y,
@@ -129,6 +155,18 @@ pub fn local_stiffness_matrix(
     if !positive_finite(length_m) {
         return Err(BeamElementError::DegenerateLength);
     }
+
+    // Powers/products/divisions (8), bending coefficients (16), then 40
+    // scalar updates in the symmetric axial, torsion and bending entries.
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Assembly, OperationCount::from_operations(64))
+        })
+        .transpose()?;
 
     let l = length_m;
     let l2 = l * l;
@@ -151,6 +189,10 @@ pub fn local_stiffness_matrix(
 
     add_bending_z(&mut k, eiz, l, l2, l3);
     add_bending_y(&mut k, eiy, l, l2, l3);
+
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(64))?;
+    }
 
     Ok(k)
 }
@@ -177,7 +219,22 @@ pub fn global_stiffness_matrix(
     let frame = geometry.local_frame()?;
     let local = local_stiffness_matrix(section, material, frame.length_m.canonical_value())?;
     let transform = transformation_matrix(frame);
-    Ok(transform_transpose_multiply(&transform, &local))
+    // Two dense 12x12 products, each output uses 12 products and 11 additions.
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage.ledger().reserve(
+                UsageCategory::Assembly,
+                OperationCount::from_operations(6_624),
+            )
+        })
+        .transpose()?;
+    let stiffness = transform_transpose_multiply(&transform, &local);
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(6_624))?;
+    }
+    Ok(stiffness)
 }
 
 fn add_bending_z(k: &mut BeamMatrix12, ei: f64, l: f64, l2: f64, l3: f64) {
@@ -273,6 +330,8 @@ fn norm(a: [f64; 3]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_simulation_usage::UsageLedger;
+    use std::sync::Arc;
 
     fn section() -> BeamSection {
         BeamSection {
@@ -291,6 +350,28 @@ mod tests {
             youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
             shear_modulus_pa: runmat_types::physical::ShearModulus::new(79.3e9),
         }
+    }
+
+    #[test]
+    fn admitted_global_beam_stiffness_conserves_geometry_local_and_transform_work() {
+        let limit = OperationCount::from_operations(43 + 64 + 6_624);
+        let ledger = Arc::new(UsageLedger::new(limit, limit).unwrap());
+        let context = UsageContext::new(Arc::clone(&ledger));
+        context.run_sync(|| {
+            global_stiffness_matrix(
+                section(),
+                material(),
+                BeamElementGeometry {
+                    node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+                    node_j_m: runmat_types::physical::Position::new([2.0, 0.0, 0.0]),
+                    reference_axis: [0.0, 0.0, 1.0],
+                },
+            )
+            .unwrap();
+        });
+        let snapshot = ledger.snapshot().unwrap();
+        assert_eq!(snapshot.completed.assembly, limit);
+        assert_eq!(snapshot.reserved, OperationCount::ZERO);
     }
 
     #[test]

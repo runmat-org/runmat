@@ -1208,11 +1208,12 @@ export interface GeometryPreviewResult extends GeometryInspectResult {
   previewMessage?: string | null;
 }
 
-export type { LocalFeaWorkerContext } from "./fea-run-context.js";
+export type { LocalFeaWorkerContext, FeaWorkerWorkClass } from "./fea-run-context.js";
 import type { LocalFeaWorkerContext } from "./fea-run-context.js";
 export { createFeaRunAdmissionHook, FeaRunAdmissionError, feaRunAdmissionError } from "./fea-run-admission.js";
-export type { FeaRunAdmission, FeaRunAdmissionHook, FeaRunWorkerAdmission, FeaRunWorkerLeaseState, FeaRunRequest, FeaRunLease, FeaRunLeaseRenewal, FeaRunUsage, FeaRunOutcome, FeaRunDenied, FeaRunStopReason } from "./fea-run-admission.js";
-import { createFeaRunAdmissionHook, FeaRunAdmissionError, type FeaRunAdmission, type FeaRunAdmissionHook, type FeaRunWorkerAdmission, type FeaRunLease } from "./fea-run-admission.js";
+export type { FeaRunAdmission, FeaRunAdmissionHook, FeaRunWorkerAdmission, FeaRunWorkerOwner, FeaRunWorkerGrantRequest, FeaWorkerAssignment, FeaRunRetirementReceipt, FeaRunWorkerLeaseState, FeaRunRequest, FeaRunLease, FeaRunLeaseRenewal, FeaRunUsage, FeaRunOutcome, FeaRunDenied, FeaRunStopReason, FeaRunSettlement, FeaRunWorkerReport, CompletedSimulationUsage, SimulationOperationCount } from "./fea-run-admission.js";
+export { simulationOperationCount, emptySimulationUsage, parseCompletedSimulationUsage } from "./simulation-usage.js";
+import { createFeaRunAdmissionHook, FeaRunAdmissionError, type FeaRunAdmission, type FeaRunAdmissionHook, type FeaRunWorkerAdmission, type FeaRunLease, type FeaRunLeaseState } from "./fea-run-admission.js";
 
 export interface RunMatSessionHandle {
   listProjectEntrypoints(projectPath: string, context?: ProjectEntrypointContext): Promise<ProjectEntrypointDescription[]>;
@@ -1234,6 +1235,7 @@ export interface RunMatSessionHandle {
   planFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaExecutionChoices>;
   runFeaSource(path: string, planId: string, inputManifest?: InputManifest): Promise<FeaRunResult>;
   setFeaRunAdmission(admission: FeaRunAdmission | FeaRunAdmissionHook | null): void;
+  retryPendingFeaSettlement(runId: string): Promise<void>;
   renewFeaRunLease(runId: string, lease: FeaRunLease): void;
   checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult>;
   checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult>;
@@ -1343,6 +1345,12 @@ interface RunMatNativeSession extends ProjectEntrypointSessionExports {
   runFeaSource?: (path: string, planId: string, inputManifest?: InputManifest) => FeaRunResult | Promise<FeaRunResult>;
   setFeaRunAdmission?: (admission: FeaRunAdmissionHook | null) => void;
   renewFeaRunLease?: (runId: string, lease: FeaRunLease) => void;
+  delegateFeaWorker?: (context: LocalFeaWorkerContext) => FeaRunLeaseState;
+  startFeaWorker?: (context: LocalFeaWorkerContext) => void;
+  acquireFeaWorkerGrant?: (context: LocalFeaWorkerContext, requiredOps: import("./simulation-usage.js").SimulationOperationCount) => Promise<FeaRunLeaseState>;
+  reportFeaWorker?: (context: LocalFeaWorkerContext, usage: import("./fea-run-admission.js").FeaRunUsage, finalReport: boolean) => import("./fea-run-admission.js").FeaRunUsage;
+  retireFeaWorker?: (context: LocalFeaWorkerContext, receipt: import("./fea-run-admission.js").FeaRunRetirementReceipt) => void;
+  discardUndispatchedFeaWorker?: (context: LocalFeaWorkerContext, receipt: import("./fea-run-admission.js").FeaRunRetirementReceipt) => void;
   inspectFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
   reviewFeaChanges?: (request: FeaChangeSetReviewRequest) => FeaChangeSetReview | Promise<FeaChangeSetReview>;
   stageFeaChanges?: (request: FeaChangeSetRequest) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
@@ -2566,6 +2574,7 @@ export async function importWorkspaceState(state: Uint8Array): Promise<boolean> 
 
 class WebRunMatSession implements RunMatSessionHandle {
   private disposed = false;
+  private feaAdmissionHook: FeaRunAdmissionHook | null = null;
 
   constructor(
     private readonly native: RunMatNativeSession,
@@ -2697,8 +2706,27 @@ class WebRunMatSession implements RunMatSessionHandle {
   setFeaRunAdmission(admission: FeaRunAdmission | FeaRunAdmissionHook | null): void {
     this.ensureActive();
     if (!this.native.setFeaRunAdmission) throw new Error("Reload the current runtime to install FEA lease admission.");
-    this.native.setFeaRunAdmission(admission === null ? null : "check" in admission
-      ? admission : createFeaRunAdmissionHook(admission, () => this.cancelExecution(), (runId, lease) => this.renewFeaRunLease(runId, lease)));
+    if (admission === null) { this.native.setFeaRunAdmission(null); this.feaAdmissionHook = null; return; }
+    const hook = "check" in admission ? admission
+      : createFeaRunAdmissionHook(admission, () => this.cancelExecution(), (runId, lease) => this.renewFeaRunLease(runId, lease));
+    const native = this.native;
+    if (!native.delegateFeaWorker || !native.startFeaWorker || !native.acquireFeaWorkerGrant || !native.reportFeaWorker || !native.retireFeaWorker || !native.discardUndispatchedFeaWorker) throw new Error("Reload the current runtime to install owned FEA worker accounting.");
+    hook.bindOwner({
+      delegate: async context => native.delegateFeaWorker!(context),
+      start: async context => { native.startFeaWorker!(context); },
+      acquire: (context, requiredOps) => native.acquireFeaWorkerGrant!(context, requiredOps),
+      report: async (context, usage, finalReport) => native.reportFeaWorker!(context, usage, finalReport),
+      retire: async (context, receipt) => { native.retireFeaWorker!(context, receipt); },
+      discardUndispatched: async (context, receipt) => { native.discardUndispatchedFeaWorker!(context, receipt); },
+    });
+    native.setFeaRunAdmission!(hook);
+    this.feaAdmissionHook = hook;
+  }
+
+  async retryPendingFeaSettlement(runId: string): Promise<void> {
+    this.ensureActive();
+    if (!this.feaAdmissionHook) throw new FeaRunAdmissionError({ reason: "licenseInvalid" });
+    await this.feaAdmissionHook.retryPendingSettlement(runId);
   }
 
   renewFeaRunLease(runId: string, lease: FeaRunLease): void {

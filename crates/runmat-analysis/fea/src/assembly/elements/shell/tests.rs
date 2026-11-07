@@ -1,4 +1,33 @@
 use super::*;
+use runmat_simulation_usage::{OperationCount, UsageContext, UsageLedger};
+use std::sync::Arc;
+
+#[test]
+fn admitted_shell_frame_and_homogeneous_constitutive_conserve_work() {
+    let limit = OperationCount::from_operations(56 + 55);
+    let ledger = Arc::new(UsageLedger::new(limit, limit).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    context.run_sync(|| {
+        geometry().local_frame().unwrap();
+        admitted_homogeneous_constitutive(section(), material()).unwrap();
+    });
+    let snapshot = ledger.snapshot().unwrap();
+    assert_eq!(snapshot.completed.assembly, limit);
+    assert_eq!(snapshot.reserved, OperationCount::ZERO);
+}
+
+#[test]
+fn admitted_shell_stiffness_conserves_local_mitc_and_contraction_work() {
+    let limit = OperationCount::from_operations(55 + 56 + 68 + 4 * 597 + 74_491);
+    let ledger = Arc::new(UsageLedger::new(limit, limit).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    context.run_sync(|| {
+        global_stiffness_matrix(section(), material(), geometry()).unwrap();
+    });
+    let snapshot = ledger.snapshot().unwrap();
+    assert_eq!(snapshot.completed.assembly, limit);
+    assert_eq!(snapshot.reserved, OperationCount::ZERO);
+}
 
 fn section() -> ShellSection {
     ShellSection {
@@ -104,7 +133,7 @@ fn homogeneous_reference_surface_retains_membrane_bending_coupling() {
     let mut offset_section = section();
     offset_section.reference_offset_m =
         runmat_types::physical::Length::new(0.5 * offset_section.thickness_m.canonical_value());
-    let constitutive = homogeneous_constitutive(offset_section, material());
+    let constitutive = admitted_homogeneous_constitutive(offset_section, material()).unwrap();
     let extensional = constitutive.matrices.extensional[0][0];
     assert_close(
         constitutive.matrices.coupling[0][0],

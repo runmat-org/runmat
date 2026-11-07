@@ -412,9 +412,10 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     assert_eq!(evidence.artifact_digest, mesh.canonical_digest);
     // Golden counts for the authored independent-definition STEP fixture,
     // qualified by two byte-identical standalone meshes with seed zero.
-    assert_eq!(mesh.topology.nodes.len(), 402);
-    assert_eq!(mesh.topology.volume_elements.len(), 1204);
-    assert_eq!(mesh.topology.boundary_faces.len(), 768);
+    // Face gaps are sized to at least one element layer across (thin-layer sizing).
+    assert_eq!(mesh.topology.nodes.len(), 632);
+    assert_eq!(mesh.topology.volume_elements.len(), 2524);
+    assert_eq!(mesh.topology.boundary_faces.len(), 848);
 
     let model: AnalysisModel =
         serde_json::from_value(manifest["compiled"]["model"].clone()).unwrap();
@@ -1115,4 +1116,154 @@ fn a_script_running_the_same_study_twice_publishes_two_attempts() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// Runs a documentation example with `extra` study members (outputs and assessments) appended,
+/// asserts a completed, numerically acceptable public run, and returns the run payload.
+fn run_example_witness(temp: &TempDir, name: &str, extra: &str) -> Value {
+    let examples = repository_fixture(temp).join("docs/simulation/examples");
+    let path = if extra.is_empty() {
+        format!("docs/simulation/examples/{name}.fea")
+    } else {
+        let source = fs::read_to_string(examples.join(format!("{name}.fea"))).unwrap();
+        let body = source.trim_end().strip_suffix('}').expect("study block closes the file");
+        fs::write(
+            examples.join(format!("{name}.witness.fea")),
+            format!("{body}{extra}}}\n"),
+        )
+        .unwrap();
+        format!("docs/simulation/examples/{name}.witness.fea")
+    };
+    let output = runmat_from_repository(temp, &["run", &path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let manifest_path = payload["result_manifest_artifact_path"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{path}: no manifest path in {payload}"));
+    let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["public_run"]["run_status"], "completed", "{path}");
+    assert_eq!(
+        manifest["public_run"]["numerically_acceptable"], true,
+        "{path}"
+    );
+    payload
+}
+
+/// The measured value of a passed assessment.
+fn passed_assessment(payload: &Value, id: &str) -> f64 {
+    let assessment = payload["assessments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["result"]["assessment_id"] == id)
+        .unwrap_or_else(|| panic!("no assessment {id} in {}", payload["assessments"]));
+    let status = assessment["result"]["status"].as_str().unwrap_or_default();
+    assert!(status.eq_ignore_ascii_case("passed"), "{id}: {assessment}");
+    assessment["evidence"]["value"].as_f64().unwrap()
+}
+
+// witness: FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate @
+//   incompressible_laminar_steady/tet4/public_study;
+//   coverage: partial; boundary: pressure_drop on the public plane Poiseuille example
+//   (L/h = 30, Re = 1) lies within 5% of the fully developed 12 mu U L / h^2 = 36 Pa; the
+//   uniform inlet's entrance loss (about 0.9 h of equivalent length, +3%) is inside the band.
+#[test]
+fn plane_poiseuille_example_publishes_the_analytic_pressure_drop() {
+    let temp = TempDir::new().unwrap();
+    let payload = run_example_witness(
+        &temp,
+        "fluid-plane-poiseuille",
+        "    assessment poiseuille_drop { value = output.pressure_drop; minimum = 34.2 Pa; maximum = 37.8 Pa; evidence = authored_samples }\n",
+    );
+    let drop = passed_assessment(&payload, "poiseuille_drop");
+    eprintln!("plane Poiseuille pressure_drop = {drop} Pa (developed 36 Pa)");
+}
+
+// witness: FEA-ACOUSTIC-OUTPUTS-001/transmission_and_insertion_loss @
+//   acoustic_harmonic/tet10/public_study; coverage: partial; boundary: transmission_loss on the
+//   public two-fluid interface example (m = 4) lies within 0.1 dB of 1.938 dB at 500, 1000 and
+//   2000 Hz; no muffler or one-third-octave sweep.
+#[test]
+fn two_fluid_interface_example_publishes_the_plane_wave_transmission_loss() {
+    let temp = TempDir::new().unwrap();
+    let mut extra = String::new();
+    for f in [500, 1000, 2000] {
+        extra.push_str(&format!(
+            "    output tl_at_{f} = max(sample(output.tl, over = frequency, at = [{f} Hz]), over = frequency)\n    assessment tl_{f} {{ value = output.tl_at_{f}; minimum = 1.84; maximum = 2.04; evidence = authored_samples }}\n"
+        ));
+    }
+    let payload = run_example_witness(&temp, "acoustic-interface-transmission-loss", &extra);
+    for f in [500, 1000, 2000] {
+        let tl = passed_assessment(&payload, &format!("tl_{f}"));
+        eprintln!("transmission loss at {f} Hz = {tl} dB (analytic 1.938 dB)");
+    }
+}
+
+// witness: FEA-COUPLING-CHT-001/interface @
+//   conjugate_heat_transfer/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The CHT plate-channel example runs two-way from `runmat run` to a completed,
+//   numerically acceptable run; interface closure is the runtime gate, not asserted here.
+// witness: FEA-FLUID-HEAT-001/two_way_cht @ conjugate_heat_transfer/tet4/public_study;
+//   coverage: partial; boundary: One public two-way CHT example on a linear mesh converges.
+// witness: FEA-PUBLIC-STUDIES-001/chained_and_coupled_studies_run @
+//   conjugate_heat_transfer/canonical_tetrahedra/public_study; coverage: partial;
+//   boundary: Local public CHT run only; remote execution is a separate case.
+#[test]
+fn cht_plate_channel_example_runs_as_a_coupled_study() {
+    let temp = TempDir::new().unwrap();
+    let payload = run_example_witness(
+        &temp,
+        "cht-plate-channel",
+        "    assessment plate_warms { value = output.peak_temperature; minimum = 293 K; maximum = 1000 K; evidence = authored_samples }\n",
+    );
+    passed_assessment(&payload, "plate_warms");
+}
+
+// witness: FEA-COUPLING-FSI-001/interface @
+//   fluid_structure_interaction/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The compliant-tube example runs steady two-way FSI from `runmat run` to a
+//   completed, numerically acceptable run.
+// witness: FEA-COUPLING-FSI-002/compliant_channel @ fluid_structure_interaction/tet4/public_study;
+//   coverage: partial; boundary: Steady compliant tube only; no transient ALE run.
+// witness: FEA-PUBLIC-STUDIES-001/chained_and_coupled_studies_run @
+//   fluid_structure_interaction/canonical_tetrahedra/public_study; coverage: partial;
+//   boundary: Local public FSI run only; remote execution is a separate case.
+#[test]
+fn fsi_compliant_tube_example_runs_as_a_coupled_study() {
+    let temp = TempDir::new().unwrap();
+    let payload = run_example_witness(
+        &temp,
+        "fsi-compliant-tube",
+        "    assessment pressurized { value = output.inlet_pressure; minimum = 0 Pa; evidence = authored_samples }\n",
+    );
+    passed_assessment(&payload, "pressurized");
+}
+
+// witness: FEA-COUPLING-CHAIN-001/thermal_to_prestress_to_modal @ thermoelastic/tet4/public_study;
+//   coverage: partial; boundary: The thermal-prestress example runs thermal steady, then
+//   thermomechanical preload, then prestressed modal from `runmat run`; no reference values.
+// witness: FEA-PUBLIC-STUDIES-001/chained_and_coupled_studies_run @
+//   thermoelastic/canonical_tetrahedra/public_study; coverage: partial;
+//   boundary: Local public chained run only; remote execution is a separate case.
+#[test]
+fn thermal_prestress_example_runs_its_three_step_chain() {
+    let temp = TempDir::new().unwrap();
+    let payload = run_example_witness(&temp, "thermal-prestress", "");
+    assert_eq!(payload["step_run_ids"].as_array().unwrap().len(), 3, "{payload}");
+}
+
+// witness: FEA-EM-FREQUENCY-001/multi_frequency_study @ harmonic_maxwell/edge_elements/public_study;
+//   coverage: partial; boundary: The induction-gear example runs three authored frequencies with
+//   a current-driven coil terminal from `runmat run`, one case per frequency, to a completed,
+//   numerically acceptable run; no skin-depth reference is asserted here.
+#[test]
+fn induction_gear_example_runs_its_three_frequency_harmonic_study() {
+    let temp = TempDir::new().unwrap();
+    let payload = run_example_witness(&temp, "em-induction-gear-harmonic", "");
+    assert_eq!(payload["step_run_ids"].as_array().unwrap().len(), 3, "{payload}");
 }

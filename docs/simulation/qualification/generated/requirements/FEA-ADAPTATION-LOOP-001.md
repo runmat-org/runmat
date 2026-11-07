@@ -9,7 +9,7 @@ Evidence kind: SpatialConvergence. Criterion: Estimators must be formulation-app
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | adaptive_analysis | tet4 | numerical_kernel | OPEN |  |
-| adaptive_analysis | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::adaptation::structural_recovery::tests::tetrahedron10_integration_point_estimator_preserves_linear_recovery` (crates/runmat-analysis/fea/src/adaptation/structural_recovery/tests.rs:246) - The Tet10 integration-point structural recovery estimator preserves a linear recovery; stress-jump and marking behavior are other tests. |
+| adaptive_analysis | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::adaptation::structural_recovery::tests::tetrahedron10_integration_point_estimator_preserves_linear_recovery` (crates/runmat-analysis/fea/src/adaptation/structural_recovery/tests.rs:274) - The Tet10 integration-point structural recovery estimator preserves a linear recovery; stress-jump and marking behavior are other tests. |
 | adaptive_analysis | tet4 | public_study | OPEN |  |
 | adaptive_analysis | tet10 | public_study | OPEN |  |
 | adaptive_analysis | canonical_mixed_topology | native_process | OPEN |  |
@@ -25,8 +25,8 @@ Evidence kind: SpatialConvergence. Criterion: Plastic, contact, coupled-interfac
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| adaptive_analysis | tet4 | numerical_kernel | PARTIAL | `runmat-meshing-tetrahedron[lib]::cdt::adaptive_transfer::tests::quadratic::quadratic_refinement_preserves_all_polynomial_modes_and_cold_lineage` (crates/runmat-meshing/tetrahedron/src/cdt/adaptive_transfer/tests/quadratic.rs:48) - Quadratic refinement transfer preserves all polynomial modes and cold lineage for Tet4 and Tet10; plastic, contact and coupled-interface state transfer are not ... |
-| adaptive_analysis | tet10 | numerical_kernel | PARTIAL | `runmat-meshing-tetrahedron[lib]::cdt::adaptive_transfer::tests::quadratic::quadratic_refinement_preserves_all_polynomial_modes_and_cold_lineage` (crates/runmat-meshing/tetrahedron/src/cdt/adaptive_transfer/tests/quadratic.rs:48) - Quadratic refinement transfer preserves all polynomial modes and cold lineage for Tet4 and Tet10; plastic, contact and coupled-interface state transfer are not ... |
+| adaptive_analysis | tet4 | numerical_kernel | PARTIAL | `runmat-meshing-tetrahedron[lib]::cdt::adaptive_transfer::tests::quadratic::quadratic_refinement_preserves_all_polynomial_modes_and_cold_lineage` (crates/runmat-meshing/tetrahedron/src/cdt/adaptive_transfer/tests/quadratic.rs:52) - Quadratic refinement transfer preserves all polynomial modes and cold lineage for Tet4 and Tet10; plastic, contact and coupled-interface state transfer are not ... |
+| adaptive_analysis | tet10 | numerical_kernel | PARTIAL | `runmat-meshing-tetrahedron[lib]::cdt::adaptive_transfer::tests::quadratic::quadratic_refinement_preserves_all_polynomial_modes_and_cold_lineage` (crates/runmat-meshing/tetrahedron/src/cdt/adaptive_transfer/tests/quadratic.rs:52) - Quadratic refinement transfer preserves all polynomial modes and cold lineage for Tet4 and Tet10; plastic, contact and coupled-interface state transfer are not ... |
 | adaptive_analysis | tet4 | public_study | OPEN |  |
 | adaptive_analysis | tet10 | public_study | OPEN |  |
 | adaptive_analysis | canonical_mixed_topology | native_process | OPEN |  |
