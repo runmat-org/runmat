@@ -45,9 +45,9 @@ impl DyadicNode {
         }
         // The unreduced sum may need one extra bit even when the resulting
         // parameter fits the admitted representation. Reduce before admission.
-        let left = u128::from(self.numerator) << (exponent - self.exponent);
-        let right = u128::from(right.numerator) << (exponent - right.exponent);
-        let mut numerator = left + right;
+        let lower = u128::from(self.numerator) << (exponent - self.exponent);
+        let upper = u128::from(right.numerator) << (exponent - right.exponent);
+        let mut numerator = lower + upper;
         let mut exponent = exponent + 1;
         while exponent > 0 && numerator.is_multiple_of(2) {
             numerator /= 2;
