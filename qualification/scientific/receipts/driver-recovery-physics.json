@@ -67,14 +67,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "6b953ddcdb84ca7ba8e84da21438278ec4e200ee7a94f605c0e74a64757289f9",
+      "sha256": "414b12c71918894968bd083a7d9dc54f900c91280a5d18ebc6559dd649f9aba1",
       "files": 24830,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The reviewed 113-path inverse reconstructs the original measured Git inventory. Affected ordinary, native-output, Mac/Linux product and browser successors support the classified platform, ownership, storage and test changes. Scientific solver/mesher arithmetic, workload definitions, thresholds and original measurements are preserved. Final Windows shipping acceptance is a separate release gate.",
+    "reason": "The reviewed 114-path inverse reconstructs the unchanged original scientific inventory. Existing affected qualification is retained; the additional WASM cfg(test) correction preserves every production byte and all assertions. Browser test qualification is tracked separately in dev CI.",
     "review": {
-      "path": "qualification/scientific/reviews/cross-platform-r1322.json",
-      "sha256": "af11facda840784c245e26378a4c85d0b85c10b750c9a1968a98c3510b1073fc"
+      "path": "qualification/scientific/reviews/dev-wasm-fixture.json",
+      "sha256": "02c0d9eede8ea86866c368a82c8aaf4cda92f464aee298d47f1554bca51ac2b3"
     }
   }
 }

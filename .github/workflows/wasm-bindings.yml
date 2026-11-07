@@ -118,6 +118,7 @@ jobs:
           # are immutable.
           shared-key: wasm-bindings-workspace-v1
           cache-workspace-crates: true
+          cache-on-failure: true
           cache-directories: target-exact-cad-wasm
 
       - name: Setup Node.js
