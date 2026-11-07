@@ -7,6 +7,12 @@
 //! the ones `runmat-cad-wasm`'s wasm-bindgen entry points take, and get back the same JSON text
 //! those entry points return. Native callers use [`call`] (the same function, for host-parity
 //! tests).
+//!
+//! The per-part cache travels too (`runmat_cad_wasm::runtime::part_cache`): `probe` is `compile`
+//! with each part the cache doesn't hold left out (its fifth argument, a JSON list of digests,
+//! names those it may regenerate), and `cacheMisses` lists what the last probe left out.
+//! [`call_framed`]'s `cacheFresh` returns the entries regenerated since the last take, and
+//! [`runmat_cad_seed`] reads stored entries back in.
 
 use runmat_cad_wasm::{analyze, edit, kernel, runtime};
 use runmat_geometry_io::ImportSource;
@@ -28,6 +34,9 @@ struct Request {
 /// them (the workspace path and the bare file name). The browser host has no project folder, so
 /// the files travel in the request and the kernel reads their text from here.
 static IMPORTS: Mutex<BTreeMap<String, ImportSource>> = Mutex::new(BTreeMap::new());
+
+/// The digests the last `probe` left out.
+static MISSES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn set_imports(files: &runtime::Files) {
     let mut map = BTreeMap::new();
@@ -88,6 +97,22 @@ pub fn call(request: &str) -> String {
                 Err(message) => runtime::error_json(path, &message),
             }
         }
+        "probe" => {
+            let (path, text) = (arg(a, 0), arg(a, 1));
+            let allow: std::collections::HashSet<String> = serde_json::from_str(arg(a, 4)).unwrap_or_default();
+            match runtime::parse_files(arg(a, 2)) {
+                Ok(files) => {
+                    set_imports(&files);
+                    let (out, misses) = runtime::part_cache::probe(allow, || {
+                        runtime::values_host::compile_json_with_values(path, text, &files, arg(a, 3))
+                    });
+                    *MISSES.lock().unwrap_or_else(|e| e.into_inner()) = misses;
+                    out
+                }
+                Err(message) => runtime::error_json(path, &message),
+            }
+        }
+        "cacheMisses" => serde_json::to_string(&*MISSES.lock().unwrap_or_else(|e| e.into_inner())).unwrap_or_else(|_| "[]".into()),
         "edit" => {
             let (path, text, request) = (arg(a, 0), arg(a, 1), arg(a, 3));
             match runtime::parse_files(arg(a, 2)) {
@@ -130,7 +155,38 @@ pub fn call(request: &str) -> String {
 /// [`call`] with the display meshes written as bytes beside the JSON
 /// ([`runtime::display_wire`]): the JSON text and the bytes its mesh references point into.
 pub fn call_framed(request: &str) -> (String, Vec<u8>) {
+    if let Ok(Request { function, .. }) = serde_json::from_str::<Request>(request) {
+        if function == "cacheFresh" {
+            return fresh_entries();
+        }
+    }
     runtime::display_wire::collect(|| call(request))
+}
+
+/// The entries regenerated since the last take: a JSON list of `{digest, start, end}` and the
+/// concatenated entry frames those byte ranges cut out (`part_cache::entry_frame`).
+fn fresh_entries() -> (String, Vec<u8>) {
+    let mut index = Vec::new();
+    let mut bytes = Vec::new();
+    for (digest, frame) in runtime::part_cache::take_fresh() {
+        let start = bytes.len();
+        bytes.extend_from_slice(&frame);
+        index.push(serde_json::json!({ "digest": digest, "start": start, "end": bytes.len() }));
+    }
+    (serde_json::Value::Array(index).to_string(), bytes)
+}
+
+/// Reads stored cache entries (concatenated entry frames, `len` bytes at `frames`) into the
+/// per-part cache; returns how many it took.
+///
+/// # Safety
+/// `frames` is null or points to `len` readable bytes that stay valid for this call.
+#[no_mangle]
+pub unsafe extern "C" fn runmat_cad_seed(frames: *const u8, len: usize) -> u32 {
+    if frames.is_null() {
+        return 0;
+    }
+    runtime::part_cache::seed(std::slice::from_raw_parts(frames, len)) as u32
 }
 
 /// One frame holding a framed answer: the JSON's length and the bytes' length (`u32`,

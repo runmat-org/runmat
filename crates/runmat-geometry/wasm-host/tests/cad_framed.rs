@@ -68,3 +68,34 @@ fn the_framed_compile_sends_mesh_arrays_as_bytes_that_read_back_exactly() {
         cad::runmat_cad_free_framed(frame);
     }
 }
+
+/// The cache's travel through the host: an assembly's regenerated entries come out of
+/// `cacheFresh`, a probe of an emptied cache lists them and regenerates nothing, and once they
+/// are seeded through `runmat_cad_seed` the probe leaves nothing out and answers as the first
+/// compile did.
+#[test]
+fn stored_part_entries_seed_the_host_and_its_probe_finds_nothing_missing() {
+    use runmat_cad_wasm::runtime::part_cache;
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n}\n";
+    let files = serde_json::json!({ "/p/bracket.part": BRACKET, "/p/rig.assembly": rig }).to_string();
+    let compile = serde_json::json!({ "fn": "compile", "args": ["/p/rig.assembly", rig, files, "{}"] }).to_string();
+    let probe = serde_json::json!({ "fn": "probe", "args": ["/p/rig.assembly", rig, files, "{}", "[]"] }).to_string();
+    let misses = || -> Vec<String> { serde_json::from_str(&cad::call(r#"{"fn":"cacheMisses","args":[]}"#)).unwrap() };
+
+    part_cache::clear();
+    let first = cad::call(&compile);
+    let (index, frames) = cad::call_framed(r#"{"fn":"cacheFresh","args":[]}"#);
+    let index: Value = serde_json::from_str(&index).unwrap();
+    let digests: Vec<&str> = index.as_array().unwrap().iter().map(|e| e["digest"].as_str().unwrap()).collect();
+    assert_eq!(digests.len(), 1, "{index}");
+
+    part_cache::clear();
+    cad::call(&probe);
+    assert_eq!(misses(), digests);
+    assert_eq!(part_cache::stats().misses, 0, "the probe regenerated nothing");
+
+    assert_eq!(unsafe { cad::runmat_cad_seed(frames.as_ptr(), frames.len()) }, 1);
+    let answer = cad::call(&probe);
+    assert!(misses().is_empty());
+    assert_eq!(answer, first);
+}
