@@ -5,6 +5,7 @@ use crate::cdt::topology::VolumeTopologyRead;
 use crate::cdt::volume_quality::working::PreparedLocalQuality;
 pub(super) use crate::cdt::volume_state::{SearchState, WorkingState, WorkingTrial};
 use crate::cdt::volume_state::{VolumeStateError, VolumeStateErrorKind, VolumeStateOptions};
+pub(in crate::cdt) mod rejected;
 mod seed;
 pub(super) mod treatment;
 #[cfg(test)]

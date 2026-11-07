@@ -25,6 +25,7 @@ use crate::cdt::{
 
 mod block;
 mod cavity;
+mod changes;
 mod collapse;
 mod geometry;
 mod materialization;
@@ -69,6 +70,7 @@ impl RelocationSearchScope {
     }
 }
 
+#[cfg(test)]
 pub(super) fn relocation_candidates(
     input: DelaunayVolumeRefinementInput<'_>,
     source: &DelaunayTetrahedronQuality,
@@ -77,6 +79,54 @@ pub(super) fn relocation_candidates(
     work: &mut OptimizationWork<'_>,
     policy: SliverSearchPolicy,
     scope: RelocationSearchScope,
+) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
+    search(
+        input,
+        source,
+        current_spectrum,
+        cancellation,
+        work,
+        policy,
+        scope,
+        None,
+    )
+}
+
+/// [`relocation_candidates`] that also adds to `changed` the nodes of every cell a produced
+/// candidate added or removed, so a caller can tell when a rejected search would decide the same.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn relocation_candidates_recording_changes(
+    input: DelaunayVolumeRefinementInput<'_>,
+    source: &DelaunayTetrahedronQuality,
+    current_spectrum: &[f64],
+    cancellation: &dyn MeshingCancellationSignal,
+    work: &mut OptimizationWork<'_>,
+    policy: SliverSearchPolicy,
+    scope: RelocationSearchScope,
+    changed: &mut BTreeSet<StableDigest>,
+) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
+    search(
+        input,
+        source,
+        current_spectrum,
+        cancellation,
+        work,
+        policy,
+        scope,
+        Some(changed),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn search(
+    input: DelaunayVolumeRefinementInput<'_>,
+    source: &DelaunayTetrahedronQuality,
+    current_spectrum: &[f64],
+    cancellation: &dyn MeshingCancellationSignal,
+    work: &mut OptimizationWork<'_>,
+    policy: SliverSearchPolicy,
+    scope: RelocationSearchScope,
+    mut changed: Option<&mut BTreeSet<StableDigest>>,
 ) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
     let SliverSearchPolicy {
         options,
@@ -155,6 +205,9 @@ pub(super) fn relocation_candidates(
                 );
                 continue;
             };
+            if let Some(changed) = changed.as_deref_mut() {
+                changes::record_changed_nodes(topology, &candidate_topology, changed);
+            }
             let Some(quality) = evaluate_candidate(
                 &candidate_topology,
                 input,
@@ -223,6 +276,9 @@ pub(super) fn relocation_candidates(
             None => None,
         };
         if let Some(candidate_topology) = candidate_topology {
+            if let Some(changed) = changed.as_deref_mut() {
+                changes::record_changed_nodes(topology, &candidate_topology, changed);
+            }
             if let Some(quality) = evaluate_candidate(
                 &candidate_topology,
                 input,
@@ -306,6 +362,9 @@ pub(super) fn relocation_candidates(
                     options,
                     cancellation,
                 )? {
+                    if let Some(changed) = changed.as_deref_mut() {
+                        changes::record_changed_nodes(topology, &candidate_topology, changed);
+                    }
                     if let Some(candidate_quality) = evaluate_candidate(
                         &candidate_topology,
                         input,
@@ -371,6 +430,9 @@ pub(super) fn relocation_candidates(
                 );
                 continue;
             };
+            if let Some(changed) = changed.as_deref_mut() {
+                changes::record_changed_nodes(topology, &candidate_topology, changed);
+            }
             let Some(candidate_quality) = evaluate_candidate(
                 &candidate_topology,
                 input,
