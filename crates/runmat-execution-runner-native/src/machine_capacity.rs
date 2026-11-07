@@ -11,21 +11,11 @@ pub(crate) fn cpu_millicores() -> u32 {
     threads as u32 * 1000
 }
 
-/// The memory this process admits for work: three quarters of its pool, leaving a quarter for
-/// the OS and other work. The pool is the memory available now plus the memory this process
-/// already holds. Every requirement law charges the run's own resident components (mesh, model,
-/// compiled properties), so they count inside the budget; reading only the available memory
-/// would subtract them a second time. The pool does not change as the run allocates, so path
-/// selection, the early checks and the worker envelope read the same budget whenever they ask.
-/// Admission is a snapshot of other processes' use; runtime ceilings and cancellation remain
-/// authoritative.
 pub(crate) fn memory_bytes() -> io::Result<u64> {
-    admitted_memory(available_memory()?, process_resident_memory()?)
-}
-
-fn admitted_memory(available: u64, resident: u64) -> io::Result<u64> {
-    let pool = available.saturating_add(resident);
-    let budget = pool - pool / 4;
+    // Leave a quarter of currently available memory for the OS and other work.
+    // Admission is a snapshot; runtime ceilings/cancellation remain authoritative.
+    let available = available_memory()?;
+    let budget = available - available / 4;
     if budget == 0 {
         Err(io::Error::other(
             "local memory discovery returned no available capacity",
@@ -75,22 +65,6 @@ fn available_memory() -> io::Result<u64> {
         system.available_memory(),
         system.cgroup_limits().map(|limit| limit.free_memory),
     ))
-}
-
-#[cfg(target_os = "macos")]
-fn process_resident_memory() -> io::Result<u64> {
-    macos::process_footprint()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn process_resident_memory() -> io::Result<u64> {
-    let pid = sysinfo::get_current_pid().map_err(io::Error::other)?;
-    let mut system = sysinfo::System::new();
-    system.refresh_process_specifics(pid, sysinfo::ProcessRefreshKind::new().with_memory());
-    system
-        .process(pid)
-        .map(sysinfo::Process::memory)
-        .ok_or_else(|| io::Error::other("this process's resident memory is not readable"))
 }
 
 #[cfg(any(not(target_os = "macos"), test))]
@@ -166,24 +140,6 @@ mod tests {
         assert_eq!(usable_memory(2_000, Some(16_000)), 2_000);
         assert_eq!(usable_memory(16_000, None), 16_000);
         assert_eq!(usable_memory(16_000, Some(0)), 0);
-    }
-    #[test]
-    fn memory_this_process_holds_counts_inside_its_budget() {
-        // 20 GB available while the process holds 10 GB: the pool is 30 GB, not 20 GB.
-        const GB: u64 = 1_000_000_000;
-        assert_eq!(admitted_memory(20 * GB, 10 * GB).unwrap(), 22_500_000_000);
-        // The budget is the same before and after the process allocates from the pool.
-        assert_eq!(
-            admitted_memory(30 * GB, 0).unwrap(),
-            admitted_memory(20 * GB, 10 * GB).unwrap()
-        );
-        assert!(admitted_memory(0, 0).is_err());
-        assert_eq!(admitted_memory(u64::MAX, u64::MAX).unwrap(), u64::MAX - u64::MAX / 4);
-    }
-    #[test]
-    fn this_process_footprint_is_readable_and_counts() {
-        assert!(process_resident_memory().unwrap() > 0);
-        assert!(memory_bytes().unwrap() >= available_memory().unwrap() - available_memory().unwrap() / 4);
     }
     #[test]
     fn automatic_and_explicit_study_allocations_share_machine_capacity() {
