@@ -1,0 +1,68 @@
+runmat 0.7
+std 1
+
+// The field launch stand: a welded frame of 20 x 20 x 1.5 mm 6061-T6 square tube that holds the
+// drone with its skid soles 310 mm above the ground for pre-flight checks and take-off. Two side
+// frames stand in the skids' planes (y = ±34 mm): each is a base rail, two splayed legs and a top
+// rail that the skid rests on, mitred at all four corners. Two cross members butt between the top
+// rails, and the side frames sit across two feet that give the stand its 260 mm width. Origin:
+// on the ground under the cradle's centre; x points to the drone's nose.
+part launch_stand {
+    // The feet lie on the ground, across the drone's axis; their centre lines are 10 mm up.
+    feature foot_plane = plane.offset(base = origin.xy, distance = 10 mm)
+    sketch feet on plane.foot_plane {
+        foot_front = line(start = [150 mm, -130 mm], end = [150 mm, 130 mm])
+        foot_rear = line(start = [-150 mm, 130 mm], end = [-150 mm, -130 mm])
+    }
+    // On a plane parallel to origin.zx a point is [z, x]. The base rail sits on the feet
+    // (centre line 30 mm up); the legs rise from its ends to the top rail at 300 mm.
+    feature left_plane = plane.offset(base = origin.zx, distance = 34 mm)
+    sketch side_left on plane.left_plane {
+        base = line(start = [30 mm, -160 mm], end = [30 mm, 160 mm])
+        leg_front = line(start = [30 mm, 160 mm], end = [300 mm, 60 mm])
+        rail = line(start = [300 mm, 60 mm], end = [300 mm, -60 mm])
+        leg_rear = line(start = [300 mm, -60 mm], end = [30 mm, -160 mm])
+    }
+    feature right_plane = plane.offset(base = origin.zx, distance = -34 mm)
+    sketch side_right on plane.right_plane {
+        base = line(start = [30 mm, -160 mm], end = [30 mm, 160 mm])
+        leg_front = line(start = [30 mm, 160 mm], end = [300 mm, 60 mm])
+        rail = line(start = [300 mm, 60 mm], end = [300 mm, -60 mm])
+        leg_rear = line(start = [300 mm, -60 mm], end = [30 mm, -160 mm])
+    }
+    // The cross members butt square between the top rails' inner faces (y = ±24 mm), inboard
+    // of the leg mitres.
+    feature top_plane = plane.offset(base = origin.xy, distance = 300 mm)
+    sketch cradle on plane.top_plane {
+        cross_front = line(start = [40 mm, -24 mm], end = [40 mm, 24 mm])
+        cross_rear = line(start = [-40 mm, 24 mm], end = [-40 mm, -24 mm])
+    }
+    feature frame = weldment.structural_member(
+        groups = [
+            {
+                sketch = feet,
+                segments = [foot_front, foot_rear],
+                profile = rect_tube(width = 20 mm, height = 20 mm, wall = 1.5 mm),
+                material = al_6061
+            },
+            {
+                sketch = side_left,
+                segments = [base, leg_front, rail, leg_rear],
+                profile = rect_tube(width = 20 mm, height = 20 mm, wall = 1.5 mm),
+                material = al_6061
+            },
+            {
+                sketch = side_right,
+                segments = [base, leg_front, rail, leg_rear],
+                profile = rect_tube(width = 20 mm, height = 20 mm, wall = 1.5 mm),
+                material = al_6061
+            },
+            {
+                sketch = cradle,
+                segments = [cross_front, cross_rear],
+                profile = rect_tube(width = 20 mm, height = 20 mm, wall = 1.5 mm),
+                material = al_6061
+            }
+        ]
+    )
+}
