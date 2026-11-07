@@ -231,13 +231,14 @@ pub(super) fn segment_samples(s: &ProfileSegment) -> Vec<[f64; 2]> {
 }
 
 /// A sketch's non-construction curves chained end to end into one path, starting from a free
-/// end when the path is open.
+/// end when the path is open; a sketch holding only one circle is that circle.
 pub(super) fn build_path(
     sketch: &Sketch,
     solved: &SolvedSketch,
 ) -> Result<Vec<ProfileSegment>, String> {
     let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
     let mut pool: Vec<ProfileSegment> = Vec::new();
+    let mut circles: Vec<ProfileSegment> = Vec::new();
     for e in sketch.entities.iter().filter(|e| !e.construction) {
         let seg = match &e.geometry {
             SketchGeometry::Line { .. } => ProfileSegment {
@@ -268,9 +269,24 @@ pub(super) fn build_path(
             SketchGeometry::Spline { points, closed } => {
                 spline_segment(&e.id, points.len(), *closed, solved).ok_or("path spline not solved")?
             }
+            SketchGeometry::Circle { .. } => {
+                // A circle closes on itself: on its own it is the whole path (a loft section).
+                let center = solved.point(&e.id, PointRole::Center).ok_or("path circle not solved")?;
+                let radius = *solved.radii.get(&e.id).ok_or("path circle not solved")?;
+                circles.push(ProfileSegment {
+                    curve: e.id.clone(),
+                    kind: SegmentKind::Circle { center, radius },
+                    start: [center[0] + radius, center[1]],
+                    end: [center[0] + radius, center[1]],
+                });
+                continue;
+            }
             _ => continue,
         };
         pool.push(seg);
+    }
+    if pool.is_empty() && circles.len() == 1 {
+        return Ok(circles);
     }
     if pool.is_empty() {
         return Err("the path sketch has no curves".into());

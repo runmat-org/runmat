@@ -44,7 +44,9 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopLoc_Location.hxx>
+#include <Geom2d_Curve.hxx>
 #include <gp_Lin.hxx>
+#include <gp_Pnt2d.hxx>
 #include <gp_Pln.hxx>
 
 #include <cmath>
@@ -305,6 +307,25 @@ rust::Vec<double> kernel_analyze(std::uint32_t kind, rust::Slice<const double> r
 
 // ------------------------------------------------------------------------- hidden lines
 
+// True when face `f` is edge-on to the viewer all along edge `e` (its normal, placed by `tr`,
+// is perpendicular to `to_viewer` at a quarter, the middle and three quarters of the edge): a
+// tangent edge there is the view's outline, as where a lug's rounded end runs into its flat
+// sides, seen along those sides. HLR's outline pass gives no line where the silhouette falls
+// on an edge, so the edge itself draws it.
+static bool on_silhouette(const TopoDS_Edge& e, const TopoDS_Face& f, const gp_Trsf& tr, const gp_Dir& to_viewer) {
+  double first = 0, last = 0;
+  Handle(Geom2d_Curve) pc = BRep_Tool::CurveOnSurface(e, f, first, last);
+  if (pc.IsNull() || !std::isfinite(first) || !std::isfinite(last)) return false;
+  BRepAdaptor_Surface surface(f);
+  for (const double t : {0.25, 0.5, 0.75}) {
+    const gp_Pnt2d uv = pc->Value(first + (last - first) * t);
+    BRepLProp_SLProps props(surface, uv.X(), uv.Y(), 1, 1e-9);
+    if (!props.IsNormalDefined()) return false;
+    if (std::abs(props.Normal().Transformed(tr).Dot(to_viewer)) > 1e-6) return false;
+  }
+  return true;
+}
+
 rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
                                      rust::Slice<const double> transforms,
                                      rust::Slice<const double> frame_r, std::uint32_t flags,
@@ -358,7 +379,8 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
           bool is_smooth = false;
           const TopTools_ListOfShape& fs = ef.FindFromKey(body.edges[ei]);
           if (fs.Extent() == 2)
-            is_smooth = BRep_Tool::Continuity(body.edges[ei], TopoDS::Face(fs.First()), TopoDS::Face(fs.Last())) >= GeomAbs_G1;
+            is_smooth = BRep_Tool::Continuity(body.edges[ei], TopoDS::Face(fs.First()), TopoDS::Face(fs.Last())) >= GeomAbs_G1 &&
+                        !on_silhouette(TopoDS::Edge(body.edges[ei]), TopoDS::Face(fs.First()), tr, to_viewer);
           if (is_smooth) continue;
         }
         BRepAdaptor_Curve c(e);

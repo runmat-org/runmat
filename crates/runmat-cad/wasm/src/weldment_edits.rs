@@ -125,10 +125,76 @@ fn segments(values: &Values, picks: &Picks) -> Result<Vec<(String, Vec<String>)>
     Ok(groups)
 }
 
-/// `weldment.structural-member` as its feature's model, or `None` for other commands.
+fn one(values: &Values, id: &str, what: &str) -> Result<String, EditFailure> {
+    picks_of(values, id).into_iter().next().ok_or_else(|| model(format!("pick {what}")))
+}
+
+/// End cap, gusset, weld bead and trim/extend: the joints placed on members already in the part.
+fn joint_kind(command: &str, values: &Values, picks: &Picks) -> Result<Option<(&'static str, Value)>, EditFailure> {
+    let kind = match command {
+        "weldment.end-cap" => (
+            "cap",
+            json!({
+                "feature": "weldment", "weldment": "end_cap",
+                "end_face": picks.reference(&one(values, "face", "the member's end face")?)?,
+                "thickness": value(values, "thickness", "mm")?,
+                "inset": if values.contains_key("inset") { value(values, "inset", "mm")? } else { Value::Null },
+            }),
+        ),
+        "weldment.gusset" => {
+            let faces = picks_of(values, "faces");
+            if faces.len() != 2 {
+                return Err(model(format!("a gusset joins two faces that meet at a corner; {} picked", faces.len())));
+            }
+            (
+                "gusset",
+                json!({
+                    "feature": "weldment", "weldment": "gusset",
+                    "faces": picks.references(&faces)?,
+                    "leg": value(values, "leg", "mm")?,
+                    "thickness": value(values, "thickness", "mm")?,
+                }),
+            )
+        }
+        "weldment.weld-bead" => {
+            let edges = picks_of(values, "edges");
+            if edges.is_empty() {
+                return Err(model("pick the edges the weld runs along"));
+            }
+            (
+                "weld",
+                json!({
+                    "feature": "weldment", "weldment": "weld_bead",
+                    "edges": picks.references(&edges)?,
+                    "kind": { "weld": "fillet", "leg": value(values, "leg", "mm")? },
+                }),
+            )
+        }
+        "weldment.trim-extend" => {
+            // A face picked on a member stands for its body (each member is its own body).
+            let pick = one(values, "member", "the member to trim or extend")?;
+            let member = match picks.body_of_face(&pick) {
+                Some(body) => body,
+                None => picks.reference(&crate::surface_edits::body_of(&pick))?,
+            };
+            (
+                "trim",
+                json!({
+                    "feature": "weldment", "weldment": "trim_extend",
+                    "members": [member],
+                    "to": picks.reference(&one(values, "to", "the face or plane to trim to")?)?,
+                }),
+            )
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(kind))
+}
+
+/// A Weldments command as its feature's model, or `None` for other commands.
 pub fn weldment_kind(command: &str, values: &Values, picks: &Picks) -> Result<Option<(&'static str, Value)>, EditFailure> {
     if command != "weldment.structural-member" {
-        return Ok(None);
+        return joint_kind(command, values, picks);
     }
     if values.get("mirror_profile").and_then(Value::as_bool).unwrap_or(false) {
         return Err(model("a mirrored profile isn't in the member model yet; rotate the profile 180° instead"));
@@ -139,9 +205,11 @@ pub fn weldment_kind(command: &str, values: &Values, picks: &Picks) -> Result<Op
     let profile = profile(kind, size, unit)?;
     let corner = values.get("corner").and_then(Value::as_str).unwrap_or("miter");
     let rotation = if values.contains_key("rotation") { value(values, "rotation", "deg")? } else { json!({ "form": "quantity", "value": 0.0, "unit": "deg" }) };
+    // The grade the cut list prints and weighs each member by.
+    let material = values.get("material").and_then(Value::as_str).unwrap_or("s235");
     let groups: Vec<Value> = segments(values, picks)?
         .into_iter()
-        .map(|(sketch, segments)| json!({ "sketch": sketch, "segments": segments, "profile": profile, "corner": corner, "rotation": rotation }))
+        .map(|(sketch, segments)| json!({ "sketch": sketch, "segments": segments, "profile": profile, "material": material, "corner": corner, "rotation": rotation }))
         .collect();
     Ok(Some(("members", json!({ "feature": "weldment", "weldment": "structural_member", "groups": groups }))))
 }
@@ -165,6 +233,11 @@ mod tests {
         let text = out["files"][0]["text"].as_str().unwrap();
         assert!(text.contains("rect_tube(width = 20 mm, height = 30 mm, wall = 2 mm)"), "{text}");
         assert!(text.contains("segments = [bottom, top]"), "{text}");
+        // The grade defaults to structural steel; the cut list weighs the members by it.
+        assert!(text.contains("material = s235"), "{text}");
+        let out = run(json!({ "profile": "square_tube", "size": "20x20x1.5", "material": "al_6061", "segments": ["sketch:layout"] }));
+        let text = out["files"][0]["text"].as_str().unwrap_or_else(|| panic!("{out}"));
+        assert!(text.contains("material = al_6061"), "{text}");
         // A sketch pick takes every line; an angle with two numbers is an equal angle, in inches for ANSI.
         let out = run(json!({ "profile": "angle", "standard": "ansi", "size": "2 x 0.25", "segments": ["sketch:layout"] }));
         let text = out["files"][0]["text"].as_str().unwrap_or_else(|| panic!("{out}"));
@@ -174,5 +247,23 @@ mod tests {
         let out = run(json!({ "profile": "channel", "size": "40x20", "segments": ["sketch.layout.bottom"] }));
         assert_eq!(out["ok"], false);
         assert!(out["message"].as_str().unwrap().contains("depth x flange x web x flange thickness"), "{out}");
+    }
+
+    /// End cap, gusset, weld bead and trim/extend write their features from the canvas's picks.
+    #[test]
+    fn the_joint_commands_write_their_features() {
+        let edit = |command: &str, values: Value| -> String {
+            let request = json!({ "command": command, "values": values }).to_string();
+            let out: Value = serde_json::from_str(&crate::edit::edit_json("/p/frame.part", FRAME, &Files::new(), &request)).unwrap();
+            assert_eq!(out["ok"], true, "{command}: {out}");
+            out["files"][0]["text"].as_str().unwrap().to_owned()
+        };
+        let t = edit("weldment.end-cap", json!({ "face": ["feature.members.face.end"], "thickness": 3, "inset": 1 }));
+        assert!(t.contains("feature cap1 = weldment.end_cap(") && t.contains("thickness = 3 mm") && t.contains("inset = 1 mm"), "{t}");
+        let t = edit("weldment.weld-bead", json!({ "edges": ["edges_between(feature.members.face.end, feature.members.face.start)"], "leg": 4 }));
+        assert!(t.contains("feature weld1 = weldment.weld_bead(") && t.contains("leg = 4 mm"), "{t}");
+        let request = json!({ "command": "weldment.gusset", "values": { "faces": ["feature.members.face.end"], "leg": 50, "thickness": 5 } }).to_string();
+        let out: Value = serde_json::from_str(&crate::edit::edit_json("/p/frame.part", FRAME, &Files::new(), &request)).unwrap();
+        assert_eq!(out["ok"], false, "a gusset needs two faces: {out}");
     }
 }

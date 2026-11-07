@@ -636,12 +636,19 @@ pub fn feature_kind(
                 rules["rule"] =
                     json!({ "rule": "k_factor", "k": { "form": "number", "value": 0.44 } });
             }
-            let mut kind = json!({ "feature": "sheet_metal", "sheet_metal": "base_flange", "profile": profile(values, "profile", picks)?, "rules": rules });
-            if values.get("depth").is_some() {
+            let sketch = picks.sketch(&one(values, "profile", "the sketch")?)?;
+            let mut kind = json!({ "feature": "sheet_metal", "sheet_metal": "base_flange", "profile": { "sketch": sketch }, "rules": rules });
+            // Depth sweeps an open chain; a closed profile is a flat plate (with a depth it would
+            // sweep its outline into walls).
+            if values.get("depth").is_some() && !crate::sheet_profile::closed_profile(picks, &sketch) {
                 kind["depth"] = value(values, "depth", "mm")?;
             }
             ("flange", kind)
         }
+        "sheet-metal.flat-pattern" => (
+            "flat",
+            json!({ "feature": "sheet_metal", "sheet_metal": "flat_pattern", "fixed_face": crate::sheet_profile::flat_fixed_face(picks)? }),
+        ),
         "sheet-metal.edge-flange" => (
             "flange",
             json!({
@@ -802,6 +809,44 @@ mod tests {
             "{command}"
         );
         text
+    }
+
+    /// A closed sketch's base flange is a flat plate even though the form sends its depth; an
+    /// edge flange and a flat pattern follow from the canvas.
+    #[test]
+    fn sheet_metal_plate_flange_and_flat_pattern_from_the_canvas() {
+        let sketch_only = PLATE.replace("    feature body = extrude(profile = sketch.s1, distance = 10 mm)\n", "");
+        let edit = |text: &str, command: &str, values: Value| -> String {
+            let request = json!({ "command": command, "values": values });
+            let out: Value = serde_json::from_str(&edit_json("/p/plate.part", text, &Files::new(), &request.to_string())).unwrap();
+            assert_eq!(out["ok"], true, "{command}: {out}");
+            out["files"][0]["text"].as_str().unwrap().to_owned()
+        };
+        let t = edit(&sketch_only, "sheet-metal.base-flange", json!({ "profile": ["sketch:s1"], "thickness": 1.5, "radius": 1, "depth": 20, "bend_rule": "k_factor", "k": 0.44 }));
+        assert!(t.contains("feature flange1 = sheet_metal.base_flange(") && !t.contains("depth"), "{t}");
+        let t = edit(&t, "sheet-metal.flat-pattern", json!({}));
+        assert!(t.contains("feature flat1 = sheet_metal.flat_pattern(fixed_face = feature.flange1.face.sheet(plate"), "{t}");
+        let compiled: Value = serde_json::from_str(&compile_json("/p/plate.part", &t, &Files::new())).unwrap();
+        let errors: Vec<&Value> = compiled["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").collect();
+        assert!(errors.is_empty(), "{errors:?}\n{t}");
+    }
+
+    /// A lofted surface through two sketches, thickened: the features the canvas writes.
+    #[test]
+    fn a_lofted_surface_from_two_sketches_thickens_into_a_solid() {
+        let two = "runmat 0.7\nstd 1\n\npart skin {\n    sketch a on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = 10 mm)\n    }\n    feature up = plane.offset(base = origin.xy, distance = 20 mm)\n    sketch b on plane.up {\n        c = circle(center = [0 mm, 0 mm], radius = 6 mm)\n    }\n}\n";
+        let edit = |text: &str, command: &str, values: Value| -> String {
+            let request = json!({ "command": command, "values": values });
+            let out: Value = serde_json::from_str(&edit_json("/p/skin.part", text, &Files::new(), &request.to_string())).unwrap();
+            assert_eq!(out["ok"], true, "{command}: {out}");
+            out["files"][0]["text"].as_str().unwrap().to_owned()
+        };
+        let t = edit(two, "surface.loft", json!({ "profiles": ["sketch:a", "sketch:b"] }));
+        assert!(t.contains("feature loft1 = surface.loft(profiles = [sketch.a, sketch.b]"), "{t}");
+        let t = edit(&t, "surface.thicken", json!({ "surface": ["feature:loft1"], "thickness": 1.5, "side": "one" }));
+        assert!(t.contains("feature thicken1 = surface.thicken(bodies = [feature.loft1.body]"), "{t}");
+        // The grid test kernel doesn't loft; the solid is checked on OCCT
+        // (geometry wasm host, cad_loft_thicken).
     }
 
     #[test]

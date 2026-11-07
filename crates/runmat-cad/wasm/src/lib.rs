@@ -21,6 +21,8 @@
 //! - `edit(path, text, files, request)` → `{ ok: true, files, summary }` or
 //!   `{ ok: false, message, diagnostics }`: a catalog command run from the canvas, written as
 //!   the smallest text change ([`edit`]).
+//! - `export(path, text, files, request)` → `{ ok: true, name, mime, text }` or
+//!   `{ ok: false, message }`: a part or assembly as STEP AP242 ([`exchange::export`]).
 //!
 //! Geometry comes from the kernel installed with [`kernel::install`]: OCCT in the product (the
 //! browser and Desktop worker run this runtime inside the OCCT geometry host,
@@ -51,6 +53,8 @@ mod repairs;
 mod xref_repairs;
 pub mod runtime;
 pub mod study_checks;
+mod mold_edits;
+mod sheet_profile;
 mod surface_edits;
 mod weldment_edits;
 pub mod undercut;
@@ -83,6 +87,16 @@ pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
 pub fn analyze(path: &str, text: &str, files: &str, request: &str) -> String {
     match runtime::parse_files(files) {
         Ok(files) => analyze::analyze_json(path, text, &files, request),
+        Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
+    }
+}
+
+/// Exports the part or assembly `path` as a file (STEP AP242).
+#[cfg(feature = "bindings")]
+#[wasm_bindgen]
+pub fn export(path: &str, text: &str, files: &str, request: &str) -> String {
+    match runtime::parse_files(files) {
+        Ok(files) => exchange::export::export_json(path, text, &files, request),
         Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
     }
 }

@@ -356,6 +356,19 @@ pub fn text(id: &str, label: &str, placeholder: Option<&str>) -> Field {
     )
 }
 
+/// A text field that starts filled with `default` (a value the command runs with as it stands).
+pub fn text_value(id: &str, label: &str, default: &str) -> Field {
+    field(
+        id,
+        label,
+        FieldKind::Text {
+            default: Some(default.to_owned()),
+            placeholder: None,
+            suggest: None,
+        },
+    )
+}
+
 /// A text field that offers names from the open file as it is typed (see [`Suggest`]).
 pub fn suggested_text(id: &str, label: &str, placeholder: Option<&str>, source: Suggest) -> Field {
     field(

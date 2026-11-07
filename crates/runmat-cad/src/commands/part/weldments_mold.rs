@@ -37,7 +37,16 @@ pub(super) fn weldments() -> Vec<CommandDescriptor> {
                         ("flat_bar", "Flat bar"),
                     ],
                 ),
-                text("size", "Size", Some("40x40x3")),
+                text_value("size", "Size", "40x40x3"),
+                choice(
+                    "material",
+                    "Material",
+                    &[
+                        ("s235", "Steel S235"),
+                        ("al_6061", "Aluminum 6061"),
+                        ("stainless_304", "Stainless 304"),
+                    ],
+                ),
                 picks("segments", "Path segments", &[K::SketchEntity, K::Sketch]),
                 choice(
                     "corner",
@@ -59,23 +68,10 @@ pub(super) fn weldments() -> Vec<CommandDescriptor> {
             "Trim/extend",
             "trim-extend",
             "trim_extend",
-            "Trim or extend members to each other or to faces.",
+            "Trim or extend a member to a flat face of another body.",
             vec![
-                picks("members", "Members to trim", &[K::Body]),
-                picks(
-                    "boundary",
-                    "Trimming boundary",
-                    &[K::Body, K::Face, K::Plane],
-                ),
-                choice(
-                    "type",
-                    "Corner",
-                    &[
-                        ("end_trim", "End trim"),
-                        ("miter", "Miter"),
-                        ("butt", "Butt"),
-                    ],
-                ),
+                pick("member", "Member", &[K::Body, K::Face]),
+                pick("to", "Trim to", &[K::Face]),
             ],
         )
         .when(has(Facet::Weldments)),
@@ -84,12 +80,11 @@ pub(super) fn weldments() -> Vec<CommandDescriptor> {
             "End cap",
             "end-cap",
             "end_cap",
-            "Close a tube end with a plate.",
+            "Close a member's open end with a plate.",
             vec![
-                picks("faces", "End faces", &[K::Face]),
+                pick("face", "End face", &[K::Face]),
                 length("thickness", "Thickness", 3.0),
                 length("inset", "Inset", 0.0),
-                flag("chamfer", "Chamfer corners", true),
             ],
         )
         .when(has(Facet::Weldments)),
@@ -98,16 +93,10 @@ pub(super) fn weldments() -> Vec<CommandDescriptor> {
             "Gusset",
             "gusset",
             "gusset",
-            "Add a triangular or polygonal plate between members.",
+            "Add a triangular plate between two members' faces at a corner.",
             vec![
                 picks("faces", "Supporting faces", &[K::Face]),
-                choice(
-                    "shape",
-                    "Profile",
-                    &[("triangle", "Triangular"), ("polygon", "Polygonal")],
-                ),
-                length("d1", "Leg 1", 50.0),
-                length("d2", "Leg 2", 50.0),
+                length("leg", "Leg", 50.0),
                 length("thickness", "Thickness", 5.0),
             ],
         )
@@ -117,17 +106,10 @@ pub(super) fn weldments() -> Vec<CommandDescriptor> {
             "Weld bead",
             "weld-bead",
             "weld_bead",
-            "Add a fillet or groove weld between faces.",
+            "Add a fillet weld along the edges between members.",
             vec![
-                picks("faces", "Faces", &[K::Face, K::Edge]),
-                choice(
-                    "weld",
-                    "Type",
-                    &[("fillet", "Fillet"), ("groove", "Groove")],
-                ),
+                picks("edges", "Edges", &[K::Edge]),
                 length("leg", "Leg size", 4.0),
-                flag("intermittent", "Intermittent", false),
-                length("pitch", "Pitch", 50.0).if_checked("intermittent"),
             ],
         )
         .when(has(Facet::Weldments)),
@@ -212,12 +194,11 @@ pub(super) fn mold() -> Vec<CommandDescriptor> {
             "Core/cavity split",
             "core-cavity",
             "core_cavity",
-            "Split a mold block into core and cavity.",
+            "Split a mold block round the part into core and cavity.",
             vec![
-                pick("block", "Block sketch", &[K::Sketch]),
-                length("core_depth", "Core depth", 30.0),
-                length("cavity_depth", "Cavity depth", 30.0),
-                flag("interlock", "Interlock surface", false),
+                pick("part", "Part", &[K::Body, K::Face]),
+                pick("parting", "Parting plane", &[K::Plane, K::Face]),
+                length("margin", "Block margin", 10.0),
             ],
         ),
         cmd("mold.draft-analysis", "Draft analysis", "draft-analysis", P)

@@ -126,3 +126,36 @@ fn an_assembly_exports_its_hierarchy_and_face_names_as_ap242() {
     let ext = |k: usize| b["max"][k].as_f64().unwrap() - b["min"][k].as_f64().unwrap();
     assert!((ext(0) - 0.08).abs() < 1e-6 && (ext(1) - 0.05).abs() < 1e-6 && (ext(2) - 0.04).abs() < 1e-6, "bounds {b}");
 }
+
+fn export(path: &str, text: &str, files: &Value, values: Value) -> Value {
+    let request = serde_json::json!({ "command": "manage.export", "values": values });
+    let call = serde_json::json!({ "fn": "export", "args": [path, text, files.to_string(), request.to_string()] });
+    serde_json::from_str(&runmat_geometry_wasm_host::cad::call(&call.to_string())).expect("json")
+}
+
+/// The Desktop's Export command: `runmat_cad_call`'s `export` writes a part and an assembly as
+/// AP242 with canonical face names, and each file imports back at its size.
+#[test]
+fn the_export_call_writes_a_part_and_an_assembly_that_import_back() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    let files = serde_json::json!({ "/p/plate.part": PLATE, "/p/pair.assembly": PAIR });
+    let part = export("/p/plate.part", PLATE, &files, serde_json::json!({ "format": "step_ap242" }));
+    assert_eq!(part["ok"], true, "{part}");
+    assert_eq!(part["name"], "plate.step");
+    let step = part["text"].as_str().unwrap();
+    assert!(step.contains("ADVANCED_FACE('feature.body.face.end'"), "canonical face names");
+    let pair = export("/p/pair.assembly", PAIR, &files, serde_json::json!({ "format": "step" }));
+    assert_eq!(pair["ok"], true, "{pair}");
+    assert_eq!(pair["text"].as_str().unwrap().matches("NEXT_ASSEMBLY_USAGE_OCCURRENCE").count(), 2);
+
+    for (name, text, height) in [("plate.step", step, 0.01), ("pair.step", pair["text"].as_str().unwrap(), 0.02)] {
+        let housing = format!("runmat 0.7\nstd 1\n\npart housing {{\n    feature step = import(source = \"{name}\", digest = \"unrecorded\")\n}}\n");
+        let files = serde_json::json!({ format!("/p/{name}"): text, "/p/housing.part": housing });
+        let v = call("/p/housing.part", &housing, &files);
+        let b = &v["display"]["data"]["bounds"];
+        let ext = |k: usize| b["max"][k].as_f64().unwrap() - b["min"][k].as_f64().unwrap();
+        assert!((ext(0) - 0.08).abs() < 1e-6 && (ext(2) - height).abs() < 1e-6, "{name}: bounds {b}");
+    }
+    let stl = export("/p/plate.part", PLATE, &files, serde_json::json!({ "format": "stl" }));
+    assert_eq!(stl["ok"], false);
+}

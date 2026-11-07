@@ -1,6 +1,7 @@
 //! The Surfaces tab's edit commands as `surface.*` features (CAD-36), with faces, edges and
 //! bodies referenced by their canonical names:
 //!
+//! - `surface.loft` → `surface.loft(profiles, guides)`: a sheet through two or more sketches;
 //! - `surface.boundary` → `surface.boundary(first, second)`: a surface through edges in one
 //!   direction, or a patch bounded by edges in two;
 //! - `surface.fill` → `surface.fill(boundary)`: a patch over a closed loop of edges, each at the
@@ -35,7 +36,7 @@ fn text<'a>(values: &'a Values, id: &str, default: &'a str) -> &'a str {
 }
 
 /// `feature.patch.face.top` → `feature.patch.body`: the body a picked face belongs to.
-fn body_of(pick: &str) -> String {
+pub(crate) fn body_of(pick: &str) -> String {
     match pick.strip_prefix("feature.").and_then(|rest| rest.split_once('.')) {
         Some((id, rest)) if rest.starts_with("face") || rest.starts_with("edge") => format!("feature.{id}.body"),
         _ => pick.to_owned(),
@@ -72,6 +73,16 @@ fn continuity(values: &Values) -> Result<&str, EditFailure> {
 /// command this module doesn't lower.
 pub fn surface_kind(command: &str, values: &Values, picks: &Picks) -> Result<Option<(&'static str, Value)>, EditFailure> {
     let kind = match command {
+        "surface.loft" => {
+            let profiles = some(values, "profiles", "two or more profiles")?
+                .iter()
+                .map(|p| Ok(json!({ "sketch": picks.sketch(p)? })))
+                .collect::<Result<Vec<_>, EditFailure>>()?;
+            if profiles.len() < 2 {
+                return Err(model("a lofted surface takes two or more profiles"));
+            }
+            ("loft", json!({ "feature": "surface", "kind": "loft", "profiles": profiles, "guides": picks.references(&picks_of(values, "guides"))? }))
+        }
         "surface.boundary" => {
             let first = some(values, "direction1", "the edges in the first direction")?;
             let second = picks_of(values, "direction2");

@@ -3,7 +3,7 @@
 //! [`OcctKernel`], the kernel the K1 corpus checks.
 //!
 //! The browser and Desktop worker call [`runmat_cad_call`] with one JSON request,
-//! `{ "fn": "dependencies" | "compile" | "edit" | "analyze", "args": [..strings] }`, whose arguments are
+//! `{ "fn": "dependencies" | "compile" | "edit" | "analyze" | "export", "args": [..strings] }`, whose arguments are
 //! the ones `runmat-cad-wasm`'s wasm-bindgen entry points take, and get back the same JSON text
 //! those entry points return. Native callers use [`call`] (the same function, for host-parity
 //! tests).
@@ -107,6 +107,17 @@ pub fn call(request: &str) -> String {
                 Ok(files) => {
                     set_imports(&files);
                     analyze::analyze_json(path, text, &files, request)
+                }
+                Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
+            }
+        }
+        "export" => {
+            // A part or assembly as a STEP AP242 file (`runmat_cad_wasm::exchange::export`).
+            let (path, text, request) = (arg(a, 0), arg(a, 1), arg(a, 3));
+            match runtime::parse_files(arg(a, 2)) {
+                Ok(files) => {
+                    set_imports(&files);
+                    runmat_cad_wasm::exchange::export::export_json(path, text, &files, request)
                 }
                 Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
             }
