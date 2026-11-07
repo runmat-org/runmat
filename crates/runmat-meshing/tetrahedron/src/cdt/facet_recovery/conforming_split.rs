@@ -178,6 +178,9 @@ pub(super) fn split_recovered_segment_edge_in_place(
 
 const MAXIMUM_ENCROACHMENT_DEPTH: u8 = 8;
 
+/// Triangles one facet may re-triangulate around a segment split node.
+const MAXIMUM_SPLIT_FACET_CAVITY_TRIANGLES: usize = 64;
+
 /// Returns whether `edge` itself was split; `splits` receives every protected-facet split made,
 /// in application order, including those of encroached edges split first.
 #[allow(clippy::too_many_arguments)]
@@ -1095,20 +1098,79 @@ fn split_and_admit_locally(
     options: crate::cdt::DelaunayInsertionOptions,
     cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
 ) -> Result<LocalSplit, DelaunayFacetRecoveryError> {
+    let mut split_edge_key = edge;
+    split_edge_key.sort_unstable();
+    // Protected triangles of the facets on the edge whose circumcircle holds the node leave
+    // protection and are re-triangulated in their facet; the split and the link flips then see
+    // them as ordinary faces, and the admission below requires their replacements.
+    let cavities = super::facet_delaunay::segment_split_cavities(
+        &*topology,
+        protected,
+        edge,
+        node.identity,
+        node.coordinates_m.canonical_value(),
+        &protected_edges
+            .iter()
+            .copied()
+            .chain([split_edge_key])
+            .collect(),
+        MAXIMUM_SPLIT_FACET_CAVITY_TRIANGLES,
+    );
+    let released = cavities
+        .iter()
+        .flat_map(|cavity| cavity.sources.iter().copied())
+        .collect::<Vec<_>>();
+    let split_protection = protected
+        .iter()
+        .copied()
+        .filter(|triangle| {
+            !released.contains(triangle)
+                || edge
+                    .iter()
+                    .all(|endpoint| triangle.node_identities.contains(endpoint))
+        })
+        .collect::<Vec<_>>();
     let mut observed = topology.observe_edge_changes();
     let Ok(inserted) = observed.append_node(node) else {
         return Ok(LocalSplit::Declined("duplicate node".to_owned()));
     };
-    let mut split_edge_key = edge;
-    split_edge_key.sort_unstable();
     let (removed, created, mut splits) = split_edge(
         &observed,
         inserted,
         edge,
-        protected,
+        &split_protection,
         strategy,
         constraint_index,
     )?;
+    let retriangulated = cavities
+        .iter()
+        .flat_map(|cavity| cavity.children.iter().copied())
+        .collect::<Vec<_>>();
+    if !cavities.is_empty() {
+        tracing::info!(
+            event_code = "meshing.tetrahedron.facet_recovery.split_facet_cavity",
+            constraint_index,
+            facet_count = cavities.len(),
+            released_triangle_count = released.len(),
+            child_triangle_count = retriangulated.len(),
+            "a segment split node encroaches protected triangles of a facet on the edge, which \
+             are re-triangulated around it"
+        );
+        splits.retain(|split| !released.contains(&split.source));
+        for cavity in cavities {
+            let mut sources = cavity.sources.into_iter();
+            if let Some(first) = sources.next() {
+                splits.push(ProtectedFacetSplit {
+                    source: first,
+                    children: cavity.children,
+                });
+            }
+            splits.extend(sources.map(|source| ProtectedFacetSplit {
+                source,
+                children: Vec::new(),
+            }));
+        }
+    }
     if removed.is_empty() {
         return Ok(LocalSplit::Declined("empty replacement".to_owned()));
     }
@@ -1183,6 +1245,27 @@ fn split_and_admit_locally(
         splits.extend(flip_splits);
         protected_face_keys(&current)
     };
+    // The re-triangulated facet triangles that the flips kept must exist as faces.
+    if !retriangulated.is_empty() {
+        let missing = retriangulated.iter().any(|triangle| {
+            let mut face = triangle.node_identities;
+            face.sort_unstable();
+            if !protected_faces.contains(&face) {
+                return false;
+            }
+            let [Some(a), Some(b), Some(c)] =
+                triangle.node_identities.map(|identity| observed.node_index(identity))
+            else {
+                return true;
+            };
+            observed.face_incidence([a, b, c]).is_empty()
+        });
+        if missing {
+            return Ok(LocalSplit::Declined(
+                "a re-triangulated facet triangle is not a face after link flips".to_owned(),
+            ));
+        }
+    }
     // The split edge is replaced by its two halves; every other recovered segment edge that a
     // removed cell carried must survive.
     let halves = edge.map(|endpoint| [endpoint, node.identity]);
