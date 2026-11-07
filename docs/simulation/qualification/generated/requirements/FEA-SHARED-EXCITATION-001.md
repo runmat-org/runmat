@@ -38,7 +38,7 @@ Evidence kind: SemanticRealization. Criterion: A signal declares: stable signal 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::validate_signals::topology_field_tests::field_validation_preserves_frames_precision_and_approximation_evidence` (crates/runmat-analysis/core/src/validate_signals/topology_field_tests.rs:220) - Field validation preserves frames, precision and approximation evidence.<br>`runmat-analysis-fea[lib]::excitation::tests::step_interpolation_selects_the_documented_side_of_an_interval` (crates/runmat-analysis/fea/src/excitation/tests.rs:321) - Typed tabulated force signal at time 0.5 selects distinct left and right endpoint vectors; no generator freezing, spatial integration or placement equivalence. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::validate_signals::topology_field_tests::field_validation_preserves_frames_precision_and_approximation_evidence` (crates/runmat-analysis/core/src/validate_signals/topology_field_tests.rs:222) - Field validation preserves frames, precision and approximation evidence.<br>`runmat-analysis-fea[lib]::excitation::tests::step_interpolation_selects_the_documented_side_of_an_interval` (crates/runmat-analysis/fea/src/excitation/tests.rs:323) - Typed tabulated force signal at time 0.5 selects distinct left and right endpoint vectors; no generator freezing, spatial integration or placement equivalence. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -53,7 +53,7 @@ Evidence kind: SemanticRealization. Criterion: An excitation binds a signal to p
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::excitation::tests::realization_preserves_exact_multi_entity_region_targets` (crates/runmat-analysis/fea/src/excitation/tests.rs:144) - Realization preserves exact multi-entity region targets.<br>`runmat-analysis-fea[lib]::excitation::tests::preserves_reference_point_force_and_moment_action_identity` (crates/runmat-analysis/fea/src/excitation/tests.rs:640) - Reference-point force and moment action identity is preserved. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::excitation::tests::realization_preserves_exact_multi_entity_region_targets` (crates/runmat-analysis/fea/src/excitation/tests.rs:144) - Realization preserves exact multi-entity region targets.<br>`runmat-analysis-fea[lib]::excitation::tests::preserves_reference_point_force_and_moment_action_identity` (crates/runmat-analysis/fea/src/excitation/tests.rs:645) - Reference-point force and moment action identity is preserved. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -128,7 +128,7 @@ Evidence kind: SemanticRealization. Criterion: Modal eigenvalue extraction has n
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::validate_sequence::tests::modal_response_requires_typed_existing_spectrum_ids` (crates/runmat-analysis/core/src/validate_sequence/tests.rs:126) - Modal response requires typed existing spectrum ids.<br>`runmat-analysis-fea[lib]::solve::dynamics::response_spectrum::tests::modal_and_directional_combination_policies_have_independent_semantics` (crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/tests.rs:24) - Modal and directional combination policies have independent semantics. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::validate_sequence::tests::modal_response_requires_typed_existing_spectrum_ids` (crates/runmat-analysis/core/src/validate_sequence/tests.rs:124) - Modal response requires typed existing spectrum ids.<br>`runmat-analysis-fea[lib]::solve::dynamics::response_spectrum::tests::modal_and_directional_combination_policies_have_independent_semantics` (crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/tests.rs:24) - Modal and directional combination policies have independent semantics. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -143,7 +143,7 @@ Evidence kind: SemanticRealization. Criterion: Generated physical input has laye
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::tests::generator_capture_and_realized_content_invalidate_the_realization` (crates/runmat-analysis/fea/src/execution/tests.rs:82) - Generator capture and realized content invalidate the realization.<br>`runmat-analysis-fea[lib]::execution::tests::canonical_signal_realization_round_trips_and_layers_content_identity` (crates/runmat-analysis/fea/src/execution/tests.rs:658) - Canonical signal realization round-trips and layers content identity. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::tests::generator_capture_and_realized_content_invalidate_the_realization` (crates/runmat-analysis/fea/src/execution/tests.rs:83) - Generator capture and realized content invalidate the realization.<br>`runmat-analysis-fea[lib]::execution::tests::canonical_signal_realization_round_trips_and_layers_content_identity` (crates/runmat-analysis/fea/src/execution/tests.rs:669) - Canonical signal realization round-trips and layers content identity. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -173,7 +173,7 @@ Evidence kind: SemanticRealization. Criterion: Required governed cases include: 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::excitation::tests::static_excitation_accepts_only_coordinate_independent_tables` (crates/runmat-analysis/fea/src/excitation/tests.rs:282) - Static excitation accepts only coordinate-independent tables; the constant, step and frequency-dependent cases of the corpus are not all covered. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::excitation::tests::static_excitation_accepts_only_coordinate_independent_tables` (crates/runmat-analysis/fea/src/excitation/tests.rs:283) - Static excitation accepts only coordinate-independent tables; the constant, step and frequency-dependent cases of the corpus are not all covered. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

@@ -8,7 +8,7 @@ Evidence kind: IndependentReference. Criterion: Integrate actual momentum time d
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::transient::original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/transient.rs:52) - A uniformly accelerating field has the exact inertia-driven pressure and binds cold; a nontrivial unsteady reference is not covered here.<br>`runmat-analysis-fea[lib]::physics::cfd::canonical::tests::transient::original_mass_term_matches_independent_cell_integral_on_every_axis` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/transient.rs:226) - Independent rho*volume*delta-U/dt cell action on every axis; not temporal field convergence. |
+| incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::transient::original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/transient.rs:64) - A uniformly accelerating field has the exact inertia-driven pressure and binds cold; a nontrivial unsteady reference is not covered here.<br>`runmat-analysis-fea[lib]::physics::cfd::canonical::tests::transient::original_mass_term_matches_independent_cell_integral_on_every_axis` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/transient.rs:248) - Independent rho*volume*delta-U/dt cell action on every axis; not temporal field convergence. |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | public_study | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | durable | OPEN |  |
@@ -19,7 +19,7 @@ Evidence kind: TemporalConvergence. Criterion: Show temporal convergence indepen
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::transient::exponential_translation_pressure_shows_first_order_time_convergence` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/transient.rs:112) - Uniform exponential translation pressure on three time steps; no vortex or independent spatial sweep. |
+| incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::transient::exponential_translation_pressure_shows_first_order_time_convergence` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/transient.rs:133) - Uniform exponential translation pressure on three time steps; no vortex or independent spatial sweep. |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | public_study | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | durable | OPEN |  |
@@ -30,7 +30,7 @@ Evidence kind: ColdReplay. Criterion: Preserve complete original interval state,
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::time_block::authored_time_block_cold_recovery_and_split_match_original_acceleration` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/time_block.rs:34) - Original acceleration history and split replay; chronology/tamper/budget/cancel checks, no native process credit. |
+| incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::fluid::tests::transient_workload::authored_history_retains_and_publishes_fields_at_sampled_times` (crates/runmat-analysis/fea/src/execution/fluid/tests/transient_workload.rs:394) - an authored time history retains the sampled interval's fields (and drops the others), and native field recovery publishes them at their physical times beside t...<br>`runmat-analysis-fea[lib]::physics::cfd::canonical::tests::time_block::authored_time_block_cold_recovery_and_split_match_original_acceleration` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/time_block.rs:34) - Original acceleration history and split replay; chronology/tamper/budget/cancel checks, no native process credit. |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | public_study | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | durable | OPEN |  |

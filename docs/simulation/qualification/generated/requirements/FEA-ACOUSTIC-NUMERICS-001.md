@@ -9,7 +9,7 @@ Evidence kind: SpatialConvergence. Criterion: Independent duct/impedance traveli
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
-| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::continuum::tet10_traveling_wave_phase_pressure_velocity_and_power_converge` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/continuum.rs:73) - Tet10 slab at two frequencies, three refinements; exact traveling-wave references, not all acoustic geometries. |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::continuum::tet10_traveling_wave_phase_pressure_velocity_and_power_converge` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/continuum.rs:79) - Tet10 slab at two frequencies, three refinements; exact traveling-wave references, not all acoustic geometries. |
 
 ## cavity
 
@@ -17,8 +17,8 @@ Evidence kind: IndependentReference. Criterion: Rigid cavity references verify m
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::continuum::tet4_and_tet10_forced_rigid_cavity_converge_on_both_sides_of_axial_resonance` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/continuum.rs:137) - Forced axial cavity at 0.9/1.1 times first pole, phase/pressure/energy convergence; no complete multidimensional modal-spectrum credit. |
-| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::continuum::tet4_and_tet10_forced_rigid_cavity_converge_on_both_sides_of_axial_resonance` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/continuum.rs:137) - Forced axial cavity at 0.9/1.1 times first pole, phase/pressure/energy convergence; no complete multidimensional modal-spectrum credit. |
+| acoustic_harmonic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::continuum::tet4_and_tet10_forced_rigid_cavity_converge_on_both_sides_of_axial_resonance` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/continuum.rs:145) - Forced axial cavity at 0.9/1.1 times first pole, phase/pressure/energy convergence; no complete multidimensional modal-spectrum credit. |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::continuum::tet4_and_tet10_forced_rigid_cavity_converge_on_both_sides_of_axial_resonance` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/continuum.rs:145) - Forced axial cavity at 0.9/1.1 times first pole, phase/pressure/energy convergence; no complete multidimensional modal-spectrum credit. |
 
 ## conditioning
 

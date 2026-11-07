@@ -53,7 +53,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Implement component-wise prescri
 | linear_structural | tet4 | numerical_kernel | OPEN |  |
 | linear_structural | tet10 | numerical_kernel | OPEN |  |
 | linear_structural | beam | numerical_kernel | OPEN |  |
-| linear_structural | shell | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::mixed::tests::explicit_shell_distributing_coupling_retains_reference_point_evidence` (crates/runmat-analysis/fea/src/constraints/mixed/tests.rs:208) - Shell distributing coupling with reference-point evidence.<br>`runmat-analysis-fea[lib]::constraints::mixed::tests::mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path` (crates/runmat-analysis/fea/src/constraints/mixed/tests.rs:309) - A mesh-free shell reference coupling uses the same generalized DOF path. |
+| linear_structural | shell | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::mixed::tests::explicit_shell_distributing_coupling_retains_reference_point_evidence` (crates/runmat-analysis/fea/src/constraints/mixed/tests.rs:219) - Shell distributing coupling with reference-point evidence.<br>`runmat-analysis-fea[lib]::constraints::mixed::tests::mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path` (crates/runmat-analysis/fea/src/constraints/mixed/tests.rs:323) - A mesh-free shell reference coupling uses the same generalized DOF path. |
 | linear_structural | tet4 | public_study | OPEN |  |
 | linear_structural | tet10 | public_study | OPEN |  |
 | linear_structural | beam | public_study | OPEN |  |
@@ -82,7 +82,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Add resource-aware scoped shared
 | linear_structural | canonical_mixed_topology | native_process | OPEN |  |
 | linear_structural | canonical_mixed_topology | durable | OPEN |  |
 | linear_structural | canonical_mixed_topology | remote_execution | OPEN |  |
-| linear_structural | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::tests::admitted_parallel_solid_recovery_matches_serial_static_fields_exactly` (crates/runmat-analysis/fea/src/tests.rs:4822) - Admitted parallel solid recovery matches the serial static fields exactly; assembly and solve parallelism and accelerator or remote placement are not covered. |
+| linear_structural | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::tests::admitted_parallel_solid_recovery_matches_serial_static_fields_exactly` (crates/runmat-analysis/fea/src/tests.rs:5000) - Admitted parallel solid recovery matches the serial static fields exactly; assembly and solve parallelism and accelerator or remote placement are not covered. |
 | linear_structural | canonical_mixed_topology | domain_decomposed | OPEN |  |
 | linear_structural | canonical_mixed_topology | claimed_accelerator | OPEN |  |
 

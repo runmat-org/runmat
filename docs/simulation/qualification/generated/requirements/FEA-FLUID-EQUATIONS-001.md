@@ -8,7 +8,7 @@ Evidence kind: PhysicalBalance. Criterion: Evaluate one original oriented owner-
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::affine_skew_face_velocity_and_nonzero_convection_are_consistent` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:90) - Independent affine skew-face flux and integrated nonzero advection; no general nonlinear field-convergence credit. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::affine_skew_face_velocity_and_nonzero_convection_are_consistent` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:94) - Independent affine skew-face flux and integrated nonzero advection; no general nonlinear field-convergence credit. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
@@ -23,7 +23,7 @@ Evidence kind: PhysicalBalance. Criterion: Pressure-velocity coupling solves ori
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::closed_reference::closed_gauge_admission_rejects_missing_duplicate_outlet_and_incompatible_flux` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/closed_reference.rs:78) - Closed gauge/reference and net flux rejection; not full pressure-velocity envelope proof. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::closed_reference::closed_gauge_admission_rejects_missing_duplicate_outlet_and_incompatible_flux` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/closed_reference.rs:91) - Closed gauge/reference and net flux rejection; not full pressure-velocity envelope proof. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |

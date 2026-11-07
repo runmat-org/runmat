@@ -3,15 +3,15 @@
     {
       "capability": "Published example studies run end to end from the public command",
       "cells": 1,
-      "fail": 1,
+      "fail": 0,
       "id": "SIM-01",
       "maps": [
         "FEA-PUBLIC-STUDIES-001/docs_examples_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:30",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -47,16 +47,16 @@
     {
       "capability": "Chained and coupled studies run",
       "cells": 20,
-      "fail": 0,
+      "fail": 2,
       "id": "SIM-04",
       "maps": [
         "FEA-PUBLIC-STUDIES-001/chained_and_coupled_studies_run",
         "FEA-COUPLING-CHAIN-001/thermal_to_prestress_to_modal"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:33",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -106,16 +106,16 @@
     {
       "capability": "Units, entity kinds and hand-offs are checked before meshing; a failing study does not run",
       "cells": 6,
-      "fail": 1,
+      "fail": 0,
       "id": "SIM-08",
       "maps": [
         "FEA-AUTHORING-COMPILER-002/type_and_unit_pass",
         "FEA-AUTHORING-COMPILER-002/check_plan_run"
       ],
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:37",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -266,7 +266,7 @@
     {
       "capability": "Conjugate heat transfer and fluid-structure interaction run as coupled studies",
       "cells": 28,
-      "fail": 0,
+      "fail": 3,
       "id": "SIM-19",
       "maps": [
         "FEA-COUPLING-CHT-001/*",
@@ -276,13 +276,13 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:55",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Large deformation, adaptive analysis, acoustic modal and transient, transient or compressible flow",
       "cells": 44,
-      "fail": 3,
+      "fail": 0,
       "id": "SIM-20",
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/large_deformation",
@@ -293,16 +293,16 @@
         "FEA-FLUID-PHYSICS-001/compressible_and_networks",
         "excluded: turbulent flow and fatigue (owner 2026-10-21 and 2026-10-20)"
       ],
-      "partial": 3,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:56",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Electromagnetic frequency sweeps and eddy-current transients",
       "cells": 8,
-      "fail": 0,
+      "fail": 1,
       "id": "SIM-21",
       "maps": [
         "FEA-EM-FREQUENCY-001/multi_frequency_study",
@@ -312,7 +312,7 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:57",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -479,7 +479,7 @@
     {
       "capability": "Steady current, electrostatic, magnetostatic and multi-frequency harmonic studies run and publish fields",
       "cells": 15,
-      "fail": 0,
+      "fail": 1,
       "id": "SIM-33",
       "maps": [
         "FEA-EM-FREQUENCY-001/multi_frequency_study",
@@ -489,7 +489,7 @@
       "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:74",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -539,16 +539,16 @@
     {
       "capability": "Acoustic cavity modes and transient pressure run from a .fea study",
       "cells": 24,
-      "fail": 3,
+      "fail": 0,
       "id": "SIM-37",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
         "FEA-ACOUSTIC-TRANSIENT-001/*"
       ],
-      "partial": 3,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:78",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -583,7 +583,7 @@
     {
       "capability": "CHT and FSI run end to end with converged two-way coupling",
       "cells": 11,
-      "fail": 0,
+      "fail": 2,
       "id": "SIM-40",
       "maps": [
         "FEA-COUPLING-CHT-001/*",
@@ -593,7 +593,7 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:81",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -614,7 +614,7 @@
     {
       "capability": "Acoustics: harmonic, modal, transient, SPL, impedance, TL, intensity, structure-borne",
       "cells": 72,
-      "fail": 3,
+      "fail": 1,
       "id": "SIM-42",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
@@ -623,7 +623,7 @@
         "FEA-ACOUSTIC-BOUNDARY-002/*",
         "FEA-ACOUSTIC-COUPLING-001/*"
       ],
-      "partial": 7,
+      "partial": 11,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:83",
       "status": "fail",
@@ -712,10 +712,10 @@
       "maps": [
         "FEA-COUPLING-CHAIN-001/thermal_to_prestress_to_modal"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:16",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -736,7 +736,7 @@
     {
       "capability": "Electromagnetic studies runnable: multi-body STEP, named faces, AC loss into heat, multi-frequency, magnetostatics",
       "cells": 21,
-      "fail": 0,
+      "fail": 1,
       "id": "SLOT-08",
       "maps": [
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import",
@@ -746,10 +746,10 @@
         "FEA-EM-MAXWELL-001/*",
         "FEA-EM-MAGNETOSTATIC-001/*"
       ],
-      "partial": 6,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:18",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -769,7 +769,7 @@
     {
       "capability": "Acoustics studies runnable and run",
       "cells": 72,
-      "fail": 3,
+      "fail": 1,
       "id": "SLOT-10",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
@@ -778,7 +778,7 @@
         "FEA-ACOUSTIC-BOUNDARY-002/*",
         "FEA-ACOUSTIC-COUPLING-001/*"
       ],
-      "partial": 7,
+      "partial": 11,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:20",
       "status": "fail",
@@ -794,7 +794,7 @@
         "FEA-EM-NONLINEAR-001/*",
         "FEA-EM-INPUTS-002/*"
       ],
-      "partial": 2,
+      "partial": 4,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:21",
       "status": "tied",
@@ -803,7 +803,7 @@
     {
       "capability": "Complete non-turbulent flow, fast at scale",
       "cells": 200,
-      "fail": 0,
+      "fail": 1,
       "id": "SLOT-12",
       "maps": [
         "FEA-FLUID-SOLVERS-001/*",
@@ -815,10 +815,10 @@
         "FEA-FLUID-VERIFICATION-001/*",
         "FEA-SCALE-SIZE-001/fluid_performance_targets"
       ],
-      "partial": 0,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:22",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -950,15 +950,15 @@
     {
       "capability": "Differential agreement with an independent mesher",
       "cells": 3,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-MESH-010",
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/independent_mesher_differential"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:138",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1530,15 +1530,15 @@
     {
       "capability": "Every published example runs end to end via `runmat run`",
       "cells": 1,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-CLI-002",
       "maps": [
         "FEA-PUBLIC-STUDIES-001/docs_examples_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:178",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1572,15 +1572,15 @@
     {
       "capability": "Chained and coupled studies admitted at `runmat run`",
       "cells": 8,
-      "fail": 0,
+      "fail": 2,
       "id": "REG-CLI-005",
       "maps": [
         "FEA-PUBLIC-STUDIES-001/chained_and_coupled_studies_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:181",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1686,29 +1686,29 @@
     {
       "capability": "Acoustic cavity modal analysis",
       "cells": 12,
-      "fail": 2,
+      "fail": 0,
       "id": "REG-ACOUS-001",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*"
       ],
-      "partial": 3,
+      "partial": 6,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:48",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Acoustic transient with energy balance",
       "cells": 12,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-ACOUS-002",
       "maps": [
         "FEA-ACOUSTIC-TRANSIENT-001/*"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:49",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1756,7 +1756,7 @@
     {
       "capability": "Transmission and insertion loss",
       "cells": 4,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-ACOUS-006",
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/transmission_and_insertion_loss"
@@ -1764,7 +1764,7 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:53",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1845,7 +1845,7 @@
       "maps": [
         "FEA-EM-INPUTS-002/*"
       ],
-      "partial": 2,
+      "partial": 4,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:207",
       "status": "tied",
@@ -1860,10 +1860,10 @@
         "FEA-FLUID-SOLVERS-001/coupled_newton_continuation",
         "FEA-FLUID-SOLVERS-001/residual_history"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:54",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1874,10 +1874,10 @@
       "maps": [
         "FEA-FLUID-SOLVERS-001/block_linear_solvers"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:55",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1941,7 +1941,7 @@
     {
       "capability": "Heat in the fluid: convection, CHT, viscous heating, radiation",
       "cells": 24,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-FLUID-007",
       "maps": [
         "FEA-FLUID-HEAT-001/*"
@@ -1949,7 +1949,7 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:60",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1974,10 +1974,10 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/generalized_newtonian"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:62",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2002,10 +2002,10 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/porous_zones"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:64",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2095,7 +2095,7 @@
     {
       "capability": "Fluid-structure: one-way loads and two-way ALE",
       "cells": 16,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-FLUID-018",
       "maps": [
         "FEA-COUPLING-FSI-002/*"
@@ -2103,7 +2103,7 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:71",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -2114,10 +2114,10 @@
       "maps": [
         "FEA-FLUID-OUTPUTS-001/*"
       ],
-      "partial": 0,
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:72",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2165,7 +2165,7 @@
     {
       "capability": "Declarative .fea language, imports, composition and one compiler authority",
       "cells": 140,
-      "fail": 4,
+      "fail": 3,
       "id": "PLAN-LANG",
       "maps": [
         "FEA-AUTHORING-LANGUAGE-002/*",
@@ -2173,7 +2173,7 @@
         "FEA-AUTHORING-CUTOVER-001/*",
         "FEA-AUTHORING-COMPILER-002/*"
       ],
-      "partial": 22,
+      "partial": 23,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:508",
       "status": "fail",
@@ -2260,7 +2260,7 @@
       "maps": [
         "FEA-SHARED-PROPERTIES-001/*"
       ],
-      "partial": 9,
+      "partial": 8,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:1156",
       "status": "tied",
@@ -2332,7 +2332,7 @@
         "FEA-SHARED-EXECUTION-001/*",
         "FEA-SHARED-IDENTITY-001/*"
       ],
-      "partial": 8,
+      "partial": 9,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2202",
       "status": "tied",
@@ -2422,7 +2422,7 @@
         "FEA-STRUCTURAL-CONSTRAINT-001/*",
         "FEA-STRUCTURAL-EXECUTION-001/*"
       ],
-      "partial": 23,
+      "partial": 26,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2571",
       "status": "tied",
@@ -2450,7 +2450,7 @@
       "maps": [
         "FEA-DYNAMICS-PRESTRESS-001/*"
       ],
-      "partial": 3,
+      "partial": 4,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2623",
       "status": "tied",
@@ -2474,17 +2474,17 @@
     {
       "capability": "Nonlinear state, operators and laws",
       "cells": 114,
-      "fail": 1,
+      "fail": 0,
       "id": "PLAN-NL",
       "maps": [
         "FEA-NONLINEAR-STATE-001/*",
         "FEA-NONLINEAR-OPERATOR-001/*",
         "FEA-NONLINEAR-GOVERNANCE-001/*"
       ],
-      "partial": 29,
+      "partial": 31,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2654",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2503,8 +2503,8 @@
     },
     {
       "capability": "Thermal domain, inputs, solves, fields, accuracy, execution",
-      "cells": 146,
-      "fail": 1,
+      "cells": 154,
+      "fail": 0,
       "id": "PLAN-HEAT",
       "maps": [
         "FEA-THERMAL-DOMAIN-001/*",
@@ -2514,10 +2514,10 @@
         "FEA-THERMAL-ACCURACY-001/*",
         "FEA-THERMAL-EXECUTION-001/*"
       ],
-      "partial": 23,
+      "partial": 32,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2680",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2532,7 +2532,7 @@
         "FEA-EM-MAXWELL-001/*",
         "FEA-EM-QUALIFICATION-001/*"
       ],
-      "partial": 29,
+      "partial": 36,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2693",
       "status": "tied",
@@ -2541,7 +2541,7 @@
     {
       "capability": "Harmonic Helmholtz operator, boundaries, sources, numerics, accuracy, execution",
       "cells": 81,
-      "fail": 4,
+      "fail": 0,
       "id": "PLAN-ACOUSTIC",
       "maps": [
         "FEA-ACOUSTIC-OPERATOR-001/*",
@@ -2551,16 +2551,16 @@
         "FEA-ACOUSTIC-ACCURACY-001/*",
         "FEA-ACOUSTIC-EXECUTION-001/*"
       ],
-      "partial": 20,
+      "partial": 24,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2719",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Laminar incompressible flow base",
       "cells": 159,
-      "fail": 1,
+      "fail": 0,
       "id": "PLAN-CFD",
       "maps": [
         "FEA-FLUID-TOPOLOGY-001/*",
@@ -2571,10 +2571,10 @@
         "FEA-FLUID-ACCURACY-001/*",
         "FEA-FLUID-EXECUTION-001/*"
       ],
-      "partial": 21,
+      "partial": 23,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2731",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2608,7 +2608,7 @@
     {
       "capability": "Conservative thermal/fluid interface and iteration",
       "cells": 15,
-      "fail": 0,
+      "fail": 1,
       "id": "PLAN-CHT",
       "maps": [
         "FEA-COUPLING-CHT-001/*",
@@ -2617,13 +2617,13 @@
       "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2762",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Dynamics/fluid interaction with ALE",
       "cells": 9,
-      "fail": 0,
+      "fail": 1,
       "id": "PLAN-FSI",
       "maps": [
         "FEA-COUPLING-FSI-001/*"
@@ -2631,7 +2631,7 @@
       "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2771",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -2659,7 +2659,7 @@
         "FEA-SCALE-PARALLEL-001/parallel_assembly_and_recovery",
         "FEA-SCALE-DISTRIBUTED-001/domain_decomposition"
       ],
-      "partial": 6,
+      "partial": 7,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2807",
       "status": "tied",
@@ -2697,15 +2697,15 @@
     {
       "capability": "Blocking attested evidence in the existing release graph",
       "cells": 6,
-      "fail": 1,
+      "fail": 0,
       "id": "PLAN-CI",
       "maps": [
         "FEA-RELEASE-CI-001/*"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2881",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2774,7 +2774,7 @@
         "FEA-DYNAMICS-PRESTRESS-001/*",
         "FEA-STRUCTURAL-PUBLIC-001/result_publication_defects"
       ],
-      "partial": 3,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:29",
       "status": "tied",
@@ -2833,7 +2833,7 @@
       "maps": [
         "FEA-DYNAMICS-PRESTRESS-001/*"
       ],
-      "partial": 3,
+      "partial": 4,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:33",
       "status": "tied",
@@ -2842,16 +2842,16 @@
     {
       "capability": "Small-strain J2 plasticity; failing J2 gates",
       "cells": 48,
-      "fail": 1,
+      "fail": 0,
       "id": "PM-J2",
       "maps": [
         "FEA-NONLINEAR-OPERATOR-001/*",
         "FEA-STRUCTURAL-PUBLIC-001/plasticity_example"
       ],
-      "partial": 5,
+      "partial": 6,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:34",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2923,7 +2923,7 @@
         "FEA-COUPLING-THERMOELASTIC-001/*",
         "FEA-COUPLING-CHAIN-001/*"
       ],
-      "partial": 2,
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:39",
       "status": "tied",
@@ -2938,7 +2938,7 @@
         "FEA-EM-SCALAR-001/*",
         "FEA-EM-INPUTS-002/scalar_potential_inputs"
       ],
-      "partial": 10,
+      "partial": 12,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:40",
       "status": "tied",
@@ -2968,7 +2968,7 @@
         "FEA-EM-MAGNETOSTATIC-001/*",
         "FEA-EM-INPUTS-002/magnetic_inputs"
       ],
-      "partial": 3,
+      "partial": 4,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:42",
       "status": "tied",
@@ -2977,7 +2977,7 @@
     {
       "capability": "Harmonic Maxwell, multi-frequency",
       "cells": 11,
-      "fail": 0,
+      "fail": 1,
       "id": "PM-MAXWELL",
       "maps": [
         "FEA-EM-MAXWELL-001/*",
@@ -2986,7 +2986,7 @@
       "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:43",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3007,7 +3007,7 @@
     {
       "capability": "Acoustic harmonic",
       "cells": 32,
-      "fail": 2,
+      "fail": 0,
       "id": "PM-ACOUSTIC-H",
       "maps": [
         "FEA-ACOUSTIC-OPERATOR-001/*",
@@ -3015,25 +3015,25 @@
         "FEA-ACOUSTIC-SOURCE-001/*",
         "FEA-ACOUSTIC-NUMERICS-001/*"
       ],
-      "partial": 17,
+      "partial": 19,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:45",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Acoustic modal and transient",
       "cells": 24,
-      "fail": 3,
+      "fail": 0,
       "id": "PM-ACOUSTIC-MT",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
         "FEA-ACOUSTIC-TRANSIENT-001/*"
       ],
-      "partial": 3,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:46",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3069,7 +3069,7 @@
     {
       "capability": "Conjugate heat transfer",
       "cells": 7,
-      "fail": 0,
+      "fail": 2,
       "id": "PM-CHT",
       "maps": [
         "FEA-COUPLING-CHT-001/*",
@@ -3078,13 +3078,13 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:49",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Fluid-structure interaction",
       "cells": 25,
-      "fail": 0,
+      "fail": 2,
       "id": "PM-FSI",
       "maps": [
         "FEA-COUPLING-FSI-001/*",
@@ -3093,7 +3093,7 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:50",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3338,13 +3338,13 @@
     {
       "capability": "Corpus, conformance, differential, reliability and integration catalogs",
       "cells": 5,
-      "fail": 2,
+      "fail": 1,
       "id": "MESH-CATALOGS",
       "maps": [
         "FEA-MESH-EXECUTION-001/performance_slo_and_governance",
         "FEA-MESH-DISCRETIZATION-001/independent_mesher_differential"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:93",
       "status": "fail",
@@ -3367,17 +3367,17 @@
     {
       "capability": "Twelve failing scientific gates (J2 continuum x8, transient rod x3, adaptation estimator x1)",
       "cells": 35,
-      "fail": 1,
+      "fail": 0,
       "id": "VER-GATES",
       "maps": [
         "FEA-NONLINEAR-OPERATOR-001/references",
         "FEA-DYNAMICS-RESPONSE-001/references",
         "FEA-ADAPTATION-LOOP-001/family_estimator_canonical_order"
       ],
-      "partial": 4,
+      "partial": 5,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/verification.md:40",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3476,10 +3476,10 @@
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/result_publication_defects"
       ],
-      "partial": 0,
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/launch-scope-vs-reality.md:46",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3762,15 +3762,15 @@
     {
       "capability": "Rigid, pressure, impedance, plane-wave radiation, incident, periodic and Bloch boundaries",
       "cells": 8,
-      "fail": 2,
+      "fail": 0,
       "id": "AC-T1-BOUNDS",
       "maps": [
         "FEA-ACOUSTIC-BOUNDARY-001/*"
       ],
-      "partial": 5,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:16",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3805,7 +3805,7 @@
     {
       "capability": "Authored acoustic outputs published from runs",
       "cells": 22,
-      "fail": 0,
+      "fail": 1,
       "id": "AC-T2-OUTPUTS",
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/*",
@@ -3814,23 +3814,23 @@
       "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:24",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Accuracy gate, cold selection, placement, release docs, conditioning, cold spectra equivalence",
       "cells": 59,
-      "fail": 2,
+      "fail": 0,
       "id": "AC-T3-GATES",
       "maps": [
         "FEA-ACOUSTIC-ACCURACY-001/*",
         "FEA-ACOUSTIC-EXECUTION-001/*",
         "FEA-ACOUSTIC-NUMERICS-001/*"
       ],
-      "partial": 8,
+      "partial": 10,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:32",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3850,7 +3850,7 @@
     {
       "capability": "Muffler hero: pressure per one-third-octave band with TL curve",
       "cells": 10,
-      "fail": 0,
+      "fail": 1,
       "id": "AC-PAGE-HERO",
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/transmission_and_insertion_loss",
@@ -3860,22 +3860,22 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:62",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Cabin modes with mode snapshots",
       "cells": 14,
-      "fail": 2,
+      "fail": 0,
       "id": "AC-PAGE-CABIN",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
         "FEA-PUBLIC-RESULTS-001/saved_scene_capture"
       ],
-      "partial": 3,
+      "partial": 6,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:63",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4014,7 +4014,7 @@
     {
       "capability": "One-way CHT through steady flow then energy",
       "cells": 7,
-      "fail": 0,
+      "fail": 2,
       "id": "FL-C-HEAT",
       "maps": [
         "FEA-COUPLING-CHT-001/*",
@@ -4023,13 +4023,13 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:19",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Two-way partitioned FSI with ALE",
       "cells": 25,
-      "fail": 0,
+      "fail": 2,
       "id": "FL-C-FSI",
       "maps": [
         "FEA-COUPLING-FSI-001/*",
@@ -4038,7 +4038,7 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:20",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4050,7 +4050,7 @@
         "FEA-FLUID-RECOVERY-001/*",
         "FEA-FLUID-OUTPUTS-001/*"
       ],
-      "partial": 2,
+      "partial": 5,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:22",
       "status": "tied",
@@ -4066,10 +4066,10 @@
         "FEA-FLUID-OUTPUTS-001/wall_shear_stress_fields",
         "FEA-FLUID-SOLVERS-001/residual_history"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:23",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4081,10 +4081,10 @@
         "FEA-FLUID-SOLVERS-001/block_linear_solvers",
         "FEA-SCALE-PARALLEL-001/parallel_solve"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:24",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4111,7 +4111,7 @@
         "FEA-FLUID-ACCURACY-001/*",
         "FEA-FLUID-VERIFICATION-001/*"
       ],
-      "partial": 2,
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:28",
       "status": "tied",
@@ -4148,17 +4148,17 @@
     {
       "capability": "Cold plate: pressure drop and part temperature, streamlines, temperature on a cut",
       "cells": 28,
-      "fail": 0,
+      "fail": 1,
       "id": "FL-PAGE-HERO",
       "maps": [
         "FEA-FLUID-HEAT-001/two_way_cht",
         "FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate",
         "FEA-FLUID-OUTPUTS-001/vorticity_and_streamlines"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:81",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4186,10 +4186,10 @@
         "FEA-FLUID-OUTPUTS-001/wall_shear_stress_fields",
         "FEA-FLUID-SOLVERS-001/second_order_time"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:83",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4201,10 +4201,10 @@
         "FEA-FLUID-MATERIALS-001/generalized_newtonian",
         "FEA-FLUID-MATERIALS-001/species_and_scalars"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:84",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4229,10 +4229,10 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/porous_zones"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:86",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4252,7 +4252,7 @@
     {
       "capability": "Muffler harmonic study over 17 one-third-octave centers with incident wave and TL output",
       "cells": 9,
-      "fail": 0,
+      "fail": 1,
       "id": "STUDY-MUFFLER",
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/transmission_and_insertion_loss",
@@ -4262,22 +4262,22 @@
       "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustics/muffler.fea:1",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Cabin acoustic modal study with headliner impedance",
       "cells": 13,
-      "fail": 2,
+      "fail": 0,
       "id": "STUDY-CABIN",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
-      "partial": 3,
+      "partial": 6,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustics/cabin-modes.fea:1",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4316,7 +4316,7 @@
     {
       "capability": "Cold plate CHT study with mass flow, pressure drop and peak temperature",
       "cells": 19,
-      "fail": 0,
+      "fail": 1,
       "id": "STUDY-COLDPLATE",
       "maps": [
         "FEA-FLUID-HEAT-001/two_way_cht",
@@ -4324,10 +4324,10 @@
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
-      "partial": 1,
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/fluid-flow/cold-plate.fea:1",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4369,7 +4369,7 @@
         "FEA-FLUID-BOUNDARY-002/profiles_and_excitations",
         "FEA-PUBLIC-LANGUAGE-001/input_forms"
       ],
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:83",
       "status": "tied",
@@ -4384,10 +4384,10 @@
         "FEA-FLUID-MATERIALS-001/species_and_scalars",
         "FEA-FLUID-MATERIALS-001/generalized_newtonian"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:84",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4412,16 +4412,16 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/porous_zones"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:86",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Induction hardening: multi-body gear, inductor and air; harmonic at 3, 10 and 30 kHz; loss into a 3 s transient heat step",
       "cells": 17,
-      "fail": 0,
+      "fail": 1,
       "id": "STUDY-INDUCTION",
       "maps": [
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import",
@@ -4431,7 +4431,7 @@
       "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/electromagnetic/induction-hardening.fea:1",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4473,7 +4473,7 @@
         "FEA-EM-OUTPUTS-001/terminal_quantities",
         "FEA-EM-INPUTS-002/scalar_potential_inputs"
       ],
-      "partial": 2,
+      "partial": 4,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/electromagnetic/hv-electrode.fea:1",
       "status": "tied",
@@ -4589,10 +4589,10 @@
         "FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/fluid-duct.fea:1",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4627,7 +4627,7 @@
     {
       "capability": "Structural analyses: static, preload, modal, transient, harmonic, prestressed, buckling, spectrum, random, nonlinear",
       "cells": 339,
-      "fail": 1,
+      "fail": 0,
       "id": "PAGE-STRUCT-ANALYSES",
       "maps": [
         "FEA-STRUCTURAL-SOLID-001/*",
@@ -4636,10 +4636,10 @@
         "FEA-DYNAMICS-RESPONSE-001/*",
         "FEA-NONLINEAR-OPERATOR-001/*"
       ],
-      "partial": 26,
+      "partial": 28,
       "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:22",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4666,7 +4666,7 @@
         "FEA-STRUCTURAL-CONSTRAINT-001/*",
         "FEA-STRUCTURAL-PUBLIC-001/contact_example"
       ],
-      "partial": 8,
+      "partial": 10,
       "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:24",
       "status": "tied",
@@ -4798,7 +4798,7 @@
     {
       "capability": "Induction hardening hero with frequency tabs and loss into transient heat",
       "cells": 14,
-      "fail": 0,
+      "fail": 1,
       "id": "PAGE-EM-HERO",
       "maps": [
         "FEA-EM-FREQUENCY-001/*",
@@ -4807,7 +4807,7 @@
       "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:7",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4820,7 +4820,7 @@
         "FEA-EM-NONLINEAR-001/*",
         "FEA-EM-INPUTS-002/*"
       ],
-      "partial": 2,
+      "partial": 4,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:9",
       "status": "tied",
@@ -4868,7 +4868,7 @@
         "FEA-COUPLING-ELECTROTHERMAL-002/ac_loss_into_transient_heat",
         "FEA-PUBLIC-LANGUAGE-001/check_matches_run"
       ],
-      "partial": 3,
+      "partial": 4,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:14",
       "status": "tied",
@@ -4953,15 +4953,15 @@
     {
       "capability": "Seeded-fault table: twenty setup faults caught before solve",
       "cells": 5,
-      "fail": 1,
+      "fail": 0,
       "id": "EVD-03",
       "maps": [
         "FEA-AUTHORING-COMPILER-002/check_plan_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/evidence.md:9",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {

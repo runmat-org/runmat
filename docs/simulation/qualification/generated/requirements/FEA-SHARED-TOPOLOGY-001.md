@@ -23,7 +23,7 @@ Evidence kind: IndependentReference. Criterion: Dense node-index mapping from ca
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::tests::canonical_tetrahedron_projection_has_indexed_oriented_geometry` (crates/runmat-analysis/fea/src/topology/tests.rs:73) - Single affine Tet10 tetrahedron checks node/element/face inventory, positive volume, integrated shapes and world gradient, outward normals and repeatable projec... |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::tests::canonical_tetrahedron_projection_has_indexed_oriented_geometry` (crates/runmat-analysis/fea/src/topology/tests.rs:79) - Single affine Tet10 tetrahedron checks node/element/face inventory, positive volume, integrated shapes and world gradient, outward normals and repeatable projec... |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -38,7 +38,7 @@ Evidence kind: IndependentReference. Criterion: Every element has exactly one su
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::tests::projection_rejects_a_substituted_mesh_digest` (crates/runmat-analysis/fea/src/topology/tests.rs:160) - Tet4 node-coordinate substitution without digest resealing rejects projection; no exhaustive provenance or interface invalid-case corpus. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::tests::projection_rejects_a_substituted_mesh_digest` (crates/runmat-analysis/fea/src/topology/tests.rs:166) - Tet4 node-coordinate substitution without digest resealing rejects projection; no exhaustive provenance or interface invalid-case corpus. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
