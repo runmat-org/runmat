@@ -16,6 +16,9 @@ use crate::{DesignKind, Files, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+mod suggestions;
+pub use suggestions::{FileState, Suggestion, MAX_PANEL_SUGGESTIONS};
+
 /// The card controls every guide and the conversation share (doc 18, §2.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -138,21 +141,6 @@ pub struct Completion {
     pub requires: Vec<Requirement>,
 }
 
-/// A composer suggestion: shown as the placeholder when its editor (and selection) is current.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Suggestion {
-    /// The editor it applies in: part, assembly, drawing, circuit, layout, fea, geometry, m, or
-    /// none (nothing open).
-    pub editor: String,
-    /// The selection it needs, when it needs one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selection: Option<PickEntity>,
-    pub text: String,
-    /// The catalog command that does it, so the suggestion never names a missing feature.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-}
-
 /// One guide.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Guide {
@@ -198,7 +186,8 @@ impl GuideCatalog {
     }
 
     /// Problems in the declarations: duplicate ids, requirements naming unknown decisions,
-    /// picks without an editor-pick control, commands missing from `command_ids`.
+    /// picks without an editor-pick control, commands missing from `command_ids`, more suggestions
+    /// for an editor and file state than a placeholder and [`MAX_PANEL_SUGGESTIONS`].
     pub fn lint(&self, command_ids: &[&str]) -> Vec<String> {
         let mut problems = Vec::new();
         let mut ids: Vec<&str> = self.guides.iter().map(|g| g.id.as_str()).collect();
@@ -235,6 +224,21 @@ impl GuideCatalog {
                     if !command_ids.contains(&id.as_str()) {
                         problems.push(format!("{}: command {id} isn't in the catalog", g.id));
                     }
+                }
+            }
+        }
+        for editor in self.suggestions.iter().map(|s| s.editor.as_str()) {
+            for state in [FileState::Empty, FileState::Written] {
+                let shown = self
+                    .suggestions
+                    .iter()
+                    .filter(|s| s.editor == editor && s.selection.is_none())
+                    .filter(|s| s.state.is_none_or(|st| st == state))
+                    .count();
+                if shown > MAX_PANEL_SUGGESTIONS + 1 {
+                    problems.push(format!(
+                        "{editor} ({state:?}): {shown} suggestions, more than a placeholder and {MAX_PANEL_SUGGESTIONS}"
+                    ));
                 }
             }
         }
@@ -394,20 +398,6 @@ fn new_file(extension: &str) -> EntryPoint {
 
 fn command(id: &str) -> EntryPoint {
     EntryPoint::Command { id: id.into() }
-}
-
-fn suggestion(
-    editor: &str,
-    selection: Option<PickEntity>,
-    text: &str,
-    cmd: Option<&str>,
-) -> Suggestion {
-    Suggestion {
-        editor: editor.into(),
-        selection,
-        text: text.into(),
-        command: cmd.map(str::to_owned),
-    }
 }
 
 /// The model guide turns start on: fast and lower cost for one structured question at a time.
@@ -664,66 +654,7 @@ pub fn catalog() -> GuideCatalog {
             "Set up a thermal study of this board",
         ),
     ];
-    let suggestions = vec![
-        suggestion("none", None, "Make a bracket that holds 2 kN", None),
-        suggestion("none", None, "Capture a schematic for a sensor node", None),
-        suggestion("m", None, "Plot this result against time", None),
-        suggestion(
-            "part",
-            Some(Edge),
-            "Fillet these edges 2 mm",
-            Some("part.fillet"),
-        ),
-        suggestion(
-            "part",
-            Some(Face),
-            "Draft these faces 2°",
-            Some("part.draft"),
-        ),
-        suggestion(
-            "part",
-            None,
-            "Check this part under a 2 kN load",
-            Some("study.new"),
-        ),
-        suggestion(
-            "assembly",
-            None,
-            "Mate the hook to the bracket",
-            Some("assembly.mate"),
-        ),
-        suggestion(
-            "drawing",
-            None,
-            "Add the hole callouts",
-            Some("drawing.hole-callout"),
-        ),
-        suggestion(
-            "circuit",
-            None,
-            "Run ERC and fix what it finds",
-            Some("schematic.erc"),
-        ),
-        suggestion(
-            "layout",
-            None,
-            "Update the board from the schematic",
-            Some("board.update-schematic"),
-        ),
-        suggestion(
-            "layout",
-            Some(Net),
-            "Run DRC on this net",
-            Some("board.drc"),
-        ),
-        suggestion(
-            "geometry",
-            None,
-            "Set up a simulation of this part",
-            Some("study.new"),
-        ),
-        suggestion("fea", None, "Explain the margin on this result", None),
-    ];
+    let suggestions = suggestions::catalog();
     GuideCatalog {
         format: "runmat.design-guides".into(),
         format_version: 1,
