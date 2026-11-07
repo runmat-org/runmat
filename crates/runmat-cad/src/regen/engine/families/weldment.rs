@@ -352,7 +352,8 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             WeldmentFeature::TrimExtend { members, to } => {
                 // The member's end face nearest the target moves onto the target's plane: a
-                // member that runs past it is trimmed, one that stops short is extended.
+                // member that runs past it is trimmed, one that stops short is extended. The
+                // target body is only read (it stays as it is).
                 let set = self.list(i, id, "members", members, None)?;
                 let bodies = Self::bodies_of(&set);
                 let w = self.face_handle(i, id, "to", to)?;
@@ -376,8 +377,8 @@ impl<'a, 'b> Run<'a, 'b> {
                     ));
                 };
                 let member = bodies[0];
-                // An end face crosses the target's normal (a side face runs along it); of the
-                // ends, the one nearest the target's plane.
+                // An end face is square to the target (parallel to it); of the ends, the one
+                // nearest the target's plane.
                 let end = self.st.bodies[member]
                     .topology
                     .faces
@@ -385,26 +386,25 @@ impl<'a, 'b> Run<'a, 'b> {
                     .enumerate()
                     .filter_map(|(k, f)| {
                         let m = plane_normal(&f.geom)?;
-                        (dot(m, n).abs() > 0.3).then(|| (k, dot(n, sub(f.geom.centroid, target.centroid)).abs()))
+                        let gap = dot(n, sub(target.centroid, f.geom.centroid));
+                        (dot(m, n).abs() > 1.0 - 1e-6).then_some((k as u32, gap))
                     })
-                    .min_by(|a, b| a.1.total_cmp(&b.1))
-                    .map(|(k, _)| k as u32);
-                let Some(end) = end else {
+                    .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()));
+                let Some((end, gap)) = end else {
                     return Err(self.error(
                         id,
-                        Some("members"),
+                        Some("to"),
                         DiagCode::RegenInvalid,
-                        "the member has no end face that meets the target's plane".into(),
+                        "the member has no end face parallel to the target face; trim/extend runs to a face square to the member".into(),
                         Vec::new(),
                     ));
                 };
-                let operands = vec![member, w.body as usize];
                 Ok(op(
-                    KernelOp::ReplaceFaces {
+                    KernelOp::MoveFaces {
                         faces: vec![OperandEntity { operand: 0, entity: end }],
-                        with: OperandEntity { operand: 1, entity: w.index },
+                        motion: FaceMotion::Translate { vector: scale(n, gap) },
                     },
-                    operands,
+                    vec![member],
                     simple,
                 ))
             }

@@ -114,6 +114,7 @@ fn end_cap_gusset_weld_bead_and_extend_apply_from_the_canvas() {
     assert_eq!(target.len(), 1, "{:?}", face_refs(&v, "feature.plate"));
     let (text, extended) = apply(frame, "weldment.trim-extend", json!({ "member": [sides[0]], "to": [target[0]] })).expect("extend applies");
     assert!(text.contains("weldment.trim_extend("), "{text}");
+    assert_eq!(bodies(&extended).len(), start, "the plate it runs to stays a body of its own");
     let reach = max_x_of_body_with(&extended, &sides[0]);
     assert!((reach - 0.25).abs() < 1e-6, "the bottom member reaches x = {reach} m");
 }
