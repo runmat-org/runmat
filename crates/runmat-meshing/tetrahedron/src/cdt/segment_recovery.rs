@@ -594,7 +594,7 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment(
                 options.insertion,
                 cancellation,
             )
-            .map_err(|failure| insertion_error(failure, constraint_index))?,
+            .map_err(|failure| temporary_error(failure, constraint_index, context, "legalization"))?,
         };
         let conflicting_protected_edges = protected_edges
             .iter()
@@ -610,7 +610,7 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment(
                 options.insertion,
                 cancellation,
             )
-            .map_err(|failure| insertion_error(failure, constraint_index))?;
+            .map_err(|failure| temporary_error(failure, constraint_index, context, "validation"))?;
             let inserted_nodes = candidate
                 .nodes
                 .iter()
@@ -1163,6 +1163,20 @@ fn insertion_error(
         }
     };
     error(kind, Some(constraint_index), error_value.to_string())
+}
+
+fn temporary_error(
+    error_value: DelaunayInsertionError,
+    constraint_index: u32,
+    context: SegmentContext,
+    stage: &str,
+) -> DelaunaySegmentRecoveryError {
+    let mut failure = insertion_error(error_value, constraint_index);
+    failure.reason = format!(
+        "temporary segment {:?}-{:?} {stage}: {}",
+        context.first_coordinates, context.last_coordinates, failure.reason
+    );
+    failure
 }
 
 fn mutation_error(error_value: TopologyMutationError) -> DelaunaySegmentRecoveryError {

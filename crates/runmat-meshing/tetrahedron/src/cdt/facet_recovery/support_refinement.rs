@@ -23,6 +23,7 @@ use crate::cdt::segment_recovery::{
     recover_temporary_delaunay_segment_in_place, try_recover_delaunay_edges_with_local_flips,
     InPlaceTemporarySegment, TemporarySegmentRequest,
 };
+use crate::cdt::DelaunaySegmentRecoveryErrorKind;
 
 pub(super) struct PendingSupportTriangle {
     pub(super) triangle: DelaunayRecoveredFacetTriangle,
@@ -312,8 +313,26 @@ pub(super) fn ensure_support_triangle_edges(
             lineage.push((identity, candidate_rank));
             identity
         },
-    )
-    .map_err(segment_error)?;
+    );
+    // The temporary chain is a trial on a copy of the topology. When its points admit no
+    // constrained Delaunay tetrahedralization with the current barriers (validation rejects
+    // the legalized copy) or no split clears a witness, decline it, so the caller tries the
+    // facet cavity and interior refinement. Budget, cancellation and option errors still end
+    // recovery.
+    let temporary = match temporary {
+        Ok(temporary) => temporary,
+        Err(failure)
+            if matches!(
+                failure.kind,
+                DelaunaySegmentRecoveryErrorKind::InvalidTopology
+                    | DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint
+            ) =>
+        {
+            work.reject(format!("temporary support segment declined: {failure}"));
+            return Ok(SupportTriangleEdgeState::Unavailable);
+        }
+        Err(failure) => return Err(segment_error(failure)),
+    };
     if let Some(conflict) = temporary.conflicting_protected_edges.first().copied() {
         work.clear_rejection();
         let Some(refined) = try_split_recovered_segment_edge(
