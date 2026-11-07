@@ -63,6 +63,46 @@
       "height": 800,
       "seconds": 10.8,
       "base": "/design-assets/flow-clips/mcad/drawing/drawing"
+    },
+    {
+      "id": "ecad/place",
+      "alt": "On the flight controller's mcu sheet, Part places C24, a 100 nF decoupling capacitor, upright under C5 in the row of C8 and C9, and Power port gives it +3V3 on its top pin and GND on its bottom pin, like its neighbors.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.3,
+      "base": "/design-assets/flow-clips/ecad/place/place"
+    },
+    {
+      "id": "ecad/wire",
+      "alt": "On the mcu sheet's status LEDs, Wire runs from R5's free end across and down to D2's anode on the LED2_K net, as R4 is wired to D1, and both unconnected-pin markers clear.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 7.4,
+      "base": "/design-assets/flow-clips/ecad/wire/wire"
+    },
+    {
+      "id": "ecad/erc",
+      "alt": "On the flight controller's mcu sheet, ERC runs over the whole design and ends with one line: Electrical rule check, no violations.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 6.0,
+      "base": "/design-assets/flow-clips/ecad/erc/erc"
+    },
+    {
+      "id": "ecad/update-board",
+      "alt": "With C24 added to the mcu sheet, Update board (ECO) lists C24 Add component with its 0402 footprint; Apply; the Board tab shows C24 beside the board with two airwires and 2 unrouted connections.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 9.4,
+      "base": "/design-assets/flow-clips/ecad/update-board/update-board"
+    },
+    {
+      "id": "ecad/drc",
+      "alt": "On the flight controller's whole board, DRC runs and ends with one line: Design rule check, no violations.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 5.9,
+      "base": "/design-assets/flow-clips/ecad/drc/drc"
     }
   ]
 }

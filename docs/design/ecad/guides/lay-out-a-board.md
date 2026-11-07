@@ -87,6 +87,10 @@ package C0402 {
 
 When the schematic changes later (a part added, a net renamed, a value swapped), the board lists each change, and Update board takes the ones you pick. A component renamed with `renamed_from` keeps its placement.
 
+In the Desktop, Update board (ECO) lists each change the board hasn't taken, with its footprint and the sheet it comes from. Apply puts a new component beside the board with its airwires:
+
+<!-- design:clip:ecad/update-board -->
+
 ## 3. Place the footprints
 
 Drag footprints on the canvas, or set `at`, `rotation` and `side` in Properties. Place in the order the circuit works: the connector at the board edge, the regulator and its capacitors beside it, the sensor with its decoupling capacitor as close to its supply pins as the courtyards allow, the pull-ups near the connector. Ratsnest lines show the connections still to route. `locked = true` keeps a placed part from moving.
@@ -123,6 +127,10 @@ runmat-design check baro.circuit.layout
 ```
 
 See [Board layout](/docs/ecad/layout#design-rules) for every rule.
+
+In the Desktop, DRC on the Board tab runs the full check. A clean board ends with one line under the board:
+
+<!-- design:clip:ecad/drc -->
 
 ## 6. See it in 3D
 

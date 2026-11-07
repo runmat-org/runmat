@@ -22,6 +22,10 @@ sheet main {
 
 A part the built-in library doesn't have is written into the circuit as a `part "<mpn>" = { … }` declaration, so the file carries every part it uses. See [The parts library](/docs/ecad/parts-library).
 
+In the Desktop, Part places a component where you click on the sheet, and Power port puts a supply or ground symbol on a pin. Here a 100 nF decoupling capacitor joins the row under the MCU and takes +3V3 and GND:
+
+<!-- design:clip:ecad/place -->
+
 ## 2. Connect pins into nets
 
 A `connect` list joins every endpoint it names into one net. A wire drawn on the canvas between two pins adds them to a list. Pins are `U1.VIN` by name or `"J1.1"` by number; `net.SDA` names the net, which needs no declaration unless it has settings.
@@ -40,6 +44,10 @@ Settings go on a `net` statement:
 - Other entries are the net's parameters, such as `max_length = 50 mm`. The Directive tool's Parameter set writes them onto the picked nets, in the units you type.
 
 To give several nets the same class and parameters, pick them with the Directive tool's Blanket and write a class (`power`) or entries (`class = power, max_length = 50 mm`). The tool writes `blanket blanket1 = { nets = [VIN, GND], class = power, max_length = 50 mm }` on the sheet, and the canvas draws a dashed box round the nets it covers.
+
+In the Desktop, Wire runs from the pin you click to the next pin you click, across and then up or down, and joins both to one net. Here the second status LED's resistor is wired to the LED's anode, and both unconnected-pin markers clear:
+
+<!-- design:clip:ecad/wire -->
 
 ## 3. Split the design into sheets
 
@@ -113,6 +121,10 @@ runmat-design check baro.circuit
 The check runs the electrical rules (undriven inputs, conflicting drivers, unconnected pins) and the design-review suites. On this circuit the I2C suite confirms each bus line has a pull-up between 1 kΩ and 10 kΩ, and the decoupling suite confirms each IC power pin has a capacitor to ground. `no_erc = [U1.NC]` tells the rules the regulator's no-connect pin is meant to be open.
 
 Each finding names its pins and offers a fix where one exists, such as adding the missing capacitor. See [Rules and checks](/docs/ecad/circuit/rules-and-checks).
+
+In the Desktop, ERC on the Schematic tab runs the same electrical rules over the whole design. A clean design ends with one line under the sheet:
+
+<!-- design:clip:ecad/erc -->
 
 ## 6. Move between views
 
