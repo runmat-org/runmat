@@ -15,6 +15,7 @@ on:
       - "scripts/regenerate-wasm-registry.mjs"
       - "scripts/test-wasm-headless.sh"
       - "scripts/runtime/**"
+      - "scripts/metadata/**"
       - "scripts/distribution/**"
       - "Cargo.toml"
       - "Cargo.lock"

@@ -77,6 +77,7 @@ test("rejects unsafe filesystem paths and file descendants", () => {
 
 test("rejects duplicate capabilities and endpoint declaration mismatches", () => {
   assert.deepEqual(validateBuiltinExampleRequirements({ ...nativeRequirements, runtime: ["PlotCore"] }).runtime, ["PlotCore"]);
+  assert.deepEqual(validateBuiltinExampleRequirements({ ...nativeRequirements, runtime: ["NativeCad", "NativeMeshing"] }).runtime, ["NativeCad", "NativeMeshing"]);
   assert.throws(() => validateBuiltinExampleRequirements({ ...nativeRequirements, runtime: ["Python", "Python"] }), /sorted and unique/);
   assert.throws(() => validateBuiltinExampleFixture(loopbackFixture(), "fixture", {
     program: 'host = "__RUNMAT_LOOPBACK_HOST__";',
