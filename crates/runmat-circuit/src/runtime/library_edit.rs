@@ -105,12 +105,7 @@ pub(super) fn place(project: &Project, request: &EditRequest) -> Result<EditOutp
     part.check().map_err(EditError::new)?;
     let text = &project.circuit_text;
     let at = circuit_at(text).ok_or_else(|| EditError::new(format!("{} has no `circuit` block", project.circuit_path)))?;
-    let wanted = v
-        .get("sheet")
-        .and_then(|s| s.as_str())
-        .map(str::to_owned)
-        .or_else(|| request.selection.iter().find_map(|s| s.strip_prefix("sheet:").map(|p| p.rsplit('/').next().unwrap_or(p).to_owned())))
-        .unwrap_or_else(|| project.own.root.clone());
+    let wanted = super::schematic_edit::target_sheet(project, request)?;
     let sheet = at
         .sheets
         .iter()

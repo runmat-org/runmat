@@ -149,7 +149,7 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 let (prims, b) = chosen.unwrap_or_else(|| {
                     let (on, away) = candidates[0];
                     let (p, b) = st.datum_symbol(&id, on, away, &letter);
-                    ctx.finding("callout_no_room", &aid, format!("datum symbol {aid} has no free room by its surface; it overlaps what is there"));
+                    ctx.finding("callout_no_room", &aid, format!("Datum {letter} has no room by its surface; it overlaps what is there"));
                     (p, b)
                 });
                 register(ctx, &id, &prims, b);
@@ -267,7 +267,8 @@ fn solve(ctx: &mut Ctx<'_>, v: &ViewPlan, id: &str, anchor: Xy, label: &dyn Fn(X
     let spot = place(&ctx.occ, &req);
     if spot.is_none() {
         let name = id.trim_start_matches("annotation:").to_owned();
-        ctx.finding("callout_no_room", &name, format!("{name} has no free room on sheet {} near view {}; move it by hand or give the sheet more room", ctx.sheet, v.name));
+        let text = ctx.text_of(&name);
+        ctx.finding("callout_no_room", &name, format!("{text} has no room near the {}; move it by hand or give the sheet more room", v.title().to_lowercase()));
         // The free spot nearest the anchor for the label alone; its leader may cross what is there.
         let probe = label([0.0, 0.0], true);
         let g = v.geom_box();

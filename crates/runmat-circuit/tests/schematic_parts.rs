@@ -218,3 +218,45 @@ fn a_moved_part_keeps_its_wires_and_mirror_flips_it() {
     let ends: Vec<[f64; 2]> = page.wires.iter().flat_map(|w| [w.points[0], *w.points.last().unwrap()]).collect();
     assert!(ends.contains(&vin) && ends.contains(&c1), "the wire reaches both pins after the move");
 }
+
+/// A root sheet with one child instance whose name isn't its sheet's (`sens` draws `sensors`).
+const NESTED: &str = r#"runmat 0.7
+std 1
+
+circuit reg {
+    root = main
+
+    sheet sensors {
+        component R1 = { part = "R0402-10K" }
+    }
+
+    sheet main {
+        component U1 = { part = "LDO-3V3-SOT23" }
+        instance sens = { sheet = sensors }
+    }
+}
+"#;
+
+#[test]
+fn a_part_placed_on_a_child_page_lands_on_the_sheet_that_instance_draws() {
+    let p = Project { circuit: NESTED.to_owned(), lock: None };
+    // The page as the sheet tab and the Outline's hierarchy row pick it (`sheet:/sens`), and a
+    // later page of the same instance (`#2`).
+    for page in ["sheet:/sens", "sheet:/sens#2"] {
+        let request = EditRequest {
+            command: "schematic.place-part".into(),
+            values: json!({ "part": "C0603-1U-50V", "at": ["point:50,50"] }).as_object().cloned().unwrap(),
+            selection: vec![page.to_owned()],
+            options: CompileOptions::default(),
+        };
+        let out = runtime::edit(PATH, &p.circuit, &p.files(), &request).unwrap_or_else(|e| panic!("{page}: {}", e.message));
+        assert_eq!(out.summary, "placed C1 (C0603-1U-50V) on sheet sensors", "{page}");
+        let text = &out.files.iter().find(|f| f.path == PATH).unwrap().text;
+        let sensors = &text[text.find("sheet sensors {").unwrap()..text.find("sheet main {").unwrap()];
+        assert!(sensors.contains("component C1 = { part = \"C0603-1U-50V\" }"), "{page}: {text}");
+    }
+    // The root page places on the root sheet.
+    let (root, summary) = p.run("schematic.place-part", json!({ "part": "C0603-1U-50V", "at": ["point:50,50"] })).unwrap();
+    assert_eq!(summary, "placed C1 (C0603-1U-50V) on sheet main");
+    assert!(root.circuit[root.circuit.find("sheet main {").unwrap()..].contains("component C1"), "{}", root.circuit);
+}

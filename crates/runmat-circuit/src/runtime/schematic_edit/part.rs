@@ -139,18 +139,6 @@ fn component_edit(text: &str, sheet: &SheetText, line: &str) -> TextEdit {
     }
 }
 
-/// The sheet a request targets: `sheet`, a `sheet:` selection, or the root.
-fn target_sheet(project: &Project, request: &EditRequest) -> String {
-    request
-        .values
-        .get("sheet")
-        .and_then(|s| s.as_str())
-        .map(str::to_owned)
-        .or_else(|| request.selection.iter().find_map(|s| s.strip_prefix("sheet:").map(|p| p.rsplit('/').next().unwrap_or(p).to_owned())))
-        .filter(|s| !s.is_empty() && !s.starts_with('/'))
-        .unwrap_or_else(|| project.own.root.clone())
-}
-
 /// Applies `edits`, compiles the result, records `places` (keys by designator, set on every
 /// unit of that designator) in the lock, and returns both changes.
 fn finish(
@@ -231,7 +219,7 @@ fn flag(request: &EditRequest, id: &str) -> bool {
 pub(super) fn place_part(project: &Project, files: &Files, request: &EditRequest) -> Result<EditOutput, EditError> {
     let v = &request.values;
     let text = &project.circuit_text;
-    let sheet_name = target_sheet(project, request);
+    let sheet_name = super::target_sheet(project, request)?;
     let sheet = sheet_text(project, &sheet_name)?;
     let mut edits = Vec::new();
     // The part: a record to embed, or an MPN the file or the pool knows.
@@ -303,7 +291,7 @@ pub(super) fn place_text(project: &Project, files: &Files, request: &EditRequest
     let v = &request.values;
     let words_in = v.get("text").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).ok_or_else(|| EditError::new("type the text to place"))?;
     let text = &project.circuit_text;
-    let sheet_name = target_sheet(project, request);
+    let sheet_name = super::target_sheet(project, request)?;
     let sheet = project.own.sheets.get(&sheet_name).ok_or_else(|| EditError::new(format!("sheet `{sheet_name}` comes from another file; open that file to edit it")))?;
     let used: BTreeSet<&str> = sheet.texts.iter().map(|t| t.name.as_str()).collect();
     let name = (1..).map(|n| format!("note{n}")).find(|n| !used.contains(n.as_str())).expect("a free name");

@@ -53,6 +53,24 @@ pub(super) fn failure(f: EditFailure) -> EditError {
     EditError::new(f.to_string())
 }
 
+/// The board commands that need the whole project (the circuit with the board: ECO, rooms,
+/// the routers and the board tools), so a session runs them through [`edit`], not on its kept
+/// board.
+pub(super) fn needs_project(command: &str) -> bool {
+    matches!(
+        command,
+        "board.update-schematic"
+            | "board.copy-room-formats"
+            | "board.fanout"
+            | "board.autoroute"
+            | "board.route-net"
+            | "board.stitch"
+            | "board.teardrops"
+            | "board.diff-pair"
+            | "board.tune-length"
+    )
+}
+
 /// Runs a catalog command on the circuit `path` belongs to, as one change per file.
 pub fn edit(
     path: &str,
@@ -71,7 +89,9 @@ pub fn edit(
         "schematic.update-board" => update_board(&project, request),
         "board.update-schematic" => update_schematic(&project, request),
         "board.copy-room-formats" => room_formats(&project, request),
-        "board.fanout" | "board.autoroute" => super::autoroute::run(&project, request),
+        "board.fanout" | "board.autoroute" | "board.route-net" => {
+            super::autoroute::run(&project, request)
+        }
         "board.stitch" => super::stitch::run(&project, request),
         "board.teardrops" => super::teardrops::run(&project, request),
         "board.diff-pair" => super::coupled::diff_pair(&project, request),
@@ -79,6 +99,7 @@ pub fn edit(
         "schematic.annotate" => super::annotate::run(&project, request),
         "schematic.move" => super::annotate::move_items(&project, request),
         "library.place" => super::library_edit::place(&project, request),
+        "circuit.set-property" => super::set_property::run(&project, request),
         c if super::schematic_edit::COMMANDS.contains(&c) => super::schematic_edit::run(&project, files, request),
         "simulate.probe" | "simulate.probe-net" | "simulate.probe-pin" | "simulate.monte-carlo" | "simulate.op-point" | "simulate.dc-sweep" | "simulate.transient" | "simulate.ac" | "simulate.noise" | "simulate.temperature" | "simulate.set-tolerance" => super::sim_edit::run(&project, request),
         command => {

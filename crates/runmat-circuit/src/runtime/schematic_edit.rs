@@ -35,6 +35,41 @@ use runmat_design_syntax::{parse_source, Dialect};
 use runmat_types::Span;
 use serde_json::Value;
 
+/// The sheet definition instance `instance` draws (`/` → the root sheet, `/sens` → `sensors`).
+pub(super) fn sheet_def_of(project: &Project, instance: &NamePath) -> Result<String, EditError> {
+    if *instance == NamePath::root() {
+        return Ok(project.design.root.clone());
+    }
+    project
+        .netlist
+        .sheets
+        .iter()
+        .find(|(p, _)| p == instance)
+        .map(|(_, s)| s.clone())
+        .ok_or_else(|| EditError::new(format!("no sheet instance `{instance}`")))
+}
+
+/// The instance a page id shows: `sheet:/sens` and its later pages `sheet:/sens#2` → `/sens`.
+pub(super) fn page_instance(id: &str) -> NamePath {
+    let path = id.strip_prefix("sheet:").unwrap_or(id);
+    NamePath::parse(path.split('#').next().unwrap_or(path))
+}
+
+/// The sheet definition a command adds to: its `sheet` field (a definition name, or a page
+/// id), else the picked page (a sheet tab or the Outline's hierarchy row: the definition that
+/// instance draws), else the root sheet. The one place a page maps to the sheet it edits.
+pub(super) fn target_sheet(project: &Project, request: &EditRequest) -> Result<String, EditError> {
+    let field = request.values.get("sheet").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    match field {
+        Some(id) if id.starts_with("sheet:") || id.starts_with('/') => sheet_def_of(project, &page_instance(id)),
+        Some(name) => Ok(name.to_owned()),
+        None => match request.selection.iter().find(|s| s.starts_with("sheet:")) {
+            Some(id) => sheet_def_of(project, &page_instance(id)),
+            None => Ok(project.design.root.clone()),
+        },
+    }
+}
+
 /// The commands this module applies.
 pub(super) const COMMANDS: &[&str] = &[
     "schematic.place-wire",
@@ -314,16 +349,7 @@ impl<'a> Editor<'a> {
 
     /// The sheet definition an instance draws.
     pub fn sheet_def_of(&self, instance: &NamePath) -> Result<String, EditError> {
-        if *instance == NamePath::root() {
-            return Ok(self.project.design.root.clone());
-        }
-        self.project
-            .netlist
-            .sheets
-            .iter()
-            .find(|(p, _)| p == instance)
-            .map(|(_, s)| s.clone())
-            .ok_or_else(|| EditError::new(format!("no sheet instance `{instance}`")))
+        sheet_def_of(self.project, instance)
     }
 
     /// The sheet `name` as this file declares it (sheets brought in by `use` are read-only here).

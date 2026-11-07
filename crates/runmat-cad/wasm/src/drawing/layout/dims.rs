@@ -113,9 +113,8 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
             key_refs.sort();
             let key = format!("{model}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement);
             let label = texts.get(k).or(texts.first()).cloned().unwrap_or_else(|| id.clone());
-            if let Some(first) = seen.get(&key) {
-                let first = first.clone();
-                ctx.finding("duplicate_dimension", &id, format!("dimension {id} ({label}) repeats {first}, which already measures the same two references; it is drawn once"));
+            if seen.contains_key(&key) {
+                ctx.finding("duplicate_dimension", &id, format!("The {label} dimension repeats one that measures the same two edges; it is drawn once"));
                 continue;
             }
             seen.insert(key, id.clone());

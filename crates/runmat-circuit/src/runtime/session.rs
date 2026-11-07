@@ -689,13 +689,10 @@ impl Session {
         files: &Files,
         request: &EditRequest,
     ) -> Result<EditOutput, EditError> {
-        // Schematic, library and simulation commands edit the circuit's files, and these board
-        // commands work across both; the rest are board edits on the kept board.
-        let whole = matches!(
-            request.command.as_str(),
-            "board.update-schematic" | "board.copy-room-formats" | "board.fanout" | "board.autoroute"
-        );
-        if whole || !request.command.starts_with("board.") {
+        // Schematic, library and simulation commands edit the circuit's files, and the board
+        // commands that need the project work across both; the rest are board edits on the
+        // kept board.
+        if super::edit::needs_project(&request.command) || !request.command.starts_with("board.") {
             return super::edit(path, text, files, request);
         }
         self.sync(path, text, files, &request.options)

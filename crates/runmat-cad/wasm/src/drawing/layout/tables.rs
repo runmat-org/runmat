@@ -239,7 +239,7 @@ pub fn place(ctx: &mut Ctx<'_>) {
                     match nearest_free(&ctx.occ, &id, w, h, b.center(), 2.5, 1.0, &|_| true) {
                         Some(n) => [n.x0, n.y1],
                         None => {
-                            ctx.finding("table_no_room", &id, format!("{} has no free room on sheet {}; it overlaps what is there", &id[id.find(':').map_or(0, |i| i + 1)..], ctx.sheet));
+                            ctx.finding("table_no_room", &id, format!("Table {} has no room on the sheet; it overlaps what is there", &id[id.find(':').map_or(0, |i| i + 1)..]));
                             snapped
                         }
                     }

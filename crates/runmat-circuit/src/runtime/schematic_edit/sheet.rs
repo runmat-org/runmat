@@ -12,8 +12,7 @@ use crate::syntax::{
 
 /// A sheet instance path from a pick (`sheet:/pwr`, `sheet:/ch[0]`, `sheet:/ch[0]#2`).
 fn instance_path(id: &str) -> NamePath {
-    let path = id.strip_prefix("sheet:").unwrap_or(id);
-    NamePath::parse(path.split('#').next().unwrap_or(path))
+    super::page_instance(id)
 }
 
 /// The instance name a path ends in, without a channel index (`ch[0]` → `ch`).

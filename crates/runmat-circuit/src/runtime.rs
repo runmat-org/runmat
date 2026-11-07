@@ -51,6 +51,7 @@ pub mod modules;
 pub mod values;
 mod rules;
 mod schematic_edit;
+mod set_property;
 mod session;
 mod sim_edit;
 mod stitch;

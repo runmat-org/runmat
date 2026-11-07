@@ -57,7 +57,51 @@ pub struct ViewPlan {
     pub origin: Xy,
 }
 
+/// A distance as a finding says it: `1`, `2.5`, `12` (mm, to 0.5 mm, at least 0.5).
+fn mm_text(mm: f64) -> String {
+    let half = ((mm * 2.0).round() / 2.0).max(0.5);
+    if half.fract() == 0.0 { format!("{half:.0}") } else { format!("{half:.1}") }
+}
+
+/// A view's title in a sentence (see [`ViewPlan::title`]).
+fn view_title(name: &str, labels: &[(String, f64)]) -> String {
+    let Some((label, _)) = labels.first().filter(|(l, _)| !l.contains(':')) else {
+        let mut c = name.chars();
+        let name: String = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
+        return format!("{} view", name.replace('_', " "));
+    };
+    label
+        .split(' ')
+        .enumerate()
+        .map(|(i, w)| {
+            // Letters that name the view (`A-A`, `B`) stay as written.
+            if w.chars().all(|c| c.is_ascii_uppercase() || c == '-') && (w.len() == 1 || w.contains('-')) {
+                w.to_owned()
+            } else if i == 0 {
+                let lower = w.to_lowercase();
+                let mut c = lower.chars();
+                c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+            } else {
+                w.to_lowercase()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `Top view` → `top view`, for a title inside a sentence.
+fn lower_first(title: &str) -> String {
+    let mut c = title.chars();
+    c.next().map(|f| f.to_lowercase().chain(c).collect()).unwrap_or_default()
+}
+
 impl ViewPlan {
+    /// How an engineer names the view in a sentence: its label in sentence case (`Top view`,
+    /// `Section A-A`, `Detail B`), or for an unlabelled view its name (`Front view`).
+    pub fn title(&self) -> String {
+        view_title(&self.name, &self.labels)
+    }
+
     /// A point in view millimetres on the sheet.
     pub fn to_sheet(&self, p: Xy) -> Xy {
         [self.origin[0] + (p[0] - self.cx) * self.scale, self.origin[1] + (p[1] - self.cy) * self.scale]
@@ -270,7 +314,7 @@ pub fn place(ctx: &mut Ctx<'_>, plans: &mut [ViewPlan], rooms: &std::collections
             }
             preferred = along(d0);
             if spot.is_none() {
-                ctx.finding("view_not_aligned", &v.name, format!("view {} has no room in line with {} on sheet {}; it sits in the nearest free space", v.name, pv.name, ctx.sheet));
+                ctx.finding("view_not_aligned", &v.name, format!("{} has no room in line with the {}; it sits in the nearest free space", v.title(), lower_first(&pv.title())));
             }
         } else {
             if let Some(a) = v.at.filter(|a| free(*a, &ctx.occ)) {
@@ -297,22 +341,24 @@ pub fn place(ctx: &mut Ctx<'_>, plans: &mut [ViewPlan], rooms: &std::collections
                 let hit = nearest_free(&ctx.occ, &v.id, tight.w(), tight.h(), [preferred[0] + c[0], preferred[1] + c[1]], step, 0.0, &|_| true);
                 spot = hit.map(|h| [h.center()[0] - c[0], h.center()[1] - c[1]]);
                 if spot.is_some() {
-                    ctx.finding("view_crowded", &v.name, format!("view {} sits closer to its neighbours than the standard gap: sheet {} is full", v.name, ctx.sheet));
+                    ctx.finding("view_crowded", &v.name, format!("{} sits closer than the standard gap to the views beside it: the sheet is full", v.title()));
                 }
             }
         }
         let name = v.name.clone();
+        let title = v.title();
         let id = v.id.clone();
         let o = match spot {
             Some(o) => o,
             None => {
-                ctx.finding("view_no_room", &name, format!("view {name} doesn't fit on sheet {} beside the views already there; use a larger sheet or a smaller scale", ctx.sheet));
+                ctx.finding("view_no_room", &name, format!("{title} doesn't fit beside the other views; use a larger sheet or a smaller scale"));
                 preferred
             }
         };
         if let Some(a) = v.at {
             if (a[0] - o[0]).abs() > 0.5 || (a[1] - o[1]).abs() > 0.5 {
-                ctx.finding("view_moved", &name, format!("view {name} moved from [{:.0}, {:.0}] to [{:.0}, {:.0}]: its spot overlaps another view, a table or a note", a[0], a[1], o[0], o[1]));
+                let moved = (o[0] - a[0]).hypot(o[1] - a[1]);
+                ctx.finding("view_moved", &name, format!("{title} moved {} mm to clear the views, tables and notes beside it", mm_text(moved)));
             }
         }
         plans[i].origin = o;
@@ -487,4 +533,20 @@ fn bend_lines(id: &str, flat: &Value, at: &dyn Fn(Xy) -> Xy) -> Vec<Prim> {
         out.push(prim(id, "label", "Views", "note", Shape::Text { x: mid[0], y: mid[1], text: note.to_owned(), size: 2.5, anchor: Some("middle"), rotation: Some(angle) }));
     }
     out
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::{mm_text, view_title};
+
+    #[test]
+    fn findings_name_views_as_their_labels_read() {
+        let l = |t: &str| vec![(t.to_owned(), 5.0)];
+        assert_eq!(view_title("top", &l("TOP VIEW")), "Top view");
+        assert_eq!(view_title("a_a", &l("SECTION A-A")), "Section A-A");
+        assert_eq!(view_title("b", &l("DETAIL B")), "Detail B");
+        assert_eq!(view_title("front", &[]), "Front view");
+        assert_eq!(view_title("front", &l("SCALE: 2:1")), "Front view");
+        assert_eq!((mm_text(0.9), mm_text(2.6), mm_text(0.1)), ("1".into(), "2.5".into(), "0.5".into()));
+    }
 }

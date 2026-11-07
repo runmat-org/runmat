@@ -3,7 +3,9 @@
 //! - `part.set-property`: one field of a selected feature, as Properties edits it. A value
 //!   field's edit carries its configuration scope (`all`, `this`, `specify`); `this` and
 //!   `specify` write overrides into those configurations. `suppressed` suppresses the feature in
-//!   the active configuration (`values.configuration`), or in the part for the default.
+//!   the active configuration (`values.configuration`), or in the part for the default. On a
+//!   selected input (`input:width`), `value` sets its default, or with a scope its overrides;
+//!   the value is typed text (`90 mm`, `input.depth * 2`) or a value field's edit.
 //! - `manage.configurations`: adds a configuration (`values.name`).
 //! - `part.configuration-part-number`, `part.configuration-description`: a configuration's
 //!   own part number and description (`values.configuration`, `values.value`).
@@ -14,7 +16,7 @@ use runmat_cad::syntax::configuration_edit::{
     add_configuration, set_configuration_part_number, set_configuration_property,
     set_feature_value, suppress_features,
 };
-use runmat_cad::syntax::edit::{ConfigurationScope, EditFailure, SourceChange};
+use runmat_cad::syntax::edit::{set_value, ConfigurationScope, EditFailure, SourceChange, ValueEdit};
 use runmat_cad::syntax::parse_part;
 use serde_json::{json, Map, Value};
 
@@ -128,6 +130,10 @@ fn set_property(
     text: &str,
     request: &EditRequest,
 ) -> Result<(SourceChange, String), EditFailure> {
+    let inputs: Vec<&str> = request.selection.iter().filter_map(|s| s.strip_prefix("input:")).collect();
+    if let [input] = inputs.as_slice() {
+        return set_input_property(path, text, input, request);
+    }
     let selected = selected_features(request);
     let [feature] = selected.as_slice() else {
         return Err(model("select one feature to set its properties"));
@@ -168,6 +174,50 @@ fn set_property(
         }
     };
     Ok((change, format!("Set {feature} {field}{whom}")))
+}
+
+/// `part.set-property` on a selected input: its `value`.
+fn set_input_property(
+    path: &str,
+    text: &str,
+    input: &str,
+    request: &EditRequest,
+) -> Result<(SourceChange, String), EditFailure> {
+    let (field, value) = request
+        .values
+        .iter()
+        .find(|(k, _)| k.as_str() != "configuration")
+        .ok_or_else(|| model("no property to set"))?;
+    if field != "value" {
+        return Err(model(format!("`{field}` is set in the source editor in this build")));
+    }
+    let edit = match value {
+        Value::String(typed) => ValueEdit { value: typed_value(input, typed)?, text: typed.trim().to_owned(), scope: ConfigurationScope::All },
+        other => {
+            let (expr, scope) = field_value(field, other)?;
+            let value = serde_json::from_value(expr).map_err(|e| model(format!("the value of {input}: {e}")))?;
+            ValueEdit { value, text: String::new(), scope }
+        }
+    };
+    let change = set_value(text, path, input, &edit)?;
+    Ok((change, format!("Set {input} to {}", if edit.text.is_empty() { "the new value" } else { &edit.text })))
+}
+
+/// A value as Properties types it (`90 mm`, `input.depth * 2`), read as an input's default.
+fn typed_value(input: &str, typed: &str) -> Result<runmat_cad::value::ValueExpr, EditFailure> {
+    let typed = typed.trim();
+    let bad = || model(format!("`{typed}` is not a value for {input}"));
+    if typed.is_empty() || typed.contains('\n') || typed.contains('}') {
+        return Err(bad());
+    }
+    let probe = format!("part typed_value {{\n    input v : real = {typed}\n}}\n");
+    let parsed = parse_part("typed_value.part", &probe);
+    parsed
+        .document
+        .filter(|_| parsed.diagnostics.is_empty())
+        .and_then(|d| d.inputs.into_iter().next())
+        .map(|i| i.default)
+        .ok_or_else(bad)
 }
 
 #[cfg(test)]
@@ -264,6 +314,28 @@ mod tests {
             "{:?}",
             part.diagnostics
         );
+    }
+
+    #[test]
+    fn properties_set_an_inputs_value_typed_or_scoped() {
+        // Typed into the input's Value: the default changes, and an expression may name inputs.
+        let out = run(BRACKET, json!({ "command": "part.set-property", "selection": ["input:width"], "values": { "value": "90 mm" } }));
+        let text = text_of(&out);
+        assert!(text.contains("input width : length = 90 mm"), "{text}");
+        assert_eq!(out["summary"], "Set width to 90 mm");
+        let text = text_of(&run(&text, json!({ "command": "part.set-property", "selection": ["input:depth"], "values": { "value": "input.width / 2" } })));
+        assert!(text.contains("input depth : length = input.width / 2"), "{text}");
+        assert!(compile_part_in(PATH, &text, None).is_ok());
+        // A value field's edit in "this configuration": an override in `long`, the default kept.
+        let edit = json!({ "kind": "value", "value": { "form": "quantity", "value": 130, "unit": "mm" }, "text": "130 mm", "scope": { "scope": "this", "configuration": "long" } });
+        let scoped = text_of(&run(BRACKET, json!({ "command": "part.set-property", "selection": ["input:width"], "values": { "value": edit } })));
+        assert!(scoped.contains("configuration long = { width = 130 mm }"), "{scoped}");
+        assert!(scoped.contains("input width : length = 80 mm"), "{scoped}");
+        // Not a value, and an input the part lacks.
+        let bad = run(BRACKET, json!({ "command": "part.set-property", "selection": ["input:width"], "values": { "value": "90 mm }" } }));
+        assert_eq!(bad["ok"], false, "{bad}");
+        let missing = run(BRACKET, json!({ "command": "part.set-property", "selection": ["input:height"], "values": { "value": "5 mm" } }));
+        assert_eq!(missing["ok"], false, "{missing}");
     }
 
     #[test]

@@ -1,5 +1,7 @@
-//! `board.fanout` and `board.autoroute` on a layout's text: the routers of
+//! `board.fanout`, `board.autoroute` and `board.route-net` on a layout's text: the routers of
 //! [`crate::autoroute`] run on the board model, and the new copper is written as statements.
+//! Route net is a net's right-click command: the router takes the selected nets' open
+//! connections only.
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
@@ -7,7 +9,7 @@ use crate::autoroute::{self, FanoutOptions, RouteOptions};
 use crate::geom::{mm, Coord};
 use crate::layout::NetId;
 
-/// Runs `board.fanout` or `board.autoroute`.
+/// Runs `board.fanout`, `board.autoroute` or `board.route-net`.
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
     let layout = project.layout_or_err()?;
     let values = &request.values;
@@ -32,7 +34,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                     footprints.push(f.id);
                 }
                 let mut nets: BTreeSet<NetId> =
-                    net_picks(board, values, "nets")?.into_iter().collect();
+                    net_picks(board, values, "nets", &[])?.into_iter().collect();
                 if nets.is_empty() {
                     nets = planes.clone();
                 }
@@ -70,7 +72,13 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                 Ok(())
             }
             _ => {
-                let mut nets = net_picks(board, values, "nets")?;
+                let route_net = request.command == "board.route-net";
+                // Route net takes the nets its menu was opened on; Autoroute only its field.
+                let selection: &[String] = if route_net { &request.selection } else { &[] };
+                let mut nets = net_picks(board, values, "nets", selection)?;
+                if route_net && nets.is_empty() {
+                    return Err("select the net to route".into());
+                }
                 // Every net by default: the airwires come from the filled board, so a plane
                 // net only has the ones its pours leave (a pad off the plane, an island).
                 if nets.is_empty() {
@@ -243,8 +251,9 @@ fn net_picks(
     board: &Board,
     values: &serde_json::Map<String, Value>,
     field: &str,
+    selection: &[String],
 ) -> Result<Vec<NetId>, String> {
-    picks(values, field, &[], "net:")
+    picks(values, field, selection, "net:")
         .iter()
         .map(|n| {
             board
