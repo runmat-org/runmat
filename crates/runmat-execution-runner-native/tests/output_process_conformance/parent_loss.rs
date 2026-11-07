@@ -23,23 +23,36 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
         0,
     )
     .await;
-    program.console = Some(ConsoleLimits {
+    let controls = ConsoleLimits {
         max_records: 4,
         max_text_bytes: 100,
+    };
+    program.console = Some(controls);
+    // A placed attempt carries its assignment; the worker scopes captured console
+    // records to it, as the native provider's launches do.
+    program.assignment = Some(runmat_execution::ProgramExecutionAssignment {
+        scope_id: ExecutionScopeId::derive(&[b"original-parent-loss"]),
+        pool_id: runmat_execution::PoolId::derive(&[b"original-parent-loss"]),
+        task_id: runmat_execution::TaskId::derive(&[b"original-parent-loss"]),
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"original-parent-loss"]),
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"original-parent-loss"]),
+        backend: runmat_execution::PoolBackend::LocalProcesses,
+        resources: Default::default(),
     });
+    let resources = ResourceRequest {
+        cpu_millicores: config.worker_cpu_millicores,
+        memory_bytes: config.worker_memory_bytes,
+        scratch_bytes: config.worker_scratch_bytes,
+        max_wall_millis: 30_000,
+        max_artifact_bytes: 1024 * 1024,
+        max_egress_bytes: 0,
+        max_relay_bytes: 0,
+        accelerators: vec![],
+        required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+    };
     let request = runmat_execution_artifact::ReservedProgramExecutionRequest::new(
         program,
-        ResourceRequest {
-            cpu_millicores: config.worker_cpu_millicores,
-            memory_bytes: config.worker_memory_bytes,
-            scratch_bytes: config.worker_scratch_bytes,
-            max_wall_millis: 30_000,
-            max_artifact_bytes: 1024 * 1024,
-            max_egress_bytes: 0,
-            max_relay_bytes: 0,
-            accelerators: vec![],
-            required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
-        },
+        resources.clone(),
     )
     .unwrap();
     let mut command = HostCommand::new(&config.executable);
@@ -60,7 +73,15 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     let limits = FrameLimits {
         max_message_bytes: config.max_message_bytes,
     };
-    write_payload(&mut writer, &serde_json::to_vec(&request).unwrap(), limits)
+    // Console capture travels with its delegated subtree grant, as the native
+    // provider launches it: the ReservedConsole envelope.
+    let console_budget =
+        runmat_execution_runner_native::console_source_subgrant(&resources, controls).unwrap();
+    let launch = serde_json::json!({
+        "request": request,
+        "console_budget": console_budget,
+    });
+    write_payload(&mut writer, &serde_json::to_vec(&launch).unwrap(), limits)
         .await
         .unwrap();
     let bytes = tokio::time::timeout(Duration::from_secs(30), read_payload(&mut reader, limits))

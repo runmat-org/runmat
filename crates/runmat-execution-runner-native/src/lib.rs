@@ -7,7 +7,7 @@ mod accelerator_placement;
 mod attempt_scratch;
 mod machine_capacity;
 pub(crate) mod console_bridge;
-pub use console_bridge::console_admission_from_subgrant;
+pub use console_bridge::{console_admission_from_subgrant, console_source_subgrant};
 pub(crate) mod console_retention;
 mod fea_delegation;
 pub mod fea_proxy;
