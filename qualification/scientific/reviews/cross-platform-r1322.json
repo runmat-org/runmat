@@ -1,0 +1,1611 @@
+{
+  "schema_version": 1,
+  "status": "reviewed source conservation; final release gates tracked separately",
+  "measured_inputs": {
+    "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
+    "files": 24826,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "6b953ddcdb84ca7ba8e84da21438278ec4e200ee7a94f605c0e74a64757289f9",
+    "files": 24830,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "source": "527f4e5f32e712d502d16b26e98ea9f91f507e22+workspace-repairs:b93661bae7f766ed29bb19c350d18af5b3a7a14a03eacd33a955bb2348a0c90f+fixture-import:b18ebe8c57efcf4bfe69c39362913726817802aa2bc7ae47f0711faee2f857b5+service-retirement:f94fa5a498d5c2d10bec8271cad7e4ffed052565e8ace6dd29107e90d422db4d+platform-mex:8caeb626fb111e52a50397e814a1c890f93492f84fa6d47476d46edfda477e0b+msvc-utf8:318dd213b623a2d0023df14b1eb6b18570caa3570a106f6c43da1935f906f398+iterator-reference:e0d2143d37c226ae4ff75bf75cc4393ca76aed602e83a09ce23d5e060f0d14df+mex-docs:0e6f1b3e7dd5a646e9163618e9c1e847fe8af3978d04d385ad625df9319090b7+workspace-followup:d93fe5ec68ac999fa3397d04d6e51d93f054ac99889453fe6589659cbc73d250+physical-timing-fixture:07772f04f4d9fcca0d9ec2fa8e310643e7eb1a3ed681f40884ff1a104b399fed+vm-feedback-diagnostic:fde01497e1a1b6491bb8ae0d61dc2d1191412e032d4667917ef61782be96dbd2+logical-host-confirmation:275749253fe1a9f90a965262873a90e89c8f15a5b8bc32dd4795547ab4fa1cc8+output-delivery-schema:31b4cdd603679be17a8ae9024837a0d6b3991c83cf0b73b59c38b90bf33a0e10+output-console-cap:4b75ed04d6c6c8ff107888fb6368ed963c94ab5f59e065eeaed4a1f8fdf2795a+module-private-mex-gateway:faf0001a0503accdd113898c4ee0a3e318657e0d8102e1c1941c2d6199a8de61+registry-and-live-prefix-witness:f3e2a2c11b0c909147cf0cf964f718ca063d5fc6168c4e10768a9a2ddfa88ebc+witness-entrypoint-placement:534d12097187e274a10eb0b59fa2fa5f77fbfabdb3a817140611a2c73cd37e9c+windows-private-state-repairs:10c6ff7f9603e16537dd7b5eed0bc0fb2f551ddfe66e2eb4a6d384c3b778328f+runtime-fixture-portability:483f04a170d2ce1ceb1658da9d2a3d9a127ef8485bd1d86ee929c7855ed22fa6+registry-refresh:0330dcc112bc337ea657e23f0dc66311a3af53e0475ebedcbd94163b35aa7d08+windows-java-and-fixture-lint:873b9c08fe7fac4179a303889c5847d391e42aa99b570ffe6927461861229593+lsp-native-uri-fixture:c5c93079fff3bacd902520735618a13247178215acae1bc605e9773158357155+canonical-registry:06f294819ca6d743601c81574a3e74f6a0383932d7555b58fdd2d7a0a3cc2fc8+portable-dataset-revisions:aa7640635b1511d17c95b917f26ff9381699c19b9fb7d4759220e6b3f4f79687+windows-native-cache-mounts:7ab90118c97f5fccca25cb8ad8dd0a96a13914c3bd87b371fdfcb38c6c728d32+native-conformance-entry-and-loader:84b1c125c85bd5f7072402eff733ba836ec594a4808e125941f374d41a584b23+real-worker-cancellation-witness:a055a903dcadbd2707651d40c9a96ef13300aef3e0a2d8ced4c221d72630a751+java-fixture-compilation-staging:3c956e14547f2558d4554d306b24692a66f1e0130ce94929641ca5f7168d5902+portable-chunk-files-and-windows-fixture-repairs:6c632e5036e6b4c95bf886daa43885b09500a2fce1802b7eb4c8494597e793c3+portable-full-and-slice-storage:595fff00f313ca8761277af15d2a15ebfec8ed20f058e1795bbf95404a492ec8+durable-console-fixture-reservation:068a24101d8b3c9595e24bdf460aef19eeea1ca524bdbb6d426a082574cb6cd6+dataset-and-qualification-docs:6463b1768712a824952e705e207b5e754bcb77d4fc5a6af36f46d0702b68bf28+await-target-retention:8357cf987c070b5d0b6823422c968569f7243d32dccfe8107fc1e9fa0bf02dc9+cold-readiness-reconcile-interval:ede91b4ba9c621a25044413056162ff3586e4d1169023b2dbc4aa78bbfcae4e9",
+  "cohorts": [
+    "authored-cli-physics",
+    "driver-recovery-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-analysis/fea/src/algebra/coercivity.rs",
+      "before": [
+        "100644",
+        "blob",
+        "577b2833ec8dc3722eedcc53cda22d7c277f873b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ad3a8ec90b955d4b8b4f361c2e8cb74ccd3ac41d"
+      ],
+      "reason": "Preserves the typed Cancelled error at symbolic ordering; numerical ordering, factorization and successful arithmetic are unchanged. The held cancellation-recovery fixture returns before numerical kernel execution. Fresh complete Runtime suites pass on Main and Linux; retained scientific assertions and inputs are unchanged."
+    },
+    {
+      "path": "crates/runmat-aot/src/link/canonical.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7087892dbe772b36c98319957ae73d09cdcdb50f"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fc60fc9772f244e27aa3f662551d255283ca0394"
+      ],
+      "reason": "MSVC-only execution-stack reservation and selected Windows link identity; existing tests cover its spelling and identity binding. The measured Linux scientific workloads do not create Windows native products. Unix linker arguments and canonical JSON option values are unchanged; numerical and execution paths are conserved."
+    },
+    {
+      "path": "crates/runmat-aot/src/link/plan.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6d671db8a1bf7b52dceb1095c2b9f7d0b2ced4f8"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "f837bb74a4287e3960fa94f97f8a97824a4918de"
+      ],
+      "reason": "MSVC-only execution-stack reservation and selected Windows link identity; existing tests cover its spelling and identity binding. The measured Linux scientific workloads do not create Windows native products. Unix linker arguments and canonical JSON option values are unchanged; numerical and execution paths are conserved."
+    },
+    {
+      "path": "crates/runmat-aot/src/link/selected.rs",
+      "before": [
+        "100644",
+        "blob",
+        "75fcef2c44da6a04338eefe9d6d303f507b22f8a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "7fb83da8e371a42371cf9b152a889758b7b5a7e2"
+      ],
+      "reason": "MSVC-only execution-stack reservation and selected Windows link identity; existing tests cover its spelling and identity binding. The measured Linux scientific workloads do not create Windows native products. Unix linker arguments and canonical JSON option values are unchanged; numerical and execution paths are conserved."
+    },
+    {
+      "path": "crates/runmat-builtins/src/catalog/entries/io/repl_fs/rehash/contract.rs",
+      "before": [
+        "100644",
+        "blob",
+        "772d396cc1dfdc39efc72c16d50e506fa13a9847"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "90220268b737241e67586744f2718d248e4191fc"
+      ],
+      "reason": "Exports existing canonical rehash descriptors. Identifier values, successful behavior, catalog fields and inference are unchanged. Neither retained scientific cohort invokes rehash."
+    },
+    {
+      "path": "crates/runmat-builtins/src/catalog/entries/io/repl_fs/rehash/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f7af7efbcd2622f5c1d81ebda4ac241b388c7811"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "eae7d37af729d69ea83fe4364990cf7d23a4e51e"
+      ],
+      "reason": "Exports existing canonical rehash descriptors. Identifier values, successful behavior, catalog fields and inference are unchanged. Neither retained scientific cohort invokes rehash."
+    },
+    {
+      "path": "crates/runmat-cli/src/commands/job/submit.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7ecf4553f77eb3ee1eb76e2daacc6db11bd9c1a8"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cf6c590440744353e4b077e4ae89dd4aa59881bc"
+      ],
+      "reason": "Only the remote CLI artifact-upload request uses the corrected existing suite constant. The authored scientific cohort executes local studies; the recovery harness exercises the unchanged execution runner. Their numerical algorithms, fixtures, worker/admission/publication code and assertions are unchanged. Final remote upload and platform-product acceptance remain separate requirements."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/driver/process/tests/preflight.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ce16b167954ab13758bd4d3e2afbefc07b01131c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fd57029d7082ed4e947959c05735f1675a52e912"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/fea_proxy/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "14048807f879835bfa36e9c49de5414ed85d09f6"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c19381ec49628990d1c1ea25679f0ad0acea00d7"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/local_store/artifact/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b9f35c0826631419e01b56e9421397c5c46f30e4"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2d5321c42fd7e1b0a7fe52b646bd1d4bb2260e1c"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/materialized_project.rs",
+      "before": [
+        "100644",
+        "blob",
+        "d185e8f89708fa7d1f78120b9638f1e4c39a2368"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "780322f856ad94bf8e249111e95b8eb5fcce608c"
+      ],
+      "reason": "Changes only the MEX-specific cfg(test) fixture directory to a portable logical name. Typed artifact identities, admitted bytes and adjacent manifest relationships are unchanged. Neither retained scientific cohort invokes these MEX test cases; production functions are unchanged."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/service.rs",
+      "before": [
+        "100644",
+        "blob",
+        "5226963f09028e2c5a9575b81da3db9dac1e1e9f"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "36722115a5890ada6b7a573c1fb1e52dff28dcf9"
+      ],
+      "reason": "A durable await checks retention only for its requested job instead of synchronously reclaiming unrelated expired receipts. Submission retains global reclamation; expired awaited receipts retain the supervisor-authorized terminal/retention check. No solver arithmetic, scientific fixture, admission, output publication or retirement evidence format changes. Complete Windows output conformance passes at R1323, including cold restart and the original responsiveness and quota-cancellation assertions. R1325 records AOT-runtime/WASM dependency conservation; fresh ARM, Intel/Rosetta and Linux native products pass. Final Windows shipping is separate."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/service/job_receipt.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1d75de14948862aca5f27ffd8665c773fc1bd0bb"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5dd25a51dd612ff52a58ef28763feb0aa8ffa632"
+      ],
+      "reason": "A durable await checks retention only for its requested job instead of synchronously reclaiming unrelated expired receipts. Submission retains global reclamation; expired awaited receipts retain the supervisor-authorized terminal/retention check. No solver arithmetic, scientific fixture, admission, output publication or retirement evidence format changes. Complete Windows output conformance passes at R1323, including cold restart and the original responsiveness and quota-cancellation assertions. R1325 records AOT-runtime/WASM dependency conservation; fresh ARM, Intel/Rosetta and Linux native products pass. Final Windows shipping is separate."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/supervisor/auth/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "836c52d5bd10a46cf6ea3235609880ceb50a6ce5"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "4d2be89e99cf8253b649b3bf57b4cbb7269df3d8"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/supervisor/bootstrap.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a49d98287347562b91ea2bac9a0876657ad362a5"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "bc2d24b1e17b56560edcc7f4e87ee96c0970ff51"
+      ],
+      "reason": "Changes only cfg(test) bootstrap fixtures to let the existing private-directory owner create an authority child. Production bootstrap logic and retained scientific assertions are unchanged."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/supervisor/bootstrap/default_profile/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b9af09594ae5fdaa5ebe8c8d1548d08fafb0485c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "84202225fb79451a97e7188d72e5fb7174358978"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/supervisor/filesystem.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a7b5c83142558dd9599c51b20a1e3c6af87831a5"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "4f113559e646e7d71cf9248753c2e99c2d0c7c6f"
+      ],
+      "reason": "Windows immutable-winner retention opens the existing file with write access required by FlushFileBuffers and uses the shared directory-sync owner. On Linux, file synchronization is unchanged and the shared directory-sync implementation performs the same File::open(path).sync_all() for the absolute supervisor roots used by both measured cohorts. No worker-fencing, accounting, publication-state or numerical assertion changes. The Windows ordinary successor union and complete native-output conformance pass with publication assertions retained."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/supervisor/filesystem/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ef09b110f1d7c4de767b03b4a18a28c41fa1e5c4"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "176aa3b5a454afd5291f84510fca999a77eb03ea"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/supervisor/server.rs",
+      "before": [
+        "100644",
+        "blob",
+        "dc825c2ca180246d4aa43d351470bebedbd07e4b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "d3799e3f9f87a2d49a61f1a12645356c41dc75ce"
+      ],
+      "reason": "The supervisor completes its existing initial reconciliation before serving readiness, then schedules its first background pass one 250-ms period later. This removes an immediate duplicate recovery pass from the authenticated startup response window. The original five-second readiness budget, journal validation, authority/retention rules, scheduler state transitions, numerical algorithms and scientific assertions are unchanged. The complete Windows output-conformance target passes, including cold restart, retained console output and physical quota-cancellation evidence; native packaging/CLI follow-ups remain separate gates."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/test_workload.rs",
+      "before": [
+        "100644",
+        "blob",
+        "16737512091e0604d84ea60d26b73e85bdb00dfc"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "de3d5f5c926b09802c1dacf347f25d7299d3861d"
+      ],
+      "reason": "Changes only the MEX-specific cfg(test) fixture directory to a portable logical name. Typed artifact identities, admitted bytes and adjacent manifest relationships are unchanged. Neither retained scientific cohort invokes these MEX test cases; production functions are unchanged."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6e5914dc5c7c9af086e08dd53ea0bb39b1a1bd2a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "84501a715299be9c910423b73e01e7d6dd788a40"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately. Additional reviewed delta: Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/electrothermal.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9e27e346145cfe6200f74a7ef18c46c84f5175f4"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3f638698788c80337aac7f6498c2c3fc8825f200"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/fluid_study_fixture.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8a77e8db2a0a50bb9f42ab5a16799f449331c75f"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b692ee8756f5d7c12c3a069d04aad8074ce415d2"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/fluid_transient.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a0779927049393f6d3969ee8fdbf13d3bbf66db0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1ebbe1a90a615ef2025a766029bca8c11dc7aef2"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/magnetic.rs",
+      "before": [
+        "100644",
+        "blob",
+        "d41c74b1ac5fab00886ac169a5e5f35871dfed73"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1c8b167e37d52ca84a8cd254ad513da6c1299e46"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/signal.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6be32faf73f132ad1c91e07c8e7434dd1dfe5ced"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2d0548095e0d7c721afcad90610066b3a446e312"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/static_recovery.rs",
+      "before": [
+        "100644",
+        "blob",
+        "abae824800b39723ac053528b3de196752e5fb06"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c687d38ebb871df02581a08bb8b48978c661d5c1"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/thermal_prestress.rs",
+      "before": [
+        "100644",
+        "blob",
+        "21274bcb5f276f43652c885f9c67f5c5afd1d353"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8d64c2ed570d85fae8d1e59b6d1a7dbb19917146"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/thermal_prestress/observations.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a86e110d712fddbe433a18a07786f8d03b38465b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1a585104dd86b7dbd0922d74253efb82dc69523e"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/thermal_radiation/lifecycle.rs",
+      "before": [
+        "100644",
+        "blob",
+        "63efd7443c1015187fe3a1e2e32a97bab75dc3e4"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "f220cfc43be196b1dc8fc0d7cbacda25d524762a"
+      ],
+      "reason": "Uses the canonical request-gated worker arguments instead of the obsolete --child alias. Numerical fixtures, solver code, thresholds and publication assertions are unchanged. The original Windows numerical prefix is retained with its measured artifact and log; the complete signal-layout tail passed at R1228. This process-conformance harness is separate from the two retained Linux scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/graph_worker_roundtrip.rs",
+      "before": [
+        "100644",
+        "blob",
+        "be71beb8d3b5d0a7cfe594a7da3a8045f3f40b01"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "10fe4be1c2ce217dad69623315cb5898fbbbb0d6"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/meshing_process_conformance.rs",
+      "before": [
+        "100644",
+        "blob",
+        "315e2f37aa83b8ccc99f23dd80d90a32ec08727d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b2c61ef681f3af3fd55edb909eb581bff2020f73"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/output_process_conformance.rs",
+      "before": [
+        "100644",
+        "blob",
+        "06565e2a13800af5887dbaf78c45478acbd2c9a3"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "03ff49a845c7f2209ca852bbaae9314f69462b41"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately. Additional reviewed delta: Updates the process-conformance harness to the typed assignment and reserved-console envelope, preserving the non-yielding parent-loss checks. The existing real-worker durable cancellation case also checks quota cause, physical process exit, interrupted console output and stable repeat-cancellation evidence. Production containment/cancellation and both retained scientific cohorts are unchanged. Complete Windows output conformance passes at R1323 with the original numerical, cancellation and responsiveness assertions."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/output_process_conformance/cancellation.rs",
+      "before": [
+        "100644",
+        "blob",
+        "564ae63764e3590b48c374c68110afa8e67d1c11"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "7960b3580ae6c718d8484fa9d119bc0519bf72f5"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately. Additional reviewed delta: Updates the process-conformance harness to the typed assignment and reserved-console envelope, preserving the non-yielding parent-loss checks. The existing real-worker durable cancellation case also checks quota cause, physical process exit, interrupted console output and stable repeat-cancellation evidence. Production containment/cancellation and both retained scientific cohorts are unchanged. Complete Windows output conformance passes at R1323 with the original numerical, cancellation and responsiveness assertions."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/output_process_conformance/durable_poll.rs",
+      "before": [
+        "100644",
+        "blob",
+        "daabb35912c7ec6476b465b0f869d8c84cdbc40d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2418b28f29d330cb0581218fdfff610230b8cef6"
+      ],
+      "reason": "Updates the process-conformance harness to the typed assignment and reserved-console envelope, preserving the non-yielding parent-loss checks. The existing real-worker durable cancellation case also checks quota cause, physical process exit, interrupted console output and stable repeat-cancellation evidence. Production containment/cancellation and both retained scientific cohorts are unchanged. Complete Windows output conformance passes at R1323 with the original numerical, cancellation and responsiveness assertions. The final fixture reserves the canonical console-subtree envelope and reports early terminal failure. Its five-second responsiveness assertion is preserved, with elapsed time added to the failure diagnostic. These integration-test definitions are separate from the retained scientific workloads."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/output_process_conformance/live_prefix.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a22bd380c8588a276510664239692fe5ff6f2382"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "53878d4de9752aa93cb04852422a9c14a7e58860"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/output_process_conformance/parent_loss.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1701baf6f8a4d4a4b519d9c76527f9b5772c7d6c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "144f5d3e05c913cb062b9ffd723aebf7d824e728"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately. Additional reviewed delta: Updates the process-conformance harness to the typed assignment and reserved-console envelope, preserving the non-yielding parent-loss checks. The existing real-worker durable cancellation case also checks quota cause, physical process exit, interrupted console output and stable repeat-cancellation evidence. Production containment/cancellation and both retained scientific cohorts are unchanged. Complete Windows output conformance passes at R1323 with the original numerical, cancellation and responsiveness assertions."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/supervisor_process_conformance.rs",
+      "before": [
+        "100644",
+        "blob",
+        "87208771af648a6f11c671b30040935e55c78dd0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "25dae5a07b50236d9684caba3f16bedac860cdf3"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/support/native_host.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "d6e9bf809cc30958f1604a3dd08cc9169c785cb3"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows.rs",
+      "before": [
+        "100644",
+        "blob",
+        "759278f039c5be230240ad3f4e61953fe174c400"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1a202c9f903b48f4fdc622e8f2025868ede68075"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows/directory.rs",
+      "before": [
+        "100644",
+        "blob",
+        "35bb7a89e2471be8f93ac9cae4f99f0a8b561866"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "dc320ba33fa932ce82aad0ee26ba09c26d477f8b"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f67e8814b51e07aa4508817998a050919d4d5025"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "64271da928cf481eb3203bcc574758cbb9aa4d7f"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/pinned/mounts.rs",
+      "before": [
+        "100644",
+        "blob",
+        "dacbd24ac15ed2489dda5bd026a39df4788a0380"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e38fc5acc9ff41ccc0e8d96c8fdc589e9fe9cc69"
+      ],
+      "reason": "Adds cfg(windows) native dependency-cache routing. The existing non-Windows normalization and provider routes are unchanged, as confirmed against the R1196 transition backup. Both retained scientific measurements target Linux. The Windows captured-project and extended filesystem successors pass and retain their original assertions in the ordinary outcome union."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/pinned/provider.rs",
+      "before": [
+        "100644",
+        "blob",
+        "194bf2b8084fe23ef499cca480bece78f5ddccb7"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e1829d4a3b476e2e8b069851692c1dcc57b27ac8"
+      ],
+      "reason": "Adds cfg(windows) native dependency-cache routing. The existing non-Windows normalization and provider routes are unchanged, as confirmed against the R1196 transition backup. Both retained scientific measurements target Linux. The Windows captured-project and extended filesystem successors pass and retain their original assertions in the ordinary outcome union."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/pinned/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c3da998c520f0771fb169cb1ac8199b76558b99a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5cf921b198f10b4e9f928527b7871e12834e1783"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/pinned/tests/native_mounts.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "a1f7af26fa00d82ff3626ac700ef8d8c95e593c1"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-geometry/io/build.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1787e813f84636119873b52c57b11929dcc5a834"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cfd10bb3a73752fb971bc57f810a873d295427d2"
+      ],
+      "reason": "Adds advapi32 only under the Windows target branch. Both retained scientific measurements target Linux. Their link inputs and numerical implementations are unchanged."
+    },
+    {
+      "path": "crates/runmat-java/src/invoke/loader.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a4df85df3984a7f70ddc0ab95cdd60659fca97c0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "bdec596d87fd8a3466b384e739ccd4758a634ae5"
+      ],
+      "reason": "Only the Windows Java classpath URL conversion uses File.toPath and Path.toUri. Both retained scientific cohorts were measured on Linux; the non-Windows File.toURI implementation is unchanged. Fresh Linux and Windows Java successors pass, with the original failed Windows command and its successor preserved in the ordinary outcome union."
+    },
+    {
+      "path": "crates/runmat-java/tests/live_jvm.rs",
+      "before": [
+        "100644",
+        "blob",
+        "20236cb1da8af3a37460bd6352ae70bb8ff0fdb6"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c3b557dced006add587d6527d2721dc690a37172"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately. Additional reviewed delta: Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-lsp/src/backend/rename/edit.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e014b263154ead8f04cc2c1994c8d63339d1365e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "7f06abbef8c2dfc75797a1f08902149f8915b6f8"
+      ],
+      "reason": "Changes only a cfg(test) native rename fixture from a drive-less file URI to a tempfile URL. LSP production code and the retained scientific workloads are unchanged."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cavity/constrained/refill_tetrahedra/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6727aa701683f92170f83b62a84964e889a8f924"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b6e4031e422767b766c3a1022ac709e56a0bde11"
+      ],
+      "reason": "Changes only a cfg(test) reserved-capacity fixture. Production tetrahedral refill arithmetic and the measured scientific fixture inputs/thresholds remain unchanged."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/volume_quality/jacobian/gradient/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "aa5ae3d87d056b3b6a08fedeed504d7f89793a4b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6f045f750dde6cde30d0ab661cd2728b041e557f"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/volume_quality/jacobian/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c76c8c4dc018a3175cd30e316bf99417fe111eb6"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "36692edd546467b6bceb7f0d31094ac83920ce51"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-mex/include/MatlabDataArray/TypedArray.hpp",
+      "before": [
+        "100644",
+        "blob",
+        "79ea53e2bac9acfe372c8f1cf6ead9fb61cc57ca"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2ce70b5f1e7e0189ed10fbc3d2e0d4e2de487068"
+      ],
+      "reason": "Native MEX callback/service ownership, iterator-position copies, per-module C++ gateway storage and compiler flags. The retained scientific workloads do not compile or execute MEX modules. Fresh MEX package/lint and Linux GCC reentry evidence qualify those separate consumers."
+    },
+    {
+      "path": "crates/runmat-mex/include/mexAdapter.hpp",
+      "before": [
+        "100644",
+        "blob",
+        "53d1b2364da0f60320a25362c5d5e65146cf1e86"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "d6f205d72bd069afbe5dd459702af336a1ac028e"
+      ],
+      "reason": "Native MEX callback/service ownership, iterator-position copies, per-module C++ gateway storage and compiler flags. The retained scientific workloads do not compile or execute MEX modules. Fresh MEX package/lint and Linux GCC reentry evidence qualify those separate consumers."
+    },
+    {
+      "path": "crates/runmat-mex/src/build/plan.rs",
+      "before": [
+        "100644",
+        "blob",
+        "61e1a4d1d2c260761d787b14b906390c7bd1ff4f"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8d1242ff41ab940ab5949aff597f228da1b55f8e"
+      ],
+      "reason": "Native MEX callback/service ownership, iterator-position copies, per-module C++ gateway storage and compiler flags. The retained scientific workloads do not compile or execute MEX modules. Fresh MEX package/lint and Linux GCC reentry evidence qualify those separate consumers."
+    },
+    {
+      "path": "crates/runmat-mex/src/host/abi.rs",
+      "before": [
+        "100644",
+        "blob",
+        "695ace5cac0cc0cf27d7a8d08e4b119cdf76befb"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "92e4566e03c2498610b66f927452af2662a0c75f"
+      ],
+      "reason": "Native MEX callback/service ownership, iterator-position copies, per-module C++ gateway storage and compiler flags. The retained scientific workloads do not compile or execute MEX modules. Fresh MEX package/lint and Linux GCC reentry evidence qualify those separate consumers."
+    },
+    {
+      "path": "crates/runmat-mex/src/host/abi/callback_lock_tests.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "03d0fabf3539fef71580320a9e82c741aaa13413"
+      ],
+      "reason": "New cfg(test) MEX callback-lock coverage, outside both retained scientific workloads. It verifies the separate native host reentry repair without changing numerical execution or scientific assertions."
+    },
+    {
+      "path": "crates/runmat-mex/src/host/service_slot.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e7deb0900942e401217e4e368e6c73d38bb79876"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5725a0ecb698c81e92bf9abecc8b0231b90cdcc2"
+      ],
+      "reason": "Native MEX callback/service ownership, iterator-position copies, per-module C++ gateway storage and compiler flags. The retained scientific workloads do not compile or execute MEX modules. Fresh MEX package/lint and Linux GCC reentry evidence qualify those separate consumers."
+    },
+    {
+      "path": "crates/runmat-mex/tests/source_mex.rs",
+      "before": [
+        "100644",
+        "blob",
+        "62b274bca6ce088016b31443c39f6e1ff91f34ed"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2b182aabb6912f90242f9dbacff0eb437161ad60"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime-integration-tests/tests/bench_residency_smoke.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b1ad59fabe8c6df1776e52651ecc3b39566513e6"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "42f12bf43c800f45d42f9f1358da8f196bf16883"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime-integration-tests/tests/gpu.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ee5022f5a798f36b5b48319c9dfd7c774b827f6a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "306def0170cebe865e330ca947ea20c226bb1c6e"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/common/path_state/user_setting.rs",
+      "before": [
+        "100644",
+        "blob",
+        "54e148531e1a1cf5fddf541319b76585caf939f4"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ebf6d6e1424e19c3904889be3ee4fe0a1d4b2281"
+      ],
+      "reason": "Changes only the inline cfg(test) MemoryFsProvider fixture root. Production source before that test module is byte-identical; scientific workloads and assertions are unchanged."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/common/real_unary_preparation/runner.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9b6f9eba78df8b0c84c77c4ad24f9ffd6e03e82d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fbb6335cc43e33e2a226c04d837f6e485166d4ac"
+      ],
+      "reason": "Moves error projection to the existing admitted continuation owner; retains original provider causes and cancellation/retry classification. Numerical kernels and successful values are unchanged. Fresh full Runtime and descriptor tests exercise the affected ownership boundary."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
+      "before": [
+        "100644",
+        "blob",
+        "243e4198f4a1bfa1b17070c41495e84fb79f7ca1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "32c7ad5f07cd257027a72d5b23fbd29185be7dfb"
+      ],
+      "reason": "Canonical generation changes only REGISTRY_SOURCE_FINGERPRINT. The generated registry entries, descriptors and bodies are byte-identical after removing that line. The measured scientific targets are native Linux; the generated WASM registry is outside their execution. Additional reviewed delta: Canonical generation at R1259 preserves every registration body and all 3084 entries/2343 builtin bindings; only REGISTRY_SOURCE_FINGERPRINT changes. Dispatch and inference implementations are unchanged. Optimized Runtime WASM and actual packaged SDK acceptance pass at R1302; cohort counts and artifact identities are retained in the supporting evidence."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/archive/gzip.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3c1649e90e7221c524d40f7c32dc244623f6fb94"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0c1b6c8b2f3060a36b7d270819f4efb1042c3ded"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/archive/gzip/filesystem/tests/ownership.rs",
+      "before": [
+        "100644",
+        "blob",
+        "d13a9e594f41c1310891f0dbd31ca70ec80a5e5d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2bf88e350e38ed98204aecc8b6e292e688947f31"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/archive/gzip/filesystem/tests/support.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7e742213e3a5c21137cea140bdf0009c46e265a7"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3a6f9f96045f6b037971de55bfc941c42b87b6ef"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/archive/unzip/extraction/worker/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c0beaf07fe6e80b2440a244ce9ae96652b269ae7"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "583e768e7620088888d0100253c295e5af00a1ca"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/archive/unzip/path_authority_tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "85b21455d5acf2d5ef9598f6c9975528d24b1f08"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e18ecc42cc95e07c2691a2ce714fa11af32eb801"
+      ],
+      "reason": "Native cfg(test) archive-path fixture uses platform PathBuf spelling. The unchanged parent module excludes it from production; retained scientific workloads do not execute this test module."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/archive/unzip/source/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "dc2c1cbffc81113040122dbf6a88f77cfb08a402"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "64b1f44275f61300f01c895427065da2cf94b5dc"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/audio/stream/fallback_tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "241102efe84e568a8d32a6f2ced31605e73251f1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0cd3965a84e28dfca881162c89754b82c69fd85c"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/audio/tests/admission/cases.rs",
+      "before": [
+        "100644",
+        "blob",
+        "62a1538e68ec02c98ee449a0740027a3e109c259"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8f34f6b801036257d81582d52df81042dac023b9"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/data/kernel/owner.rs",
+      "before": [
+        "100644",
+        "blob",
+        "84462e71cac520068c99e616d7f5ee7d1c733da4"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "647ee8a801fbc002cad643252673ed7717e5c5d4"
+      ],
+      "reason": "Unifies portable physical chunk names and slash-separated dataset-relative metadata for full and slice writes, and encodes opaque revision nonces as hexadecimal path components. Public content hashes/object IDs, numerical payload serialization and immutable publication ordering are preserved. Existing persistence tests additionally inspect path spelling after slice/transaction writes and copy slice-written data. R1260 Linux persistence 5/0, VM lifecycle 1/0 and full Runtime 18269/0 pass; Windows Runtime/Data successors, three Mac/Linux native-product cohorts and optimized SDK acceptance pass; final Windows native shipping remains a separate gate. These changes do not alter solver/mesher arithmetic or scientific fixtures/expected results."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/data/kernel/write.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1c476865f9981f8ff208521fd96e19d3c55ecac3"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c2224fba60f1c8dc3fae3d499bdea88ee74bd876"
+      ],
+      "reason": "Unifies portable physical chunk names and slash-separated dataset-relative metadata for full and slice writes, and encodes opaque revision nonces as hexadecimal path components. Public content hashes/object IDs, numerical payload serialization and immutable publication ordering are preserved. Existing persistence tests additionally inspect path spelling after slice/transaction writes and copy slice-written data. R1260 Linux persistence 5/0, VM lifecycle 1/0 and full Runtime 18269/0 pass; Windows Runtime/Data successors, three Mac/Linux native-product cohorts and optimized SDK acceptance pass; final Windows native shipping remains a separate gate. These changes do not alter solver/mesher arithmetic or scientific fixtures/expected results."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/data/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "dbfa0868d676914ed49fc749fcc4cd45f8fb5444"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ac5bd51dfe91bce348a1430eddc2661f002c819f"
+      ],
+      "reason": "Unifies portable physical chunk names and slash-separated dataset-relative metadata for full and slice writes, and encodes opaque revision nonces as hexadecimal path components. Public content hashes/object IDs, numerical payload serialization and immutable publication ordering are preserved. Existing persistence tests additionally inspect path spelling after slice/transaction writes and copy slice-written data. R1260 Linux persistence 5/0, VM lifecycle 1/0 and full Runtime 18269/0 pass; Windows Runtime/Data successors, three Mac/Linux native-product cohorts and optimized SDK acceptance pass; final Windows native shipping remains a separate gate. These changes do not alter solver/mesher arithmetic or scientific fixtures/expected results."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/data/tests/handle_receipt.rs",
+      "before": [
+        "100644",
+        "blob",
+        "67edf05b481418a96225245210c074a653e4aa8a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "9d075694f2435cfad1016435b238ffbdffd13c8e"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/filetext/cooperation/full_call_tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3dcad00aa2185f0b81a29c28907000afc1a87403"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "72d79a755e86e2bc5b7d111d09196687b21c8263"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/filetext/fwrite/tests/writing.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8db407f14ec050612d4a8b41d82e75031ecc233d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "363eea29c09171623f4c1a2152274505da5a0991"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/hdf5/path_tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "beba3cb4204c9be48aa395c4f9ea43c80a9d9a4c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "37f424786d81e8a9a7a43b5ee180496f97d117f9"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/net/tcpclient.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b37545234cbb44b09b5386994eb129c6204cdc5e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5dfbf6956dd724939d7475b8d82dc0a7e7524008"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/compat.rs",
+      "before": [
+        "100644",
+        "blob",
+        "59303b678652f80d2efdcf4d56294f5381bce99d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "08070db249a063bd3375e57128e141cc042f19b7"
+      ],
+      "reason": "Uses canonical rehash and Windows registry error descriptors. Successful behavior and identifier values remain unchanged; neither retained scientific cohort uses these filesystem compatibility operations. Additional reviewed delta: Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/compat/memmapfile/authority/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "fa12c7d2f4431b00dda1f858095d0806d7c4b4d9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "91b1361f26acb6ce221d594aa07d2c1ecf0df5d5"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/compat/memmapfile/live/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "94d1b9bac415fab5ee6c05ded28907d3f1ffbd59"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1bebefcbda4093a0f38f8787b4192a65dbdee6dd"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/compat/memmapfile/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1f411811b2cd9cc4923f9ae6e8a88eac4dc83d3d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "efb7bb87fbfa9738dab20b70dac9c13fcfa0037f"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/compat/user_path/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "573ab54d069738de86a992880907792b6502ed7b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "91e6ff3b22425deffb313b75936b4558929e911c"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately. Additional reviewed delta: Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/uigetdir/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a75374830aea153208f400f2121eabab9bee8cc7"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fd2e824ce9895d8fd20c236b1a0168667729ca64"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/uigetfile/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6434fe5b56d4e71b9d79dbdef6c05b975fd420a2"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e1d87290570cc4b32ef5db1081e6228ed8f3e071"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/uiputfile/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "094a9a83718e6b0e67ffa4dab6cb04fbfbc4d670"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fa75674a631eaadf1d06cd8571883bfeb6fb4b20"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/xml/source.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c3a6b83ae6574e56be51c2b9ab40f89584923754"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "4e02e6bc27e5d4bc1741e06e246f52ac338aa1e0"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/xml/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "354be08681dc6ee60cc796473518b713533788d9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b9305c19e5dc01bfab544597572564b82b04faa9"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/repl_fs/xml/tests/write_owner.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b6d84a51dba0663ea226f9ada14897a6f5b573c0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "86c5f2ef5a225e1e81c4f0ae5580f441f58b3de6"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/io/tabular/writecell/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "aedd133888ec8ac1c8afd341866f83c7a5bd5ad1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fb33ea82ebc0d0029e2a0139fd7a1ce2015b4954"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/logical/bit/truth/binary.rs",
+      "before": [
+        "100644",
+        "blob",
+        "dc16b183cfa5021cd2eced6ff8726831c3ff5930"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e9af45a73cde8f888eb6accbb73a89960e94a689"
+      ],
+      "reason": "Confirms the selected host branch after successful canonical logical/relational computation. Arithmetic, shapes and output classes are unchanged. Fresh complete Runtime suites and the existing VM placement-observation witness qualify the added completion event. Scientific workload definitions, numerical kernels and their assertions are unchanged."
+    },
+    {
+      "path": "crates/runmat-runtime/src/builtins/logical/rel/comparison/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b8f8b92e965bafa5be2ca424f131cc04fbf11a0c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1f9c5ea160b3c1c08ffb19d7c55a06028be3e0a8"
+      ],
+      "reason": "Confirms the selected host branch after successful canonical logical/relational computation. Arithmetic, shapes and output classes are unchanged. Fresh complete Runtime suites and the existing VM placement-observation witness qualify the added completion event. Scientific workload definitions, numerical kernels and their assertions are unchanged."
+    },
+    {
+      "path": "crates/runmat-runtime/src/console/diary/tests/reentrant_provider.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f65e06fafb997f6275c0e187fa11701de64f9f6e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fe5a2f5b191825af91fd8e1c210600e41bb705b5"
+      ],
+      "reason": "Additional changes repair platform assumptions in ordinary-test fixtures: virtual rooted MemoryFsProvider paths and namespace declarations, native joined-path expectations, the closed-port refusal timeout, typed HDF5 invalid-path refusal, or Unicode Java fixture staging. Existing assertions, typed causes and case selection remain. The retained scientific cohort fixtures/commands and production numerical implementations are unchanged. Complete Linux and Windows Runtime/Java and targeted Data successors pass; their ordinary outcome unions retain exact measured sources and original failures."
+    },
+    {
+      "path": "crates/runmat-runtime/src/context/preparation/real_unary.rs",
+      "before": [
+        "100644",
+        "blob",
+        "5604a30db7361062a2b7e16463d36b27d19889ce"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "647769866888b0b02d9b7db3dfb64043dc854eb5"
+      ],
+      "reason": "Moves error projection to the existing admitted continuation owner; retains original provider causes and cancellation/retry classification. Numerical kernels and successful values are unchanged. Fresh full Runtime and descriptor tests exercise the affected ownership boundary."
+    },
+    {
+      "path": "crates/runmat-runtime/src/data/authority/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "5a206d5815e393b1943e7c1f9e2b98d48f4c9063"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e85f6158596d3052ce7e58e9e1e025813aea11d6"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/src/data/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3eb312953ce803596b5176d1b298eed47fb2d7c3"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "55f247413170308e30fe55a295b3227d463cfe2b"
+      ],
+      "reason": "Unifies portable physical chunk names and slash-separated dataset-relative metadata for full and slice writes, and encodes opaque revision nonces as hexadecimal path components. Public content hashes/object IDs, numerical payload serialization and immutable publication ordering are preserved. Existing persistence tests additionally inspect path spelling after slice/transaction writes and copy slice-written data. R1260 Linux persistence 5/0, VM lifecycle 1/0 and full Runtime 18269/0 pass; Windows Runtime/Data successors, three Mac/Linux native-product cohorts and optimized SDK acceptance pass; final Windows native shipping remains a separate gate. These changes do not alter solver/mesher arithmetic or scientific fixtures/expected results."
+    },
+    {
+      "path": "crates/runmat-runtime/src/data/publication.rs",
+      "before": [
+        "100644",
+        "blob",
+        "0fed0bc5e71e318746d87030201ee3862c238c19"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "679340794ede5229be1bfb57aefb5e752366fac2"
+      ],
+      "reason": "Private Data array revisions encode the same 32-byte random nonce directly as a portable 64-hex path component. Shared callers include Data APIs and replay scene storage; numerical payloads, manifest publication ownership, content-hash tokens and reader references are unchanged. Scientific storage roots and numerical thresholds are unchanged, while original artifact identities remain recorded. Fresh Linux Runtime and compiled VM dataset lifecycle tests pass. Fresh ARM and Intel packaged CLI cohorts pass 31 cases each; their dataset witnesses pass interpreter, JIT and compiled native-image execution, preserving exact uint64 values and validating portable revision directories. Their byte-verified evidence is attached. Linux products and Data interpreter/JIT/native cases pass; final Windows shipping remains a separate gate. Additional reviewed delta: Unifies portable physical chunk names and slash-separated dataset-relative metadata for full and slice writes, and encodes opaque revision nonces as hexadecimal path components. Public content hashes/object IDs, numerical payload serialization and immutable publication ordering are preserved. Existing persistence tests additionally inspect path spelling after slice/transaction writes and copy slice-written data. R1260 Linux persistence 5/0, VM lifecycle 1/0 and full Runtime 18269/0 pass; Windows Runtime/Data successors, three Mac/Linux native-product cohorts and optimized SDK acceptance pass; final Windows native shipping remains a separate gate. These changes do not alter solver/mesher arithmetic or scientific fixtures/expected results."
+    },
+    {
+      "path": "crates/runmat-runtime/src/dispatcher/managed_gather/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "d81191a23586c9ac884cfca64a24477dbfd82856"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "944cdd6a81a1162581e96443ba5a99e9b305931f"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/tests/analysis.rs",
+      "before": [
+        "100644",
+        "blob",
+        "73a7e8d4bc48a0dcb074dd593518a35cd45a3fac"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "262d5748aa4dca10b287856adfacd4357f631c1d"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/tests/analysis/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e47a77efad30c6b7c8661e1a893173fc8b6989e6"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "f692386f2ed8dc061af6b30354e03559dd65fbb5"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/tests/analysis/runner/rejection.rs",
+      "before": [
+        "100644",
+        "blob",
+        "505ca80a9f7a4afffdc27c75eb0c8559fe601958"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "d95e1f8122f4e73bbfb9d12ff4ea024b8010554d"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/tests/data_integer_persistence.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3ad58115bf51d6a82abce0596de8883cbd3ca1c8"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b73315023a79418260ffc5fb40ac9d5ae54bfccc"
+      ],
+      "reason": "Unifies portable physical chunk names and slash-separated dataset-relative metadata for full and slice writes, and encodes opaque revision nonces as hexadecimal path components. Public content hashes/object IDs, numerical payload serialization and immutable publication ordering are preserved. Existing persistence tests additionally inspect path spelling after slice/transaction writes and copy slice-written data. R1260 Linux persistence 5/0, VM lifecycle 1/0 and full Runtime 18269/0 pass; Windows Runtime/Data successors, three Mac/Linux native-product cohorts and optimized SDK acceptance pass; final Windows native shipping remains a separate gate. These changes do not alter solver/mesher arithmetic or scientific fixtures/expected results."
+    },
+    {
+      "path": "crates/runmat-runtime/tests/operation_contracts.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b1085086fd560438b26d5a8854f8142bcb8e75f9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "048c60ef47816e413b2ea3bbfb1c3a234b16a86a"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-runtime/tests/support/nonlinear_solid.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "54b848fc068f86d01bfca566c04303c5efcc811d"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-vm/tests/admitted_logical_execution.rs",
+      "before": [
+        "100644",
+        "blob",
+        "4eb344dc2ce428fe9c27046b0712e0978c79320d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ec58eb7ef90f7e161aca18a4dbdbca5759b57b43"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-vm/tests/fusion_gpu/consumed_values.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7c5d42a6de877efb6aaa856e01ca0ec32c8efd6f"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cf8b60a88093e8fa125d5d81f4cb48b6aeee7414"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-vm/tests/indexing.rs",
+      "before": [
+        "100644",
+        "blob",
+        "d3ae28f3d3ad8f3fb1df9924faf4227a96dcf717"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "25d7794050abdae1864b0b38f939c54e12860687"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "crates/runmat-vm/tests/multid_indexing.rs",
+      "before": [
+        "100644",
+        "blob",
+        "83ba3a817f00df74adbe4e329421a02d725b406e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "d81c24854b7a8ea7800cd507346a356fb0f2419f"
+      ],
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately."
+    },
+    {
+      "path": "scripts/meshing/tests/test_validate_release_evidence.py",
+      "before": [
+        "100644",
+        "blob",
+        "7700f1a93d0863b745c547b508f0186d086466ed"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6beb16f812f8bad90f2ff8fbc0602f977ba26791"
+      ],
+      "reason": "One Python workflow-regression test rejects scoping the release verifier to a deferred cohort. It does not participate in measured Rust scientific execution."
+    },
+    {
+      "path": "scripts/meshing/validate_release_evidence.py",
+      "before": [
+        "100644",
+        "blob",
+        "fc842c99002d6e4aed0f2b0b82fae828dbd13fdc"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "4016a952525d9082b7225e07637424679b6a122f"
+      ],
+      "reason": "This CI workflow validator requires verification of all required scientific receipts. It is not invoked by either measured Rust scientific cohort and changes no numerical, execution, fixture or workload assertion."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/windows-private-path-r1056.json",
+      "sha256": "e1ddce3db2aafa79944170959f2ab9b94ea12c0bd27ba11fa60b81b8477fbc80"
+    },
+    {
+      "path": "qualification/scientific/evidence/cli-artifact-suite-r1057.json",
+      "sha256": "0a408db2fbd2299ac7b33454c6edcaf0f79e5caa797926c7ed0c1f108f8556f4"
+    },
+    {
+      "path": "qualification/scientific/evidence/release-routing-r1058.json",
+      "sha256": "f4e467408e3585c33d3e1162e71b223b3f1ec5046d7603bf0d817306ef376ff0"
+    },
+    {
+      "path": "qualification/scientific/evidence/windows-stack-r1059.json",
+      "sha256": "8ffb4f6803102a93a0abbdc96f4ae8f17a7408bf12242867143eb203e04be877"
+    },
+    {
+      "path": "qualification/scientific/evidence/cross-platform-r1322.json",
+      "sha256": "5e0721e9da40aeb0aba8ebe60c1580e213f4cfbf3512ee35052d4d883228c612"
+    }
+  ],
+  "cache_identity": "Package test inputs can change conservative compiled cache namespaces. This review does not claim byte-identical compiled artifacts or relabel earlier cache implementations.",
+  "implementation_commit": "2a49ca1c467256029c5a64ec165bc66ec2b35810"
+}
