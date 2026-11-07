@@ -99,15 +99,17 @@ fn end_cap_gusset_weld_bead_and_extend_apply_from_the_canvas() {
     let (_, gusseted) = gusset.expect("a gusset between the members' sides");
     assert_eq!(bodies(&gusseted).len(), start + 1);
 
-    // A fillet weld along one of the bottom member's straight edges.
+    // A fillet weld along any outer edge of either member, as the canvas names it: every one
+    // applies and regenerates without errors (an outside corner's bead leaves its legs exposed).
     let edges: Vec<String> = bodies(&v)
         .iter()
         .flat_map(|b| b["edges"].as_array().cloned().unwrap_or_default())
         .filter_map(|e| e["reference"].as_str().map(str::to_owned))
-        .filter(|r| r.contains("member_side(\"bottom/"))
+        .filter(|r| r.contains("member_side(") && !r.contains("/inner_"))
         .collect();
-    let weld = edges.iter().find_map(|e| apply(frame, "weldment.weld-bead", json!({ "edges": [e], "leg": 3 })));
-    assert!(weld.is_some(), "no weld bead applied on {edges:?}");
+    assert!(edges.len() >= 16, "outer member edges: {edges:?}");
+    let failed: Vec<&String> = edges.iter().filter(|e| apply(frame, "weldment.weld-bead", json!({ "edges": [e], "leg": 3 })).is_none()).collect();
+    assert!(failed.is_empty(), "weld beads that failed: {failed:?}");
 
     // The bottom member, picked by a side face, extends from x = 200 mm to the plate's face.
     let target = face_refs(&v, "feature.plate.face.side(w.l4)");

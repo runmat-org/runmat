@@ -331,6 +331,18 @@ impl<'a, 'b> Run<'a, 'b> {
                             ordinal: None,
                         },
                     ));
+                    // The legs lie on the two faces' planes; where the bead stands proud of
+                    // them (an outside corner) they are faces of the result and need names too.
+                    for (side, ordinal) in [("a", 2), ("b", 3)] {
+                        tool.sides.push((
+                            crate::ids::SketchEntityId::new(side),
+                            FaceLabel {
+                                role: Role::WeldBead,
+                                tag: tag.clone(),
+                                ordinal: Some(ordinal),
+                            },
+                        ));
+                    }
                     tool.start = Some(FaceLabel {
                         role: Role::WeldBead,
                         tag: tag.clone(),
