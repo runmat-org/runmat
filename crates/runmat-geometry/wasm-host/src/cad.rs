@@ -126,6 +126,61 @@ pub fn call(request: &str) -> String {
     }
 }
 
+/// [`call`] with the display meshes written as bytes beside the JSON
+/// ([`runtime::display_wire`]): the JSON text and the bytes its mesh references point into.
+pub fn call_framed(request: &str) -> (String, Vec<u8>) {
+    runtime::display_wire::collect(|| call(request))
+}
+
+/// One frame holding a framed answer: the JSON's length and the bytes' length (`u32`,
+/// little-endian), the JSON, zero padding to a multiple of 4, then the bytes.
+pub fn frame(json: &str, bytes: &[u8]) -> Vec<u8> {
+    let padded = json.len().div_ceil(4) * 4;
+    let mut out = Vec::with_capacity(8 + padded + bytes.len());
+    out.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(json.as_bytes());
+    out.resize(8 + padded, 0);
+    out.extend_from_slice(bytes);
+    out
+}
+
+/// Like [`runmat_cad_call`], but the display meshes come back as bytes in one [`frame`]; free
+/// it with [`runmat_cad_free_framed`].
+///
+/// # Safety
+/// As [`runmat_cad_call`]. Free the returned frame exactly once using `runmat_cad_free_framed`
+/// from this same module instance.
+#[no_mangle]
+pub unsafe extern "C" fn runmat_cad_call_framed(request: *const c_char) -> *mut u8 {
+    let (json, bytes) = if request.is_null() {
+        (error("missing CAD request"), Vec::new())
+    } else {
+        match CStr::from_ptr(request).to_str() {
+            Ok(r) => call_framed(r),
+            Err(e) => (error(&e.to_string()), Vec::new()),
+        }
+    };
+    Box::into_raw(frame(&json, &bytes).into_boxed_slice()) as *mut u8
+}
+
+/// Frees a frame [`runmat_cad_call_framed`] returned.
+///
+/// # Safety
+/// `frame` is null or a pointer `runmat_cad_call_framed` returned from this module instance
+/// that has not been freed.
+#[no_mangle]
+pub unsafe extern "C" fn runmat_cad_free_framed(frame: *mut u8) {
+    if frame.is_null() {
+        return;
+    }
+    let header = std::slice::from_raw_parts(frame, 8);
+    let json = u32::from_le_bytes([header[0], header[1], header[2], header[3]]) as usize;
+    let bytes = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+    let len = 8 + json.div_ceil(4) * 4 + bytes;
+    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(frame, len)));
+}
+
 /// Caller supplies a NUL-terminated UTF-8 JSON request; free the response with
 /// `runmat_occt_exact_free`, like the import and execution ABIs.
 ///

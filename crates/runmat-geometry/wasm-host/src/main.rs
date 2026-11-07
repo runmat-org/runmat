@@ -6,6 +6,8 @@ fn main() {
     std::hint::black_box(runmat_geometry_wasm_host::runmat_occt_exact_free as *const ());
     std::hint::black_box(runmat_geometry_wasm_host::runmat_occt_exact_execute as *const ());
     std::hint::black_box(runmat_geometry_wasm_host::cad::runmat_cad_call as *const ());
+    std::hint::black_box(runmat_geometry_wasm_host::cad::runmat_cad_call_framed as *const ());
+    std::hint::black_box(runmat_geometry_wasm_host::cad::runmat_cad_free_framed as *const ());
 }
 
 // The identical JSON ABI can be exercised natively for host-parity checks.

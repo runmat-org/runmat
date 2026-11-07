@@ -1,6 +1,11 @@
 //! The CAD document runtime behind the wasm entry points, in plain Rust so it tests natively.
 
+pub mod part_cache;
+mod prototype_reuse;
 pub mod values_host;
+
+/// Display meshes as bytes beside the JSON, for the hosts' framed compile.
+pub use runmat_cad::display::wire as display_wire;
 
 use runmat_cad::assembly::index::build_assembly_index;
 use runmat_cad::assembly::model::{AssemblyDocument, DefinitionKind, DefinitionRef};
@@ -210,6 +215,9 @@ pub struct RegeneratedPart {
     pub kernel: Box<dyn crate::kernel::DesignKernel>,
     pub index: runmat_cad::index::PartIndex,
     pub display: PartDisplay,
+    /// The regeneration asked for a dynamic value (an `.m` function, another file's published
+    /// value, a snapshot): it depends on more than the part's text and configuration.
+    pub dynamic: bool,
 }
 
 /// Regenerates the part `path` from its text; syntax errors are the `Err` diagnostics.
@@ -254,12 +262,14 @@ pub fn regenerate_part_in(
         configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
     };
     // Values that call `.m` functions run through the host's runner (values_host).
+    let used = std::cell::Cell::new(false);
     let mut result = values_host::with_evaluator(path, |dynamic| {
+        let watched = part_cache::Watched::new(dynamic, &used);
         let ctx = RegenContext {
             kernel: kernel.as_ref(),
             solver: &ConstraintSketchSolver,
             units: &StubUnits,
-            dynamic,
+            dynamic: &watched,
             lock: None,
             catalog: None,
             policy: Default::default(),
@@ -297,6 +307,7 @@ pub fn regenerate_part_in(
         kernel,
         index,
         display,
+        dynamic: used.get(),
     })
 }
 
@@ -397,6 +408,8 @@ pub struct AssemblyResolution {
     pub documents: BTreeMap<String, PartDocument>,
     pub resolved: runmat_cad::assembly::resolve::ResolvedAssembly,
     pub problems: Vec<Diagnostic>,
+    /// Each regenerated part file's digest ([`part_cache::digest`] of its cache key), by file.
+    pub digests: BTreeMap<String, String>,
 }
 
 /// Resolves the assembly `path` from its text; syntax errors are the `Err` diagnostics.
@@ -432,6 +445,7 @@ pub fn resolve_assembly_in(
     let mut displays: BTreeMap<String, PartDisplay> = BTreeMap::new();
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     let mut problems = Vec::new();
+    let mut digests: BTreeMap<String, String> = BTreeMap::new();
     let top_path = top.path.clone();
     // Breadth-first over sub-assemblies, each definition once.
     let mut queue: Vec<(String, AssemblyDocument)> = vec![(path.to_owned(), top)];
@@ -489,11 +503,25 @@ pub fn resolve_assembly_in(
                         message: format!("{key} has errors"),
                     }),
                 },
-                _ => match regenerate_part_with(&key, text, &ASSEMBLY_TESSELLATION) {
+                _ => {
+                    let cache_key = part_cache::assembly_key(&key, text, &ASSEMBLY_TESSELLATION);
+                    digests.insert(key.clone(), part_cache::digest(&cache_key));
+                    match part_cache::assembly_part(cache_key, || {
+                    regenerate_part_with(&key, text, &ASSEMBLY_TESSELLATION).map(|part| {
+                        let diagnostics = regen_diagnostics(&key, &part);
+                        let publishes = published_datums(&part);
+                        // Coarser tessellations for the canvas's level of detail.
+                        let levels = runmat_cad::display::display_levels(&part.result, part.kernel.as_ref(), &ASSEMBLY_TESSELLATION);
+                        let mut display = part.display;
+                        display.levels = levels;
+                        let entry = part_cache::AssemblyPart { diagnostics, publishes, display, document: part.document };
+                        (entry, part.dynamic)
+                    })
+                }) {
                     Ok(part) => {
                         // A part that regenerates with errors (a feature the kernel refused)
                         // says so on the assembly, at the assembly's top.
-                        for d in regen_diagnostics(&key, &part) {
+                        for d in &part.diagnostics {
                             if d.severity == "error" {
                                 problems.push(Diagnostic {
                                     path: path.to_owned(),
@@ -533,18 +561,16 @@ pub fn resolve_assembly_in(
                         let configured = ConfiguredSummary {
                             bbox: bbox(&part.display),
                             artifact: format!("text:{key}"),
-                            publishes: published_datums(&part),
+                            publishes: part.publishes.clone(),
                             ..Default::default()
                         };
                         source.add_part(summary, configured);
-                        // Coarser tessellations for the canvas's level of detail.
-                        let mut display = part.display;
-                        display.levels = runmat_cad::display::display_levels(&part.result, part.kernel.as_ref(), &ASSEMBLY_TESSELLATION);
-                        displays.insert(key.clone(), display);
-                        documents.insert(key.clone(), part.document);
+                        displays.insert(key.clone(), part.display.clone());
+                        documents.insert(key.clone(), part.document.clone());
                     }
                     Err(mut d) => problems.append(&mut d),
-                },
+                    }
+                }
             }
         }
     }
@@ -596,6 +622,7 @@ pub fn resolve_assembly_in(
         documents,
         resolved,
         problems,
+        digests,
     })
 }
 
@@ -605,25 +632,38 @@ pub fn compile_assembly(
     text: &str,
     files: &Files,
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
+    compile_assembly_known(path, text, files, &BTreeSet::new())
+}
+
+/// [`compile_assembly`] for a caller that holds the part displays whose digests are in `known`:
+/// each prototype carries its part's `digest`, and a known one is sent `reused` without its
+/// part display ([`prototype_reuse`]).
+pub fn compile_assembly_known(
+    path: &str,
+    text: &str,
+    files: &Files,
+    known: &BTreeSet<String>,
+) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
     let AssemblyResolution {
         source,
         displays,
         documents,
         resolved,
         problems,
+        digests,
     } = resolve_assembly(path, text, files)?;
     let index = build_assembly_index(&resolved, Some(&source));
     let configured = crate::configured::configured_displays(&resolved, &documents);
-    let display = assembly_display_configured(&resolved, &source, &displays, &configured);
+    let mut display = assembly_display_configured(&resolved, &source, &displays, &configured);
+    let prototype_digests = prototype_reuse::prototype_digests(&resolved, &documents, &digests);
+    let reused = prototype_reuse::omit_known(&mut display, &prototype_digests, known);
+    let mut display = serde_json::to_value(&display).unwrap_or(Value::Null);
+    prototype_reuse::mark(&mut display, &prototype_digests, &reused);
     let mut index = serde_json::to_value(&index).unwrap_or(Value::Null);
     if let Some(row) = index.as_object_mut() {
         row.insert("exploded".into(), crate::exploded::exploded_views(&resolved, &source));
     }
-    Ok((
-        index,
-        serde_json::to_value(&display).unwrap_or(Value::Null),
-        problems,
-    ))
+    Ok((index, display, problems))
 }
 
 /// `compile` as JSON.
@@ -645,11 +685,17 @@ pub fn compile_options(options: &str) -> Option<String> {
 
 /// [`compile_json`] with a part's active configuration.
 pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Option<&str>) -> String {
+    compile_json_known(path, text, files, configuration, &BTreeSet::new())
+}
+
+/// [`compile_json_in`] for a caller that holds the part displays whose digests are in `known`
+/// (an assembly sends those prototypes `reused`; see [`compile_assembly_known`]).
+pub fn compile_json_known(path: &str, text: &str, files: &Files, configuration: Option<&str>, known: &BTreeSet<String>) -> String {
     if path.ends_with(".drawing") {
         return crate::drawing::compile_json(path, text, files);
     }
     let out = if is_assembly(path) {
-        match compile_assembly(path, text, files) {
+        match compile_assembly_known(path, text, files, known) {
             Ok((mut index, display, diagnostics)) => {
                 crate::repairs::label_candidates(&mut index["diagnostics"]);
                 json!({

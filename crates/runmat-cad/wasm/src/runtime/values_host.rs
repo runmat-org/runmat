@@ -87,7 +87,7 @@ pub fn resolve_let_files(path: &str, lets: &mut [runmat_cad::index::LetRow]) {
     }
 }
 
-/// The Desktop's and the browser's compile entry (`options`: `{ configuration?, values? }`):
+/// The Desktop's and the browser's compile entry (`options`: `{ configuration?, values?, known? }`):
 /// the first phase of the two-phase `.m` compile ([`runmat_cad::value::m_table`]).
 /// `values` holds the results evaluated so far by call key. The output is the compile JSON
 /// plus `pending_values`, the calls still to run in the runtime, when there are any.
@@ -108,7 +108,9 @@ pub fn compile_json_with_values(path: &str, text: &str, files: &super::Files, op
     let mut all = files.clone();
     all.insert(path.to_owned(), text.to_owned());
     let host = ValueHost { files: all, runner: Box::new(runner) };
-    let out = with_value_host(host, || super::compile_json_in(path, text, files, configuration.as_deref()));
+    // Part displays the caller holds, by digest: an assembly sends those prototypes `reused`.
+    let known = super::prototype_reuse::known_from_options(options);
+    let out = with_value_host(host, || super::compile_json_known(path, text, files, configuration.as_deref(), &known));
     let pending = pending.borrow();
     if pending.is_empty() {
         return out;

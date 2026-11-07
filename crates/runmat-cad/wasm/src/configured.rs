@@ -5,6 +5,7 @@
 //! Each distinct configuration is regenerated once on the installed kernel and tessellated, so
 //! every occurrence draws its own configuration's geometry.
 
+use crate::runtime::part_cache;
 use runmat_cad::assembly::model::DefinitionKind;
 use runmat_cad::assembly::resolve::ResolvedAssembly;
 use runmat_cad::assembly::source::ConfigKey;
@@ -37,13 +38,23 @@ pub fn regenerate_configured(
     document: &PartDocument,
     key: &ConfigKey,
 ) -> (RegenResult, Box<dyn crate::kernel::DesignKernel>) {
+    regenerate_configured_watched(document, key, &std::cell::Cell::new(false))
+}
+
+/// [`regenerate_configured`], noting in `used` whether the regeneration asked for a dynamic value.
+fn regenerate_configured_watched(
+    document: &PartDocument,
+    key: &ConfigKey,
+    used: &std::cell::Cell<bool>,
+) -> (RegenResult, Box<dyn crate::kernel::DesignKernel>) {
     let doc = configured_document(document, key);
     let kernel = crate::kernel::make();
+    let watched = crate::runtime::part_cache::Watched::new(&NoDynamicValues, used);
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
         solver: &ConstraintSketchSolver,
         units: &StubUnits,
-        dynamic: &NoDynamicValues,
+        dynamic: &watched,
         lock: None,
         catalog: None,
         policy: Default::default(),
@@ -77,12 +88,18 @@ pub fn configured_displays(
         let Some(document) = documents.get(&key.0) else {
             continue;
         };
-        let (result, kernel) = regenerate_configured(document, &node.configuration);
-        let mut display = part_display(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
-        display.levels = runmat_cad::display::display_levels(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
-        // A configured occurrence draws in the part's own colors, as its default does.
-        runmat_cad::appearance::apply_document_appearance(&configured_document(document, &node.configuration), &result, &mut display);
-        out.insert(key, display);
+        // Kept across compiles by the part's document and the configuration ([`part_cache`]).
+        let cache_key = part_cache::configured_key(&key.0, document, &node.configuration);
+        let part = part_cache::configured_part(cache_key, || {
+            let used = std::cell::Cell::new(false);
+            let (result, kernel) = regenerate_configured_watched(document, &node.configuration, &used);
+            let mut display = part_display(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
+            display.levels = runmat_cad::display::display_levels(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
+            // A configured occurrence draws in the part's own colors, as its default does.
+            runmat_cad::appearance::apply_document_appearance(&configured_document(document, &node.configuration), &result, &mut display);
+            (part_cache::ConfiguredPart { display }, used.get())
+        });
+        out.insert(key, part.display.clone());
     }
     out
 }
