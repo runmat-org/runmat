@@ -33,7 +33,9 @@ pub use sampled::{
     sampled_observation_partition_source_indices,
 };
 mod topology;
-pub use topology::resources::solid_observation_topology_resident_bytes;
+pub use topology::resources::{
+    solid_observation_topology_resident_bytes, solid_observation_topology_resident_bytes_for_mesh,
+};
 
 pub use source::{
     ObservationFieldSelection, ObservationFieldSelectionIdentity, ObservationFieldSource,

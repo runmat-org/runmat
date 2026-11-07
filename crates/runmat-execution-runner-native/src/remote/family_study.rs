@@ -84,7 +84,7 @@ pub(super) async fn execute(
             artifact_access: &decoded.artifact_access,
             program_revision: &request.recipe.program_revision,
             local_execution: decoded.local_execution,
-            worker_memory_bytes: task_resources.memory_bytes,
+            worker_memory: &|| Ok(task_resources.memory_bytes),
         },
         &mut |model| match super::input_materialization::apply_to_model(
             model,

@@ -29,6 +29,50 @@ impl ObservationPublicationCatalog {
         };
         construction_resident_bytes_admitted(workload, manifest, mesh, maximum_resident_bytes)
     }
+
+    /// Workspace of `validate_for` over a thermal source, beside the borrowed catalog,
+    /// workload and mesh. Validation runs two stages in sequence:
+    /// - the source authority (`thermal_source_construction_resident_bytes_admitted`), which
+    ///   is dropped before the next stage;
+    /// - re-derivation of the execution grouping: one projection, then the observation
+    ///   topology over it.
+    ///
+    /// The peak is the larger stage. Copies of the catalog's own plan and selected values are
+    /// bounded by the catalog's decoded size, which the caller accounts.
+    pub fn thermal_source_validation_resident_bytes_admitted(
+        &self,
+        workload: &ThermalWorkload,
+        mesh: &SolverMeshArtifact,
+        maximum_resident_bytes: u64,
+    ) -> AnalysisExecutionResult<u64> {
+        let ObservationFieldCatalogSource::Thermal { manifest } = self.source().source() else {
+            return Err(invalid("thermal validation source family differs"));
+        };
+        // Thermal sources publish node and element fields; a face topology is never derived.
+        if crate::results::observation::distributed::source_selection::observation_topology_faces(
+            self.plan(),
+        ) {
+            return Err(invalid("thermal observations select no faces or cells"));
+        }
+        let construction =
+            construction_resident_bytes_admitted(workload, manifest, mesh, maximum_resident_bytes)?;
+        let derivation =
+            AnalysisProjection::derivation_resident_bytes_estimate(mesh).map_err(invalid)?;
+        let retained =
+            AnalysisProjection::retained_resident_bytes_upper_bound(mesh).map_err(invalid)?;
+        let topology =
+            crate::results::observation::solid_observation_topology_resident_bytes_for_mesh(mesh)
+                .map_err(|error| invalid(error.to_string()))?;
+        let grouping = retained
+            .checked_add(topology)
+            .ok_or(AnalysisExecutionError::Limit(
+                "thermal source validation workspace",
+            ))?
+            .max(derivation);
+        let bytes = construction.max(grouping);
+        require(bytes, maximum_resident_bytes)?;
+        Ok(bytes)
+    }
 }
 
 pub(in crate::results::observation) fn construction_resident_bytes_admitted(

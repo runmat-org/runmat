@@ -100,10 +100,11 @@ pub(crate) struct FamilyStudyContext<'a> {
     pub artifact_access: &'a ArtifactAccess,
     pub program_revision: &'a ProgramRevision,
     pub local_execution: LocalExecutionPlan,
-    /// The memory one analysis worker of this run may use, read once per run by the placement
-    /// (locally: the run's pool less what the coordinating process holds). Path selection, the
-    /// output policy and the worker envelope all use this value.
-    pub worker_memory_bytes: u64,
+    /// Reads the memory one analysis worker of this run may use (locally: the run's pool less
+    /// what the coordinating process holds). Planning calls it once, after the family compile,
+    /// so the read sees the coordinator's compiled study. Path selection, the output policy and
+    /// the worker envelope all use that one value.
+    pub worker_memory: &'a dyn Fn() -> Result<u64, String>,
 }
 
 /// Coordinator preparation for one family, ready for any analysis task pool.
@@ -123,6 +124,8 @@ pub(crate) struct PlannedFamilyStudy {
     /// Authored step envelope; local placement sizes its worker processes from it.
     pub maximum_resident_bytes: u64,
     pub maximum_wall_millis: u64,
+    /// The run's worker memory, as read once during planning.
+    pub worker_memory_bytes: u64,
 }
 
 impl PlannedFamilyStudy {
@@ -168,7 +171,17 @@ pub(crate) fn plan_family_study(
             kind.label()
         ));
     }
-    let output_policy = admitted_output_policy(context.study, context.worker_memory_bytes)?;
+    // One read per run, at the first use after the compile.
+    let read = std::cell::Cell::new(None::<u64>);
+    let worker_memory = || -> Result<u64, String> {
+        if let Some(bytes) = read.get() {
+            return Ok(bytes);
+        }
+        let bytes = (context.worker_memory)()?;
+        read.set(Some(bytes));
+        Ok(bytes)
+    };
+    let output_policy = || admitted_output_policy(context.study, worker_memory()?);
     let capabilities = BTreeSet::from([AnalysisCapabilityRequirement::ProcessIsolation]);
     let mesh = context.mesh.clone();
     let access = context.artifact_access.clone();
@@ -201,7 +214,7 @@ pub(crate) fn plan_family_study(
             // multigrid when the factor does not fit) within the step's resident ceiling. Run it
             // under the run's admitted budget, min(authored, the run's worker memory), so the
             // plan, the worker's re-derivation and the worker envelope agree.
-            let machine = context.worker_memory_bytes;
+            let machine = worker_memory()?;
             for step in &mut compiled.model.sequence.steps {
                 let budget = step.accuracy.resources.resident_byte_budget().min(machine);
                 step.accuracy.resources.set_resident_byte_budget(budget);
@@ -224,7 +237,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
@@ -244,7 +257,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
@@ -265,7 +278,7 @@ pub(crate) fn plan_family_study(
                         frozen_project_digest: frozen,
                         artifact_access: access,
                         program_revision: revision,
-                        output_policy,
+                        output_policy: output_policy()?,
                         required_capabilities: capabilities,
                     },
                 )),
@@ -300,14 +313,14 @@ pub(crate) fn plan_family_study(
             (
                 FamilyStudyPreparation::Electrical(Box::new(ElectricalStudyPreparation {
                     local_execution: context.local_execution,
-                    machine_memory_bytes: context.worker_memory_bytes,
+                    machine_memory_bytes: worker_memory()?,
                     policy,
                     product,
                     mesh,
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
@@ -333,7 +346,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
@@ -359,7 +372,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
@@ -375,7 +388,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 },
             )
@@ -406,7 +419,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                 })),
                 step,
             )
@@ -416,6 +429,7 @@ pub(crate) fn plan_family_study(
         preparation,
         maximum_resident_bytes: step.0,
         maximum_wall_millis: step.1,
+        worker_memory_bytes: worker_memory()?,
     })
 }
 

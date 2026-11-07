@@ -644,3 +644,66 @@ fn finalization_rejects_eviction_and_missing_accepted_samples() {
     )
     .is_err());
 }
+
+#[test]
+fn thermal_catalog_validation_fits_its_source_validation_law() {
+    use crate::results::observation::{ObservationPublicationCatalog, ObservationPublicationEntry};
+    let (workload, mesh, plan, source, checkpoint) =
+        fixture(RetentionPolicy::Canonical, SeriesReduction::Maximum);
+    let ObservationFieldCatalogSource::Thermal { manifest } = source.source() else {
+        unreachable!()
+    };
+    let producer = manifest.producer;
+    let context = ObservationHistorySourceContext::Thermal {
+        workload: &workload,
+        mesh: &mesh,
+    };
+    let request = ObservationHistoryFinalizationRequest::new(
+        plan.clone(),
+        producer,
+        ObservationId("temperature_history".into()),
+        &checkpoint,
+        &source,
+        context,
+    )
+    .unwrap();
+    let finalized = request
+        .finalize(checkpoint.clone(), &source, context)
+        .unwrap();
+    let history = crate::results::observation::ObservationHistoryPublication::new(
+        request,
+        &checkpoint,
+        &source,
+        context,
+        &finalized.history,
+        finalized.series_reduction.as_ref(),
+    )
+    .unwrap();
+    let step = &workload.model.sequence.steps[0];
+    let catalog = ObservationPublicationCatalog::new(
+        producer,
+        plan,
+        source.clone(),
+        step,
+        vec![ObservationPublicationEntry::History(Box::new(history))],
+        context,
+    )
+    .unwrap();
+    let law = catalog
+        .thermal_source_validation_resident_bytes_admitted(&workload, &mesh, u64::MAX)
+        .unwrap();
+    // Copies of the catalog's plan and selected values are accounted by the caller as one
+    // decoded catalog; the canonical bytes bound that copy here.
+    let catalog_copy = catalog.canonical_bytes().unwrap().len() as u64;
+    let ((), _, peak) = crate::topology::measure_test_allocations(|| {
+        catalog.validate_for(step, context).unwrap();
+    });
+    println!("thermal catalog validation peak={peak} law={law} catalog={catalog_copy}");
+    assert!(
+        peak as u64 <= law + catalog_copy,
+        "validation peak {peak} exceeds {law} + {catalog_copy}"
+    );
+    assert!(catalog
+        .thermal_source_validation_resident_bytes_admitted(&workload, &mesh, law - 1)
+        .is_err());
+}
