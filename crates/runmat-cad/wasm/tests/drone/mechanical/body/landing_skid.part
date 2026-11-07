@@ -8,12 +8,14 @@ std 1
 // centre line (y); its origin is the body origin.
 part landing_skid {
     input side : length = 34 mm
+    // The rail's depth under the struts: the wall the landing load bends.
+    input rail_thickness : length = 3.5 mm
     feature sole_plane = plane.offset(base = origin.xy, distance = -21 mm)
     sketch rail_s on plane.sole_plane {
         c = spline(points = [[48.5 mm, -3.5 mm + input.side], [50.019 mm, -3.153 mm + input.side], [51.236 mm, -2.182 mm + input.side], [51.912 mm, -0.779 mm + input.side], [51.912 mm, 0.779 mm + input.side], [51.236 mm, 2.182 mm + input.side], [50.019 mm, 3.153 mm + input.side], [48.5 mm, 3.5 mm + input.side], [-42.5 mm, 3.5 mm + input.side], [-44.019 mm, 3.153 mm + input.side], [-45.236 mm, 2.182 mm + input.side], [-45.912 mm, 0.779 mm + input.side], [-45.912 mm, -0.779 mm + input.side], [-45.236 mm, -2.182 mm + input.side], [-44.019 mm, -3.153 mm + input.side], [-42.5 mm, -3.5 mm + input.side]], closed)
     }
-    feature rail = extrude(profile = sketch.rail_s, distance = 3.5 mm)
-    feature front_st0 = plane.offset(base = origin.xy, distance = -19 mm)
+    feature rail = extrude(profile = sketch.rail_s, distance = input.rail_thickness)
+    feature front_st0 = plane.offset(base = origin.xy, distance = input.rail_thickness - 22.5 mm)
     sketch front_s0 on plane.front_st0 {
         c = spline(points = [[30.5 mm, -2.5 mm + input.side], [31.585 mm, -2.252 mm + input.side], [32.455 mm, -1.559 mm + input.side], [32.937 mm, -0.556 mm + input.side], [32.937 mm, 0.556 mm + input.side], [32.455 mm, 1.559 mm + input.side], [31.585 mm, 2.252 mm + input.side], [30.5 mm, 2.5 mm + input.side], [25.5 mm, 2.5 mm + input.side], [24.415 mm, 2.252 mm + input.side], [23.545 mm, 1.559 mm + input.side], [23.063 mm, 0.556 mm + input.side], [23.063 mm, -0.556 mm + input.side], [23.545 mm, -1.559 mm + input.side], [24.415 mm, -2.252 mm + input.side], [25.5 mm, -2.5 mm + input.side]], closed)
     }
@@ -26,7 +28,7 @@ part landing_skid {
         c = spline(points = [[33.5 mm, -4.5 mm + input.side], [35.452 mm, -4.054 mm + input.side], [37.018 mm, -2.806 mm + input.side], [37.887 mm, -1.001 mm + input.side], [37.887 mm, 1.001 mm + input.side], [37.018 mm, 2.806 mm + input.side], [35.452 mm, 4.054 mm + input.side], [33.5 mm, 4.5 mm + input.side], [22.5 mm, 4.5 mm + input.side], [20.548 mm, 4.054 mm + input.side], [18.982 mm, 2.806 mm + input.side], [18.113 mm, 1.001 mm + input.side], [18.113 mm, -1.001 mm + input.side], [18.982 mm, -2.806 mm + input.side], [20.548 mm, -4.054 mm + input.side], [22.5 mm, -4.5 mm + input.side]], closed)
     }
     feature front = loft(profiles = [sketch.front_s0, sketch.front_s1, sketch.front_s2], mode = add)
-    feature rear_st0 = plane.offset(base = origin.xy, distance = -19 mm)
+    feature rear_st0 = plane.offset(base = origin.xy, distance = input.rail_thickness - 22.5 mm)
     sketch rear_s0 on plane.rear_st0 {
         c = spline(points = [[-27.5 mm, -2.5 mm + input.side], [-26.415 mm, -2.252 mm + input.side], [-25.545 mm, -1.559 mm + input.side], [-25.063 mm, -0.556 mm + input.side], [-25.063 mm, 0.556 mm + input.side], [-25.545 mm, 1.559 mm + input.side], [-26.415 mm, 2.252 mm + input.side], [-27.5 mm, 2.5 mm + input.side], [-32.5 mm, 2.5 mm + input.side], [-33.585 mm, 2.252 mm + input.side], [-34.455 mm, 1.559 mm + input.side], [-34.937 mm, 0.556 mm + input.side], [-34.937 mm, -0.556 mm + input.side], [-34.455 mm, -1.559 mm + input.side], [-33.585 mm, -2.252 mm + input.side], [-32.5 mm, -2.5 mm + input.side]], closed)
     }
@@ -78,5 +80,9 @@ part landing_skid {
     feature belly = loft(profiles = [sketch.belly_s0, sketch.belly_s1, sketch.belly_s2, sketch.belly_s3, sketch.belly_s4, sketch.belly_s5, sketch.belly_s6, sketch.belly_s7, sketch.belly_s8], mode = cut)
     // The sole's edges are rounded, so the skid doesn't catch when it lands with drift.
     feature sole_round = fillet(edges = [edges_between(feature.rail.face.side(rail_s.c), feature.rail.face.start)], radius = 1.2 mm)
+    // The struts' tops, where the skid is bonded and screwed to the belly, and the sole that meets
+    // the ground.
+    region mount : face = { select = [feature.belly.face.side(belly_s0.c)], expect = at_least_one }
+    region sole : face = { select = [feature.rail.face.start], expect = exactly_one }
     output landing_skid = { body = feature.rail.body, part_number = "CD-BD-140", material = "glass_filled_nylon", color = "#4A4F57" }
 }
