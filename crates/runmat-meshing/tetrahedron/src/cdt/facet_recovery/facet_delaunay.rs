@@ -193,10 +193,33 @@ pub(super) fn insert_nodes(
     nodes: &[StableDigest],
     segment_edges: &BTreeSet<[StableDigest; 2]>,
 ) -> Option<Vec<PendingSupportTriangle>> {
+    let nodes = nodes.iter().map(|node| (*node, None)).collect::<Vec<_>>();
     insert_nodes_at(
         &|identity| coordinates(topology, identity),
         triangles,
-        nodes,
+        &nodes,
+        segment_edges,
+    )
+}
+
+/// [`insert_nodes`] for nodes that a segment split placed on the facet boundary: each node comes
+/// with the segment edge it split, as sorted identities. The triangles on that edge seed its
+/// cavity, so a node that rounding puts just outside its triangle is still placed, and the
+/// split edge leaves the triangulation.
+pub(super) fn insert_segment_nodes(
+    topology: &impl TetrahedralTopology,
+    triangles: Vec<PendingSupportTriangle>,
+    nodes: &[(StableDigest, [StableDigest; 2])],
+    segment_edges: &BTreeSet<[StableDigest; 2]>,
+) -> Option<Vec<PendingSupportTriangle>> {
+    let nodes = nodes
+        .iter()
+        .map(|(node, edge)| (*node, Some(*edge)))
+        .collect::<Vec<_>>();
+    insert_nodes_at(
+        &|identity| coordinates(topology, identity),
+        triangles,
+        &nodes,
         segment_edges,
     )
 }
@@ -204,7 +227,7 @@ pub(super) fn insert_nodes(
 fn insert_nodes_at(
     coordinates: &impl Fn(StableDigest) -> Option<[f64; 3]>,
     mut triangles: Vec<PendingSupportTriangle>,
-    nodes: &[StableDigest],
+    nodes: &[(StableDigest, Option<[StableDigest; 2]>)],
     segment_edges: &BTreeSet<[StableDigest; 2]>,
 ) -> Option<Vec<PendingSupportTriangle>> {
     let triangle_coordinates = |triangle: [StableDigest; 3]| {
@@ -213,7 +236,8 @@ fn insert_nodes_at(
         };
         Some([a, b, c])
     };
-    for node in nodes {
+    for (node, split_edge) in nodes {
+        let split_edge = split_edge.map(|[first, second]| sorted_edge(first, second));
         let point = coordinates(*node)?;
         if triangles
             .iter()
@@ -227,6 +251,15 @@ fn insert_nodes_at(
         }
         let mut seeds = Vec::new();
         for (index, triangle) in corners.iter().enumerate() {
+            if let Some(edge) = split_edge {
+                if edge
+                    .iter()
+                    .all(|end| triangles[index].triangle.node_identities.contains(end))
+                {
+                    seeds.push(index);
+                }
+                continue;
+            }
             let Some(apex) = lift(*triangle) else {
                 continue;
             };
@@ -282,7 +315,7 @@ fn insert_nodes_at(
                         .iter()
                         .any(|owner| owner != index && cavity.contains(owner))
                 });
-                if interior {
+                if interior || split_edge == Some(edge) {
                     continue;
                 }
                 let sign =
@@ -313,6 +346,195 @@ fn insert_nodes_at(
         triangles = kept;
     }
     Some(triangles)
+}
+
+/// Protected triangles of one facet that a segment split re-triangulates, and their 2D
+/// Bowyer-Watson replacement around the split node.
+pub(super) struct SplitFacetCavity {
+    pub(super) sources: Vec<DelaunayRecoveredFacetTriangle>,
+    pub(super) children: Vec<DelaunayRecoveredFacetTriangle>,
+}
+
+/// The facets on recovered segment edge `edge` whose protected triangles a node at `point` on
+/// that edge encroaches beyond the triangles on the edge itself.
+///
+/// The triangles on `edge` seed one cavity per facet. A cavity grows across edges that are not
+/// in `segment_edges` into triangles whose circumcircle strictly contains `point` (exact in-circle
+/// against a lifted apex), so it stays inside its facet. A cavity that grew is replaced by the fan
+/// from `node` to its boundary, without the split edge; each child keeps the winding of the
+/// triangle that owned its boundary edge. Without these re-triangulations, a nearly coplanar
+/// neighbor facet keeps a protected triangle whose every sphere holds the node, and no
+/// constrained-Delaunay complex contains both. A cavity larger than `maximum` triangles or not
+/// star-shaped from the node is left out, and the caller keeps the plain split.
+pub(super) fn segment_split_cavities(
+    topology: &impl TetrahedralTopology,
+    protected: &[DelaunayRecoveredFacetTriangle],
+    edge: [StableDigest; 2],
+    node: StableDigest,
+    point: [f64; 3],
+    segment_edges: &BTreeSet<[StableDigest; 2]>,
+    maximum: usize,
+) -> Vec<SplitFacetCavity> {
+    segment_split_cavities_at(
+        &|identity| coordinates(topology, identity),
+        protected,
+        edge,
+        node,
+        point,
+        segment_edges,
+        maximum,
+    )
+}
+
+/// Floating-point prefilter for the exact in-circle test, with a wide relative margin.
+fn near_circumcircle(triangle: [[f64; 3]; 3], point: [f64; 3]) -> bool {
+    let [a, b, c] = triangle;
+    let (ab, ac) = (sub(b, a), sub(c, a));
+    let normal = cross(ab, ac);
+    let denominator = 2.0 * dot(normal, normal);
+    if denominator == 0.0 || !denominator.is_finite() {
+        return false;
+    }
+    let first = cross(normal, ab).map(|value| value * dot(ac, ac));
+    let second = cross(ac, normal).map(|value| value * dot(ab, ab));
+    let offset = [0, 1, 2].map(|axis| (first[axis] + second[axis]) / denominator);
+    let center = [0, 1, 2].map(|axis| a[axis] + offset[axis]);
+    dot(sub(point, center), sub(point, center)) < dot(offset, offset) * (1.0 + 1e-6)
+}
+
+fn segment_split_cavities_at(
+    coordinates: &impl Fn(StableDigest) -> Option<[f64; 3]>,
+    protected: &[DelaunayRecoveredFacetTriangle],
+    edge: [StableDigest; 2],
+    node: StableDigest,
+    point: [f64; 3],
+    segment_edges: &BTreeSet<[StableDigest; 2]>,
+    maximum: usize,
+) -> Vec<SplitFacetCavity> {
+    let split_edge = sorted_edge(edge[0], edge[1]);
+    let corners_of = |triangle: &DelaunayRecoveredFacetTriangle| {
+        let [Some(a), Some(b), Some(c)] = triangle.node_identities.map(coordinates) else {
+            return None;
+        };
+        Some([a, b, c])
+    };
+    let on_edge = |triangle: &DelaunayRecoveredFacetTriangle| {
+        edge.iter()
+            .all(|endpoint| triangle.node_identities.contains(endpoint))
+    };
+    // One pass selects the seeds and the candidates; the cavities grow only among them.
+    let local = protected
+        .iter()
+        .copied()
+        .filter(|triangle| {
+            on_edge(triangle)
+                || corners_of(triangle).is_some_and(|corners| near_circumcircle(corners, point))
+        })
+        .collect::<Vec<_>>();
+    let mut owners = BTreeMap::<[StableDigest; 2], Vec<usize>>::new();
+    for (index, triangle) in local.iter().enumerate() {
+        let [a, b, c] = triangle.node_identities;
+        for (first, second) in [(a, b), (b, c), (c, a)] {
+            owners
+                .entry(sorted_edge(first, second))
+                .or_default()
+                .push(index);
+        }
+    }
+    let mut assigned = BTreeSet::new();
+    let mut cavities = Vec::new();
+    for seed in (0..local.len()).filter(|index| on_edge(&local[*index])) {
+        if assigned.contains(&seed) {
+            continue;
+        }
+        let mut cavity = BTreeSet::from([seed]);
+        let mut queue = vec![seed];
+        let mut bounded = true;
+        while let Some(index) = queue.pop() {
+            let [a, b, c] = local[index].node_identities;
+            for (first, second) in [(a, b), (b, c), (c, a)] {
+                let shared = sorted_edge(first, second);
+                if shared == split_edge || segment_edges.contains(&shared) {
+                    continue;
+                }
+                for neighbor in owners.get(&shared).into_iter().flatten().copied() {
+                    if cavity.contains(&neighbor) {
+                        continue;
+                    }
+                    let joins = on_edge(&local[neighbor])
+                        || corners_of(&local[neighbor])
+                            .is_some_and(|corners| strictly_inside_circumcircle(corners, point));
+                    if !joins {
+                        continue;
+                    }
+                    cavity.insert(neighbor);
+                    queue.push(neighbor);
+                }
+            }
+            if cavity.len() > maximum {
+                bounded = false;
+                break;
+            }
+        }
+        assigned.extend(cavity.iter().copied());
+        let grew = cavity.iter().any(|index| !on_edge(&local[*index]));
+        if !bounded || !grew {
+            continue;
+        }
+        if let Some(children) = fan(coordinates, &local, &cavity, &owners, split_edge, node, point)
+        {
+            cavities.push(SplitFacetCavity {
+                sources: cavity.iter().map(|index| local[*index]).collect(),
+                children,
+            });
+        }
+    }
+    cavities
+}
+
+/// The fan from `node` to the cavity boundary without `split_edge`, or `None` when a fan
+/// triangle would turn against the triangle that owned its boundary edge.
+fn fan(
+    coordinates: &impl Fn(StableDigest) -> Option<[f64; 3]>,
+    local: &[DelaunayRecoveredFacetTriangle],
+    cavity: &BTreeSet<usize>,
+    owners: &BTreeMap<[StableDigest; 2], Vec<usize>>,
+    split_edge: [StableDigest; 2],
+    node: StableDigest,
+    point: [f64; 3],
+) -> Option<Vec<DelaunayRecoveredFacetTriangle>> {
+    let mut children = Vec::new();
+    for index in cavity {
+        let [a, b, c] = local[*index].node_identities;
+        let corners = [coordinates(a)?, coordinates(b)?, coordinates(c)?];
+        let apex = lift(corners)?;
+        let reference = orient3d([corners[0], corners[1], corners[2], apex]).ok()?;
+        if reference == PredicateSign::Zero {
+            return None;
+        }
+        for (first, second) in [(a, b), (b, c), (c, a)] {
+            let shared = sorted_edge(first, second);
+            if shared == split_edge {
+                continue;
+            }
+            let interior = owners.get(&shared).is_some_and(|owners| {
+                owners
+                    .iter()
+                    .any(|owner| owner != index && cavity.contains(owner))
+            });
+            if interior {
+                continue;
+            }
+            let sign = orient3d([coordinates(first)?, coordinates(second)?, point, apex]).ok()?;
+            if sign != reference {
+                return None;
+            }
+            children.push(DelaunayRecoveredFacetTriangle {
+                node_identities: [first, second, node],
+            });
+        }
+    }
+    Some(children)
 }
 
 #[cfg(test)]
@@ -365,7 +587,7 @@ mod tests {
             .into_iter()
             .collect();
         let triangles = vec![pending([0, 3, 1]), pending([0, 1, 2])];
-        let result = insert_nodes_at(&lookup, triangles, &[id(4)], &segment_edges)
+        let result = insert_nodes_at(&lookup, triangles, &[(id(4), None)], &segment_edges)
             .expect("the cavity is star-shaped");
         let has_chord = result.iter().any(|entry| {
             let nodes = entry.triangle.node_identities;
@@ -406,11 +628,122 @@ mod tests {
             .into_iter()
             .collect();
         let triangles = vec![pending([0, 3, 1]), pending([0, 1, 2])];
-        let result = insert_nodes_at(&lookup, triangles, &[id(4)], &segment_edges)
+        let result = insert_nodes_at(&lookup, triangles, &[(id(4), None)], &segment_edges)
             .expect("the cavity is star-shaped");
         assert_eq!(result.len(), 4);
         assert!(result
             .iter()
             .any(|entry| entry.triangle.node_identities == [0, 1, 2].map(id)));
+    }
+
+    /// Two facets meet at segment 0-1. In the lower facet, triangle 0-1-3 is split at the
+    /// midpoint 4 of 0-1, and the neighbor 1-5-3 has 4 in its circumcircle, so its edge 1-3
+    /// gives way to 4-5. Triangle 0-3-6 does not hold 4 in its circumcircle and stays.
+    #[test]
+    fn segment_split_retriangulates_the_neighbor_triangle_that_the_node_encroaches() {
+        let points = [
+            [0.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+            [2.0, 1.0, 0.0],
+            [1.0, -1.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [4.0, -1.0, 0.0],
+            [-3.0, -6.0, 0.0],
+        ];
+        let lookup = |identity: StableDigest| {
+            (0..points.len() as u8)
+                .find(|index| id(*index) == identity)
+                .map(|index| points[index as usize])
+        };
+        let triangle = |nodes: [u8; 3]| DelaunayRecoveredFacetTriangle {
+            node_identities: nodes.map(id),
+        };
+        let protected = [
+            triangle([0, 1, 2]),
+            triangle([1, 0, 3]),
+            triangle([1, 3, 5]),
+            triangle([0, 6, 3]),
+        ];
+        let segment_edges = [[0, 1], [1, 2], [2, 0], [1, 5], [0, 6], [6, 3], [3, 5]]
+            .map(|[a, b]| sorted_edge(id(a), id(b)))
+            .into_iter()
+            .collect();
+        let cavities = segment_split_cavities_at(
+            &lookup,
+            &protected,
+            [id(0), id(1)],
+            id(4),
+            points[4],
+            &segment_edges,
+            16,
+        );
+        assert_eq!(cavities.len(), 1, "only the lower facet grows");
+        let cavity = &cavities[0];
+        assert_eq!(cavity.sources.len(), 2);
+        assert!(cavity.sources.contains(&triangle([1, 3, 5])));
+        assert_eq!(cavity.children.len(), 3);
+        assert!(cavity
+            .children
+            .iter()
+            .all(|child| child.node_identities.contains(&id(4))));
+        assert!(!cavity.children.iter().any(|child| {
+            child.node_identities.contains(&id(1)) && child.node_identities.contains(&id(3))
+        }));
+        for child in &cavity.children {
+            let [a, b, c] = child.node_identities.map(|node| lookup(node).unwrap());
+            let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+            assert!(area > 0.0, "child does not keep the facet's counter-clockwise winding");
+        }
+        let small = segment_split_cavities_at(
+            &lookup,
+            &protected,
+            [id(0), id(1)],
+            id(4),
+            points[4],
+            &segment_edges,
+            1,
+        );
+        assert!(small.is_empty(), "a cavity over the limit is left out");
+    }
+
+    /// A segment split node that rounding puts just outside the triangle on the split edge is
+    /// still placed when the split edge is known, and the split edge leaves the support.
+    #[test]
+    fn segment_node_just_outside_its_triangle_is_placed_by_its_split_edge() {
+        let points = [
+            [0.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+            [2.0, 2.0, 0.0],
+            [2.0, -1.0e-12, 0.0],
+        ];
+        let lookup = |identity: StableDigest| {
+            (0..points.len() as u8)
+                .find(|index| id(*index) == identity)
+                .map(|index| points[index as usize])
+        };
+        let segment_edges = [[0, 3], [3, 1], [1, 2], [2, 0]]
+            .map(|[a, b]| sorted_edge(id(a), id(b)))
+            .into_iter()
+            .collect();
+        let located = insert_nodes_at(
+            &lookup,
+            vec![pending([0, 1, 2])],
+            &[(id(3), None)],
+            &segment_edges,
+        )
+        .expect("no cavity");
+        assert_eq!(located.len(), 1, "the point location test misses the node");
+        let result = insert_nodes_at(
+            &lookup,
+            vec![pending([0, 1, 2])],
+            &[(id(3), Some([id(0), id(1)]))],
+            &segment_edges,
+        )
+        .expect("the cavity is star-shaped");
+        assert_eq!(result.len(), 2);
+        assert!(!result.iter().any(|entry| {
+            let nodes = entry.triangle.node_identities;
+            nodes.contains(&id(0)) && nodes.contains(&id(1))
+        }));
     }
 }

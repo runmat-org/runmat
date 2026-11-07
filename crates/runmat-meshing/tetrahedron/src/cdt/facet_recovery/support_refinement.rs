@@ -25,6 +25,9 @@ use crate::cdt::segment_recovery::{
 };
 use crate::cdt::DelaunaySegmentRecoveryErrorKind;
 
+mod encroachment;
+
+#[derive(Clone)]
 pub(super) struct PendingSupportTriangle {
     pub(super) triangle: DelaunayRecoveredFacetTriangle,
     pub(super) lineage_support: [StableDigest; 3],
@@ -201,6 +204,58 @@ pub(super) fn ensure_support_triangle_edges_in_place(
             }))
         }
     }
+}
+
+/// After both temporary support paths declined: when the pending triangle's missing edge enters
+/// the diametral ball of a recovered segment edge, Steiner nodes on it encroach that edge, so the
+/// edge is split on the working topology (with its encroachment cascade) and the triangle is
+/// retried on the refined segments. Returns the protected-facet splits, or `None` with the
+/// rejection kept when no edge is encroached or the split declines.
+pub(super) fn split_segment_encroached_by_support_edge(
+    working: &mut super::working::FacetRecoveryWorking,
+    pending: &PendingSupportTriangle,
+    protected_triangles: &[DelaunayRecoveredFacetTriangle],
+    protected_edges: &[[StableDigest; 2]],
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Option<Vec<ProtectedFacetSplit>>, DelaunayFacetRecoveryError> {
+    let Some(edge) = triangle_edges(pending.triangle.node_identities)
+        .into_iter()
+        .find(|edge| !support_edge_exists(working.topology(), *edge))
+    else {
+        return Ok(None);
+    };
+    let Some(encroached) =
+        encroachment::deepest_encroached_segment_edge(working.topology(), edge, protected_edges)
+    else {
+        return Ok(None);
+    };
+    let declined = work.last_rejection().unwrap_or("no reason recorded").to_owned();
+    work.clear_rejection();
+    let Some(splits) = split_recovered_segment_edge_in_place(
+        working,
+        encroached,
+        protected_triangles,
+        protected_edges,
+        constraint_index,
+        work,
+    )?
+    else {
+        let detail = work.last_rejection().unwrap_or("no reason recorded").to_owned();
+        work.reject(format!(
+            "{declined}; the recovered segment edge that the support edge encroaches could not \
+             be split: {detail}"
+        ));
+        return Ok(None);
+    };
+    work.cavity_steiner_node(constraint_index)?;
+    tracing::info!(
+        event_code = "meshing.tetrahedron.facet_recovery.encroached_segment_split",
+        constraint_index,
+        protected_facet_split_count = splits.len(),
+        "a missing support edge encroached a recovered segment edge, which was split"
+    );
+    Ok(Some(splits))
 }
 
 fn temporary_insertions(
