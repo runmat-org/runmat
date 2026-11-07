@@ -18,6 +18,7 @@
 //! The report gives, per pad, how many spokes reached the fill: the DRC's minimum-spoke
 //! check reads it.
 
+use crate::layer_set::CopperIndex;
 use crate::board_rules::{props, BItem, BoardGraph, BoardRules, RuleValue};
 use crate::geom::poly::{boolean, deflate, open, rect_ring, BoolOp, PolySet, Ring};
 use crate::geom::shape::Prim;
@@ -40,7 +41,7 @@ pub const FILL_MARGIN: Coord = 10;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FillReport {
     pub zone: ItemId,
-    pub layer: u8,
+    pub layer: CopperIndex,
     /// `(footprint, pad index) → (spokes reaching the fill, spokes generated)`.
     pub spokes: BTreeMap<(ItemId, u32), (u32, u32)>,
     pub islands_removed: u32,
@@ -81,7 +82,7 @@ pub const FILL_TILE: Coord = 10_000_000;
 /// The pieces of every zone layer's fill, per tile, kept between fills.
 #[derive(Clone, Debug, Default)]
 pub struct FillCache {
-    layers: BTreeMap<(ItemId, u8), LayerCache>,
+    layers: BTreeMap<(ItemId, CopperIndex), LayerCache>,
 }
 
 #[derive(Clone, Debug)]
@@ -99,7 +100,7 @@ struct LayerCache {
 
 impl FillCache {
     /// The pieces of a zone layer's fill by tile (their union is the fill, islands included).
-    pub fn pieces(&self, zone: ItemId, layer: u8) -> Option<&BTreeMap<(i64, i64), PolySet>> {
+    pub fn pieces(&self, zone: ItemId, layer: CopperIndex) -> Option<&BTreeMap<(i64, i64), PolySet>> {
         self.layers.get(&(zone, layer)).map(|c| &c.tiles)
     }
 }
@@ -108,7 +109,7 @@ impl FillCache {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FillDirty {
     pub everywhere: bool,
-    pub rects: BTreeMap<u8, Vec<Rect>>,
+    pub rects: BTreeMap<CopperIndex, Vec<Rect>>,
 }
 
 impl FillDirty {
@@ -118,12 +119,12 @@ impl FillDirty {
             ..Default::default()
         }
     }
-    pub fn add(&mut self, layer: u8, r: Rect) {
+    pub fn add(&mut self, layer: CopperIndex, r: Rect) {
         if !r.is_empty() {
             self.rects.entry(layer).or_default().push(r);
         }
     }
-    fn hits(&self, layer: u8, r: &Rect) -> bool {
+    fn hits(&self, layer: CopperIndex, r: &Rect) -> bool {
         self.everywhere
             || self
                 .rects
@@ -135,9 +136,9 @@ impl FillDirty {
 /// What a fill changed: per zone layer, the tiles refilled.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FillChange {
-    pub tiles: BTreeMap<(ItemId, u8), Vec<(i64, i64)>>,
+    pub tiles: BTreeMap<(ItemId, CopperIndex), Vec<(i64, i64)>>,
     /// Zone layers whose merged fill changed.
-    pub merged: BTreeSet<(ItemId, u8)>,
+    pub merged: BTreeSet<(ItemId, CopperIndex)>,
 }
 
 /// The rectangle of tile `(i, j)`.
@@ -217,9 +218,9 @@ pub fn fill_zones_cached(
     order.sort();
     let mut reports = Vec::new();
     let mut change = FillChange::default();
-    let mut fills: BTreeMap<(ItemId, u8), PolySet> = BTreeMap::new();
+    let mut fills: BTreeMap<(ItemId, CopperIndex), PolySet> = BTreeMap::new();
     // Zone layers gone from the board leave the cache.
-    let live: BTreeSet<(ItemId, u8)> = board
+    let live: BTreeSet<(ItemId, CopperIndex)> = board
         .zones
         .values()
         .flat_map(|z| z.layers.iter().map(move |l| (z.id, *l)))
@@ -236,9 +237,9 @@ pub fn fill_zones_cached(
         let extent = pad_extent(&pads);
         // Each layer's items, made when a merge needs the whole layer; a tile refill takes the
         // items of the region it refills.
-        let mut per_layer: BTreeMap<u8, LayerItems> = BTreeMap::new();
+        let mut per_layer: BTreeMap<CopperIndex, LayerItems> = BTreeMap::new();
         // Tiles refilled so far per layer: lower-priority zones there refill too.
-        let mut refilled: BTreeMap<u8, Vec<Rect>> = BTreeMap::new();
+        let mut refilled: BTreeMap<CopperIndex, Vec<Rect>> = BTreeMap::new();
         let max_clr = rules.max_clearance();
         for &(_, zid) in &order {
             let z = &board.zones[&zid];
@@ -381,8 +382,8 @@ fn fills_cut(
     rules: &BoardRules,
     board: &Board,
     z: &crate::layout::Zone,
-    layer: u8,
-    done: &BTreeMap<(ItemId, u8), PolySet>,
+    layer: CopperIndex,
+    done: &BTreeMap<(ItemId, CopperIndex), PolySet>,
 ) -> HigherFills {
     let mut pieces = Vec::new();
     for &(oz, ol) in done.keys() {
@@ -414,7 +415,7 @@ fn fill_tile(
     rules: &BoardRules,
     g: &BoardGraph,
     z: &crate::layout::Zone,
-    layer: u8,
+    layer: CopperIndex,
     li: &LayerItems,
     spoke: Coord,
     area: &PolySet,
@@ -573,7 +574,7 @@ fn merge_layer(
     g: &BoardGraph,
     board: &Board,
     z: &crate::layout::Zone,
-    layer: u8,
+    layer: CopperIndex,
     li: &LayerItems,
     tiles: &BTreeMap<(i64, i64), PolySet>,
 ) -> (PolySet, FillReport) {

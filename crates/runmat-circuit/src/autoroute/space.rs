@@ -2,6 +2,7 @@
 //! drilled holes, keepouts and the board edge, answering "may net `n` put this primitive
 //! here" exactly (primitive gaps, not a raster).
 
+use crate::layer_set::{CopperIndex, LayerSet};
 use crate::connectivity::layer_mask;
 use crate::geom::shape::Prim;
 use crate::geom::{Coord, Point, Rect};
@@ -11,7 +12,7 @@ use crate::spatial::{EdgeIndex, Grid};
 /// One obstacle: its net (none for unconnected copper), the copper layers it is on, its shape.
 struct Obstacle {
     net: Option<NetId>,
-    mask: u64,
+    mask: LayerSet,
     prim: Prim,
 }
 
@@ -33,10 +34,10 @@ pub struct Space {
     /// Copper to the board edge.
     pub edge_clearance: Coord,
     /// Keepout areas closed to routing: (layer mask, outline primitive).
-    keepouts: Vec<(u64, Prim)>,
+    keepouts: Vec<(LayerSet, Prim)>,
     /// Poured copper: a route may end on it (through a via) but it is no obstacle, since pours
     /// refill around new copper.
-    fills: Vec<(NetId, u64, Prim)>,
+    fills: Vec<(NetId, LayerSet, Prim)>,
 }
 
 impl Space {
@@ -69,14 +70,14 @@ impl Space {
                 for poly in &set.polys {
                     let mut rings = vec![poly.outer.clone()];
                     rings.extend(poly.holes.iter().cloned());
-                    s.fills.push((net, 1u64 << layer, Prim::polygon(rings)));
+                    s.fills.push((net, LayerSet::single(*layer), Prim::polygon(rings)));
                 }
             }
         }
         let n = board.copper_count();
         for p in board.all_pads() {
             let mask = layer_mask(p.layers.iter().copied());
-            if mask != 0 {
+            if !mask.is_empty() {
                 s.add(p.net, mask, p.prim.clone());
             }
             if let Some(d) = p.drill {
@@ -85,7 +86,7 @@ impl Space {
         }
         for t in board.tracks.values() {
             for prim in t.prims() {
-                s.add(t.net, 1 << t.layer, prim);
+                s.add(t.net, LayerSet::single(t.layer), prim);
             }
         }
         for v in board.vias.values() {
@@ -100,7 +101,7 @@ impl Space {
             if !(k.rules.tracks || k.rules.vias) {
                 continue;
             }
-            let layers: Vec<u8> = if k.layers.is_empty() {
+            let layers: Vec<CopperIndex> = if k.layers.is_empty() {
                 (0..n).collect()
             } else {
                 k.layers.clone()
@@ -113,7 +114,7 @@ impl Space {
     }
 
     /// Records copper placed by the router.
-    pub fn add(&mut self, net: Option<NetId>, mask: u64, prim: Prim) {
+    pub fn add(&mut self, net: Option<NetId>, mask: LayerSet, prim: Prim) {
         let k = self.items.len() as u32;
         self.grid.insert(k, prim.bbox());
         self.items.push(Obstacle { net, mask, prim });
@@ -128,7 +129,7 @@ impl Space {
 
     /// Whether `prim` of net `net` on the layers of `mask` keeps `clearance + extra` from all
     /// other copper and the edge clearance from the board edge, inside the outline.
-    pub fn free(&self, net: Option<NetId>, mask: u64, prim: &Prim, extra: Coord) -> bool {
+    pub fn free(&self, net: Option<NetId>, mask: &LayerSet, prim: &Prim, extra: Coord) -> bool {
         let class = |n: Option<NetId>| {
             n.and_then(|n| self.net_clearance.get(n.0 as usize).copied())
                 .unwrap_or(0)
@@ -151,7 +152,7 @@ impl Space {
                     return;
                 }
                 let o = &self.items[k as usize];
-                if o.mask & mask == 0 || (net.is_some() && o.net == net) {
+                if !o.mask.intersects(mask) || (net.is_some() && o.net == net) {
                     return;
                 }
                 let need = (own.max(class(o.net)).min(self.clearance) + extra) as f64;
@@ -162,7 +163,7 @@ impl Space {
         ok && !self
             .keepouts
             .iter()
-            .any(|(m, k)| m & mask != 0 && prim.gap(k) <= 0.0)
+            .any(|(m, k)| m.intersects(mask) && prim.gap(k) <= 0.0)
     }
 
     /// Whether a hole of radius `r` at `at` keeps the hole-to-hole distance.
@@ -186,14 +187,14 @@ impl Space {
     }
 
     /// Whether copper of `net` on layer mask `mask` covers `p` (the route may start or end there).
-    pub fn own(&self, net: NetId, mask: u64, p: Point) -> bool {
+    pub fn own(&self, net: NetId, mask: &LayerSet, p: Point) -> bool {
         let mut hit = false;
         self.grid.visit(&Rect::new(p, p), |k, _| {
             if hit {
                 return;
             }
             let o = &self.items[k as usize];
-            if o.net == Some(net) && o.mask & mask != 0 && o.prim.contains(p) {
+            if o.net == Some(net) && o.mask.intersects(mask) && o.prim.contains(p) {
                 hit = true;
             }
         });

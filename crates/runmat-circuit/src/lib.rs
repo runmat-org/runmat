@@ -75,6 +75,7 @@ pub mod ipc2581;
 pub mod import;
 pub mod ir;
 pub mod kicad;
+pub mod layer_set;
 pub mod netlists;
 pub mod pair;
 pub mod layout;

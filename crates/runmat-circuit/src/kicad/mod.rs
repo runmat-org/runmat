@@ -30,6 +30,7 @@ mod sch_connect;
 pub mod sch_export;
 pub mod sexpr;
 
+use crate::layer_set::CopperIndex;
 use crate::geom::{Coord, Point};
 use sexpr::SExpr;
 
@@ -110,19 +111,19 @@ pub fn uuid_node(seed: &str) -> SExpr {
 }
 
 /// Copper layer name for index `i` of `n`.
-pub fn copper_layer(i: u8, n: u8) -> String {
+pub fn copper_layer(i: CopperIndex, n: CopperIndex) -> String {
     crate::layout::copper_name(i, n)
 }
 
 /// Copper layer index from a KiCad name, for a board with `n` copper layers.
-pub fn copper_index(name: &str, n: u8) -> Option<u8> {
+pub fn copper_index(name: &str, n: CopperIndex) -> Option<CopperIndex> {
     match name {
         "F.Cu" => Some(0),
         "B.Cu" => Some(n.saturating_sub(1)),
         _ => name
             .strip_prefix("In")
             .and_then(|r| r.strip_suffix(".Cu"))
-            .and_then(|k| k.parse::<u8>().ok())
+            .and_then(|k| k.parse::<CopperIndex>().ok())
             .filter(|k| *k > 0 && *k + 1 < n),
     }
 }

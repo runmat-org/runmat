@@ -14,6 +14,7 @@
 //! The file has not been validated against the consortium's XSD inside this crate (no XML
 //! schema dependency); element order follows the standard's sequences.
 
+use crate::layer_set::CopperIndex;
 use crate::geom::poly::{Polygon, Ring};
 use crate::geom::shape::Core;
 use crate::geom::{to_mm, Coord, Point};
@@ -422,7 +423,7 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
         write_layer(&mut step, lname, &BTreeMap::from([(None, s)]), ind);
     }
     // Drills per span.
-    let mut spans: BTreeMap<(u8, u8, bool), String> = BTreeMap::new();
+    let mut spans: BTreeMap<(CopperIndex, CopperIndex, bool), String> = BTreeMap::new();
     for v in board.vias.values() {
         let s = spans.entry((v.from, v.to, true)).or_default();
         let _ = writeln!(
@@ -445,7 +446,7 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
             );
         }
     }
-    let drill_name = |(a, b, pl): (u8, u8, bool)| {
+    let drill_name = |(a, b, pl): (CopperIndex, CopperIndex, bool)| {
         format!("DRILL_{}_{}{}", a + 1, b + 1, if pl { "" } else { "_NPTH" })
     };
     for (k, body) in &spans {
@@ -589,7 +590,7 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
             let ci = board.stackup.layers[..k]
                 .iter()
                 .filter(|x| is_cu(x))
-                .count() as u8;
+                .count() as CopperIndex;
             copper_name(ci, c)
         } else {
             stack_layer_name(board, k)

@@ -1,6 +1,7 @@
 //! Copper checks: clearance between items and to pours, annular rings and holes, keepouts,
 //! board regions and bend radii, and the hole checks.
 
+use crate::layer_set::CopperIndex;
 use super::*;
 use crate::board_rules::{props, BItem, BoardGraph, BoardRules, RuleValue};
 use crate::elab::Severity;
@@ -25,8 +26,8 @@ impl Drc {
                 if np.owner == o || (one_sided && np.owner < o) {
                     return;
                 }
-                let shared = p.layers & np.layers;
-                if shared == 0 || (p.net.is_some() && p.net == np.net) {
+                let Some(shared) = p.layers.first_common(&np.layers) else { return };
+                if p.net.is_some() && p.net == np.net {
                     return;
                 }
                 let mut req = rules.pair_len_id(o, np.owner, pid);
@@ -48,7 +49,7 @@ impl Drc {
                     if same_footprint && req == 1 {
                         let mut f = clearance_finding(
                             vec![o, np.owner],
-                            lowest(shared),
+                            shared,
                             p.prim.anchor(),
                             gap,
                             0,
@@ -66,7 +67,7 @@ impl Drc {
                     };
                     found.push(clearance_finding(
                         vec![o, np.owner],
-                        lowest(shared),
+                        shared,
                         at,
                         gap,
                         req,
@@ -90,7 +91,7 @@ impl Drc {
     /// One item primitive against one zone fill: clearance across the fill's edges, or
     /// containment when no edge crosses it.
     pub(super) fn zone_probe(&self, rules: &BoardRules, p: &CPrim, z: &ZoneFill, found: &mut Vec<DrcFinding>) {
-        if p.layers & (1 << z.layer) == 0 || (p.net.is_some() && p.net == z.net) {
+        if !p.layers.contains(z.layer) || (p.net.is_some() && p.net == z.net) {
             return;
         }
         let pb = p.prim.bbox();
@@ -314,7 +315,7 @@ impl Drc {
                         message: "a microvia must span exactly one layer pair".into(),
                     });
                 }
-                let layers: Vec<u8> = via.layers().collect();
+                let layers: Vec<CopperIndex> = via.layers().collect();
                 self.keepout_check(board, o, &layers, "vias");
                 self.region_check(board, o, &layers);
                 self.bend_check(board, o, via.at, via.diameter / 2);
@@ -334,7 +335,7 @@ impl Drc {
                         self.hole_finding(rules, g, o, d, min, p.center);
                     }
                 }
-                let layers: Vec<u8> = p.layers.iter().copied().collect();
+                let layers: Vec<CopperIndex> = p.layers.iter().copied().collect();
                 self.keepout_check(board, o, &layers, "pads");
                 self.region_check(board, o, &layers);
                 if p.drill.is_some() {
@@ -411,7 +412,7 @@ impl Drc {
         });
     }
 
-    pub(super) fn keepout_check(&mut self, board: &Board, o: BItem, layers: &[u8], what: &str) {
+    pub(super) fn keepout_check(&mut self, board: &Board, o: BItem, layers: &[CopperIndex], what: &str) {
         let keys = self.owners.get(&o).cloned().unwrap_or_default();
         for k in board.keepouts.values() {
             let forbidden = match what {
@@ -441,7 +442,7 @@ impl Drc {
         }
     }
 
-    pub(super) fn region_check(&mut self, board: &Board, o: BItem, layers: &[u8]) {
+    pub(super) fn region_check(&mut self, board: &Board, o: BItem, layers: &[CopperIndex]) {
         if board.regions.is_empty() {
             return;
         }
@@ -450,7 +451,7 @@ impl Drc {
         };
         let at = self.slot(*k).prim.anchor();
         let present = board.copper_at(at);
-        let missing: Vec<u8> = layers
+        let missing: Vec<CopperIndex> = layers
             .iter()
             .copied()
             .filter(|l| !present.contains(l))
@@ -552,7 +553,7 @@ impl Drc {
 
 pub(super) fn clearance_finding(
     items: Vec<BItem>,
-    layer: u8,
+    layer: CopperIndex,
     at: Point,
     gap: f64,
     req: Coord,

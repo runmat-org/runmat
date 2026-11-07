@@ -3,6 +3,7 @@
 //! Route net is a net's right-click command: the router takes the selected nets' open
 //! connections only.
 
+use crate::layer_set::CopperIndex;
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
 use crate::autoroute::{self, FanoutOptions, RouteOptions};
@@ -88,7 +89,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                     Some(text) if !text.trim().is_empty() => text
                         .split(',')
                         .map(|l| layer_index(board, l.trim()))
-                        .collect::<Result<Vec<u8>, String>>()?,
+                        .collect::<Result<Vec<CopperIndex>, String>>()?,
                     _ => routing_layers(board),
                 };
                 let mut opts = RouteOptions::new(nets, layers, clearance);
@@ -187,9 +188,9 @@ fn plane_nets(board: &Board) -> BTreeSet<NetId> {
 }
 
 /// The outer layers, then inner layers with no pour on them.
-fn routing_layers(board: &Board) -> Vec<u8> {
+fn routing_layers(board: &Board) -> Vec<CopperIndex> {
     let n = board.copper_count();
-    let poured: BTreeSet<u8> = board
+    let poured: BTreeSet<CopperIndex> = board
         .zones
         .values()
         .flat_map(|z| z.layers.iter().copied())
@@ -202,7 +203,7 @@ fn routing_layers(board: &Board) -> Vec<u8> {
     out
 }
 
-fn layer_index(board: &Board, name: &str) -> Result<u8, String> {
+fn layer_index(board: &Board, name: &str) -> Result<CopperIndex, String> {
     let n = board.copper_count();
     (0..n)
         .find(|i| crate::layout::copper_name(*i, n) == name)

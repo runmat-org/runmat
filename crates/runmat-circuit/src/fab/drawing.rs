@@ -346,7 +346,7 @@ pub fn drill_map(board: &Board) -> Drawing {
 /// weight.
 pub fn stackup_rows(board: &Board) -> Vec<Vec<String>> {
     let n = board.copper_count();
-    let mut cu = 0u8;
+    let mut cu: crate::layout::CopperIndex = 0;
     board
         .stackup
         .layers

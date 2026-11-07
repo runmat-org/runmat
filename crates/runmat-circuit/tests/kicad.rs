@@ -162,7 +162,7 @@ fn runmat_board_exports_and_reimports() {
     let (mut rules, _) = BoardRules::new(&board.limits, &[]);
     rules.rebuild(&BoardGraph::new(&board, &[]));
     runmat_circuit::zone::fill_zones(&mut board, &rules, &[]);
-    let text = pcb::write_board(&board);
+    let text = pcb::write_board(&board).unwrap();
     let back = pcb::read(&text).unwrap();
     let b2 = &back.board;
     assert_eq!(b2.copper_count(), board.copper_count());
@@ -741,7 +741,7 @@ fn board_text_graphics_dimensions_and_fiducials_map_both_ways() {
         },
     );
 
-    let text = pcb::write_board(&board);
+    let text = pcb::write_board(&board).unwrap();
     assert!(
         text.contains("(gr_text \"REV A\""),
         "{}",

@@ -1,5 +1,6 @@
 //! Net checks: connectivity (unrouted islands), thermal spokes, lengths and differential pairs.
 
+use crate::layer_set::CopperIndex;
 use super::*;
 use crate::board_rules::{props, BItem, BoardGraph, BoardRules, RuleValue};
 use crate::connectivity::{islands, net_nodes};
@@ -202,7 +203,7 @@ impl Drc {
         let tn: Vec<_> = board.tracks.values().filter(|t| t.net == Some(n)).collect();
         let mut coupled = 0.0;
         let total: f64 = tp.iter().map(|t| t.length()).sum();
-        let mut worst_gap: Option<(f64, Point, crate::layout::ItemId, crate::layout::ItemId, u8)> =
+        let mut worst_gap: Option<(f64, Point, crate::layout::ItemId, crate::layout::ItemId, CopperIndex)> =
             None;
         for a in &tp {
             let (a0, a1) = a.endpoints();
@@ -321,7 +322,7 @@ impl Drc {
     /// [`crate::impedance`] on each track's layer: one finding per layer and width off by more
     /// than [`IMPEDANCE_TOLERANCE`].
     fn check_impedance(&mut self, board: &Board, rules: &BoardRules, g: &BoardGraph, n: NetId, target: f64) {
-        let mut runs: BTreeMap<(u8, crate::geom::Coord), Vec<&crate::layout::Track>> = BTreeMap::new();
+        let mut runs: BTreeMap<(CopperIndex, crate::geom::Coord), Vec<&crate::layout::Track>> = BTreeMap::new();
         for t in board.tracks.values().filter(|t| t.net == Some(n)) {
             runs.entry((t.layer, t.width)).or_default().push(t);
         }

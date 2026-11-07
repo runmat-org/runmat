@@ -1,5 +1,6 @@
 //! A whole re-read numbers items afresh, so a cached fill finds its zone again by content.
 
+use crate::layer_set::CopperIndex;
 use super::{FillCache, LayerCache};
 use crate::layout::{ItemId, Zone};
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,7 +20,7 @@ impl FillCache {
     /// match leaves the cache. Every kept layer re-merges on the next fill, since its report
     /// names footprints by id, and those may have been renumbered too.
     pub fn rekey(&mut self, zones: &BTreeMap<ItemId, Zone>) {
-        let mut by_zone: BTreeMap<ItemId, Vec<(u8, LayerCache)>> = BTreeMap::new();
+        let mut by_zone: BTreeMap<ItemId, Vec<(CopperIndex, LayerCache)>> = BTreeMap::new();
         for ((zid, layer), c) in std::mem::take(&mut self.layers) {
             by_zone.entry(zid).or_default().push((layer, c));
         }

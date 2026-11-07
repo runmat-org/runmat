@@ -98,7 +98,7 @@ impl Drc {
             }
         }
         // Silk to pad (footprint silk against every pad on that side's outer copper).
-        let outer = |side: Side| if side == Side::Top { 0u8 } else { n - 1 };
+        let outer = |side: Side| if side == Side::Top { 0 } else { n - 1 };
         let mut silk: Vec<(BItem, Side, Prim)> = Vec::new();
         for f in board.footprints.values() {
             let t = f.transform();
@@ -127,7 +127,7 @@ impl Drc {
             for k in self.index.query(&q) {
                 let cp = self.slot(k);
                 let BItem::Pad(..) = cp.owner else { continue };
-                if cp.layers & (1 << layer) == 0 {
+                if !cp.layers.contains(layer) {
                     continue;
                 }
                 let req = rules.pair_len(*owner, cp.owner, props::SILK_CLEARANCE);

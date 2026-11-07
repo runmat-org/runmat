@@ -11,6 +11,7 @@
 //! - solid copper regions become zones of their net; a board hole outside a part becomes a
 //!   footprint of one unplated hole (`H901` …), on the board only.
 
+use crate::layer_set::CopperIndex;
 use super::{arc_mid, attributes, length, pairs, path, Document, Fields, Frame, PathStep};
 use crate::geom::poly::{Polygon, Ring};
 use crate::geom::{Point, Transform};
@@ -251,13 +252,13 @@ fn item_layer(f: &Fields) -> u32 {
 pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead, String> {
     let shapes = &doc.shapes;
     let copper = copper_layers(shapes);
-    let index = |l: u32| copper.iter().position(|c| *c == l).map(|i| i as u8);
+    let index = |l: u32| copper.iter().position(|c| *c == l).map(|i| i as CopperIndex);
     let mut outline = outline_points(shapes);
     if outline.is_empty() {
         outline = shapes.iter().filter_map(|s| s.split("#@$").next()).map(Fields::of).filter(|f| f.kind() == "TRACK").flat_map(|f| pairs(f.str(4))).collect();
     }
     let frame = Frame::around(outline);
-    let mut board = Board::new(name, Polygon::default(), Stackup::standard(copper.len() as u8, crate::geom::mm(1.6), 1.0, 0.5));
+    let mut board = Board::new(name, Polygon::default(), Stackup::standard(copper.len() as CopperIndex, crate::geom::mm(1.6), 1.0, 0.5));
     let rule = |k: &str| doc.json["DRCRULE"]["Default"][k].as_f64().filter(|v| *v > 0.0).map(length);
     if let Some(v) = rule("clearance") {
         board.limits.min_clearance = v;
@@ -411,7 +412,7 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
             "VIA" => {
                 let id = board.alloc();
                 let n = net(&mut board, f.str(4));
-                let last = copper.len() as u8 - 1;
+                let last = copper.len() as CopperIndex - 1;
                 board.vias.insert(id, Via { id, net: n, at: frame.point(f.num(1), f.num(2)), diameter: length(f.num(3)), drill: length(2.0 * f.num(5)), from: 0, to: last, micro: false, tented: true, locked: false });
                 vias += 1;
             }

@@ -602,7 +602,7 @@ fn the_layer_stack_takes_its_dielectric_and_reports_widths_for_its_target_impeda
     assert!(dielectrics.iter().all(|l| l.material.name == "Polyimide"), "{dielectrics:?}");
     // Each width is the one the stackup's closed form gives for 50 Ω.
     for (i, name) in board.stackup.copper_names().iter().enumerate() {
-        let g = runmat_circuit::impedance::TraceGeometry::of(&board.stackup, i as u8).unwrap();
+        let g = runmat_circuit::impedance::TraceGeometry::of(&board.stackup, i as u32).unwrap();
         let w = g.width_for(50.0).unwrap() as f64 / 1e6;
         assert!(out.summary.contains(&format!("{name} {w:.3} mm")), "{name}: {}", out.summary);
     }

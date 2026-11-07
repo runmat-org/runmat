@@ -5,16 +5,30 @@ use super::*;
 mod parts;
 mod rules;
 
+/// Why a KiCad export wrote nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub enum KicadExportError {
+    /// The circuit doesn't compile.
+    NotCompiled(Vec<Diagnostic>),
+    /// KiCad can't hold the board: more copper layers than KiCad's limit. The message names
+    /// both counts and the outputs that write every layer.
+    Unsupported(String),
+}
+
 /// The circuit `path` belongs to as a KiCad project: one `.kicad_sch` per sheet instance (the
 /// root named `<project>.kicad_sch`) and, with a board, `<project>.kicad_pcb`. File name → text.
+/// A board deeper than KiCad's copper stack fails the whole export: no file is written.
 pub fn export_kicad(
     path: &str,
     text: &str,
     files: &Files,
     options: &CompileOptions,
     project_name: &str,
-) -> Result<BTreeMap<String, String>, Vec<Diagnostic>> {
-    let project = load(path, text, files, options)?;
+) -> Result<BTreeMap<String, String>, KicadExportError> {
+    let project = load(path, text, files, options).map_err(KicadExportError::NotCompiled)?;
+    if let Some(board) = project.layout.as_ref().and_then(|l| l.parsed.board.as_ref()) {
+        crate::kicad::pcb::check_copper_count(board).map_err(KicadExportError::Unsupported)?;
+    }
     let mut out = crate::kicad::sch_export::export(
         &project.netlist,
         &project.pool,
@@ -33,7 +47,7 @@ pub fn export_kicad(
         fill_zones(&mut board, &rules, &[]);
         out.insert(
             format!("{project_name}.kicad_pcb"),
-            crate::kicad::pcb::write_board(&board),
+            crate::kicad::pcb::write_board(&board).map_err(KicadExportError::Unsupported)?,
         );
     }
     Ok(out)

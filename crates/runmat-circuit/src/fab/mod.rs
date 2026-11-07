@@ -36,6 +36,7 @@ pub mod assembly_drawing;
 pub use assembly::{bom, bom_csv, ipc356, natural_key, pick_place, BomLine};
 pub use drill::excellon;
 
+use crate::layer_set::CopperIndex;
 use crate::geom::poly::Ring;
 use crate::geom::shape::{Core, Prim};
 use crate::geom::{to_mm, Coord, Point};
@@ -261,7 +262,7 @@ impl Writer {
 /// Which Gerber layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GerberLayer {
-    Copper(u8),
+    Copper(CopperIndex),
     Mask(Side),
     Paste(Side),
     Legend(Side),

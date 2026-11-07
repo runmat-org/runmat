@@ -20,6 +20,7 @@
 //! Formats ([`copy_room_formats`]) and the board catalog's model edits ([`BoardEdit`],
 //! [`apply_board_edit`]) are built on it.
 
+use crate::layer_set::CopperIndex;
 use super::board::{
     canonical, parse_board, print_board, same_board, statements, statements_where, Group,
     ParsedBoard, Printed,
@@ -701,7 +702,7 @@ pub enum BoardEdit {
     Capability(crate::capability::Capability),
     /// `board.layer-stack`: a standard stackup of `layers` copper layers and `thickness`, its
     /// dielectric layers in `dielectric` when given (else FR-4 cores and prepreg).
-    LayerStack { layers: u8, thickness: Coord, dielectric: Option<Material> },
+    LayerStack { layers: CopperIndex, thickness: Coord, dielectric: Option<Material> },
     /// `board.outline` (draw).
     Outline { outline: Polygon },
     /// `board.test-points`: a test point footprint on each net.
@@ -757,13 +758,13 @@ fn net_of(board: &mut Board, net: &Option<String>) -> Result<Option<NetId>, Stri
     }
 }
 
-fn copper_of(board: &Board, layer: &str) -> Result<u8, String> {
+fn copper_of(board: &Board, layer: &str) -> Result<CopperIndex, String> {
     let names = board.stackup.copper_names();
-    let n = names.len() as u8;
+    let n = names.len() as CopperIndex;
     names
         .iter()
         .position(|x| x == layer)
-        .map(|i| i as u8)
+        .map(|i| i as CopperIndex)
         .or_else(|| (0..n).find(|i| copper_name(*i, n) == layer))
         .ok_or_else(|| format!("`{layer}` is not a copper layer of this board"))
 }
@@ -1010,7 +1011,7 @@ pub fn apply_board_edit(
             let mut s = standard_stackup(*layers, *thickness, dielectric.as_ref());
             s.name = board.stackup.name.clone();
             s.finish = board.stackup.finish.clone();
-            let last = |l: u8| if l + 1 == before { layers - 1 } else { l };
+            let last = |l: CopperIndex| if l + 1 == before { layers - 1 } else { l };
             for t in board.tracks.values_mut() {
                 t.layer = last(t.layer);
             }
@@ -1098,7 +1099,7 @@ pub fn board_command_parsed(
 
 /// The standard stackup `board.layer-stack` writes: `layers` copper layers in `thickness`, with
 /// every dielectric layer in `dielectric` when given, else FR-4 cores and prepreg.
-pub fn standard_stackup(layers: u8, thickness: Coord, dielectric: Option<&Material>) -> Stackup {
+pub fn standard_stackup(layers: CopperIndex, thickness: Coord, dielectric: Option<&Material>) -> Stackup {
     let mut s = Stackup::standard(layers, thickness, 1.0, 0.5);
     if let Some(m) = dielectric {
         for l in &mut s.layers {

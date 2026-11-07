@@ -7,6 +7,7 @@
 //! and the others carry their exact outline. Every list follows the board's item order, so
 //! identical boards give identical bytes.
 
+use crate::layer_set::CopperIndex;
 use crate::geom::poly::Ring;
 use crate::geom::shape::{arc_from_three, arc_points};
 use crate::geom::{Coord, Point, Transform};
@@ -33,7 +34,7 @@ fn ring(r: &Ring) -> Vec<Xy> {
 }
 
 /// A layer's display name (`F.Cu`, `In2.Cu`, `B.SilkS`, `Edge.Cuts`).
-pub fn layer_name(l: Layer, copper: u8) -> String {
+pub fn layer_name(l: Layer, copper: CopperIndex) -> String {
     let f =
         |s: Side, front: &str, back: &str| (if s == Side::Top { front } else { back }).to_owned();
     match l {
@@ -254,7 +255,7 @@ pub struct PadGeometry {
     pub outline: Option<Vec<Vec<Xy>>>,
 }
 
-pub fn pad(f: &Footprint, index: usize, copper: u8) -> Option<PadGeometry> {
+pub fn pad(f: &Footprint, index: usize, copper: CopperIndex) -> Option<PadGeometry> {
     let def = f.package.pads.get(index)?;
     let placed = f.pad(index, copper)?;
     let t = f.transform();

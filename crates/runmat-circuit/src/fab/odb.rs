@@ -22,6 +22,7 @@
 //!
 //! Units are millimetres throughout (`UNITS=MM`). Output is deterministic.
 
+use crate::layer_set::CopperIndex;
 use super::drill::{holes, Span};
 use super::{image, Aperture, GerberLayer, Sink};
 use crate::geom::poly::{area2, Ring};
@@ -231,7 +232,7 @@ fn rows(board: &Board) -> Vec<Row> {
 }
 
 /// Copper layer names: `top`, `inner1` …, `bottom`.
-fn odb_copper(i: u8, count: u8) -> String {
+fn odb_copper(i: CopperIndex, count: CopperIndex) -> String {
     if i == 0 {
         "top".into()
     } else if i + 1 == count {

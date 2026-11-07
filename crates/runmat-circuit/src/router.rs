@@ -27,6 +27,7 @@
 //! and checked; [`plan`] wraps obstacles, walkaround and shaping for one board edit, ready
 //! for [`crate::route::insert_track`].
 
+use crate::layer_set::CopperIndex;
 use crate::board_rules::{props, BItem, BoardRules, TrackProbe};
 use crate::geom::shape::{arc_from_three, Prim};
 use crate::geom::{Coord, Point, Rect};
@@ -391,7 +392,7 @@ pub fn obstacles(
     board: &Board,
     rules: &BoardRules,
     net: Option<NetId>,
-    layer: u8,
+    layer: CopperIndex,
     width: Coord,
     region: Rect,
     geometry: Geometry,
@@ -638,7 +639,7 @@ pub fn plan(
     board: &Board,
     rules: &BoardRules,
     net: Option<NetId>,
-    layer: u8,
+    layer: CopperIndex,
     width: Coord,
     a: Point,
     b: Point,

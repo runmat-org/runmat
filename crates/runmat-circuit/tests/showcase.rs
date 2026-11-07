@@ -349,7 +349,7 @@ fn stitching_and_shield_vias_land_where_drc_passes() {
     let files = files();
     let layout = "/p/daq.circuit.layout";
     let board = runmat_circuit::syntax::board::parse_board(layout, &files[layout]).board.unwrap();
-    let top = 0u8;
+    let top = 0;
     let pour = board.zones.values().find(|z| z.layers == [top] && board.nets[z.net.unwrap().0 as usize].name == "GND").unwrap();
     // A signal net with routed tracks.
     let signal = board

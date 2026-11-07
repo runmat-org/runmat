@@ -11,6 +11,7 @@
 //! The Desktop's worker holds one session, so a small edit to a 50k-item board recompiles in
 //! a fraction of a second where a fresh compile takes seconds.
 
+use crate::layer_set::CopperIndex;
 use super::*;
 use crate::board_rules::BItem;
 use crate::syntax::board::{reparse_board_keeping, BoardDelta, BoardItem};
@@ -98,7 +99,7 @@ fn now() -> Clock {
 }
 
 /// The copper layers an item is on (all of them for footprints, whose pads may be through).
-fn item_layers(board: &Board, item: &BoardItem) -> Vec<u8> {
+fn item_layers(board: &Board, item: &BoardItem) -> Vec<CopperIndex> {
     let n = board.copper_count();
     match item {
         BoardItem::Track(t) => vec![t.layer],
@@ -713,7 +714,7 @@ impl Session {
         };
         // Fills are derived: the edit works on the board without them.
         let board = state.parsed.board.as_mut().expect("read");
-        let fills: Vec<(ItemId, BTreeMap<u8, crate::geom::poly::PolySet>)> = board
+        let fills: Vec<(ItemId, BTreeMap<CopperIndex, crate::geom::poly::PolySet>)> = board
             .zones
             .values_mut()
             .map(|z| (z.id, std::mem::take(&mut z.fill)))

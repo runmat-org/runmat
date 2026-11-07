@@ -30,6 +30,7 @@
 //! Impedance targets (`impedance`) are recorded in [`Drc::impedance_targets`] and checked track
 //! by track against the stackup's closed forms ([`crate::impedance`], `code = impedance`).
 
+use crate::layer_set::{CopperIndex, LayerSet};
 use crate::board_rules::{BItem, BoardGraph, BoardRules};
 use crate::connectivity::layer_mask;
 use crate::elab::Severity;
@@ -72,7 +73,7 @@ pub struct DrcFinding {
     pub severity: Severity,
     /// Items involved, sorted; per-net findings include `BItem::Net`.
     pub items: Vec<BItem>,
-    pub layer: Option<u8>,
+    pub layer: Option<CopperIndex>,
     pub at: Point,
     /// Measured value (nm for lengths) and the rule's required value.
     pub actual: Option<f64>,
@@ -82,7 +83,7 @@ pub struct DrcFinding {
     pub message: String,
 }
 
-type FKey = (String, Vec<BItem>, Option<u8>);
+type FKey = (String, Vec<BItem>, Option<CopperIndex>);
 
 /// A copper primitive in the DRC store, keyed in the spatial grid by its slot.
 #[derive(Clone, Debug)]
@@ -90,7 +91,7 @@ struct CPrim {
     owner: BItem,
     sub: u32,
     net: Option<NetId>,
-    layers: u64,
+    layers: LayerSet,
     prim: Prim,
 }
 
@@ -99,7 +100,7 @@ struct CPrim {
 #[derive(Clone, Debug)]
 struct ZoneFill {
     zone: BItem,
-    layer: u8,
+    layer: CopperIndex,
     net: Option<NetId>,
     edges: EdgeIndex,
 }
@@ -130,7 +131,7 @@ fn key_items(mut v: Vec<BItem>) -> Vec<BItem> {
 }
 
 /// Copper primitives of a non-zone owner as `(net, layer mask, primitive)`.
-fn owner_prims(board: &Board, it: BItem) -> Vec<(Option<NetId>, u64, Prim)> {
+fn owner_prims(board: &Board, it: BItem) -> Vec<(Option<NetId>, LayerSet, Prim)> {
     match it {
         BItem::Track(t) => board
             .tracks
@@ -138,7 +139,7 @@ fn owner_prims(board: &Board, it: BItem) -> Vec<(Option<NetId>, u64, Prim)> {
             .map(|t| {
                 t.prims()
                     .into_iter()
-                    .map(|p| (t.net, 1u64 << t.layer, p))
+                    .map(|p| (t.net, LayerSet::single(t.layer), p))
                     .collect()
             })
             .unwrap_or_default(),
@@ -171,12 +172,12 @@ pub fn gap_ends(board: &Board, f: &DrcFinding) -> Option<(Point, Point)> {
     if f.code != "clearance" || matches!(a, BItem::Zone(_)) || matches!(b, BItem::Zone(_)) {
         return None;
     }
-    let on = |m: u64| f.layer.is_none_or(|l| m & (1u64 << l) != 0);
+    let on = |m: &LayerSet| f.layer.is_none_or(|l| m.contains(l));
     let (pa, pb) = (owner_prims(board, *a), owner_prims(board, *b));
     let mut best: Option<(f64, (Point, Point))> = None;
-    for (_, ma, x) in pa.iter().filter(|p| on(p.1)) {
-        for (_, mb, y) in pb.iter().filter(|p| on(p.1)) {
-            if ma & mb == 0 {
+    for (_, ma, x) in pa.iter().filter(|p| on(&p.1)) {
+        for (_, mb, y) in pb.iter().filter(|p| on(&p.1)) {
+            if !ma.intersects(mb) {
                 continue;
             }
             let g = x.gap(y);
@@ -199,10 +200,6 @@ fn copper_owners(board: &Board) -> Vec<BItem> {
     v.extend(board.vias.keys().map(|k| BItem::Via(*k)));
     v.extend(board.zones.keys().map(|k| BItem::Zone(*k)));
     v
-}
-
-fn lowest(mask: u64) -> u8 {
-    mask.trailing_zeros() as u8
 }
 
 fn outline_index(board: &Board) -> EdgeIndex {

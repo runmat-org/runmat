@@ -25,6 +25,7 @@
 //! Units are SI in the data (metres, watts, K/W, W/(m·K)); geometry polygons stay in board
 //! nanometres with z measured down from the top surface.
 
+use crate::layer_set::CopperIndex;
 use crate::elab::Netlist;
 use crate::geom::poly::{boolean, BoolOp, PolySet, Polygon, Ring};
 use crate::geom::{Coord, Point};
@@ -151,7 +152,7 @@ pub fn pcb_source(
     let board_area = board.outline.area().max(1.0);
     let mut layers = Vec::new();
     let mut z = 0.0;
-    let mut copper_by_layer: BTreeMap<u8, BTreeMap<Option<String>, Vec<Ring>>> = BTreeMap::new();
+    let mut copper_by_layer: BTreeMap<CopperIndex, BTreeMap<Option<String>, Vec<Ring>>> = BTreeMap::new();
     let tol = crate::geom::mm(0.01);
     for p in board.all_pads() {
         for l in &p.layers {
@@ -194,7 +195,7 @@ pub fn pcb_source(
         }
     }
     let mut copper = Vec::new();
-    let mut ci = 0u8;
+    let mut ci: CopperIndex = 0;
     for sl in &board.stackup.layers {
         let t = sl.thickness as f64 * 1e-9;
         let (kind, region) = match sl.kind {
@@ -245,7 +246,7 @@ pub fn pcb_source(
         });
         z += t;
     }
-    let depth = |l: u8| {
+    let depth = |l: CopperIndex| {
         board
             .stackup
             .copper_z(l)

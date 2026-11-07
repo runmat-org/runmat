@@ -1,6 +1,7 @@
 //! Reading one board item's value (footprint, copper, via, pour, keepout, text, graphic,
 //! dimension) against the layers, nets and packages the layout declares.
 
+use crate::layer_set::CopperIndex;
 use super::*;
 use crate::library::Package;
 use runmat_types::Span;
@@ -107,7 +108,7 @@ impl Ctx<'_> {
         Ok(t)
     }
 
-    pub(super) fn via(&self, id: ItemId, h: &Head, copper: u8) -> Read<Via> {
+    pub(super) fn via(&self, id: ItemId, h: &Head, copper: CopperIndex) -> Read<Via> {
         let net = self.head_net(h)?;
         let mut f = Fields::of(need_value(h)?, "via")?;
         let (from, to) = match f.get("layers") {
@@ -141,7 +142,7 @@ impl Ctx<'_> {
         Ok(v)
     }
 
-    pub(super) fn copper_list(&self, v: &Val) -> Read<Vec<u8>> {
+    pub(super) fn copper_list(&self, v: &Val) -> Read<Vec<CopperIndex>> {
         list(v)?.iter().map(|l| self.layers.copper(l)).collect()
     }
 

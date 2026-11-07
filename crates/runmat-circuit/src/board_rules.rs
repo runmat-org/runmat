@@ -21,6 +21,7 @@
 //! with the board's [`FabLimits`] as the default, so every lookup has a value and an
 //! explanation.
 
+use crate::layer_set::CopperIndex;
 use crate::geom::{Coord, Point};
 use crate::layout::{Board, FabLimits, ItemId, Layer, NetId, ViaKind};
 use crate::library::PadKind;
@@ -134,7 +135,7 @@ pub const PROBE_TRACK: ItemId = ItemId(u64::MAX);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TrackProbe {
     pub net: Option<NetId>,
-    pub layer: u8,
+    pub layer: CopperIndex,
     pub width: Coord,
 }
 
@@ -232,7 +233,7 @@ impl<'a> BoardGraph<'a> {
         }
     }
 
-    fn layers_of(&self, it: BItem) -> Vec<u8> {
+    fn layers_of(&self, it: BItem) -> Vec<CopperIndex> {
         if let Some(p) = self.probe_of(it) {
             return vec![p.layer];
         }
@@ -533,7 +534,7 @@ pub fn schema() -> Schema {
         .attr("priority", runmat_rules::AttrType::Num(Dim::NONE))
         .pseudo("net-class", 1, 32)
         .pseudo("net", 1, 64)
-        .pseudo("layer", 1, 64)
+        .pseudo("layer", 1, usize::MAX)
         .pseudo("side", 1, 1)
         .pseudo("diff-pair", 0, 0)
         .pseudo("in-room", 1, 8)

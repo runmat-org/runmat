@@ -8,6 +8,7 @@
 //! Logical connectivity (which pins belong to which net across hierarchy and buses) is
 //! [`crate::elab`]; this module is its physical counterpart.
 
+use crate::layer_set::{CopperIndex, LayerSet};
 use crate::board_rules::BItem;
 use crate::geom::shape::{Core, Prim};
 use crate::geom::{Point, Rect};
@@ -20,8 +21,8 @@ use std::collections::BTreeMap;
 pub struct Node {
     pub item: BItem,
     /// For zone fills: (layer, polygon index).
-    pub fill: Option<(u8, u32)>,
-    pub layers: u64,
+    pub fill: Option<(CopperIndex, u32)>,
+    pub layers: LayerSet,
     pub prims: Vec<Prim>,
     /// Points the ratsnest may connect to (pad centres, track ends, via centres).
     pub anchors: Vec<Point>,
@@ -36,10 +37,8 @@ pub struct NetConnectivity {
     pub islands: usize,
 }
 
-pub fn layer_mask(layers: impl IntoIterator<Item = u8>) -> u64 {
-    layers
-        .into_iter()
-        .fold(0u64, |m, l| m | (1u64 << l.min(63)))
+pub fn layer_mask(layers: impl IntoIterator<Item = CopperIndex>) -> LayerSet {
+    layers.into_iter().collect()
 }
 
 /// Copper nodes of every net, keyed by net.
@@ -64,7 +63,7 @@ pub fn net_nodes(board: &Board) -> BTreeMap<NetId, Vec<Node>> {
         out.entry(n).or_default().push(Node {
             item: BItem::Track(t.id),
             fill: None,
-            layers: 1u64 << t.layer,
+            layers: LayerSet::single(t.layer),
             prims: t.prims(),
             anchors: vec![a, b],
         });
@@ -87,7 +86,7 @@ pub fn net_nodes(board: &Board) -> BTreeMap<NetId, Vec<Node>> {
                 out.entry(n).or_default().push(Node {
                     item: BItem::Zone(z.id),
                     fill: Some((*layer, k as u32)),
-                    layers: 1u64 << layer,
+                    layers: LayerSet::single(*layer),
                     prims: vec![Prim::polygon(poly.rings().cloned().collect())],
                     anchors: vec![anchor],
                 });
@@ -138,7 +137,7 @@ pub fn islands(net: NetId, nodes: Vec<Node>) -> NetConnectivity {
         }
         for (k, b) in boxes[i].iter().enumerate() {
             for (j, kj) in grid.query(&b.inflate(1)) {
-                if j <= i || nodes[i].layers & nodes[j].layers == 0 {
+                if j <= i || !nodes[i].layers.intersects(&nodes[j].layers) {
                     continue;
                 }
                 if find(&mut parent, i) == find(&mut parent, j) {
@@ -152,7 +151,7 @@ pub fn islands(net: NetId, nodes: Vec<Node>) -> NetConnectivity {
     }
     for (i, idx) in &fills {
         for (j, kj) in grid.query(&boxes[*i][0]) {
-            if nodes[*i].layers & nodes[j].layers == 0
+            if !nodes[*i].layers.intersects(&nodes[j].layers)
                 || find(&mut parent, *i) == find(&mut parent, j)
             {
                 continue;
@@ -166,7 +165,7 @@ pub fn islands(net: NetId, nodes: Vec<Node>) -> NetConnectivity {
     // the boolean; different zones on a layer may touch.
     for (a, (i, ia)) in fills.iter().enumerate() {
         for (j, _) in &fills[a + 1..] {
-            if nodes[*i].layers & nodes[*j].layers == 0
+            if !nodes[*i].layers.intersects(&nodes[*j].layers)
                 || !boxes[*i][0].intersects(&boxes[*j][0])
                 || find(&mut parent, *i) == find(&mut parent, *j)
             {

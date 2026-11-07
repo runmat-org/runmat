@@ -12,6 +12,7 @@
 //! the rest of a material is one face referenced by the material's name. Millimetres; z = 0 is the
 //! board's bottom surface.
 
+use crate::layer_set::CopperIndex;
 use crate::geom::shape::Prim;
 use crate::geom::{to_mm, Point};
 use crate::layout::{Board, Footprint, Side};
@@ -429,7 +430,7 @@ fn chip(pads: &[crate::layout::PlacedPad], bw: f64, bl: f64) -> Option<Chip> {
 /// A component body's extent as the 3D view draws it: its outline on the board (mm) and the
 /// heights it spans (`z0 < z1`, mm, z = 0 at the board's bottom face). A chip part's end caps
 /// are inside the outline. `None` for a package with no body.
-pub fn body_extent(f: &Footprint, n: u8, thickness: f64) -> Option<(Vec<(f64, f64)>, f64, f64)> {
+pub fn body_extent(f: &Footprint, n: CopperIndex, thickness: f64) -> Option<(Vec<(f64, f64)>, f64, f64)> {
     let body = f.package.body.as_ref()?;
     let (bw, bl, h) = (to_mm(body.width), to_mm(body.length), to_mm(body.height));
     if h <= 0.0 {
@@ -453,7 +454,7 @@ pub fn thickness_mm(board: &Board) -> f64 {
 }
 
 /// A component's body, with metal terminals for chip parts and leads for leaded ICs.
-fn component(m: &mut Model, f: &Footprint, n: u8, top: f64) {
+fn component(m: &mut Model, f: &Footprint, n: CopperIndex, top: f64) {
     let Some(body) = &f.package.body else { return };
     let up = f.side == Side::Top;
     let (bw, bl, h) = (to_mm(body.width), to_mm(body.length), to_mm(body.height));

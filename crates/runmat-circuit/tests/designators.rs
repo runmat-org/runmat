@@ -77,7 +77,7 @@ fn every_unnamed_part_gets_a_designator_clear_of_pads_and_of_the_others() {
 fn the_kicad_export_writes_the_displayed_designator_positions() {
     let board = board();
     let placed = designators(&board);
-    let text = runmat_circuit::kicad::pcb::write_board(&board);
+    let text = runmat_circuit::kicad::pcb::write_board(&board).unwrap();
     let (id, d) = placed.iter().next().unwrap();
     let f = &board.footprints[id];
     let local = to_local(f, d.at);

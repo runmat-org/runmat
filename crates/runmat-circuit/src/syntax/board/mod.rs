@@ -65,6 +65,7 @@
 //! The reader assigns item ids in source order; [`canonical`] renumbers a board the same way,
 //! so `parse(print(b)) == canonical(b)` and printing is a fixed point.
 
+use crate::layer_set::CopperIndex;
 use super::values::*;
 use crate::geom::poly::Polygon;
 use crate::layout::*;
@@ -256,20 +257,20 @@ fn fixed_layer_name(l: Layer) -> Option<String> {
 struct Layers {
     copper: Vec<String>,
     texts: Vec<String>,
-    by_name: HashMap<String, u8>,
+    by_name: HashMap<String, CopperIndex>,
 }
 
 impl Layers {
     fn of(stackup: &Stackup) -> Layers {
         let copper = stackup.copper_names();
-        let n = copper.len() as u8;
+        let n = copper.len() as CopperIndex;
         let mut by_name = HashMap::new();
         // The conventional names first, so a stackup's own names win.
         for i in 0..n {
             by_name.insert(copper_name(i, n), i);
         }
         for (i, name) in copper.iter().enumerate() {
-            by_name.insert(name.clone(), i as u8);
+            by_name.insert(name.clone(), i as CopperIndex);
         }
         Layers {
             texts: copper.iter().map(|c| dotted_text(c)).collect(),
@@ -278,7 +279,7 @@ impl Layers {
         }
     }
 
-    fn copper_text(&self, i: u8) -> String {
+    fn copper_text(&self, i: CopperIndex) -> String {
         self.texts
             .get(i as usize)
             .cloned()
@@ -292,7 +293,7 @@ impl Layers {
         }
     }
 
-    fn copper(&self, v: &Val) -> Read<u8> {
+    fn copper(&self, v: &Val) -> Read<CopperIndex> {
         let name = text(v)?;
         self.by_name.get(&name).copied().ok_or_else(|| {
             diagnostic(

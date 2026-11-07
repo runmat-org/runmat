@@ -980,12 +980,16 @@ fn validate_simple(s: &Simple, schema: &Schema, out: &mut Vec<SelectorError>) {
                 Some(spec) if args.len() < spec.min_args || args.len() > spec.max_args => {
                     out.push(SelectorError {
                         span: *span,
-                        message: format!(
-                            "`:{name}` takes {}..={} arguments, got {}",
-                            spec.min_args,
-                            spec.max_args,
-                            args.len()
-                        ),
+                        message: if spec.max_args == usize::MAX {
+                            format!("`:{name}` takes at least {} arguments, got {}", spec.min_args, args.len())
+                        } else {
+                            format!(
+                                "`:{name}` takes {}..={} arguments, got {}",
+                                spec.min_args,
+                                spec.max_args,
+                                args.len()
+                            )
+                        },
                     })
                 }
                 _ => {}

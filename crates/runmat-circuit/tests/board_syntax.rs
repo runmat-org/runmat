@@ -160,7 +160,7 @@ fn rich_board() -> Board {
     z.islands = IslandPolicy::RemoveBelow(1234.5);
     z.connect = PadConnect::ThermalThtOnly;
     b.zones.insert(id, z);
-    for (name, layers) in [("antenna", vec![0u8]), ("", vec![])] {
+    for (name, layers) in [("antenna", vec![0]), ("", vec![])] {
         let id = b.alloc();
         b.keepouts.insert(
             id,
@@ -986,7 +986,7 @@ fn boards_at_scale() {
         let y = (i % 200) * 250_000;
         b.add_track(
             Some(nets[i as usize % 400]),
-            (i % 8) as u8,
+            (i % 8) as u32,
             150_000,
             Point::new(i * 1_250, y),
             Point::new(i * 1_250 + 1_000_000, y + 333),
@@ -1044,7 +1044,7 @@ fn the_sync_record_survives_a_kicad_round_trip() {
     let before = SyncSection::of(&board);
     assert!(!before.links.is_empty() && !before.sync.components.is_empty());
     // Export and import: the baseline, the settings and every footprint link come back.
-    let text = pcb::write_board(&board);
+    let text = pcb::write_board(&board).unwrap();
     assert!(text.contains(pcb::SYNC_PROPERTY));
     let k = pcb::read(&text).unwrap();
     assert!(k.warnings.is_empty(), "{:?}", k.warnings);

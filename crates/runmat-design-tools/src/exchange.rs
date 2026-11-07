@@ -496,15 +496,18 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
                 &Default::default(),
                 &project,
             )
-            .map_err(|d| {
-                ToolError::new(
+            .map_err(|e| match e {
+                runmat_circuit::runtime::KicadExportError::NotCompiled(d) => ToolError::new(
                     "not_compiled",
                     format!(
                         "{} doesn't compile (design.check lists why): {}",
                         input.path,
                         d.first().map(|d| d.message.as_str()).unwrap_or("")
                     ),
-                )
+                ),
+                runmat_circuit::runtime::KicadExportError::Unsupported(why) => {
+                    ToolError::new("unsupported", why)
+                }
             })?;
             out.into_iter()
                 .map(|(n, t)| text_file(n, "application/x-kicad", t))

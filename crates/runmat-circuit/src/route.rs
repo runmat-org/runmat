@@ -11,6 +11,7 @@
 //! - [`trace_length`]: the tuning length between two pads (shortest path over tracks and
 //!   vias, vias counted by their span through the stackup), plus [`net_length`].
 
+use crate::layer_set::CopperIndex;
 use crate::board_rules::{props, BItem, BoardGraph, BoardRules, TrackProbe};
 use crate::connectivity::{board_connectivity, NetConnectivity};
 use crate::drc::{Drc, DrcFinding};
@@ -270,7 +271,7 @@ pub fn obstacles(
     board: &Board,
     rules: &BoardRules,
     net: Option<NetId>,
-    layer: u8,
+    layer: CopperIndex,
     width: Coord,
     region: Rect,
 ) -> PolySet {
@@ -430,7 +431,7 @@ pub fn walkaround(
     board: &Board,
     rules: &BoardRules,
     net: Option<NetId>,
-    layer: u8,
+    layer: CopperIndex,
     width: Coord,
     a: Point,
     b: Point,
@@ -449,7 +450,7 @@ pub fn insert_track(
     rules: &mut BoardRules,
     drc: &mut Drc,
     net: Option<NetId>,
-    layer: u8,
+    layer: CopperIndex,
     width: Coord,
     a: Point,
     b: Point,
@@ -479,7 +480,7 @@ pub fn insert_via(
     at: Point,
     diameter: Coord,
     drill: Coord,
-    span: (u8, u8),
+    span: (CopperIndex, CopperIndex),
 ) -> Result<ItemId, Vec<DrcFinding>> {
     let id = board.alloc();
     board.vias.insert(
@@ -589,11 +590,11 @@ pub fn trace_length(board: &Board, from: (&str, &str), to: (&str, &str)) -> Opti
         return None;
     }
     // Nodes: (point, layer); 0 = start pad, 1 = end pad.
-    let mut ids: BTreeMap<(Point, u8), usize> = BTreeMap::new();
+    let mut ids: BTreeMap<(Point, CopperIndex), usize> = BTreeMap::new();
     let mut adj: Vec<Vec<(usize, f64)>> = vec![vec![], vec![]];
     let node = |p: Point,
-                l: u8,
-                ids: &mut BTreeMap<(Point, u8), usize>,
+                l: CopperIndex,
+                ids: &mut BTreeMap<(Point, CopperIndex), usize>,
                 adj: &mut Vec<Vec<(usize, f64)>>| {
         *ids.entry((p, l)).or_insert_with(|| {
             adj.push(vec![]);
@@ -609,7 +610,7 @@ pub fn trace_length(board: &Board, from: (&str, &str), to: (&str, &str)) -> Opti
         .values()
         .filter(|t| t.net == Some(net))
         .collect();
-    let mut ends: Vec<(Point, u8, usize)> = Vec::new();
+    let mut ends: Vec<(Point, CopperIndex, usize)> = Vec::new();
     for t in &tracks {
         let (a, b) = t.endpoints();
         let ia = node(a, t.layer, &mut ids, &mut adj);
@@ -619,7 +620,7 @@ pub fn trace_length(board: &Board, from: (&str, &str), to: (&str, &str)) -> Opti
         ends.push((b, t.layer, ib));
     }
     for v in board.vias.values().filter(|v| v.net == Some(net)) {
-        let mut prev: Option<(u8, usize)> = None;
+        let mut prev: Option<(CopperIndex, usize)> = None;
         for l in v.layers() {
             let i = node(v.at, l, &mut ids, &mut adj);
             if let Some((pl, pi)) = prev {
@@ -685,7 +686,7 @@ mod tests {
                 .map(|(i, p)| Node {
                     item: BItem::Via(ItemId(i as u64)),
                     fill: None,
-                    layers: 1,
+                    layers: crate::layer_set::LayerSet::single(0),
                     prims: vec![],
                     anchors: vec![Point::new(p.0, p.1)],
                 })

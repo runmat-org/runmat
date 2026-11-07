@@ -17,6 +17,7 @@
 //!
 //! Lengths are in metres here; [`Coord`] values are nanometres.
 
+use crate::layer_set::CopperIndex;
 use crate::geom::Coord;
 use crate::layout::{StackKind, Stackup};
 use std::f64::consts::PI;
@@ -32,7 +33,7 @@ pub enum TraceGeometry {
 
 impl TraceGeometry {
     /// The geometry of copper layer `layer` (0 = top), or `None` with no other copper layer.
-    pub fn of(stackup: &Stackup, layer: u8) -> Option<TraceGeometry> {
+    pub fn of(stackup: &Stackup, layer: CopperIndex) -> Option<TraceGeometry> {
         let copper: Vec<usize> = stackup
             .layers
             .iter()

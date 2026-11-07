@@ -2,6 +2,7 @@
 //! [`crate::pair`]: the pair comes from the circuit's `diff_pair` declarations, and the tracks
 //! written are the ones that pass DRC.
 
+use crate::layer_set::CopperIndex;
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
 use crate::geom::mm;
@@ -31,16 +32,16 @@ fn picked(request: &EditRequest, field: &str) -> Option<String> {
 
 /// A copper layer by its stackup name, its file name (`F.Cu`, `In1.Cu`, `B.Cu`), or `Top` /
 /// `Bottom`; none is the top.
-fn layer_of(board: &Board, name: Option<&str>) -> Result<u8, String> {
+fn layer_of(board: &Board, name: Option<&str>) -> Result<CopperIndex, String> {
     let names = board.stackup.copper_names();
-    let n = names.len() as u8;
+    let n = names.len() as CopperIndex;
     match name.map(str::trim) {
         None | Some("") | Some("Top") | Some("top") => Ok(0),
         Some("Bottom") | Some("bottom") => Ok(n - 1),
         Some(l) => names
             .iter()
             .position(|x| x == l)
-            .map(|i| i as u8)
+            .map(|i| i as CopperIndex)
             .or_else(|| (0..n).find(|i| crate::layout::copper_name(*i, n) == l))
             .ok_or_else(|| format!("`{l}` is not a copper layer of this board")),
     }

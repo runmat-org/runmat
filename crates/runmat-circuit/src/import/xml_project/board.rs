@@ -10,6 +10,7 @@
 //! - the design rules' clearance, track, drill, annular ring and copper-to-edge as the board's
 //!   limits.
 
+use crate::layer_set::CopperIndex;
 use super::library::{arc_mid, layer, len, package, point, rotation, DIMENSION, MILLING};
 use super::schematic::{footprint_key, libraries, library_of};
 use crate::geom::poly::{Polygon, Ring};
@@ -123,8 +124,8 @@ fn limits(rules: Option<&Element>) -> FabLimits {
 pub fn read(drawing: &Element, name: &str, report: &mut Report) -> Result<Board, String> {
     let brd = drawing.child("board").ok_or("the file has no <board>")?;
     let copper = copper_layers(brd);
-    let index = |number: u32| copper.iter().position(|l| *l == number).map(|i| i as u8);
-    let stackup = Stackup::standard(copper.len() as u8, mm(1.6), 1.0, 0.5);
+    let index = |number: u32| copper.iter().position(|l| *l == number).map(|i| i as CopperIndex);
+    let stackup = Stackup::standard(copper.len() as CopperIndex, mm(1.6), 1.0, 0.5);
     let mut board = Board::new(name, Polygon::default(), stackup);
     match outline(brd.child("plain"), report) {
         Some(o) => board.outline = o,
@@ -209,7 +210,7 @@ pub fn read(drawing: &Element, name: &str, report: &mut Report) -> Result<Board,
                         d => d,
                     };
                     let id = board.alloc();
-                    let (from, to) = (from.unwrap_or(0), to.unwrap_or(copper.len() as u8 - 1));
+                    let (from, to) = (from.unwrap_or(0), to.unwrap_or(copper.len() as CopperIndex - 1));
                     board.vias.insert(id, Via { id, net, at: point(item, "x", "y"), diameter, drill, from: from.min(to), to: from.max(to), micro: false, tented: true, locked: false });
                     vias += 1;
                 }

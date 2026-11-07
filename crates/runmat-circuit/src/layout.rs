@@ -17,6 +17,7 @@
 //! Every item has an [`ItemId`] unique within the board, which the DRC kernel and the
 //! spatial index key on.
 
+pub use crate::layer_set::{CopperIndex, LayerSet};
 use crate::geom::poly::{Polygon, Ring};
 use crate::geom::shape::Prim;
 use crate::geom::{mm, Coord, Point, Rect, Transform};
@@ -32,7 +33,7 @@ pub struct NetId(pub u32);
 /// Every board layer. Copper layers are numbered top (0) to bottom (n − 1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Layer {
-    Copper(u8),
+    Copper(CopperIndex),
     Mask(Side),
     Paste(Side),
     Silk(Side),
@@ -166,7 +167,7 @@ pub struct Stackup {
 }
 
 /// Copper layer names in KiCad convention: `F.Cu`, `In1.Cu` … `B.Cu`.
-pub fn copper_name(i: u8, count: u8) -> String {
+pub fn copper_name(i: CopperIndex, count: CopperIndex) -> String {
     if i == 0 {
         "F.Cu".into()
     } else if i + 1 == count {
@@ -179,7 +180,7 @@ pub fn copper_name(i: u8, count: u8) -> String {
 impl Stackup {
     /// A symmetric FR-4 stack of `n` copper layers (n even, ≥ 2) of `total` thickness, with
     /// `outer_oz` / `inner_oz` copper, alternating core and prepreg, 20 µm mask.
-    pub fn standard(n: u8, total: Coord, outer_oz: f64, inner_oz: f64) -> Stackup {
+    pub fn standard(n: CopperIndex, total: Coord, outer_oz: f64, inner_oz: f64) -> Stackup {
         let oz = |w: f64| (w * 34.79e3) as Coord;
         let mask = mm(0.02);
         let mut copper_total = 0;
@@ -191,7 +192,11 @@ impl Stackup {
             });
         }
         let gaps = n.saturating_sub(1).max(1) as Coord;
-        let diel = ((total - copper_total - 2 * mask) / gaps).max(mm(0.05));
+        // The dielectrics share what the copper and mask leave, whole nanometres each; the
+        // leftover nanometres go one each to the first gaps, so the stack is exactly `total`.
+        let room = total - copper_total - 2 * mask;
+        let diel = (room / gaps).max(mm(0.05));
+        let extra = if room / gaps >= mm(0.05) { room - diel * gaps } else { 0 };
         let mut layers = vec![StackLayer {
             name: "F.Mask".into(),
             kind: StackKind::SolderMask,
@@ -220,7 +225,7 @@ impl Stackup {
                 layers.push(StackLayer {
                     name: format!("dielectric {}", i + 1),
                     kind: StackKind::Dielectric { core },
-                    thickness: diel,
+                    thickness: diel + Coord::from((i as Coord) < extra),
                     material: m,
                 });
             }
@@ -239,7 +244,7 @@ impl Stackup {
     }
 
     /// A flex stack: `n` copper layers on polyimide with coverlay.
-    pub fn flex(n: u8, copper_oz: f64, core: Coord) -> Stackup {
+    pub fn flex(n: CopperIndex, copper_oz: f64, core: Coord) -> Stackup {
         let mut s = Stackup::standard(n.max(1), core * n as Coord, copper_oz, copper_oz);
         s.name = "flex".into();
         for l in &mut s.layers {
@@ -259,11 +264,11 @@ impl Stackup {
         s
     }
 
-    pub fn copper_count(&self) -> u8 {
+    pub fn copper_count(&self) -> CopperIndex {
         self.layers
             .iter()
             .filter(|l| matches!(l.kind, StackKind::Copper { .. }))
-            .count() as u8
+            .count() as CopperIndex
     }
     pub fn copper_names(&self) -> Vec<String> {
         self.layers
@@ -276,7 +281,7 @@ impl Stackup {
         self.layers.iter().map(|l| l.thickness).sum()
     }
     /// Index into `layers` of copper layer `i`.
-    pub fn copper_index(&self, i: u8) -> Option<usize> {
+    pub fn copper_index(&self, i: CopperIndex) -> Option<usize> {
         self.layers
             .iter()
             .enumerate()
@@ -285,20 +290,20 @@ impl Stackup {
             .map(|(k, _)| k)
     }
     /// Depth from the top surface to the middle of copper layer `i`.
-    pub fn copper_z(&self, i: u8) -> Option<Coord> {
+    pub fn copper_z(&self, i: CopperIndex) -> Option<Coord> {
         let k = self.copper_index(i)?;
         let above: Coord = self.layers[..k].iter().map(|l| l.thickness).sum();
         Some(above + self.layers[k].thickness / 2)
     }
     /// Vertical distance a via travels between copper layers `a` and `b` (centre to centre).
-    pub fn span_length(&self, a: u8, b: u8) -> Coord {
+    pub fn span_length(&self, a: CopperIndex, b: CopperIndex) -> Coord {
         match (self.copper_z(a), self.copper_z(b)) {
             (Some(x), Some(y)) => (x - y).abs(),
             _ => 0,
         }
     }
     /// Dielectric directly between adjacent copper layers `i` and `i + 1`.
-    pub fn dielectric_below(&self, i: u8) -> Option<&StackLayer> {
+    pub fn dielectric_below(&self, i: CopperIndex) -> Option<&StackLayer> {
         let k = self.copper_index(i)?;
         self.layers[k + 1..]
             .iter()
@@ -343,15 +348,15 @@ pub struct Via {
     pub diameter: Coord,
     pub drill: Coord,
     /// Top-most and bottom-most copper layers (`from < to`).
-    pub from: u8,
-    pub to: u8,
+    pub from: CopperIndex,
+    pub to: CopperIndex,
     pub micro: bool,
     pub tented: bool,
     pub locked: bool,
 }
 
 impl Via {
-    pub fn kind(&self, copper_count: u8) -> ViaKind {
+    pub fn kind(&self, copper_count: CopperIndex) -> ViaKind {
         if self.micro {
             ViaKind::Micro
         } else if self.from == 0 && self.to + 1 == copper_count {
@@ -362,7 +367,7 @@ impl Via {
             ViaKind::Buried
         }
     }
-    pub fn layers(&self) -> impl Iterator<Item = u8> {
+    pub fn layers(&self) -> impl Iterator<Item = CopperIndex> {
         self.from..=self.to
     }
 }
@@ -385,7 +390,7 @@ pub enum TrackGeom {
 pub struct Track {
     pub id: ItemId,
     pub net: Option<NetId>,
-    pub layer: u8,
+    pub layer: CopperIndex,
     pub width: Coord,
     pub geom: TrackGeom,
     pub locked: bool,
@@ -454,7 +459,7 @@ pub struct Zone {
     pub id: ItemId,
     pub name: String,
     pub net: Option<NetId>,
-    pub layers: Vec<u8>,
+    pub layers: Vec<CopperIndex>,
     pub outline: Polygon,
     /// Higher priority fills first; lower-priority zones keep clear of it.
     pub priority: i32,
@@ -467,7 +472,7 @@ pub struct Zone {
     pub islands: IslandPolicy,
     pub locked: bool,
     /// Derived: filled area per copper layer. Not source data.
-    pub fill: BTreeMap<u8, crate::geom::poly::PolySet>,
+    pub fill: BTreeMap<CopperIndex, crate::geom::poly::PolySet>,
 }
 
 impl Zone {
@@ -475,7 +480,7 @@ impl Zone {
         id: ItemId,
         name: &str,
         net: Option<NetId>,
-        layers: Vec<u8>,
+        layers: Vec<CopperIndex>,
         outline: Polygon,
     ) -> Self {
         Zone {
@@ -514,7 +519,7 @@ pub struct Keepout {
     pub name: String,
     pub outline: Polygon,
     /// Copper layers affected (empty = all).
-    pub layers: Vec<u8>,
+    pub layers: Vec<CopperIndex>,
     pub rules: KeepoutRules,
 }
 
@@ -599,7 +604,7 @@ pub struct PlacedPad {
     pub prim: Prim,
     pub center: Point,
     /// Copper layers the pad occupies.
-    pub layers: BTreeSet<u8>,
+    pub layers: BTreeSet<CopperIndex>,
     pub drill: Option<Coord>,
     pub plated: bool,
     pub thermal_pad: bool,
@@ -670,20 +675,20 @@ impl Footprint {
     pub fn transform(&self) -> Transform {
         Transform::new(self.at, self.rotation, self.side == Side::Bottom)
     }
-    pub fn pads(&self, copper_count: u8) -> Vec<PlacedPad> {
+    pub fn pads(&self, copper_count: CopperIndex) -> Vec<PlacedPad> {
         let t = self.transform();
         (0..self.package.pads.len())
             .map(|i| self.placed(i, copper_count, &t))
             .collect()
     }
     /// Pad `i` in board coordinates (without placing the others).
-    pub fn pad(&self, i: usize, copper_count: u8) -> Option<PlacedPad> {
+    pub fn pad(&self, i: usize, copper_count: CopperIndex) -> Option<PlacedPad> {
         (i < self.package.pads.len()).then(|| self.placed(i, copper_count, &self.transform()))
     }
-    fn placed(&self, i: usize, copper_count: u8, t: &Transform) -> PlacedPad {
+    fn placed(&self, i: usize, copper_count: CopperIndex, t: &Transform) -> PlacedPad {
         let p = &self.package.pads[i];
         let last = copper_count.saturating_sub(1);
-        let layers: BTreeSet<u8> = match (p.copper, self.side) {
+        let layers: BTreeSet<CopperIndex> = match (p.copper, self.side) {
             (CopperSpan::All, _) if p.kind != PadKind::Npth => (0..copper_count).collect(),
             (CopperSpan::All, _) => BTreeSet::new(),
             (CopperSpan::Front, Side::Top) | (CopperSpan::Back, Side::Bottom) => [0].into(),
@@ -862,7 +867,7 @@ impl Board {
         self.next_id += 1;
         id
     }
-    pub fn copper_count(&self) -> u8 {
+    pub fn copper_count(&self) -> CopperIndex {
         self.stackup.copper_count()
     }
     pub fn add_net(&mut self, name: &str, class: Option<&str>) -> NetId {
@@ -887,7 +892,7 @@ impl Board {
     pub fn add_track(
         &mut self,
         net: Option<NetId>,
-        layer: u8,
+        layer: CopperIndex,
         width: Coord,
         a: Point,
         b: Point,
@@ -1034,11 +1039,11 @@ impl Board {
         &self.stackup
     }
     /// Copper layer indices (of the rigid stack) present at `p`.
-    pub fn copper_at(&self, p: Point) -> BTreeSet<u8> {
+    pub fn copper_at(&self, p: Point) -> BTreeSet<CopperIndex> {
         let s = self.stackup_at(p);
         let names = s.copper_names();
         let all = self.stackup.copper_names();
-        (0..all.len() as u8)
+        (0..all.len() as CopperIndex)
             .filter(|i| names.contains(&all[*i as usize]))
             .collect()
     }

@@ -69,7 +69,7 @@ pub fn layer_rows(board: &Board) -> Vec<LayerRow> {
         rows
     };
     let mut out = side_rows(Side::Top, true);
-    let mut cu = 0u8;
+    let mut cu: crate::layout::CopperIndex = 0;
     for l in &board.stackup.layers {
         let (name, kind, oz, gerber) = match &l.kind {
             StackKind::Copper { weight_oz } => {

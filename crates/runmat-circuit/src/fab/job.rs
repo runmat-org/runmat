@@ -55,7 +55,7 @@ pub fn gerber_job(board: &Board, layers: &[(String, super::GerberLayer)], drill_
     for (path, function) in drill_files {
         files.push(json!({ "Path": path, "FileFunction": function, "FilePolarity": "Positive" }));
     }
-    let mut cu = 0u8;
+    let mut cu: crate::layout::CopperIndex = 0;
     let stack: Vec<Value> = board
         .stackup
         .layers

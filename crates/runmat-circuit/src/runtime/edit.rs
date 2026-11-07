@@ -1,6 +1,7 @@
 //! Catalog commands on a circuit: board edits, ECO in both directions, room formats; each a
 //! minimal text change per file.
 
+use crate::layer_set::CopperIndex;
 use super::*;
 
 /* ------------------------------------------------------------------------------------------------
@@ -474,7 +475,7 @@ fn widths_for(stackup: &crate::layout::Stackup, target: f64) -> String {
     let rows: Vec<String> = names
         .iter()
         .enumerate()
-        .map(|(i, name)| match TraceGeometry::of(stackup, i as u8) {
+        .map(|(i, name)| match TraceGeometry::of(stackup, i as CopperIndex) {
             Some(g) => {
                 let kind = match g {
                     TraceGeometry::Microstrip { .. } => "microstrip",
@@ -551,7 +552,7 @@ pub(super) fn board_edit(
                 .ok_or_else(|| EditError::new(format!("`{word}` is not a board-house capability; expected standard, advanced or hdi")))
         }
         "board.layer-stack" => Ok(BoardEdit::LayerStack {
-            layers: number(values, "layers").map_or(board.copper_count(), |n| n as u8),
+            layers: number(values, "layers").map_or(board.copper_count(), |n| n as CopperIndex),
             thickness: mm_value(values, "thickness").unwrap_or_else(|| board.stackup.thickness()),
             dielectric: dielectric(values.get("material").and_then(Value::as_str))?,
         }),

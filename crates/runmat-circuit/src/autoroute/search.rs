@@ -3,6 +3,7 @@
 //! net's width centred there keeps the clearance plus the grid's sampling slack, so the
 //! straight run between two open neighbours keeps the clearance exactly.
 
+use crate::layer_set::{CopperIndex, LayerSet};
 use super::space::Space;
 use crate::geom::shape::Prim;
 use crate::geom::{Coord, Point};
@@ -11,7 +12,7 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
 /// A grid node: column, row, index into the routing layers.
-pub(super) type Node = (i64, i64, u8);
+pub(super) type Node = (i64, i64, CopperIndex);
 
 /// What one search needs: the net, its track width and via, the routing layers (board copper
 /// indices) and the costs.
@@ -20,8 +21,8 @@ pub(super) struct Query<'a> {
     pub width: Coord,
     pub via: (Coord, Coord),
     /// Copper layers the via spans (through: every layer).
-    pub via_mask: u64,
-    pub layers: &'a [u8],
+    pub via_mask: LayerSet,
+    pub layers: &'a [CopperIndex],
     pub grid: Coord,
     /// Grid origin: the route's start anchor, so a track leaves a pad along its centre line.
     pub origin: Point,
@@ -123,13 +124,17 @@ pub(super) struct Search<'a> {
     open: HashMap<Node, bool>,
     via_open: HashMap<(i64, i64), bool>,
     slack: Coord,
+    /// Each routing layer as a layer set, by routing-layer index.
+    on: Vec<LayerSet>,
 }
 
 impl<'a> Search<'a> {
     pub fn new(q: Query<'a>, space: &'a Space) -> Self {
         // A segment between two neighbours lies within half a diagonal step of one of them.
         let slack = (q.grid as f64 * std::f64::consts::FRAC_1_SQRT_2).ceil() as Coord;
+        let on = q.layers.iter().map(|l| LayerSet::single(*l)).collect();
         Search {
+            on,
             q,
             space,
             open: HashMap::new(),
@@ -138,8 +143,8 @@ impl<'a> Search<'a> {
         }
     }
 
-    fn mask(&self, l: u8) -> u64 {
-        1u64 << self.q.layers[l as usize]
+    fn mask(&self, l: CopperIndex) -> &LayerSet {
+        &self.on[l as usize]
     }
 
     /// Whether the straight stub from node `n` to the anchor `p`, at the width the route draws
@@ -187,7 +192,7 @@ impl<'a> Search<'a> {
         let (d, drill) = self.q.via;
         let v = self.space.free(
             Some(self.q.net),
-            self.q.via_mask,
+            &self.q.via_mask,
             &Prim::circle(p, d / 2),
             0,
         ) && self.space.hole_free(p, drill / 2);
@@ -288,7 +293,7 @@ impl<'a> Search<'a> {
             }
             // A via to every other routing layer.
             if self.q.layers.len() > 1 && dir != VIA && self.via_ok(node.0, node.1) {
-                for l in 0..self.q.layers.len() as u8 {
+                for l in 0..self.q.layers.len() as CopperIndex {
                     if l == node.2 {
                         continue;
                     }

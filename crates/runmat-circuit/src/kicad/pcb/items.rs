@@ -1,6 +1,7 @@
 //! Board texts, graphics, dimensions and fiducials, read from and written to KiCad nodes, and
 //! KiCad layer names.
 
+use crate::layer_set::CopperIndex;
 use super::*;
 use super::super::footprint;
 use super::super::sexpr::SExpr;
@@ -8,7 +9,7 @@ use super::super::{at_of, copper_index, copper_layer, len, mm_of, uuid_node, xy}
 use crate::geom::{mm, Coord};
 
 /// A non-copper layer by its KiCad name; copper layers by [`copper_index`].
-pub(super) fn layer_of(name: &str, n: u8) -> Option<Layer> {
+pub(super) fn layer_of(name: &str, n: CopperIndex) -> Option<Layer> {
     if let Some(i) = copper_index(name, n) {
         return Some(Layer::Copper(i));
     }
@@ -31,7 +32,7 @@ pub(super) fn layer_of(name: &str, n: u8) -> Option<Layer> {
 }
 
 /// The KiCad name of a layer.
-pub(super) fn layer_name(l: Layer, n: u8) -> String {
+pub(super) fn layer_name(l: Layer, n: CopperIndex) -> String {
     let f =
         |s: Side, front: &str, back: &str| (if s == Side::Top { front } else { back }).to_owned();
     match l {
@@ -55,7 +56,7 @@ pub(super) fn font_size(node: &SExpr) -> (Option<Coord>, Option<Coord>) {
     )
 }
 
-pub(super) fn text_of(node: &SExpr, id: ItemId, n: u8) -> Option<BoardText> {
+pub(super) fn text_of(node: &SExpr, id: ItemId, n: CopperIndex) -> Option<BoardText> {
     let layer = layer_of(node.child_arg("layer")?, n)?;
     let (at, angle) = at_of(node.child("at"));
     let (size, thickness) = font_size(node);
@@ -76,7 +77,7 @@ pub(super) fn text_of(node: &SExpr, id: ItemId, n: u8) -> Option<BoardText> {
     })
 }
 
-pub(super) fn text_node(t: &BoardText, n: u8) -> SExpr {
+pub(super) fn text_node(t: &BoardText, n: CopperIndex) -> SExpr {
     let mut effects = vec![SExpr::list(
         "font",
         vec![
@@ -99,7 +100,7 @@ pub(super) fn text_node(t: &BoardText, n: u8) -> SExpr {
     )
 }
 
-pub(super) fn graphic_of(node: &SExpr, id: ItemId, n: u8) -> Option<BoardGraphic> {
+pub(super) fn graphic_of(node: &SExpr, id: ItemId, n: CopperIndex) -> Option<BoardGraphic> {
     let (layer, graphic) = footprint::graphic(node, &|p| p)?;
     Some(BoardGraphic {
         id,
@@ -108,7 +109,7 @@ pub(super) fn graphic_of(node: &SExpr, id: ItemId, n: u8) -> Option<BoardGraphic
     })
 }
 
-pub(super) fn board_graphic_node(g: &BoardGraphic, n: u8) -> SExpr {
+pub(super) fn board_graphic_node(g: &BoardGraphic, n: CopperIndex) -> SExpr {
     let mut node = footprint::graphic_node(
         &g.graphic,
         &layer_name(g.layer, n),
@@ -125,7 +126,7 @@ pub(super) fn board_graphic_node(g: &BoardGraphic, n: u8) -> SExpr {
 
 /// An aligned dimension (`(dimension (type aligned) … (pts a b) (height h))`); other types stay
 /// in the tree.
-pub(super) fn dimension_of(node: &SExpr, id: ItemId, n: u8) -> Option<Dimension> {
+pub(super) fn dimension_of(node: &SExpr, id: ItemId, n: CopperIndex) -> Option<Dimension> {
     if node.child_arg("type") != Some("aligned") {
         return None;
     }
@@ -145,7 +146,7 @@ pub(super) fn dimension_of(node: &SExpr, id: ItemId, n: u8) -> Option<Dimension>
     })
 }
 
-pub(super) fn dimension_node(d: &Dimension, n: u8) -> SExpr {
+pub(super) fn dimension_node(d: &Dimension, n: CopperIndex) -> SExpr {
     SExpr::list(
         "dimension",
         vec![

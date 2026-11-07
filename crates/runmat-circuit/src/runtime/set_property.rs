@@ -16,6 +16,7 @@
 //! item's Outline id as the selection. Lengths are millimetres as numbers, or text with a unit
 //! (`0.25 mm`, `10 mil`); angles are degrees as numbers or text (`90 deg`).
 
+use crate::layer_set::CopperIndex;
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
 use crate::geom::{Coord, NM_PER_MIL, NM_PER_MM};
@@ -427,7 +428,7 @@ fn footprint_field(project: &Project, designator: &str, field: &str, value: &Val
 }
 
 /// The copper layer index of a layer name (`F.Cu`, `Top`, `Inner 1`, `B.Cu`).
-fn copper_index(board: &Board, name: &str) -> Result<u8, EditError> {
+fn copper_index(board: &Board, name: &str) -> Result<CopperIndex, EditError> {
     let named = crate::drawn::copper_layer(board, name).map_err(EditError::new)?;
     let n = board.copper_count();
     let names = board.stackup.copper_names();

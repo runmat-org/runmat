@@ -5,6 +5,7 @@
 //! points from its `points` field, in pick order, or from the selection's point picks when
 //! the field is empty. Nets come from the `net` field or from a picked pad, track or via.
 
+use crate::layer_set::CopperIndex;
 use crate::geom::poly::{area2, Polygon};
 use crate::geom::{mm, Coord, Point};
 use crate::layout::{copper_name, Board, KeepoutRules, Layer, PadConnect};
@@ -89,7 +90,7 @@ pub fn copper_layer(board: &Board, name: &str) -> Result<String, String> {
         "bottom" | "back" => Some(n.saturating_sub(1)),
         _ => lower
             .strip_prefix("inner")
-            .and_then(|k| k.trim().parse::<u8>().ok())
+            .and_then(|k| k.trim().parse::<CopperIndex>().ok())
             .filter(|k| *k >= 1 && *k + 1 < n),
     };
     if let Some(i) = index {

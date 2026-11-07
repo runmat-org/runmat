@@ -6,6 +6,7 @@
 //! items are the whole layer's that touch the region, in the same order, so a query inside the
 //! region returns what the whole layer's query would.
 
+use crate::layer_set::CopperIndex;
 use crate::board_rules::BItem;
 use crate::geom::shape::Prim;
 use crate::geom::{Coord, Point, Rect};
@@ -37,7 +38,7 @@ impl LayerItems {
 }
 
 /// The items on `layer`, or only those whose boxes touch `region`.
-pub(super) fn layer_items(board: &Board, pads: &[PlacedPad], layer: u8, region: Option<&Rect>) -> LayerItems {
+pub(super) fn layer_items(board: &Board, pads: &[PlacedPad], layer: CopperIndex, region: Option<&Rect>) -> LayerItems {
     let inside = |b: Rect| region.is_none_or(|r| r.intersects(&b));
     let mut out = Vec::new();
     for p in pads {
@@ -90,8 +91,8 @@ pub(super) fn layer_items(board: &Board, pads: &[PlacedPad], layer: u8, region: 
 }
 
 /// Per copper layer, the largest side of a plated pad's box there: how far a thermal spoke reaches.
-pub(super) fn pad_extent(pads: &[PlacedPad]) -> BTreeMap<u8, Coord> {
-    let mut out: BTreeMap<u8, Coord> = BTreeMap::new();
+pub(super) fn pad_extent(pads: &[PlacedPad]) -> BTreeMap<CopperIndex, Coord> {
+    let mut out: BTreeMap<CopperIndex, Coord> = BTreeMap::new();
     for p in pads.iter().filter(|p| p.kind != PadKind::Npth) {
         let b = p.prim.bbox();
         let side = b.width().max(b.height());

@@ -14,6 +14,7 @@
 //! as the run holds, with the amplitude that adds the missing length. One side is tried, then
 //! the other. DRC decides as above.
 
+use crate::layer_set::CopperIndex;
 use crate::board_rules::{BItem, BoardGraph, BoardRules};
 use crate::drc::Drc;
 use crate::geom::{Coord, Point};
@@ -49,7 +50,7 @@ fn item_net(board: &Board, item: &BItem) -> Option<NetId> {
 }
 
 /// The two pads of `net` that copper on `layer` can reach: centre and half their larger side.
-fn ends(board: &Board, net: NetId, layer: u8) -> Result<[(Point, Coord); 2], String> {
+fn ends(board: &Board, net: NetId, layer: CopperIndex) -> Result<[(Point, Coord); 2], String> {
     let pads: Vec<(Point, Coord)> = board
         .all_pads()
         .into_iter()
@@ -126,7 +127,7 @@ fn length(path: &[Point]) -> f64 {
 }
 
 /// Adds `paths` as tracks of their nets, then keeps them only if DRC names none of them.
-fn add_checked(board: &mut Board, pairs: &[(NetId, NetId)], layer: u8, width: Coord, paths: &[(NetId, Vec<Point>)]) -> Result<Vec<Vec<ItemId>>, String> {
+fn add_checked(board: &mut Board, pairs: &[(NetId, NetId)], layer: CopperIndex, width: Coord, paths: &[(NetId, Vec<Point>)]) -> Result<Vec<Vec<ItemId>>, String> {
     let ids: Vec<Vec<ItemId>> = paths
         .iter()
         .map(|(net, path)| path.windows(2).filter(|w| w[0] != w[1]).map(|w| board.add_track(Some(*net), layer, width, w[0], w[1])).collect())
@@ -148,7 +149,7 @@ fn add_checked(board: &mut Board, pairs: &[(NetId, NetId)], layer: u8, width: Co
 }
 
 /// Routes the pair `p`/`n` on `layer` with tracks `width` wide `gap` apart (edge to edge).
-pub fn route_pair(board: &mut Board, p: NetId, n: NetId, layer: u8, width: Coord, gap: Coord) -> Result<PairRoute, String> {
+pub fn route_pair(board: &mut Board, p: NetId, n: NetId, layer: CopperIndex, width: Coord, gap: Coord) -> Result<PairRoute, String> {
     if width <= 0 || gap <= 0 {
         return Err("the width and the gap must be more than zero".into());
     }

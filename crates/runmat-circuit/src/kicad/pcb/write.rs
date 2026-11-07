@@ -1,6 +1,7 @@
 //! Writing a board as KiCad text: tracks, vias, zones, keepouts, the edge, the net table and
 //! footprints, merged into the original file's nodes so what RunMat doesn't model survives.
 
+use crate::layer_set::CopperIndex;
 use super::*;
 use super::super::footprint;
 use super::super::sexpr::{self, SExpr};
@@ -443,7 +444,7 @@ pub(super) fn merge(original: Option<&SExpr>, fresh: SExpr, modeled: &[&str]) ->
     SExpr::List(out)
 }
 
-pub(super) fn track_node(t: &Track, n: u8, b: &Codes, seed: &str) -> SExpr {
+pub(super) fn track_node(t: &Track, n: CopperIndex, b: &Codes, seed: &str) -> SExpr {
     let layer = SExpr::list("layer", vec![SExpr::str(&copper_layer(t.layer, n))]);
     let w = SExpr::list("width", vec![len(t.width)]);
     match t.geom {
@@ -473,7 +474,7 @@ pub(super) fn track_node(t: &Track, n: u8, b: &Codes, seed: &str) -> SExpr {
     }
 }
 
-pub(super) fn via_node(v: &Via, n: u8, b: &Codes, seed: &str) -> SExpr {
+pub(super) fn via_node(v: &Via, n: CopperIndex, b: &Codes, seed: &str) -> SExpr {
     let mut items = Vec::new();
     match v.kind(n) {
         ViaKind::Micro => items.push(SExpr::sym("micro")),
@@ -495,7 +496,7 @@ pub(super) fn via_node(v: &Via, n: u8, b: &Codes, seed: &str) -> SExpr {
     SExpr::list("via", items)
 }
 
-pub(super) fn zone_node(z: &Zone, n: u8, b: &Board, codes: &Codes) -> SExpr {
+pub(super) fn zone_node(z: &Zone, n: CopperIndex, b: &Board, codes: &Codes) -> SExpr {
     let mut items = vec![net_ref(z.net, codes)];
     items.push(SExpr::list(
         "net_name",
@@ -568,7 +569,7 @@ pub(super) fn zone_node(z: &Zone, n: u8, b: &Board, codes: &Codes) -> SExpr {
     SExpr::list("zone", items)
 }
 
-pub(super) fn keepout_node(k: &Keepout, n: u8) -> SExpr {
+pub(super) fn keepout_node(k: &Keepout, n: CopperIndex) -> SExpr {
     let na = |b: bool| SExpr::sym(if b { "not_allowed" } else { "allowed" });
     let layers = if k.layers.is_empty() {
         vec![SExpr::str("*.Cu")]

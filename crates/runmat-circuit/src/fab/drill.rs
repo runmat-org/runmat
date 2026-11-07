@@ -1,5 +1,6 @@
 //! Excellon drill files and the drill map.
 
+use crate::layer_set::CopperIndex;
 use crate::geom::{to_mm, Coord, Point};
 use crate::layout::Board;
 use std::collections::BTreeMap;
@@ -17,14 +18,14 @@ pub struct Hole {
 /// plated. Non-plated holes always run through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Span {
-    pub from: u8,
-    pub to: u8,
+    pub from: CopperIndex,
+    pub to: CopperIndex,
     pub plated: bool,
 }
 
 impl Span {
     /// `PTH`, `Blind`, `Buried` or `NPTH`, as the drill file's function names it.
-    pub fn kind(&self, copper_count: u8) -> &'static str {
+    pub fn kind(&self, copper_count: CopperIndex) -> &'static str {
         if !self.plated {
             "NPTH"
         } else if self.from == 0 && self.to + 1 == copper_count {

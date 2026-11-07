@@ -251,7 +251,7 @@ fn net_class_scope(expr: &str) -> Option<String> {
 /// Reads a board document's records into a board named `name`.
 pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<BoardRead, String> {
     let copper = copper_layers(records);
-    let index = |l: &str| copper.iter().position(|c| c == l).map(|i| i as u8);
+    let index = |l: &str| copper.iter().position(|c| c == l).map(|i| i as crate::layout::CopperIndex);
     // The outline: the Board record's vertices, else the keep-out layer's tracks and arcs.
     let board_rec = records.iter().find(|r| r.kind().eq_ignore_ascii_case("Board"));
     let outline_pts = board_rec.map(vertices).unwrap_or_default();
@@ -273,7 +273,7 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
         extent = records.iter().filter(|r| r.kind() == "Component").map(|r| (r.len("X"), r.len("Y"))).collect();
     }
     let frame = Frame { origin: (extent.iter().map(|p| p.0).min().unwrap_or(0), extent.iter().map(|p| p.1).min().unwrap_or(0)) };
-    let mut board = Board::new(name, Polygon::default(), Stackup::standard(copper.len() as u8, crate::geom::mm(1.6), 1.0, 0.5));
+    let mut board = Board::new(name, Polygon::default(), Stackup::standard(copper.len() as crate::layout::CopperIndex, crate::geom::mm(1.6), 1.0, 0.5));
 
     // Nets by index, with their classes.
     let net_names: Vec<String> = records.iter().filter(|r| r.kind() == "Net").map(|r| r.str("NAME").trim().to_owned()).collect();
@@ -454,7 +454,7 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
             "Via" => {
                 let id = board.alloc();
                 let n = net(&mut board, r);
-                let last = copper.len() as u8 - 1;
+                let last = copper.len() as crate::layout::CopperIndex - 1;
                 let from = index(&r.str("STARTLAYER").trim().to_ascii_uppercase()).unwrap_or(0);
                 let to = index(&r.str("ENDLAYER").trim().to_ascii_uppercase()).unwrap_or(last);
                 board.vias.insert(id, Via { id, net: n, at: frame.point(r, "X", "Y"), diameter: r.len("DIAMETER"), drill: r.len("HOLESIZE"), from: from.min(to), to: from.max(to), micro: false, tented: true, locked: false });
@@ -579,7 +579,7 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
         };
         let n = net(&mut board, &Record([("NET".to_owned(), i.to_string())].into_iter().collect()));
         let id = board.alloc();
-        let mut z = Zone::new(id, &net_name, n, vec![li as u8], board.outline.clone());
+        let mut z = Zone::new(id, &net_name, n, vec![li as crate::layout::CopperIndex], board.outline.clone());
         z.priority = -1;
         board.zones.insert(id, z);
         planes += 1;

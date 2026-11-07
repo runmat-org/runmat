@@ -1,6 +1,7 @@
 //! The board projection: layers, rooms, rules, footprints, pads and copper with the rule each
 //! value came from, DRC rows and airwires, and how error lists and scenes name board items.
 
+use crate::layer_set::CopperIndex;
 use super::*;
 use crate::board_rules::{props, BItem, BoardGraph, BoardRules, RuleValue};
 use crate::drc::Drc;
@@ -258,7 +259,7 @@ pub fn add_board_reusing(
         let value = value.map(|v| format!("{v:.2} mm ")).unwrap_or_default();
         Some(format!("{label} {value}{}", origin_text(&rule, &source)))
     };
-    let layer_name = |l: u8| crate::layout::copper_name(l, copper);
+    let layer_name = |l: CopperIndex| crate::layout::copper_name(l, copper);
     // Each copper layer's transmission-line geometry, for a track's impedance in Properties.
     let lines: Vec<Option<crate::impedance::TraceGeometry>> =
         (0..copper).map(|l| crate::impedance::TraceGeometry::of(&board.stackup, l)).collect();

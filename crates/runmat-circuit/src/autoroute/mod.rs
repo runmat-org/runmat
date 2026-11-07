@@ -21,7 +21,9 @@ mod star;
 pub use fanout::{fanout, FanoutOptions, FanoutReport};
 pub use space::Space;
 
+use crate::layer_set::CopperIndex;
 use crate::connectivity::layer_mask;
+use crate::layer_set::LayerSet;
 use crate::geom::shape::Prim;
 use crate::geom::{mm, Coord, Point};
 use crate::layout::{Board, NetId};
@@ -34,7 +36,7 @@ pub struct RouteOptions {
     /// Nets to route; airwires of other nets are left.
     pub nets: Vec<NetId>,
     /// Copper layers to route on, preferred first.
-    pub layers: Vec<u8>,
+    pub layers: Vec<CopperIndex>,
     /// Track width per net; nets not listed use `default_width`.
     pub widths: BTreeMap<NetId, Coord>,
     pub default_width: Coord,
@@ -47,7 +49,7 @@ pub struct RouteOptions {
 }
 
 impl RouteOptions {
-    pub fn new(nets: Vec<NetId>, layers: Vec<u8>, clearance: Coord) -> Self {
+    pub fn new(nets: Vec<NetId>, layers: Vec<CopperIndex>, clearance: Coord) -> Self {
         RouteOptions {
             nets,
             layers,
@@ -179,7 +181,7 @@ pub fn autoroute_in(
                 report.routed += 1;
                 for (layer, width, a, b) in route.tracks {
                     board.add_track(Some(w.net), layer, width, a, b);
-                    space.add(Some(w.net), 1 << layer, Prim::segment(a, b, width));
+                    space.add(Some(w.net), LayerSet::single(layer), Prim::segment(a, b, width));
                     report.tracks += 1;
                 }
                 for p in route.vias {
@@ -218,7 +220,7 @@ fn pad_width(pads: &[crate::layout::PlacedPad], net: NetId, p: Point) -> Option<
 
 struct Route {
     /// Layer, width, ends.
-    tracks: Vec<(u8, Coord, Point, Point)>,
+    tracks: Vec<(CopperIndex, Coord, Point, Point)>,
     vias: Vec<Point>,
 }
 
@@ -244,7 +246,7 @@ fn ends(s: &mut Search, space: &Space, p: Point) -> (Vec<Node>, bool) {
             if !space.own_fill(s.q.net, at) || !s.via_site(x, y) {
                 continue;
             }
-            for l in 0..s.q.layers.len() as u8 {
+            for l in 0..s.q.layers.len() as CopperIndex {
                 if s.open_node((x, y, l)) {
                     out.push((x, y, l));
                 }
@@ -265,7 +267,7 @@ fn copper_ends(s: &mut Search, p: Point) -> Vec<Node> {
     let mut clear = Vec::new();
     let mut out = Vec::new();
     let mut any_own = Vec::new();
-    for l in 0..s.q.layers.len() as u8 {
+    for l in 0..s.q.layers.len() as CopperIndex {
         for x in cx - r..=cx + r {
             for y in cy - r..=cy + r {
                 let n = (x, y, l);
@@ -320,7 +322,7 @@ fn route_one(space: &Space, q: Query, a: Point, b: Point) -> Result<Route, Why> 
 /// two anchors (inside the net's own copper).
 fn geometry(s: &Search, space: &Space, nodes: &[Node], a: Point, b: Point) -> Route {
     let q = &s.q;
-    let mut runs: Vec<(u8, Coord, Vec<Point>)> = Vec::new();
+    let mut runs: Vec<(CopperIndex, Coord, Vec<Point>)> = Vec::new();
     let mut vias = Vec::new();
     for n in nodes {
         let p = search::point(q, *n);
@@ -410,7 +412,7 @@ fn merge(pts: &[Point]) -> Vec<Point> {
 fn shortcut(
     space: &Space,
     net: NetId,
-    layer: u8,
+    layer: CopperIndex,
     width: Coord,
     pts: &[Point],
     keep_first: bool,
@@ -428,7 +430,7 @@ fn shortcut(
         while j > i + 1 {
             let (p, r) = (pts[i], pts[j]);
             if direction(p, r).is_some()
-                && space.free(Some(net), 1 << layer, &Prim::segment(p, r, width), 0)
+                && space.free(Some(net), &LayerSet::single(layer), &Prim::segment(p, r, width), 0)
             {
                 break;
             }

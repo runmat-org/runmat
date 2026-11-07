@@ -1,5 +1,6 @@
 //! The large design and board generator, and seeded violations.
 
+use crate::layer_set::{CopperIndex, LayerSet};
 use super::standard_pool;
 use crate::elab::{elaborate, ElabOptions, Netlist};
 use crate::geom::poly::{rect_ring, Polygon};
@@ -15,7 +16,7 @@ use std::collections::BTreeMap;
 pub struct LargeParams {
     /// Repeated analog channels (each ≈ 5 local nets, 8 components).
     pub channels: u32,
-    pub copper_layers: u8,
+    pub copper_layers: CopperIndex,
     /// Route a straight stub for every this-many nets (0 = no routing).
     pub route_every: u32,
     /// Add GND and power pours.
@@ -251,7 +252,7 @@ const GEN_EDGE: Coord = 350_000;
 /// Copper placed so far, for the generator's legality checks.
 struct Occupancy {
     grid: Grid<u32>,
-    items: Vec<(Option<NetId>, bool, u64, Prim)>,
+    items: Vec<(Option<NetId>, bool, LayerSet, Prim)>,
     holes: Grid<u32>,
     hole_list: Vec<(Point, Coord)>,
     area: Rect,
@@ -265,7 +266,7 @@ impl Occupancy {
             GEN_CLEARANCE
         }
     }
-    fn free(&self, net: Option<NetId>, power: bool, mask: u64, p: &Prim) -> bool {
+    fn free(&self, net: Option<NetId>, power: bool, mask: &LayerSet, p: &Prim) -> bool {
         let bb = p.bbox();
         if bb.min.x < self.area.min.x
             || bb.min.y < self.area.min.y
@@ -280,7 +281,7 @@ impl Occupancy {
                 return;
             }
             let (on, opower, omask, op) = &self.items[k as usize];
-            if omask & mask == 0 || (net.is_some() && *on == net) {
+            if !omask.intersects(mask) || (net.is_some() && *on == net) {
                 return;
             }
             if p.gap(op) < Occupancy::clearance(power, *opower) as f64 {
@@ -302,7 +303,7 @@ impl Occupancy {
         );
         ok
     }
-    fn add(&mut self, net: Option<NetId>, power: bool, mask: u64, p: Prim) {
+    fn add(&mut self, net: Option<NetId>, power: bool, mask: LayerSet, p: Prim) {
         let k = self.items.len() as u32;
         self.grid.insert(k, p.bbox());
         self.items.push((net, power, mask, p));
@@ -323,9 +324,9 @@ impl Router<'_> {
     fn power(&self, net: Option<NetId>) -> bool {
         net.is_some_and(|n| self.board.nets[n.0 as usize].class.as_deref() == Some("power"))
     }
-    fn track_ok(&self, net: Option<NetId>, layer: u8, w: Coord, a: Point, b: Point) -> bool {
+    fn track_ok(&self, net: Option<NetId>, layer: CopperIndex, w: Coord, a: Point, b: Point) -> bool {
         self.occ
-            .free(net, self.power(net), 1 << layer, &Prim::segment(a, b, w))
+            .free(net, self.power(net), &LayerSet::single(layer), &Prim::segment(a, b, w))
     }
     fn via_ok(
         &self,
@@ -333,21 +334,21 @@ impl Router<'_> {
         at: Point,
         d: Coord,
         drill: Coord,
-        span: (u8, u8),
+        span: (CopperIndex, CopperIndex),
     ) -> bool {
-        let mask = (span.0..=span.1).fold(0u64, |m, l| m | 1 << l);
+        let mask = LayerSet::span(span.0, span.1);
         self.occ
-            .free(net, self.power(net), mask, &Prim::circle(at, d / 2))
+            .free(net, self.power(net), &mask, &Prim::circle(at, d / 2))
             && self.occ.hole_free(at, drill / 2)
     }
-    fn track(&mut self, net: Option<NetId>, layer: u8, w: Coord, a: Point, b: Point) {
+    fn track(&mut self, net: Option<NetId>, layer: CopperIndex, w: Coord, a: Point, b: Point) {
         let pw = self.power(net);
-        self.occ.add(net, pw, 1 << layer, Prim::segment(a, b, w));
+        self.occ.add(net, pw, LayerSet::single(layer), Prim::segment(a, b, w));
         self.board.add_track(net, layer, w, a, b);
     }
-    fn via(&mut self, net: Option<NetId>, at: Point, d: Coord, drill: Coord, span: (u8, u8)) {
+    fn via(&mut self, net: Option<NetId>, at: Point, d: Coord, drill: Coord, span: (CopperIndex, CopperIndex)) {
         let pw = self.power(net);
-        let mask = (span.0..=span.1).fold(0u64, |m, l| m | 1 << l);
+        let mask = LayerSet::span(span.0, span.1);
         self.occ.add(net, pw, mask, Prim::circle(at, d / 2));
         self.occ.add_hole(at, drill / 2);
         let id = self.board.add_via(net, at, d, drill);
@@ -423,7 +424,7 @@ impl Router<'_> {
     /// Routes `a → b` on the layer pair `(hl, vl)`: horizontal runs on `hl`, vertical runs on
     /// `vl`, joined by buried vias spanning the pair. Tries a straight run, the two L shapes,
     /// then Z shapes over lanes around the midpoint.
-    fn connect(&mut self, net: Option<NetId>, a: Point, b: Point, (hl, vl): (u8, u8)) -> bool {
+    fn connect(&mut self, net: Option<NetId>, a: Point, b: Point, (hl, vl): (CopperIndex, CopperIndex)) -> bool {
         let w = mm(0.15);
         let (vd, vdr) = (mm(0.45), mm(0.2));
         let span = (hl.min(vl), hl.max(vl));
@@ -513,8 +514,8 @@ fn route_large(board: &mut Board, params: &LargeParams) -> RouteReport {
         let power = p
             .net
             .is_some_and(|nn| board.nets[nn.0 as usize].class.as_deref() == Some("power"));
-        let mask = p.layers.iter().fold(0u64, |m, l| m | 1 << l);
-        if mask != 0 {
+        let mask: LayerSet = p.layers.iter().copied().collect();
+        if !mask.is_empty() {
             occ.items.push((p.net, power, mask, p.prim.clone()));
             let k = occ.items.len() as u32 - 1;
             occ.grid.insert(k, p.prim.bbox());
@@ -558,8 +559,8 @@ fn route_large(board: &mut Board, params: &LargeParams) -> RouteReport {
         }
     }
     // Signal layer pairs (horizontal, vertical): adjacent inner layers between the planes.
-    let signal: Vec<u8> = (3..n.saturating_sub(2)).collect();
-    let pairs: Vec<(u8, u8)> = match signal.len() {
+    let signal: Vec<CopperIndex> = (3..n.saturating_sub(2)).collect();
+    let pairs: Vec<(CopperIndex, CopperIndex)> = match signal.len() {
         0 => vec![(0, n - 1)],
         1 => vec![(signal[0], signal[0])],
         _ => signal
@@ -658,10 +659,10 @@ pub fn seed_violations(board: &mut Board, count: u32) -> Seeded {
     // Pads do not move while seeding.
     let pads = board.all_pads();
     // Objects within `radius` of `prim` on `mask`, with their gap and net.
-    let probe = |board: &Board, prim: &Prim, mask: u64, radius: Coord| {
+    let probe = |board: &Board, prim: &Prim, mask: &LayerSet, radius: Coord| {
         let mut hits: Vec<(BItemLite, f64, Option<NetId>)> = Vec::new();
         for t in board.tracks.values() {
-            if mask & (1 << t.layer) != 0 {
+            if mask.contains(t.layer) {
                 for p in t.prims() {
                     let g = p.gap(prim);
                     if g < radius as f64 {
@@ -671,16 +672,16 @@ pub fn seed_violations(board: &mut Board, count: u32) -> Seeded {
             }
         }
         for v in board.vias.values() {
-            let vm = v.layers().fold(0u64, |m, l| m | 1 << l);
+            let vm: LayerSet = v.layers().collect();
             let g = Prim::circle(v.at, v.diameter / 2).gap(prim);
-            if vm & mask != 0 && g < radius as f64 {
+            if vm.intersects(mask) && g < radius as f64 {
                 hits.push((BItemLite::Via(v.id), g, v.net));
             }
         }
         for p in &pads {
-            let pm = p.layers.iter().fold(0u64, |m, l| m | 1 << l);
+            let pm: LayerSet = p.layers.iter().copied().collect();
             let g = p.prim.gap(prim);
-            if pm & mask != 0 && g < radius as f64 {
+            if pm.intersects(mask) && g < radius as f64 {
                 hits.push((BItemLite::Pad, g, p.net));
             }
         }
@@ -736,7 +737,7 @@ pub fn seed_violations(board: &mut Board, count: u32) -> Seeded {
                     // within 0.6 mm.
                     let c = mid + off(t.width / 2 + mm(0.1) + mm(0.075));
                     let (p, q) = (c - along(mm(0.5)), c + along(mm(0.5)));
-                    let hits = probe(board, &Prim::segment(p, q, mm(0.15)), 1 << t.layer, mm(0.6));
+                    let hits = probe(board, &Prim::segment(p, q, mm(0.15)), &LayerSet::single(t.layer), mm(0.6));
                     if hits.len() == 1 && hits[0].0 == BItemLite::Track(t.id) {
                         board.add_track(None, t.layer, mm(0.15), p, q);
                         placed[0] += 1;
@@ -757,7 +758,7 @@ pub fn seed_violations(board: &mut Board, count: u32) -> Seeded {
                     for dir in [off(mm(0.49)), off(-mm(0.49)), -along(mm(0.49))] {
                         let c = v.at + dir;
                         let hits =
-                            probe(board, &Prim::circle(c, mm(0.25)), (1u64 << n) - 1, mm(0.22));
+                            probe(board, &Prim::circle(c, mm(0.25)), &LayerSet::span(0, n - 1), mm(0.22));
                         let ok = hits.iter().all(|(h, g, net)| {
                             *h == BItemLite::Via(v.id) || (*net == t.net && *g >= mm(0.16) as f64)
                         }) && hits.iter().filter(|h| h.0 == BItemLite::Via(v.id)).count()
@@ -773,7 +774,7 @@ pub fn seed_violations(board: &mut Board, count: u32) -> Seeded {
                     // A narrow isolated stub well clear of everything.
                     let c = mid + off(mm(1.5));
                     let (p, q) = (c - along(mm(0.4)), c + along(mm(0.4)));
-                    if probe(board, &Prim::segment(p, q, mm(0.1)), 1 << t.layer, mm(0.8)).is_empty()
+                    if probe(board, &Prim::segment(p, q, mm(0.1)), &LayerSet::single(t.layer), mm(0.8)).is_empty()
                     {
                         board.add_track(None, t.layer, mm(0.1), p, q);
                         placed[2] += 1;

@@ -2,6 +2,7 @@
 
 use super::space::Space;
 use crate::connectivity::layer_mask;
+use crate::layer_set::LayerSet;
 use crate::geom::shape::Prim;
 use crate::geom::{mm, Coord, Point};
 use crate::layout::{Board, ItemId, NetId, PlacedPad};
@@ -84,12 +85,12 @@ pub fn fanout_in(board: &mut Board, space: &mut Space, opts: &FanoutOptions) -> 
                 let to = toward(&pad, ep);
                 if space.free(
                     Some(net),
-                    1 << layer,
+                    &LayerSet::single(layer),
                     &Prim::segment(pad.center, to, neck),
                     0,
                 ) {
                     board.add_track(Some(net), layer, neck, pad.center, to);
-                    space.add(Some(net), 1 << layer, Prim::segment(pad.center, to, neck));
+                    space.add(Some(net), LayerSet::single(layer), Prim::segment(pad.center, to, neck));
                     report.fanned += 1;
                     continue;
                 }
@@ -102,16 +103,16 @@ pub fn fanout_in(board: &mut Board, space: &mut Space, opts: &FanoutOptions) -> 
             let site = sites.into_iter().find(|v| {
                 space.free(
                     Some(net),
-                    1 << layer,
+                    &LayerSet::single(layer),
                     &Prim::segment(pad.center, *v, width),
                     0,
-                ) && space.free(Some(net), layer_mask(0..n), &Prim::circle(*v, d / 2), 0)
+                ) && space.free(Some(net), &layer_mask(0..n), &Prim::circle(*v, d / 2), 0)
                     && space.hole_free(*v, drill / 2)
             });
             match site {
                 Some(v) => {
                     board.add_track(Some(net), layer, width, pad.center, v);
-                    space.add(Some(net), 1 << layer, Prim::segment(pad.center, v, width));
+                    space.add(Some(net), LayerSet::single(layer), Prim::segment(pad.center, v, width));
                     board.add_via(Some(net), v, d, drill);
                     space.add(Some(net), layer_mask(0..n), Prim::circle(v, d / 2));
                     space.add_hole(v, drill / 2);
@@ -184,7 +185,7 @@ fn thermal_vias(
             && v.y - d / 2 >= bb.min.y
             && v.y + d / 2 <= bb.max.y;
         if !inside
-            || !space.free(Some(net), layer_mask(0..n), &Prim::circle(v, d / 2), 0)
+            || !space.free(Some(net), &layer_mask(0..n), &Prim::circle(v, d / 2), 0)
             || !space.hole_free(v, drill / 2)
         {
             continue;

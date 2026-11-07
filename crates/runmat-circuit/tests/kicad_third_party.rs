@@ -79,7 +79,7 @@ fn third_party_boards_read_every_item() {
 fn third_party_boards_export_from_the_runmat_model_with_every_pad_in_place() {
     for (name, text) in BOARDS {
         let board = pcb::read(text).unwrap().board;
-        let written = pcb::write_board(&board);
+        let written = pcb::write_board(&board).unwrap();
         let back = pcb::read(&written).unwrap_or_else(|e| panic!("{name}: {e}"));
         let b2 = &back.board;
         assert_eq!(b2.copper_count(), board.copper_count(), "{name}");

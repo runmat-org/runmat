@@ -8,6 +8,7 @@
 //! the teardrops in its scope (the whole board, or the picked tracks, pads and vias), and every
 //! teardrop a DRC finding names is left out, so the ones written pass DRC.
 
+use crate::layer_set::CopperIndex;
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
 use crate::board_rules::BItem;
@@ -132,7 +133,7 @@ fn anchor(board: &Board, t: &crate::layout::Track, end: Point) -> Option<(Point,
 }
 
 /// One teardrop per track end on a pad or via of its net: (net, layer, ring).
-fn shapes(board: &Board, scope: &Scope) -> Vec<(NetId, u8, Vec<Point>)> {
+fn shapes(board: &Board, scope: &Scope) -> Vec<(NetId, CopperIndex, Vec<Point>)> {
     let mut out = Vec::new();
     for t in board.tracks.values() {
         let Some(net) = t.net else { continue };

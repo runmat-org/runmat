@@ -17,6 +17,7 @@
 //! children we model; deleted items are dropped; new items are appended. A file read and
 //! written without edits is token-identical.
 
+use crate::layer_set::CopperIndex;
 use super::footprint;
 use super::sexpr::{self, SExpr};
 use super::{at_of, copper_index, copper_layer, len, mm_of};
@@ -86,11 +87,11 @@ pub struct KicadPcb {
     pub warnings: Vec<String>,
 }
 
-fn layer_names(n: u8) -> Vec<(u8, String)> {
+fn layer_names(n: CopperIndex) -> Vec<(CopperIndex, String)> {
     (0..n).map(|i| (i, copper_layer(i, n))).collect()
 }
 
-fn read_stackup(setup: Option<&SExpr>, n_copper: u8, thickness: Coord) -> Stackup {
+fn read_stackup(setup: Option<&SExpr>, n_copper: CopperIndex, thickness: Coord) -> Stackup {
     let Some(st) = setup.and_then(|s| s.child("stackup")) else {
         return Stackup::standard(n_copper.max(2), thickness, 1.0, 0.5);
     };
@@ -251,7 +252,7 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
                 .iter()
                 .skip(1)
                 .filter(|x| x.arg(0).is_some_and(|n| n.ends_with(".Cu")))
-                .count() as u8
+                .count() as CopperIndex
         })
         .unwrap_or(2)
         .max(2);
@@ -357,7 +358,7 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
                 origin.insert(idx, Key::Track(id));
             }
             Some("via") => {
-                let ls: Vec<u8> = node
+                let ls: Vec<CopperIndex> = node
                     .child("layers")
                     .map(|l| {
                         l.items()
@@ -391,7 +392,7 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
                 origin.insert(idx, Key::Via(id));
             }
             Some("zone") => {
-                let mut layers: Vec<u8> = Vec::new();
+                let mut layers: Vec<CopperIndex> = Vec::new();
                 if let Some(l) = node.child_arg("layer") {
                     layers.extend(copper_index(l, n_copper));
                 }
@@ -561,7 +562,24 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
 type Codes = BTreeMap<NetId, String>;
 
 
-/// Convenience: board → KiCad text.
-pub fn write_board(board: &Board) -> String {
-    KicadPcb::from_board(board).write()
+/// The copper layers a KiCad board holds: `F.Cu`, `In1.Cu` … `In30.Cu` and `B.Cu`.
+pub const KICAD_MAX_COPPER: CopperIndex = 32;
+
+/// Whether KiCad can hold the board's copper stack; the error names both layer counts and the
+/// outputs that write any number of layers.
+pub fn check_copper_count(board: &Board) -> Result<(), String> {
+    let n = board.copper_count();
+    if n <= KICAD_MAX_COPPER {
+        return Ok(());
+    }
+    Err(format!(
+        "KiCad supports at most {KICAD_MAX_COPPER} copper layers; this board has {n}. Export to ODB++, IPC-2581 or Gerber instead."
+    ))
+}
+
+/// Board → KiCad text. A board with more copper layers than KiCad holds is refused
+/// ([`check_copper_count`]): no layer is dropped or merged.
+pub fn write_board(board: &Board) -> Result<String, String> {
+    check_copper_count(board)?;
+    Ok(KicadPcb::from_board(board).write())
 }
