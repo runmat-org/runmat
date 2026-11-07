@@ -20,6 +20,8 @@ pub enum TransportError {
     NotReady,
     #[error("credential or lease is stale")]
     StaleAuthority,
+    #[error("driver authority has a malformed {0}")]
+    MalformedAuthority(&'static str),
 }
 
 pub type TransportResult<T> = Result<T, TransportError>;
