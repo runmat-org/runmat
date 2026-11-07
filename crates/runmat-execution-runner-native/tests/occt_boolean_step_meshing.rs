@@ -49,13 +49,11 @@ fn cylinders_joined_by_a_planar_beam_mesh() {
 }
 
 #[test]
-#[ignore = "small-angle trim corner: surface refinement rejects the chord between the first nodes of two edges leaving one vertex at ~8 degrees (metric length 0.0085 < 0.01)"]
 fn cylinders_unioned_with_a_lofted_beam_mesh() {
     assert_meshes("arm_only.step", ARM_ONLY, false, 3.0e-3, 1);
 }
 
 #[test]
-#[ignore = "small-angle trim corner: surface refinement rejects the chord between the first nodes of two edges leaving one vertex at ~8 degrees (metric length 0.0085 < 0.01)"]
 fn the_arm_and_its_motor_pod_mesh_with_a_shared_interface() {
     assert_meshes("arm_study.step", ARM_STUDY, true, 3.0e-3, 2);
 }
