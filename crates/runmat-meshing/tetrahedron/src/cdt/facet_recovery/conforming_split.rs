@@ -1208,22 +1208,10 @@ fn split_and_admit_locally(
     ) {
         Ok((true, flips)) => flips,
         Ok((false, _)) => {
-            let (description, blocking) =
-                illegal_star_face(&observed, inserted, &protected_faces, &kept_edges);
-            // No flip removes a kept segment edge of the illegal face, so the edge-star split,
-            // the last strategy, hands that edge to the cascade to split first.
-            if strategy == SplitStrategy::EdgeStar {
-                if let Some(blocking) = blocking.filter(|blocking| {
-                    *blocking != split_edge_key
-                        && !blocking.contains(&node.identity)
-                        && protected_edges.contains(blocking)
-                }) {
-                    return Ok(LocalSplit::Encroached(blocking));
-                }
-            }
             return Ok(LocalSplit::Declined(format!(
-                "an illegal face remains in the new node's star after link flips: {description}"
-            )));
+                "an illegal face remains in the new node's star after link flips: {}",
+                illegal_star_face(&observed, inserted, &protected_faces, &kept_edges)
+            )))
         }
         Err(failure)
             if matches!(
@@ -1327,7 +1315,7 @@ fn illegal_star_face(
     inserted: u32,
     protected_faces: &BTreeSet<[StableDigest; 3]>,
     kept_edges: &BTreeSet<[StableDigest; 2]>,
-) -> (String, Option<[StableDigest; 2]>) {
+) -> String {
     let point = |vertex: u32| topology.nodes[vertex as usize].coordinates_m.canonical_value();
     for left_index in topology.vertex_stars[inserted as usize].iter().copied() {
         let Some(left) = topology.tetrahedron(left_index) else {
@@ -1366,21 +1354,19 @@ fn illegal_star_face(
                 .filter(|slot| *slot != opposite)
                 .map(|slot| left.vertex_indices[slot])
                 .collect::<Vec<_>>();
-            let kept_keys = [(0, 1), (1, 2), (0, 2)]
+            let kept = [(0, 1), (1, 2), (0, 2)]
                 .into_iter()
-                .map(|(a, b)| {
-                    let mut key = [face[a], face[b]];
+                .filter(|(a, b)| {
+                    let mut key = [face[*a], face[*b]];
                     key.sort_unstable();
-                    key
+                    kept_edges.contains(&key)
                 })
-                .filter(|key| kept_edges.contains(key))
-                .collect::<Vec<_>>();
-            let kept = kept_keys.len();
+                .count();
             let adjacent = protected_faces
                 .iter()
                 .filter(|other| other.iter().filter(|node| face.contains(node)).count() == 2)
                 .count();
-            let description = format!(
+            return format!(
                 "face {:?} (opposite cell vertex {:?}) with apex {:?}; {kept} kept face edges, \
                  {adjacent} protected triangles share a face edge, inserted node on face: {}",
                 corners.iter().map(|vertex| point(*vertex)).collect::<Vec<_>>(),
@@ -1388,10 +1374,9 @@ fn illegal_star_face(
                 point(apex),
                 corners.contains(&inserted)
             );
-            return (description, kept_keys.first().copied());
         }
     }
-    ("not located".to_owned(), None)
+    "not located".to_owned()
 }
 
 fn copy_splits(splits: &[ProtectedFacetSplit]) -> Vec<ProtectedFacetSplit> {
