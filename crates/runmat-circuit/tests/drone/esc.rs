@@ -385,7 +385,7 @@ pub fn build(dir: &Path, stage: Stage) -> Build {
         .map(|z| z.id.0)
         .expect("the top ground pour");
     b.run("board.stitch", json!({ "mode": "stitch", "target": top_ground.to_string(), "pitch": 1.5, "via": "0.2/0.45" }), &[]);
-    // Ground and battery reach their planes through vias; the router takes the rest.
-    b.finish(&["GND", "VBAT"]);
+    // Ground and battery reach their planes through vias; the router joins what is left.
+    b.finish(&[]);
     b
 }

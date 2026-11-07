@@ -91,6 +91,8 @@ pub enum Why {
     EndBlocked,
     /// The search ran out of room or budget between the ends.
     NoPath,
+    /// The only path found would put copper inside another net's clearance at an end.
+    Crowded,
 }
 
 impl Why {
@@ -99,6 +101,7 @@ impl Why {
             Why::StartBlocked => "no room to leave the first pad",
             Why::EndBlocked => "no room to reach the second pad",
             Why::NoPath => "no path found",
+            Why::Crowded => "no path keeps the clearance at its ends",
         }
     }
 }
@@ -261,6 +264,9 @@ fn copper_ends(s: &mut Search, p: Point) -> Vec<Node> {
     let o = s.q.origin;
     let (cx, cy) = ((p.x - o.x) / g, (p.y - o.y) / g);
     let r = (mm(1.2) / g).max(1);
+    // Only the copper that covers `p` on the node's layer (the anchor's pad, track or via): other
+    // copper of the net nearby can be another island, or the anchor's copper on another layer,
+    // and a stub from there to `p` would join nothing.
     // Nodes whose straight stub to `p` keeps the clearance first: the stub is drawn without the
     // search's checks, so a node on the net's copper beside another net's pad would run it past
     // that pad.
@@ -268,10 +274,14 @@ fn copper_ends(s: &mut Search, p: Point) -> Vec<Node> {
     let mut out = Vec::new();
     let mut any_own = Vec::new();
     for l in 0..s.q.layers.len() as CopperIndex {
+        let items = s.anchor_items(l, p);
+        if items.is_empty() {
+            continue;
+        }
         for x in cx - r..=cx + r {
             for y in cy - r..=cy + r {
                 let n = (x, y, l);
-                if s.own(n) {
+                if s.on_items(n, &items) {
                     any_own.push(n);
                     if s.open_node(n) {
                         if s.stub_free(n, p) {
@@ -314,7 +324,27 @@ fn route_one(space: &Space, q: Query, a: Point, b: Point) -> Result<Route, Why> 
     if via_b {
         route.vias.push(last);
     }
+    // The stubs and an end that is not open are drawn without the search's checks: a route that
+    // would put copper inside another net's clearance is left unrouted.
+    if !clear_of_others(space, &s.q, &route) {
+        return Err(Why::Crowded);
+    }
     Ok(route)
+}
+
+/// Whether every track and via of `route` keeps the clearance to other nets' copper, the
+/// board edge and the hole-to-hole distance.
+fn clear_of_others(space: &Space, q: &Query, route: &Route) -> bool {
+    let net = Some(q.net);
+    let (d, drill) = q.via;
+    route
+        .tracks
+        .iter()
+        .all(|(layer, width, a, b)| space.free(net, &LayerSet::single(*layer), &Prim::segment(*a, *b, *width), 0))
+        && route
+            .vias
+            .iter()
+            .all(|p| space.free(net, &q.via_mask, &Prim::circle(*p, d / 2), 0) && space.hole_free(*p, drill / 2))
 }
 
 /// The node path as tracks and vias: split into runs by layer and by track width (the

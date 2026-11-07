@@ -186,6 +186,24 @@ impl Space {
             .any(|(n, _, prim)| *n == net && prim.bbox().contains(p) && prim.contains(p))
     }
 
+    /// The copper items of `net` on layer mask `mask` that cover `p`: an anchor's own pad, track
+    /// or via there. Other copper of the net nearby can belong to another island.
+    pub fn covering(&self, net: NetId, mask: &LayerSet, p: Point) -> Vec<u32> {
+        let mut out = Vec::new();
+        self.grid.visit(&Rect::new(p, p), |k, _| {
+            let o = &self.items[k as usize];
+            if o.net == Some(net) && o.mask.intersects(mask) && o.prim.contains(p) && !out.contains(&k) {
+                out.push(k);
+            }
+        });
+        out
+    }
+
+    /// Whether one of `items` (from [`Space::covering`]) covers `p`.
+    pub fn covers(&self, items: &[u32], p: Point) -> bool {
+        items.iter().any(|k| self.items[*k as usize].prim.contains(p))
+    }
+
     /// Whether copper of `net` on layer mask `mask` covers `p` (the route may start or end there).
     pub fn own(&self, net: NetId, mask: &LayerSet, p: Point) -> bool {
         let mut hit = false;

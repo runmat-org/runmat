@@ -155,6 +155,16 @@ impl<'a> Search<'a> {
             || self.space.free(Some(self.q.net), self.mask(n.2), &Prim::segment(at, p, self.q.width_at(p)), 0)
     }
 
+    /// The net's copper items on routing layer `l` that cover the anchor `p`.
+    pub fn anchor_items(&self, l: CopperIndex, p: Point) -> Vec<u32> {
+        self.space.covering(self.q.net, self.mask(l), p)
+    }
+
+    /// Whether one of `items` covers node `n`.
+    pub fn on_items(&self, n: Node, items: &[u32]) -> bool {
+        self.space.covers(items, point(&self.q, n))
+    }
+
     /// Whether net copper covers the node (sources and targets).
     pub fn own(&self, n: Node) -> bool {
         self.space

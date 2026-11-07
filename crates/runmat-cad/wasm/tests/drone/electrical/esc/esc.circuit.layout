@@ -456,16 +456,24 @@ layout esc {
     track VBAT = { layer = F.Cu, width = 0.27, from = [-5.175, -6.1575], to = [-5.175, -6.6] }
     track VBAT = { layer = F.Cu, width = 0.27, from = [-5.825, -6.1575], to = [-5.825, -6.6] }
     track GND = { layer = F.Cu, width = 0.19, from = [-19.25, -4.4975], to = [-19.05, -5.35] }
-    track "/ch[0]/NRST" = { layer = F.Cu, width = 0.2, from = [-21.3, -8.8225], to = [-21.3, -7.9725] }
-    track "/ch[0]/NRST" = { layer = F.Cu, width = 0.2, from = [-21.3, -7.9725], to = [-21.3, -7.9775] }
-    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-17.7, -11.8775], to = [-18.9, -11.1275] }
-    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-18.9, -11.1275], to = [-18.9, -11.1225] }
-    track "/ch[0]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-15.3, -11.8775], to = [-16.5, -11.1275] }
-    track "/ch[0]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-16.5, -11.1275], to = [-16.5, -11.1225] }
-    track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-11.3, -6.3775], to = [-12.5, -5.6275] }
-    track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-12.5, -5.6275], to = [-12.5, -5.6225] }
-    track "/ch[0]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-21.3, -5.0775], to = [-20.2, -6.2275] }
-    track "/ch[0]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-20.2, -6.2275], to = [-19.9025, -6.15] }
+    track "/ch[0]/NRST" = { layer = F.Cu, width = 0.2, from = [-21.3, -8.8225], to = [-21.3, -7.9775] }
+    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-17.7, -11.8775], to = [-17.95, -11.7275] }
+    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-17.95, -11.7275], to = [-18.05, -11.7275] }
+    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-18.05, -11.7275], to = [-18.65, -11.1275] }
+    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-18.65, -11.1275], to = [-18.9, -11.1225] }
+    track "/ch[0]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-15.3, -11.8775], to = [-15.55, -11.7275] }
+    track "/ch[0]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-15.55, -11.7275], to = [-15.65, -11.7275] }
+    track "/ch[0]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-15.65, -11.7275], to = [-16.25, -11.1275] }
+    track "/ch[0]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-16.25, -11.1275], to = [-16.5, -11.1225] }
+    track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-11.3, -6.3775], to = [-11.55, -6.2275] }
+    track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-11.55, -6.2275], to = [-11.65, -6.2275] }
+    track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-11.65, -6.2275], to = [-12.25, -5.6275] }
+    track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-12.25, -5.6275], to = [-12.5, -5.6225] }
+    track "/ch[0]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-21.3, -5.0775], to = [-21.15, -5.3275] }
+    track "/ch[0]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-21.15, -5.3275], to = [-20.75, -5.7275] }
+    track "/ch[0]/BOOT0" = { layer = F.Cu, width = 0.2, from = [-20.75, -5.7275], to = [-20.65, -5.8275] }
+    track "/ch[0]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-20.65, -5.8275], to = [-20.3, -6.1775] }
+    track "/ch[0]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-20.3, -6.1775], to = [-19.9025, -6.15] }
     track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [-12.5, -5.6225], to = [-12.75, -5.4225] }
     track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [-12.75, -5.4225], to = [-13, -5.1725] }
     track "/ch[0]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [-13, -5.1725], to = [-13.2, -5.1725] }
@@ -476,9 +484,10 @@ layout esc {
     track "/ch[0]/NRST" = { layer = F.Cu, width = 0.19, from = [-21.05, -7.7775], to = [-20.95, -7.7775] }
     track "/ch[0]/NRST" = { layer = F.Cu, width = 0.19, from = [-20.95, -7.7775], to = [-20.7, -7.5275] }
     track "/ch[0]/NRST" = { layer = F.Cu, width = 0.19, from = [-20.7, -7.5275], to = [-20.7, -7.4275] }
-    track "/ch[0]/NRST" = { layer = F.Cu, width = 0.2, from = [-20.7, -7.4275], to = [-20.7, -6.4275] }
-    track "/ch[0]/NRST" = { layer = B.Cu, width = 0.2, from = [-20.7, -6.4275], to = [-20.5, -6.2275] }
-    track "/ch[0]/NRST" = { layer = B.Cu, width = 0.19, from = [-20.5, -6.2275], to = [-19.9, -5.6275] }
+    track "/ch[0]/NRST" = { layer = F.Cu, width = 0.2, from = [-20.7, -7.4275], to = [-20.7, -6.4775] }
+    track "/ch[0]/NRST" = { layer = B.Cu, width = 0.2, from = [-20.7, -6.4775], to = [-20.5, -6.2775] }
+    track "/ch[0]/NRST" = { layer = B.Cu, width = 0.19, from = [-20.5, -6.2775], to = [-19.9, -5.6775] }
+    track "/ch[0]/NRST" = { layer = B.Cu, width = 0.19, from = [-19.9, -5.6775], to = [-19.9, -5.6275] }
     track "/ch[0]/NRST" = { layer = F.Cu, width = 0.19, from = [-19.9, -5.6275], to = [-19.9025, -5.65] }
     track "/ch[0]/GLB_D" = { layer = B.Cu, width = 0.19, from = [-9.8175, -21.25], to = [-10.2175, -21.2] }
     track "/ch[0]/GLB_D" = { layer = B.Cu, width = 0.19, from = [-10.2175, -21.2], to = [-10.5675, -20.85] }
@@ -493,9 +502,10 @@ layout esc {
     track "/ch[0]/ISENSE_B" = { layer = B.Cu, width = 0.2, from = [-15.1, -9.7725], to = [-15.1, -6.4725] }
     track "/ch[0]/ISENSE_B" = { layer = B.Cu, width = 0.19, from = [-15.1, -6.4725], to = [-15.1, -5.6725] }
     track "/ch[0]/ISENSE_B" = { layer = F.Cu, width = 0.19, from = [-15.1, -5.6725], to = [-15.0975, -5.65] }
-    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [-17.7, -11.8775], to = [-18.9, -11.0775] }
-    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-18.9, -11.0775], to = [-19.3, -10.6775] }
-    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-19.3, -10.6775], to = [-19.3, -10.1275] }
+    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [-17.7, -11.8775], to = [-18.05, -11.7275] }
+    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [-18.05, -11.7275], to = [-18.4, -11.3775] }
+    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-18.4, -11.3775], to = [-19.3, -10.4775] }
+    track "/ch[0]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-19.3, -10.4775], to = [-19.3, -10.1275] }
     track "/ch[0]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [-19.3, -10.1275], to = [-19.3, -9.2275] }
     track "/ch[0]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [-19.3, -9.2275], to = [-16.7, -6.6275] }
     track "/ch[0]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [-16.7, -6.6275], to = [-15.9, -6.6275] }
@@ -540,12 +550,12 @@ layout esc {
     track "/ch[0]/SRCA" = { layer = F.Cu, width = 0.3, from = [-19.15, -12.0775], to = [-21.4, -14.3275] }
     track "/ch[0]/SRCA" = { layer = F.Cu, width = 0.3, from = [-21.4, -14.3275], to = [-21.75, -14.3275] }
     track "/ch[0]/SRCA" = { layer = F.Cu, width = 0.3, from = [-21.75, -14.3275], to = [-22.375, -14.5] }
-    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.27, from = [-10.045, -16.4075], to = [-8.845, -16.2075] }
-    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-8.845, -16.2075], to = [-8.345, -16.2075] }
-    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-8.345, -16.2075], to = [-8.245, -16.1075] }
-    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-8.245, -16.1075], to = [-8.245, -15.3575] }
-    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-8.245, -15.3575], to = [-10.845, -12.7575] }
-    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-10.845, -12.7575], to = [-14.195, -12.7575] }
+    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.27, from = [-10.045, -16.4075], to = [-10.095, -16.3075] }
+    track "/ch[0]/SRCB" = { layer = B.Cu, width = 0.27, from = [-10.095, -16.3075], to = [-10.595, -15.8075] }
+    track "/ch[0]/SRCB" = { layer = B.Cu, width = 0.3, from = [-10.595, -15.8075], to = [-10.745, -15.6575] }
+    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-10.745, -15.6575], to = [-10.745, -13.6075] }
+    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-10.745, -13.6075], to = [-11.595, -12.7575] }
+    track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-11.595, -12.7575], to = [-14.195, -12.7575] }
     track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-14.195, -12.7575], to = [-14.395, -12.5575] }
     track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-14.395, -12.5575], to = [-15.745, -12.5575] }
     track "/ch[0]/SRCB" = { layer = F.Cu, width = 0.3, from = [-15.745, -12.5575], to = [-15.895, -12.4075] }
@@ -686,16 +696,24 @@ layout esc {
     track VBAT = { layer = F.Cu, width = 0.27, from = [6.1575, -5.175], to = [6.6, -5.175] }
     track VBAT = { layer = F.Cu, width = 0.27, from = [6.1575, -5.825], to = [6.6, -5.825] }
     track GND = { layer = F.Cu, width = 0.19, from = [4.4975, -19.25], to = [5.35, -19.05] }
-    track "/ch[1]/NRST" = { layer = F.Cu, width = 0.2, from = [8.8225, -21.3], to = [7.9725, -21.3] }
-    track "/ch[1]/NRST" = { layer = F.Cu, width = 0.2, from = [7.9725, -21.3], to = [7.9775, -21.3] }
-    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [11.8775, -17.7], to = [11.1275, -18.9] }
-    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [11.1275, -18.9], to = [11.1225, -18.9] }
-    track "/ch[1]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [11.8775, -15.3], to = [11.1275, -16.5] }
-    track "/ch[1]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [11.1275, -16.5], to = [11.1225, -16.5] }
-    track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [6.3775, -11.3], to = [5.6275, -12.5] }
-    track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [5.6275, -12.5], to = [5.6225, -12.5] }
-    track "/ch[1]/BOOT0" = { layer = F.Cu, width = 0.19, from = [5.0775, -21.3], to = [6.2275, -20.2] }
-    track "/ch[1]/BOOT0" = { layer = F.Cu, width = 0.19, from = [6.2275, -20.2], to = [6.15, -19.9025] }
+    track "/ch[1]/NRST" = { layer = F.Cu, width = 0.2, from = [8.8225, -21.3], to = [7.9775, -21.3] }
+    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [11.8775, -17.7], to = [11.7275, -17.95] }
+    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [11.7275, -17.95], to = [11.7275, -18.05] }
+    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [11.7275, -18.05], to = [11.1275, -18.65] }
+    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [11.1275, -18.65], to = [11.1225, -18.9] }
+    track "/ch[1]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [11.8775, -15.3], to = [11.7275, -15.55] }
+    track "/ch[1]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [11.7275, -15.55], to = [11.7275, -15.65] }
+    track "/ch[1]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [11.7275, -15.65], to = [11.1275, -16.25] }
+    track "/ch[1]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [11.1275, -16.25], to = [11.1225, -16.5] }
+    track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [6.3775, -11.3], to = [6.2275, -11.55] }
+    track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [6.2275, -11.55], to = [6.2275, -11.65] }
+    track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [6.2275, -11.65], to = [5.6275, -12.25] }
+    track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [5.6275, -12.25], to = [5.6225, -12.5] }
+    track "/ch[1]/BOOT0" = { layer = F.Cu, width = 0.19, from = [5.0775, -21.3], to = [5.3275, -21.15] }
+    track "/ch[1]/BOOT0" = { layer = F.Cu, width = 0.19, from = [5.3275, -21.15], to = [5.7275, -20.75] }
+    track "/ch[1]/BOOT0" = { layer = F.Cu, width = 0.2, from = [5.7275, -20.75], to = [5.8275, -20.65] }
+    track "/ch[1]/BOOT0" = { layer = F.Cu, width = 0.19, from = [5.8275, -20.65], to = [6.1775, -20.3] }
+    track "/ch[1]/BOOT0" = { layer = F.Cu, width = 0.19, from = [6.1775, -20.3], to = [6.15, -19.9025] }
     track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [5.6225, -12.5], to = [5.4225, -12.75] }
     track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [5.4225, -12.75], to = [5.1725, -13] }
     track "/ch[1]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [5.1725, -13], to = [5.1725, -13.2] }
@@ -706,9 +724,10 @@ layout esc {
     track "/ch[1]/NRST" = { layer = F.Cu, width = 0.19, from = [7.7775, -21.05], to = [7.7775, -20.95] }
     track "/ch[1]/NRST" = { layer = F.Cu, width = 0.19, from = [7.7775, -20.95], to = [7.5275, -20.7] }
     track "/ch[1]/NRST" = { layer = F.Cu, width = 0.19, from = [7.5275, -20.7], to = [7.4275, -20.7] }
-    track "/ch[1]/NRST" = { layer = F.Cu, width = 0.2, from = [7.4275, -20.7], to = [6.4275, -20.7] }
-    track "/ch[1]/NRST" = { layer = B.Cu, width = 0.2, from = [6.4275, -20.7], to = [6.2275, -20.5] }
-    track "/ch[1]/NRST" = { layer = B.Cu, width = 0.19, from = [6.2275, -20.5], to = [5.6275, -19.9] }
+    track "/ch[1]/NRST" = { layer = F.Cu, width = 0.2, from = [7.4275, -20.7], to = [6.4775, -20.7] }
+    track "/ch[1]/NRST" = { layer = B.Cu, width = 0.2, from = [6.4775, -20.7], to = [6.2775, -20.5] }
+    track "/ch[1]/NRST" = { layer = B.Cu, width = 0.19, from = [6.2775, -20.5], to = [5.6775, -19.9] }
+    track "/ch[1]/NRST" = { layer = B.Cu, width = 0.19, from = [5.6775, -19.9], to = [5.6275, -19.9] }
     track "/ch[1]/NRST" = { layer = F.Cu, width = 0.19, from = [5.6275, -19.9], to = [5.65, -19.9025] }
     track "/ch[1]/GLB_D" = { layer = B.Cu, width = 0.19, from = [21.25, -9.8175], to = [21.2, -10.2175] }
     track "/ch[1]/GLB_D" = { layer = B.Cu, width = 0.19, from = [21.2, -10.2175], to = [20.85, -10.5675] }
@@ -723,9 +742,10 @@ layout esc {
     track "/ch[1]/ISENSE_B" = { layer = B.Cu, width = 0.2, from = [9.7725, -15.1], to = [6.4725, -15.1] }
     track "/ch[1]/ISENSE_B" = { layer = B.Cu, width = 0.19, from = [6.4725, -15.1], to = [5.6725, -15.1] }
     track "/ch[1]/ISENSE_B" = { layer = F.Cu, width = 0.19, from = [5.6725, -15.1], to = [5.65, -15.0975] }
-    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [11.8775, -17.7], to = [11.0775, -18.9] }
-    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [11.0775, -18.9], to = [10.6775, -19.3] }
-    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [10.6775, -19.3], to = [10.1275, -19.3] }
+    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [11.8775, -17.7], to = [11.7275, -18.05] }
+    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [11.7275, -18.05], to = [11.3775, -18.4] }
+    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [11.3775, -18.4], to = [10.4775, -19.3] }
+    track "/ch[1]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [10.4775, -19.3], to = [10.1275, -19.3] }
     track "/ch[1]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [10.1275, -19.3], to = [9.2275, -19.3] }
     track "/ch[1]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [9.2275, -19.3], to = [6.6275, -16.7] }
     track "/ch[1]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [6.6275, -16.7], to = [6.6275, -15.9] }
@@ -770,12 +790,12 @@ layout esc {
     track "/ch[1]/SRCA" = { layer = F.Cu, width = 0.3, from = [12.0775, -19.15], to = [14.3275, -21.4] }
     track "/ch[1]/SRCA" = { layer = F.Cu, width = 0.3, from = [14.3275, -21.4], to = [14.3275, -21.75] }
     track "/ch[1]/SRCA" = { layer = F.Cu, width = 0.3, from = [14.3275, -21.75], to = [14.5, -22.375] }
-    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.27, from = [16.4075, -10.045], to = [16.2075, -8.845] }
-    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [16.2075, -8.845], to = [16.2075, -8.345] }
-    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [16.2075, -8.345], to = [16.1075, -8.245] }
-    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [16.1075, -8.245], to = [15.3575, -8.245] }
-    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [15.3575, -8.245], to = [12.7575, -10.845] }
-    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [12.7575, -10.845], to = [12.7575, -14.195] }
+    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.27, from = [16.4075, -10.045], to = [16.3075, -10.095] }
+    track "/ch[1]/SRCB" = { layer = B.Cu, width = 0.27, from = [16.3075, -10.095], to = [15.8075, -10.595] }
+    track "/ch[1]/SRCB" = { layer = B.Cu, width = 0.3, from = [15.8075, -10.595], to = [15.6575, -10.745] }
+    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [15.6575, -10.745], to = [13.6075, -10.745] }
+    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [13.6075, -10.745], to = [12.7575, -11.595] }
+    track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [12.7575, -11.595], to = [12.7575, -14.195] }
     track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [12.7575, -14.195], to = [12.5575, -14.395] }
     track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [12.5575, -14.395], to = [12.5575, -15.745] }
     track "/ch[1]/SRCB" = { layer = F.Cu, width = 0.3, from = [12.5575, -15.745], to = [12.4075, -15.895] }
@@ -916,16 +936,24 @@ layout esc {
     track VBAT = { layer = F.Cu, width = 0.27, from = [5.175, 6.1575], to = [5.175, 6.6] }
     track VBAT = { layer = F.Cu, width = 0.27, from = [5.825, 6.1575], to = [5.825, 6.6] }
     track GND = { layer = F.Cu, width = 0.19, from = [19.25, 4.4975], to = [19.05, 5.35] }
-    track "/ch[2]/NRST" = { layer = F.Cu, width = 0.2, from = [21.3, 8.8225], to = [21.3, 7.9725] }
-    track "/ch[2]/NRST" = { layer = F.Cu, width = 0.2, from = [21.3, 7.9725], to = [21.3, 7.9775] }
-    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [17.7, 11.8775], to = [18.9, 11.1275] }
-    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [18.9, 11.1275], to = [18.9, 11.1225] }
-    track "/ch[2]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [15.3, 11.8775], to = [16.5, 11.1275] }
-    track "/ch[2]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [16.5, 11.1275], to = [16.5, 11.1225] }
-    track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [11.3, 6.3775], to = [12.5, 5.6275] }
-    track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [12.5, 5.6275], to = [12.5, 5.6225] }
-    track "/ch[2]/BOOT0" = { layer = F.Cu, width = 0.19, from = [21.3, 5.0775], to = [20.2, 6.2275] }
-    track "/ch[2]/BOOT0" = { layer = F.Cu, width = 0.19, from = [20.2, 6.2275], to = [19.9025, 6.15] }
+    track "/ch[2]/NRST" = { layer = F.Cu, width = 0.2, from = [21.3, 8.8225], to = [21.3, 7.9775] }
+    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [17.7, 11.8775], to = [17.95, 11.7275] }
+    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [17.95, 11.7275], to = [18.05, 11.7275] }
+    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [18.05, 11.7275], to = [18.65, 11.1275] }
+    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [18.65, 11.1275], to = [18.9, 11.1225] }
+    track "/ch[2]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [15.3, 11.8775], to = [15.55, 11.7275] }
+    track "/ch[2]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [15.55, 11.7275], to = [15.65, 11.7275] }
+    track "/ch[2]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [15.65, 11.7275], to = [16.25, 11.1275] }
+    track "/ch[2]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [16.25, 11.1275], to = [16.5, 11.1225] }
+    track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [11.3, 6.3775], to = [11.55, 6.2275] }
+    track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [11.55, 6.2275], to = [11.65, 6.2275] }
+    track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [11.65, 6.2275], to = [12.25, 5.6275] }
+    track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [12.25, 5.6275], to = [12.5, 5.6225] }
+    track "/ch[2]/BOOT0" = { layer = F.Cu, width = 0.19, from = [21.3, 5.0775], to = [21.15, 5.3275] }
+    track "/ch[2]/BOOT0" = { layer = F.Cu, width = 0.19, from = [21.15, 5.3275], to = [20.75, 5.7275] }
+    track "/ch[2]/BOOT0" = { layer = F.Cu, width = 0.2, from = [20.75, 5.7275], to = [20.65, 5.8275] }
+    track "/ch[2]/BOOT0" = { layer = F.Cu, width = 0.19, from = [20.65, 5.8275], to = [20.3, 6.1775] }
+    track "/ch[2]/BOOT0" = { layer = F.Cu, width = 0.19, from = [20.3, 6.1775], to = [19.9025, 6.15] }
     track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [12.5, 5.6225], to = [12.75, 5.4225] }
     track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [12.75, 5.4225], to = [13, 5.1725] }
     track "/ch[2]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [13, 5.1725], to = [13.2, 5.1725] }
@@ -936,9 +964,10 @@ layout esc {
     track "/ch[2]/NRST" = { layer = F.Cu, width = 0.19, from = [21.05, 7.7775], to = [20.95, 7.7775] }
     track "/ch[2]/NRST" = { layer = F.Cu, width = 0.19, from = [20.95, 7.7775], to = [20.7, 7.5275] }
     track "/ch[2]/NRST" = { layer = F.Cu, width = 0.19, from = [20.7, 7.5275], to = [20.7, 7.4275] }
-    track "/ch[2]/NRST" = { layer = F.Cu, width = 0.2, from = [20.7, 7.4275], to = [20.7, 6.4275] }
-    track "/ch[2]/NRST" = { layer = B.Cu, width = 0.2, from = [20.7, 6.4275], to = [20.5, 6.2275] }
-    track "/ch[2]/NRST" = { layer = B.Cu, width = 0.19, from = [20.5, 6.2275], to = [19.9, 5.6275] }
+    track "/ch[2]/NRST" = { layer = F.Cu, width = 0.2, from = [20.7, 7.4275], to = [20.7, 6.4775] }
+    track "/ch[2]/NRST" = { layer = B.Cu, width = 0.2, from = [20.7, 6.4775], to = [20.5, 6.2775] }
+    track "/ch[2]/NRST" = { layer = B.Cu, width = 0.19, from = [20.5, 6.2775], to = [19.9, 5.6775] }
+    track "/ch[2]/NRST" = { layer = B.Cu, width = 0.19, from = [19.9, 5.6775], to = [19.9, 5.6275] }
     track "/ch[2]/NRST" = { layer = F.Cu, width = 0.19, from = [19.9, 5.6275], to = [19.9025, 5.65] }
     track "/ch[2]/GLB_D" = { layer = B.Cu, width = 0.19, from = [9.8175, 21.25], to = [10.2175, 21.2] }
     track "/ch[2]/GLB_D" = { layer = B.Cu, width = 0.19, from = [10.2175, 21.2], to = [10.5675, 20.85] }
@@ -953,9 +982,10 @@ layout esc {
     track "/ch[2]/ISENSE_B" = { layer = B.Cu, width = 0.2, from = [15.1, 9.7725], to = [15.1, 6.4725] }
     track "/ch[2]/ISENSE_B" = { layer = B.Cu, width = 0.19, from = [15.1, 6.4725], to = [15.1, 5.6725] }
     track "/ch[2]/ISENSE_B" = { layer = F.Cu, width = 0.19, from = [15.1, 5.6725], to = [15.0975, 5.65] }
-    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [17.7, 11.8775], to = [18.9, 11.0775] }
-    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [18.9, 11.0775], to = [19.3, 10.6775] }
-    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [19.3, 10.6775], to = [19.3, 10.1275] }
+    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [17.7, 11.8775], to = [18.05, 11.7275] }
+    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [18.05, 11.7275], to = [18.4, 11.3775] }
+    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [18.4, 11.3775], to = [19.3, 10.4775] }
+    track "/ch[2]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [19.3, 10.4775], to = [19.3, 10.1275] }
     track "/ch[2]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [19.3, 10.1275], to = [19.3, 9.2275] }
     track "/ch[2]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [19.3, 9.2275], to = [16.7, 6.6275] }
     track "/ch[2]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [16.7, 6.6275], to = [15.9, 6.6275] }
@@ -1000,12 +1030,12 @@ layout esc {
     track "/ch[2]/SRCA" = { layer = F.Cu, width = 0.3, from = [19.15, 12.0775], to = [21.4, 14.3275] }
     track "/ch[2]/SRCA" = { layer = F.Cu, width = 0.3, from = [21.4, 14.3275], to = [21.75, 14.3275] }
     track "/ch[2]/SRCA" = { layer = F.Cu, width = 0.3, from = [21.75, 14.3275], to = [22.375, 14.5] }
-    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.27, from = [10.045, 16.4075], to = [8.845, 16.2075] }
-    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [8.845, 16.2075], to = [8.345, 16.2075] }
-    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [8.345, 16.2075], to = [8.245, 16.1075] }
-    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [8.245, 16.1075], to = [8.245, 15.3575] }
-    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [8.245, 15.3575], to = [10.845, 12.7575] }
-    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [10.845, 12.7575], to = [14.195, 12.7575] }
+    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.27, from = [10.045, 16.4075], to = [10.095, 16.3075] }
+    track "/ch[2]/SRCB" = { layer = B.Cu, width = 0.27, from = [10.095, 16.3075], to = [10.595, 15.8075] }
+    track "/ch[2]/SRCB" = { layer = B.Cu, width = 0.3, from = [10.595, 15.8075], to = [10.745, 15.6575] }
+    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [10.745, 15.6575], to = [10.745, 13.6075] }
+    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [10.745, 13.6075], to = [11.595, 12.7575] }
+    track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [11.595, 12.7575], to = [14.195, 12.7575] }
     track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [14.195, 12.7575], to = [14.395, 12.5575] }
     track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [14.395, 12.5575], to = [15.745, 12.5575] }
     track "/ch[2]/SRCB" = { layer = F.Cu, width = 0.3, from = [15.745, 12.5575], to = [15.895, 12.4075] }
@@ -1146,16 +1176,24 @@ layout esc {
     track VBAT = { layer = F.Cu, width = 0.27, from = [-6.1575, 5.175], to = [-6.6, 5.175] }
     track VBAT = { layer = F.Cu, width = 0.27, from = [-6.1575, 5.825], to = [-6.6, 5.825] }
     track GND = { layer = F.Cu, width = 0.19, from = [-4.4975, 19.25], to = [-5.35, 19.05] }
-    track "/ch[3]/NRST" = { layer = F.Cu, width = 0.2, from = [-8.8225, 21.3], to = [-7.9725, 21.3] }
-    track "/ch[3]/NRST" = { layer = F.Cu, width = 0.2, from = [-7.9725, 21.3], to = [-7.9775, 21.3] }
-    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-11.8775, 17.7], to = [-11.1275, 18.9] }
-    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-11.1275, 18.9], to = [-11.1225, 18.9] }
-    track "/ch[3]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-11.8775, 15.3], to = [-11.1275, 16.5] }
-    track "/ch[3]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-11.1275, 16.5], to = [-11.1225, 16.5] }
-    track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-6.3775, 11.3], to = [-5.6275, 12.5] }
-    track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-5.6275, 12.5], to = [-5.6225, 12.5] }
-    track "/ch[3]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-5.0775, 21.3], to = [-6.2275, 20.2] }
-    track "/ch[3]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-6.2275, 20.2], to = [-6.15, 19.9025] }
+    track "/ch[3]/NRST" = { layer = F.Cu, width = 0.2, from = [-8.8225, 21.3], to = [-7.9775, 21.3] }
+    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-11.8775, 17.7], to = [-11.7275, 17.95] }
+    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-11.7275, 17.95], to = [-11.7275, 18.05] }
+    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-11.7275, 18.05], to = [-11.1275, 18.65] }
+    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-11.1275, 18.65], to = [-11.1225, 18.9] }
+    track "/ch[3]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-11.8775, 15.3], to = [-11.7275, 15.55] }
+    track "/ch[3]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-11.7275, 15.55], to = [-11.7275, 15.65] }
+    track "/ch[3]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-11.7275, 15.65], to = [-11.1275, 16.25] }
+    track "/ch[3]/ISENSE_B" = { layer = F.Cu, width = 0.2, from = [-11.1275, 16.25], to = [-11.1225, 16.5] }
+    track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-6.3775, 11.3], to = [-6.2275, 11.55] }
+    track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-6.2275, 11.55], to = [-6.2275, 11.65] }
+    track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-6.2275, 11.65], to = [-5.6275, 12.25] }
+    track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.2, from = [-5.6275, 12.25], to = [-5.6225, 12.5] }
+    track "/ch[3]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-5.0775, 21.3], to = [-5.3275, 21.15] }
+    track "/ch[3]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-5.3275, 21.15], to = [-5.7275, 20.75] }
+    track "/ch[3]/BOOT0" = { layer = F.Cu, width = 0.2, from = [-5.7275, 20.75], to = [-5.8275, 20.65] }
+    track "/ch[3]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-5.8275, 20.65], to = [-6.1775, 20.3] }
+    track "/ch[3]/BOOT0" = { layer = F.Cu, width = 0.19, from = [-6.1775, 20.3], to = [-6.15, 19.9025] }
     track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [-5.6225, 12.5], to = [-5.4225, 12.75] }
     track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [-5.4225, 12.75], to = [-5.1725, 13] }
     track "/ch[3]/ISENSE_C" = { layer = F.Cu, width = 0.19, from = [-5.1725, 13], to = [-5.1725, 13.2] }
@@ -1166,9 +1204,10 @@ layout esc {
     track "/ch[3]/NRST" = { layer = F.Cu, width = 0.19, from = [-7.7775, 21.05], to = [-7.7775, 20.95] }
     track "/ch[3]/NRST" = { layer = F.Cu, width = 0.19, from = [-7.7775, 20.95], to = [-7.5275, 20.7] }
     track "/ch[3]/NRST" = { layer = F.Cu, width = 0.19, from = [-7.5275, 20.7], to = [-7.4275, 20.7] }
-    track "/ch[3]/NRST" = { layer = F.Cu, width = 0.2, from = [-7.4275, 20.7], to = [-6.4275, 20.7] }
-    track "/ch[3]/NRST" = { layer = B.Cu, width = 0.2, from = [-6.4275, 20.7], to = [-6.2275, 20.5] }
-    track "/ch[3]/NRST" = { layer = B.Cu, width = 0.19, from = [-6.2275, 20.5], to = [-5.6275, 19.9] }
+    track "/ch[3]/NRST" = { layer = F.Cu, width = 0.2, from = [-7.4275, 20.7], to = [-6.4775, 20.7] }
+    track "/ch[3]/NRST" = { layer = B.Cu, width = 0.2, from = [-6.4775, 20.7], to = [-6.2775, 20.5] }
+    track "/ch[3]/NRST" = { layer = B.Cu, width = 0.19, from = [-6.2775, 20.5], to = [-5.6775, 19.9] }
+    track "/ch[3]/NRST" = { layer = B.Cu, width = 0.19, from = [-5.6775, 19.9], to = [-5.6275, 19.9] }
     track "/ch[3]/NRST" = { layer = F.Cu, width = 0.19, from = [-5.6275, 19.9], to = [-5.65, 19.9025] }
     track "/ch[3]/GLB_D" = { layer = B.Cu, width = 0.19, from = [-21.25, 9.8175], to = [-21.2, 10.2175] }
     track "/ch[3]/GLB_D" = { layer = B.Cu, width = 0.19, from = [-21.2, 10.2175], to = [-20.85, 10.5675] }
@@ -1183,9 +1222,10 @@ layout esc {
     track "/ch[3]/ISENSE_B" = { layer = B.Cu, width = 0.2, from = [-9.7725, 15.1], to = [-6.4725, 15.1] }
     track "/ch[3]/ISENSE_B" = { layer = B.Cu, width = 0.19, from = [-6.4725, 15.1], to = [-5.6725, 15.1] }
     track "/ch[3]/ISENSE_B" = { layer = F.Cu, width = 0.19, from = [-5.6725, 15.1], to = [-5.65, 15.0975] }
-    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [-11.8775, 17.7], to = [-11.0775, 18.9] }
-    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-11.0775, 18.9], to = [-10.6775, 19.3] }
-    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-10.6775, 19.3], to = [-10.1275, 19.3] }
+    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [-11.8775, 17.7], to = [-11.7275, 18.05] }
+    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.19, from = [-11.7275, 18.05], to = [-11.3775, 18.4] }
+    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-11.3775, 18.4], to = [-10.4775, 19.3] }
+    track "/ch[3]/ISENSE_A" = { layer = F.Cu, width = 0.2, from = [-10.4775, 19.3], to = [-10.1275, 19.3] }
     track "/ch[3]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [-10.1275, 19.3], to = [-9.2275, 19.3] }
     track "/ch[3]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [-9.2275, 19.3], to = [-6.6275, 16.7] }
     track "/ch[3]/ISENSE_A" = { layer = In2.Cu, width = 0.2, from = [-6.6275, 16.7], to = [-6.6275, 15.9] }
@@ -1230,12 +1270,12 @@ layout esc {
     track "/ch[3]/SRCA" = { layer = F.Cu, width = 0.3, from = [-12.0775, 19.15], to = [-14.3275, 21.4] }
     track "/ch[3]/SRCA" = { layer = F.Cu, width = 0.3, from = [-14.3275, 21.4], to = [-14.3275, 21.75] }
     track "/ch[3]/SRCA" = { layer = F.Cu, width = 0.3, from = [-14.3275, 21.75], to = [-14.5, 22.375] }
-    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.27, from = [-16.4075, 10.045], to = [-16.2075, 8.845] }
-    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-16.2075, 8.845], to = [-16.2075, 8.345] }
-    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-16.2075, 8.345], to = [-16.1075, 8.245] }
-    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-16.1075, 8.245], to = [-15.3575, 8.245] }
-    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-15.3575, 8.245], to = [-12.7575, 10.845] }
-    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-12.7575, 10.845], to = [-12.7575, 14.195] }
+    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.27, from = [-16.4075, 10.045], to = [-16.3075, 10.095] }
+    track "/ch[3]/SRCB" = { layer = B.Cu, width = 0.27, from = [-16.3075, 10.095], to = [-15.8075, 10.595] }
+    track "/ch[3]/SRCB" = { layer = B.Cu, width = 0.3, from = [-15.8075, 10.595], to = [-15.6575, 10.745] }
+    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-15.6575, 10.745], to = [-13.6075, 10.745] }
+    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-13.6075, 10.745], to = [-12.7575, 11.595] }
+    track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-12.7575, 11.595], to = [-12.7575, 14.195] }
     track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-12.7575, 14.195], to = [-12.5575, 14.395] }
     track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-12.5575, 14.395], to = [-12.5575, 15.745] }
     track "/ch[3]/SRCB" = { layer = F.Cu, width = 0.3, from = [-12.5575, 15.745], to = [-12.4075, 15.895] }
@@ -1291,11 +1331,15 @@ layout esc {
     track "+3V3" = { layer = B.Cu, width = 0.19, from = [21.0025, 5.85], to = [21.2525, 6.1] }
     track "+3V3" = { layer = B.Cu, width = 0.19, from = [21.2525, 6.1], to = [21.2525, 6.45] }
     track "+3V3" = { layer = B.Cu, width = 0.19, from = [21.2525, 6.45], to = [21.3, 6.64] }
-    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-19.9025, -5.15], to = [-20.5025, -5.2] }
-    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-20.5025, -5.2], to = [-20.7025, -5.4] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-20.7025, -5.4], to = [-21.3025, -6] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-21.3025, -6], to = [-21.3025, -8.95] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-21.3025, -8.95], to = [-19.5525, -10.7] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [-19.9025, -5.15], to = [-20.1525, -5.1] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [-20.1525, -5.1], to = [-20.1525, -4.7] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-20.1525, -4.7], to = [-20.1025, -4.7] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-20.1025, -4.7], to = [-19.3025, -5.5] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-19.3025, -5.5], to = [-19.3025, -5.7] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-19.3025, -5.7], to = [-19.3025, -7.25] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-19.3025, -7.25], to = [-19.9025, -7.85] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-19.9025, -7.85], to = [-19.9025, -10.35] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-19.9025, -10.35], to = [-19.5525, -10.7] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [-19.5525, -10.7], to = [-15.2025, -10.7] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [-15.2025, -10.7], to = [-14.6525, -10.15] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [-14.6525, -10.15], to = [-14.6525, -10] }
@@ -1303,11 +1347,15 @@ layout esc {
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [-14.6525, -9.35], to = [-14.6525, -9.15] }
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [-14.6525, -9.15], to = [-15.1025, -8.7] }
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [-15.1025, -8.7], to = [-15.0975, -8.65] }
-    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-5.15, 19.9025], to = [-5.2, 20.5025] }
-    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-5.2, 20.5025], to = [-5.4, 20.7025] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-5.4, 20.7025], to = [-6, 21.3025] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-6, 21.3025], to = [-8.95, 21.3025] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-8.95, 21.3025], to = [-10.7, 19.5525] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [-5.15, 19.9025], to = [-5.1, 20.1525] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [-5.1, 20.1525], to = [-4.7, 20.1525] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-4.7, 20.1525], to = [-4.7, 20.1025] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-4.7, 20.1025], to = [-5.5, 19.3025] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [-5.5, 19.3025], to = [-5.7, 19.3025] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-5.7, 19.3025], to = [-7.25, 19.3025] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-7.25, 19.3025], to = [-7.85, 19.9025] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-7.85, 19.9025], to = [-10.35, 19.9025] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [-10.35, 19.9025], to = [-10.7, 19.5525] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [-10.7, 19.5525], to = [-10.7, 15.2025] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [-10.7, 15.2025], to = [-10.15, 14.6525] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [-10.15, 14.6525], to = [-10, 14.6525] }
@@ -1315,11 +1363,15 @@ layout esc {
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [-9.35, 14.6525], to = [-9.15, 14.6525] }
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [-9.15, 14.6525], to = [-8.7, 15.1025] }
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [-8.7, 15.1025], to = [-8.65, 15.0975] }
-    track "+3V3" = { layer = B.Cu, width = 0.19, from = [5.15, -19.9025], to = [5.2, -20.5025] }
-    track "+3V3" = { layer = B.Cu, width = 0.19, from = [5.2, -20.5025], to = [5.4, -20.7025] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [5.4, -20.7025], to = [6, -21.3025] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [6, -21.3025], to = [8.95, -21.3025] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [8.95, -21.3025], to = [10.7, -19.5525] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [5.15, -19.9025], to = [5.1, -20.1525] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [5.1, -20.1525], to = [4.7, -20.1525] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [4.7, -20.1525], to = [4.7, -20.1025] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [4.7, -20.1025], to = [5.5, -19.3025] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [5.5, -19.3025], to = [5.7, -19.3025] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [5.7, -19.3025], to = [7.25, -19.3025] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [7.25, -19.3025], to = [7.85, -19.9025] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [7.85, -19.9025], to = [10.35, -19.9025] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [10.35, -19.9025], to = [10.7, -19.5525] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [10.7, -19.5525], to = [10.7, -15.2025] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [10.7, -15.2025], to = [10.15, -14.6525] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [10.15, -14.6525], to = [10, -14.6525] }
@@ -1327,11 +1379,15 @@ layout esc {
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [9.35, -14.6525], to = [9.15, -14.6525] }
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [9.15, -14.6525], to = [8.7, -15.1025] }
     track "+3V3" = { layer = F.Cu, width = 0.19, from = [8.7, -15.1025], to = [8.65, -15.0975] }
-    track "+3V3" = { layer = B.Cu, width = 0.19, from = [19.9025, 5.15], to = [20.5025, 5.2] }
-    track "+3V3" = { layer = B.Cu, width = 0.19, from = [20.5025, 5.2], to = [20.7025, 5.4] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [20.7025, 5.4], to = [21.3025, 6] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [21.3025, 6], to = [21.3025, 8.95] }
-    track "+3V3" = { layer = B.Cu, width = 0.3, from = [21.3025, 8.95], to = [19.5525, 10.7] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [19.9025, 5.15], to = [20.1525, 5.1] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [20.1525, 5.1], to = [20.1525, 4.7] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [20.1525, 4.7], to = [20.1025, 4.7] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [20.1025, 4.7], to = [19.3025, 5.5] }
+    track "+3V3" = { layer = B.Cu, width = 0.19, from = [19.3025, 5.5], to = [19.3025, 5.7] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [19.3025, 5.7], to = [19.3025, 7.25] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [19.3025, 7.25], to = [19.9025, 7.85] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [19.9025, 7.85], to = [19.9025, 10.35] }
+    track "+3V3" = { layer = B.Cu, width = 0.3, from = [19.9025, 10.35], to = [19.5525, 10.7] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [19.5525, 10.7], to = [15.2025, 10.7] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [15.2025, 10.7], to = [14.6525, 10.15] }
     track "+3V3" = { layer = B.Cu, width = 0.3, from = [14.6525, 10.15], to = [14.6525, 10] }
@@ -1366,8 +1422,9 @@ layout esc {
     track M4 = { layer = F.Cu, width = 0.2, from = [-1.425, 18.75], to = [-3.675, 18.75] }
     track M4 = { layer = B.Cu, width = 0.2, from = [-3.675, 18.75], to = [-8.475, 18.75] }
     track M4 = { layer = B.Cu, width = 0.19, from = [-8.475, 18.75], to = [-9.3025, 18.75] }
-    track TLM = { layer = F.Cu, width = 0.19, from = [1.725, 17.5], to = [0.575, 17.2] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 17.2], to = [0.575, 7.5] }
+    track TLM = { layer = F.Cu, width = 0.19, from = [1.725, 17.5], to = [0.925, 17.25] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.925, 17.25], to = [0.575, 16.9] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 16.9], to = [0.575, 7.5] }
     track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 7.5], to = [1.875, 6.2] }
     track TLM = { layer = F.Cu, width = 0.2, from = [1.875, 6.2], to = [1.875, 5.7] }
     track TLM = { layer = F.Cu, width = 0.2, from = [1.875, 5.7], to = [1.975, 5.6] }
@@ -1394,40 +1451,27 @@ layout esc {
     track TLM = { layer = F.Cu, width = 0.19, from = [14.625, 6.1], to = [14.775, 6.1] }
     track TLM = { layer = F.Cu, width = 0.19, from = [14.775, 6.1], to = [14.825, 6.15] }
     track TLM = { layer = F.Cu, width = 0.19, from = [14.825, 6.15], to = [15.0975, 6.15] }
-    track M3 = { layer = F.Cu, width = 0.19, from = [1.725, 20.5], to = [1.025, 20.25] }
-    track M3 = { layer = F.Cu, width = 0.19, from = [1.025, 20.25], to = [0.975, 20.2] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [0.975, 20.2], to = [0.625, 19.85] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [0.625, 19.85], to = [0.625, 18.05] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [0.625, 18.05], to = [0.675, 18] }
-    track M3 = { layer = B.Cu, width = 0.2, from = [0.675, 18], to = [0.675, 6.4] }
-    track M3 = { layer = B.Cu, width = 0.2, from = [0.675, 6.4], to = [0.325, 6.05] }
-    track M3 = { layer = B.Cu, width = 0.2, from = [0.325, 6.05], to = [0.325, 1.85] }
-    track M3 = { layer = B.Cu, width = 0.2, from = [0.325, 1.85], to = [1.425, 0.75] }
-    track M3 = { layer = B.Cu, width = 0.2, from = [1.425, 0.75], to = [1.975, 0.75] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [1.975, 0.75], to = [3.075, 0.75] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [3.075, 0.75], to = [3.925, -0.1] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [3.925, -0.1], to = [3.925, -0.25] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [3.925, -0.25], to = [4.275, -0.6] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [4.275, -0.6], to = [15.225, -0.6] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [15.225, -0.6], to = [15.925, 0.1] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [15.925, 0.1], to = [15.925, 0.25] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [15.925, 0.25], to = [16.575, 0.9] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [16.575, 0.9], to = [16.725, 0.9] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [16.725, 0.9], to = [17.425, 1.6] }
-    track M3 = { layer = F.Cu, width = 0.2, from = [17.425, 1.6], to = [17.425, 3.7] }
-    track M3 = { layer = B.Cu, width = 0.2, from = [17.425, 3.7], to = [17.425, 8] }
-    track M3 = { layer = B.Cu, width = 0.2, from = [17.425, 8], to = [18.225, 8.8] }
-    track M3 = { layer = B.Cu, width = 0.19, from = [18.225, 8.8], to = [18.675, 9.25] }
-    track M3 = { layer = B.Cu, width = 0.19, from = [18.675, 9.25], to = [18.75, 9.45] }
-    track TLM = { layer = F.Cu, width = 0.19, from = [1.725, 17.5], to = [0.575, 16.8] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 16.8], to = [0.575, 13.25] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 13.25], to = [-0.075, 12.6] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [-0.075, 12.6], to = [-0.225, 12.6] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [-0.225, 12.6], to = [-0.675, 12.15] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [-0.675, 12.15], to = [-0.675, 7.35] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [-0.675, 7.35], to = [-0.425, 7.1] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [-0.425, 7.1], to = [-0.425, 2] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [-0.425, 2], to = [-1.625, 0.8] }
+    track M3 = { layer = F.Cu, width = 0.19, from = [1.725, 20.5], to = [2.475, 20.3] }
+    track M3 = { layer = F.Cu, width = 0.19, from = [2.475, 20.3], to = [2.525, 20.3] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [2.525, 20.3], to = [4.575, 20.3] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [4.575, 20.3], to = [7.925, 16.95] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [7.925, 16.95], to = [7.925, 13.65] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [7.925, 13.65], to = [9.175, 12.4] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [9.175, 12.4], to = [9.525, 12.4] }
+    track M3 = { layer = In2.Cu, width = 0.2, from = [9.525, 12.4], to = [13.525, 12.4] }
+    track M3 = { layer = In2.Cu, width = 0.2, from = [13.525, 12.4], to = [14.325, 11.6] }
+    track M3 = { layer = In2.Cu, width = 0.2, from = [14.325, 11.6], to = [17.725, 11.6] }
+    track M3 = { layer = In2.Cu, width = 0.2, from = [17.725, 11.6], to = [18.775, 10.55] }
+    track M3 = { layer = In2.Cu, width = 0.2, from = [18.775, 10.55], to = [18.775, 10.25] }
+    track M3 = { layer = In2.Cu, width = 0.19, from = [18.775, 10.25], to = [18.775, 9.65] }
+    track M3 = { layer = In2.Cu, width = 0.19, from = [18.775, 9.65], to = [18.75, 9.45] }
+    track TLM = { layer = F.Cu, width = 0.19, from = [1.725, 17.5], to = [0.875, 17.2] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.875, 17.2], to = [0.575, 16.9] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 16.9], to = [0.575, 7.85] }
+    track TLM = { layer = B.Cu, width = 0.2, from = [0.575, 7.85], to = [0.575, 7.2] }
+    track TLM = { layer = B.Cu, width = 0.2, from = [0.575, 7.2], to = [-0.025, 6.6] }
+    track TLM = { layer = B.Cu, width = 0.2, from = [-0.025, 6.6], to = [-0.025, 2.4] }
+    track TLM = { layer = B.Cu, width = 0.2, from = [-0.025, 2.4], to = [-1.625, 0.8] }
     track TLM = { layer = B.Cu, width = 0.2, from = [-1.625, 0.8], to = [-1.925, 0.8] }
     track TLM = { layer = F.Cu, width = 0.2, from = [-1.925, 0.8], to = [-10.525, 0.8] }
     track TLM = { layer = F.Cu, width = 0.2, from = [-10.525, 0.8], to = [-11.425, -0.1] }
@@ -1446,69 +1490,63 @@ layout esc {
     track TLM = { layer = F.Cu, width = 0.19, from = [-14.625, -6.1], to = [-14.775, -6.1] }
     track TLM = { layer = F.Cu, width = 0.19, from = [-14.775, -6.1], to = [-14.825, -6.15] }
     track TLM = { layer = F.Cu, width = 0.19, from = [-14.825, -6.15], to = [-15.0975, -6.15] }
-    track TLM = { layer = F.Cu, width = 0.19, from = [1.725, 17.5], to = [0.575, 16.8] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 16.8], to = [0.575, 13.25] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 13.25], to = [-0.075, 12.6] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [-0.075, 12.6], to = [-0.225, 12.6] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [-0.225, 12.6], to = [-0.575, 12.25] }
-    track TLM = { layer = F.Cu, width = 0.2, from = [-0.575, 12.25], to = [-0.575, 7.85] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [-0.575, 7.85], to = [-0.575, 7.1] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [-0.575, 7.1], to = [-0.125, 6.65] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [-0.125, 6.65], to = [-0.125, 0.95] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [-0.125, 0.95], to = [0.575, 0.25] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [0.575, 0.25], to = [0.575, -11.9] }
-    track TLM = { layer = B.Cu, width = 0.2, from = [0.575, -11.9], to = [2.875, -14.2] }
+    track TLM = { layer = F.Cu, width = 0.19, from = [1.725, 17.5], to = [0.825, 17.15] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.825, 17.15], to = [0.575, 16.9] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 16.9], to = [0.575, 7.5] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.575, 7.5], to = [1.425, 6.65] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [1.425, 6.65], to = [1.425, 6.15] }
+    track TLM = { layer = B.Cu, width = 0.2, from = [1.425, 6.15], to = [1.425, 2.25] }
+    track TLM = { layer = B.Cu, width = 0.2, from = [1.425, 2.25], to = [0.925, 1.75] }
+    track TLM = { layer = B.Cu, width = 0.2, from = [0.925, 1.75], to = [0.925, -12.25] }
+    track TLM = { layer = B.Cu, width = 0.2, from = [0.925, -12.25], to = [2.875, -14.2] }
     track TLM = { layer = B.Cu, width = 0.2, from = [2.875, -14.2], to = [5.675, -14.2] }
     track TLM = { layer = F.Cu, width = 0.2, from = [5.675, -14.2], to = [5.825, -14.35] }
     track TLM = { layer = F.Cu, width = 0.19, from = [5.825, -14.35], to = [6.075, -14.6] }
     track TLM = { layer = F.Cu, width = 0.19, from = [6.075, -14.6], to = [6.075, -14.65] }
     track TLM = { layer = F.Cu, width = 0.19, from = [6.075, -14.65], to = [6.125, -14.7] }
     track TLM = { layer = F.Cu, width = 0.19, from = [6.125, -14.7], to = [6.15, -15.0975] }
-    track M1 = { layer = F.Cu, width = 0.19, from = [1.725, 18.5], to = [1.275, 18.2] }
-    track M1 = { layer = In2.Cu, width = 0.19, from = [1.275, 18.2], to = [1.275, 17.8] }
-    track M1 = { layer = In2.Cu, width = 0.2, from = [1.275, 17.8], to = [1.275, 15.3] }
-    track M1 = { layer = In2.Cu, width = 0.2, from = [1.275, 15.3], to = [0.575, 14.6] }
-    track M1 = { layer = In2.Cu, width = 0.2, from = [0.575, 14.6], to = [0.575, 6.3] }
-    track M1 = { layer = In2.Cu, width = 0.2, from = [0.575, 6.3], to = [-0.725, 5] }
-    track M1 = { layer = In2.Cu, width = 0.2, from = [-0.725, 5], to = [-0.725, -0.05] }
-    track M1 = { layer = In2.Cu, width = 0.2, from = [-0.725, -0.05], to = [-1.575, -0.9] }
-    track M1 = { layer = In2.Cu, width = 0.2, from = [-1.575, -0.9], to = [-1.975, -0.9] }
-    track M1 = { layer = F.Cu, width = 0.2, from = [-1.975, -0.9], to = [-11.375, -0.9] }
-    track M1 = { layer = B.Cu, width = 0.2, from = [-11.375, -0.9], to = [-15.225, -0.9] }
-    track M1 = { layer = B.Cu, width = 0.2, from = [-15.225, -0.9], to = [-15.925, -1.6] }
-    track M1 = { layer = B.Cu, width = 0.2, from = [-15.925, -1.6], to = [-15.925, -3.65] }
-    track M1 = { layer = B.Cu, width = 0.2, from = [-15.925, -3.65], to = [-17.425, -5.15] }
-    track M1 = { layer = B.Cu, width = 0.2, from = [-17.425, -5.15], to = [-17.425, -7.95] }
+    track M1 = { layer = F.Cu, width = 0.19, from = [1.725, 18.5], to = [0.975, 18.3] }
+    track M1 = { layer = F.Cu, width = 0.19, from = [0.975, 18.3], to = [0.925, 18.25] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [0.925, 18.25], to = [0.675, 18] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [0.675, 18], to = [0.675, 16.35] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [0.675, 16.35], to = [-0.075, 15.6] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-0.075, 15.6], to = [-0.225, 15.6] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-0.225, 15.6], to = [-0.575, 15.25] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-0.575, 15.25], to = [-0.575, 7.05] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-0.575, 7.05], to = [-0.425, 6.9] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-0.425, 6.9], to = [-0.425, 5.05] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-0.425, 5.05], to = [-1.875, 3.6] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-1.875, 3.6], to = [-1.875, 2.2] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-1.875, 2.2], to = [-2.125, 1.95] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-2.125, 1.95], to = [-2.125, 1.55] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-2.125, 1.55], to = [-2.775, 0.9] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-2.775, 0.9], to = [-11.125, 0.9] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-11.125, 0.9], to = [-14.925, 0.9] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-14.925, 0.9], to = [-15.925, -0.1] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-15.925, -0.1], to = [-15.925, -0.25] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-15.925, -0.25], to = [-16.575, -0.9] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-16.575, -0.9], to = [-16.725, -0.9] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-16.725, -0.9], to = [-17.425, -1.6] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-17.425, -1.6], to = [-17.425, -3.7] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [-17.425, -3.7], to = [-17.425, -7.95] }
     track M1 = { layer = B.Cu, width = 0.2, from = [-17.425, -7.95], to = [-18.175, -8.7] }
     track M1 = { layer = B.Cu, width = 0.19, from = [-18.175, -8.7], to = [-18.725, -9.25] }
     track M1 = { layer = B.Cu, width = 0.19, from = [-18.725, -9.25], to = [-18.75, -9.3025] }
-    track M2 = { layer = F.Cu, width = 0.19, from = [1.725, 19.5], to = [1.125, 19.2] }
-    track M2 = { layer = B.Cu, width = 0.19, from = [1.125, 19.2], to = [1.025, 19.1] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [1.025, 19.1], to = [0.525, 18.6] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [0.525, 18.6], to = [-0.225, 18.6] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-0.225, 18.6], to = [-0.925, 17.9] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-0.925, 17.9], to = [-0.925, 8.75] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-0.925, 8.75], to = [-1.325, 8.35] }
-    track M2 = { layer = F.Cu, width = 0.2, from = [-1.325, 8.35], to = [-1.475, 8.35] }
-    track M2 = { layer = F.Cu, width = 0.2, from = [-1.475, 8.35], to = [-2.075, 7.75] }
-    track M2 = { layer = F.Cu, width = 0.2, from = [-2.075, 7.75], to = [-2.075, 7.25] }
-    track M2 = { layer = F.Cu, width = 0.2, from = [-2.075, 7.25], to = [-1.875, 7.05] }
-    track M2 = { layer = F.Cu, width = 0.2, from = [-1.875, 7.05], to = [-1.875, 5.9] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-1.875, 5.9], to = [-1.875, 2.2] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-1.875, 2.2], to = [-2.125, 1.95] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.125, 1.95], to = [-2.125, 1.35] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.125, 1.35], to = [-2.475, 1] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.475, 1], to = [-2.475, 0.25] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.475, 0.25], to = [-2.425, 0.2] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.425, 0.2], to = [-2.425, -0.6] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.425, -0.6], to = [-2.525, -0.7] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.525, -0.7], to = [-2.525, -1.15] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.525, -1.15], to = [-2.075, -1.6] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.075, -1.6], to = [-2.075, -1.75] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-2.075, -1.75], to = [-1.425, -2.4] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-1.425, -2.4], to = [-1.275, -2.4] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-1.275, -2.4], to = [-0.575, -3.1] }
-    track M2 = { layer = B.Cu, width = 0.2, from = [-0.575, -3.1], to = [-0.575, -13] }
+    track M2 = { layer = F.Cu, width = 0.19, from = [1.725, 19.5], to = [1.225, 19.2] }
+    track M2 = { layer = B.Cu, width = 0.19, from = [1.225, 19.2], to = [1.225, 18.85] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [1.225, 18.85], to = [1.225, 15.9] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [1.225, 15.9], to = [0.575, 15.25] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [0.575, 15.25], to = [0.575, 8.75] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [0.575, 8.75], to = [0.075, 8.25] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [0.075, 8.25], to = [-0.075, 8.25] }
+    track M2 = { layer = In2.Cu, width = 0.2, from = [-0.075, 8.25], to = [-0.575, 7.75] }
+    track M2 = { layer = In2.Cu, width = 0.2, from = [-0.575, 7.75], to = [-0.575, 7.05] }
+    track M2 = { layer = In2.Cu, width = 0.2, from = [-0.575, 7.05], to = [0.325, 6.15] }
+    track M2 = { layer = In2.Cu, width = 0.2, from = [0.325, 6.15], to = [0.325, 4.7] }
+    track M2 = { layer = In2.Cu, width = 0.2, from = [0.325, 4.7], to = [0.475, 4.55] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [0.475, 4.55], to = [0.475, 1.3] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [0.475, 1.3], to = [-0.575, 0.25] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [-0.575, 0.25], to = [-0.575, -13] }
     track M2 = { layer = B.Cu, width = 0.2, from = [-0.575, -13], to = [2.325, -15.9] }
     track M2 = { layer = B.Cu, width = 0.2, from = [2.325, -15.9], to = [3.875, -15.9] }
     track M2 = { layer = B.Cu, width = 0.2, from = [3.875, -15.9], to = [5.375, -17.4] }
@@ -1626,7 +1664,7 @@ layout esc {
     via VBAT = { at = [-4.7, -3.2], size = 0.45, drill = 0.2 }
     via M1 = { at = [-18.75, -9.45], size = 0.45, drill = 0.2 }
     via VBAT = { at = [-10.17, -11.725], size = 0.45, drill = 0.2 }
-    via "/ch[0]/NRST" = { at = [-20.7, -6.4275], size = 0.45, drill = 0.2 }
+    via "/ch[0]/NRST" = { at = [-20.7, -6.4775], size = 0.45, drill = 0.2 }
     via "/ch[0]/NRST" = { at = [-19.9, -5.6275], size = 0.45, drill = 0.2 }
     via "/ch[0]/ISENSE_B" = { at = [-15.3, -9.9725], size = 0.45, drill = 0.2 }
     via "/ch[0]/ISENSE_B" = { at = [-15.1, -5.6725], size = 0.45, drill = 0.2 }
@@ -1639,6 +1677,8 @@ layout esc {
     via "/ch[0]/GLA_D" = { at = [-21.35, -18.2275], size = 0.45, drill = 0.2 }
     via "/ch[0]/GLA_D" = { at = [-14.05, -19.2275], size = 0.45, drill = 0.2 }
     via "/ch[0]/GLA_D" = { at = [-9.1, -25.2775], size = 0.45, drill = 0.2 }
+    via "/ch[0]/SRCB" = { at = [-10.095, -16.3075], size = 0.45, drill = 0.2 }
+    via "/ch[0]/SRCB" = { at = [-10.745, -15.6575], size = 0.45, drill = 0.2 }
     via "/ch[0]/SRCC" = { at = [-9.275, -11.3425], size = 0.45, drill = 0.2 }
     via "/ch[0]/SRCC" = { at = [-10.525, -8.5925], size = 0.45, drill = 0.2 }
     via "/ch[1]/GHA" = { at = [21.2075, -24.75], size = 0.6, drill = 0.3 }
@@ -1751,7 +1791,7 @@ layout esc {
     via VBAT = { at = [3.2, -4.7], size = 0.45, drill = 0.2 }
     via M2 = { at = [9.45, -18.75], size = 0.45, drill = 0.2 }
     via VBAT = { at = [11.725, -10.17], size = 0.45, drill = 0.2 }
-    via "/ch[1]/NRST" = { at = [6.4275, -20.7], size = 0.45, drill = 0.2 }
+    via "/ch[1]/NRST" = { at = [6.4775, -20.7], size = 0.45, drill = 0.2 }
     via "/ch[1]/NRST" = { at = [5.6275, -19.9], size = 0.45, drill = 0.2 }
     via "/ch[1]/ISENSE_B" = { at = [9.9725, -15.3], size = 0.45, drill = 0.2 }
     via "/ch[1]/ISENSE_B" = { at = [5.6725, -15.1], size = 0.45, drill = 0.2 }
@@ -1764,6 +1804,8 @@ layout esc {
     via "/ch[1]/GLA_D" = { at = [18.2275, -21.35], size = 0.45, drill = 0.2 }
     via "/ch[1]/GLA_D" = { at = [19.2275, -14.05], size = 0.45, drill = 0.2 }
     via "/ch[1]/GLA_D" = { at = [25.2775, -9.1], size = 0.45, drill = 0.2 }
+    via "/ch[1]/SRCB" = { at = [16.3075, -10.095], size = 0.45, drill = 0.2 }
+    via "/ch[1]/SRCB" = { at = [15.6575, -10.745], size = 0.45, drill = 0.2 }
     via "/ch[1]/SRCC" = { at = [11.3425, -9.275], size = 0.45, drill = 0.2 }
     via "/ch[1]/SRCC" = { at = [8.5925, -10.525], size = 0.45, drill = 0.2 }
     via "/ch[2]/GHA" = { at = [24.75, 21.2075], size = 0.6, drill = 0.3 }
@@ -1876,7 +1918,7 @@ layout esc {
     via VBAT = { at = [4.7, 3.2], size = 0.45, drill = 0.2 }
     via M3 = { at = [18.75, 9.45], size = 0.45, drill = 0.2 }
     via VBAT = { at = [10.17, 11.725], size = 0.45, drill = 0.2 }
-    via "/ch[2]/NRST" = { at = [20.7, 6.4275], size = 0.45, drill = 0.2 }
+    via "/ch[2]/NRST" = { at = [20.7, 6.4775], size = 0.45, drill = 0.2 }
     via "/ch[2]/NRST" = { at = [19.9, 5.6275], size = 0.45, drill = 0.2 }
     via "/ch[2]/ISENSE_B" = { at = [15.3, 9.9725], size = 0.45, drill = 0.2 }
     via "/ch[2]/ISENSE_B" = { at = [15.1, 5.6725], size = 0.45, drill = 0.2 }
@@ -1889,6 +1931,8 @@ layout esc {
     via "/ch[2]/GLA_D" = { at = [21.35, 18.2275], size = 0.45, drill = 0.2 }
     via "/ch[2]/GLA_D" = { at = [14.05, 19.2275], size = 0.45, drill = 0.2 }
     via "/ch[2]/GLA_D" = { at = [9.1, 25.2775], size = 0.45, drill = 0.2 }
+    via "/ch[2]/SRCB" = { at = [10.095, 16.3075], size = 0.45, drill = 0.2 }
+    via "/ch[2]/SRCB" = { at = [10.745, 15.6575], size = 0.45, drill = 0.2 }
     via "/ch[2]/SRCC" = { at = [9.275, 11.3425], size = 0.45, drill = 0.2 }
     via "/ch[2]/SRCC" = { at = [10.525, 8.5925], size = 0.45, drill = 0.2 }
     via "/ch[3]/GHA" = { at = [-21.2075, 24.75], size = 0.6, drill = 0.3 }
@@ -2001,7 +2045,7 @@ layout esc {
     via VBAT = { at = [-3.2, 4.7], size = 0.45, drill = 0.2 }
     via M4 = { at = [-9.45, 18.75], size = 0.45, drill = 0.2 }
     via VBAT = { at = [-11.725, 10.17], size = 0.45, drill = 0.2 }
-    via "/ch[3]/NRST" = { at = [-6.4275, 20.7], size = 0.45, drill = 0.2 }
+    via "/ch[3]/NRST" = { at = [-6.4775, 20.7], size = 0.45, drill = 0.2 }
     via "/ch[3]/NRST" = { at = [-5.6275, 19.9], size = 0.45, drill = 0.2 }
     via "/ch[3]/ISENSE_B" = { at = [-9.9725, 15.3], size = 0.45, drill = 0.2 }
     via "/ch[3]/ISENSE_B" = { at = [-5.6725, 15.1], size = 0.45, drill = 0.2 }
@@ -2014,6 +2058,8 @@ layout esc {
     via "/ch[3]/GLA_D" = { at = [-18.2275, 21.35], size = 0.45, drill = 0.2 }
     via "/ch[3]/GLA_D" = { at = [-19.2275, 14.05], size = 0.45, drill = 0.2 }
     via "/ch[3]/GLA_D" = { at = [-25.2775, 9.1], size = 0.45, drill = 0.2 }
+    via "/ch[3]/SRCB" = { at = [-16.3075, 10.095], size = 0.45, drill = 0.2 }
+    via "/ch[3]/SRCB" = { at = [-15.6575, 10.745], size = 0.45, drill = 0.2 }
     via "/ch[3]/SRCC" = { at = [-11.3425, 9.275], size = 0.45, drill = 0.2 }
     via "/ch[3]/SRCC" = { at = [-8.5925, 10.525], size = 0.45, drill = 0.2 }
     via VBAT = { at = [-1, -14.2], size = 0.45, drill = 0.2 }
@@ -2361,30 +2407,32 @@ layout esc {
     via "+3V3" = { at = [-5.15, 20.3025], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [5.15, -20.3025], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [20.3025, 5.15], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-20.1525, -4.7], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [-14.6525, -10], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-4.7, 20.1525], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [-10, 14.6525], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [4.7, -20.1525], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [10, -14.6525], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [20.1525, 4.7], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [14.6525, 10], size = 0.45, drill = 0.2 }
     via TLM = { at = [-4.675, 14.25], size = 0.45, drill = 0.2 }
     via TLM = { at = [-5.725, 14.25], size = 0.45, drill = 0.2 }
     via M4 = { at = [-3.675, 18.75], size = 0.45, drill = 0.2 }
     via TLM = { at = [14.225, 4.65], size = 0.45, drill = 0.2 }
     via TLM = { at = [14.225, 5.7], size = 0.45, drill = 0.2 }
-    via M3 = { at = [0.675, 18], size = 0.45, drill = 0.2 }
-    via M3 = { at = [1.975, 0.75], size = 0.45, drill = 0.2 }
-    via M3 = { at = [17.425, 3.7], size = 0.45, drill = 0.2 }
-    via TLM = { at = [-0.675, 7.35], size = 0.45, drill = 0.2 }
+    via M3 = { at = [9.525, 12.4], size = 0.45, drill = 0.2 }
+    via TLM = { at = [0.575, 7.85], size = 0.45, drill = 0.2 }
     via TLM = { at = [-1.925, 0.8], size = 0.45, drill = 0.2 }
     via TLM = { at = [-14.225, -4.65], size = 0.45, drill = 0.2 }
     via TLM = { at = [-14.225, -5.7], size = 0.45, drill = 0.2 }
-    via TLM = { at = [-0.575, 7.85], size = 0.45, drill = 0.2 }
+    via TLM = { at = [1.425, 6.15], size = 0.45, drill = 0.2 }
     via TLM = { at = [5.675, -14.2], size = 0.45, drill = 0.2 }
-    via M1 = { at = [1.275, 18.2], size = 0.45, drill = 0.2 }
-    via M1 = { at = [-1.975, -0.9], size = 0.45, drill = 0.2 }
-    via M1 = { at = [-11.375, -0.9], size = 0.45, drill = 0.2 }
-    via M2 = { at = [1.125, 19.2], size = 0.45, drill = 0.2 }
-    via M2 = { at = [-1.325, 8.35], size = 0.45, drill = 0.2 }
-    via M2 = { at = [-1.875, 5.9], size = 0.45, drill = 0.2 }
+    via M1 = { at = [0.675, 18], size = 0.45, drill = 0.2 }
+    via M1 = { at = [-11.125, 0.9], size = 0.45, drill = 0.2 }
+    via M1 = { at = [-17.425, -3.7], size = 0.45, drill = 0.2 }
+    via M2 = { at = [1.225, 19.2], size = 0.45, drill = 0.2 }
+    via M2 = { at = [-0.075, 8.25], size = 0.45, drill = 0.2 }
+    via M2 = { at = [0.475, 4.55], size = 0.45, drill = 0.2 }
     pour GND = { layers = [In1.Cu], outline = [[-25.6, -23.6], [-23.6, -25.6], [23.6, -25.6], [25.6, -23.6], [25.6, 23.6], [23.6, 25.6], [-23.6, 25.6], [-25.6, 23.6]] }
     pour VBAT = { layers = [In4.Cu], outline = [[-25.6, -23.6], [-23.6, -25.6], [23.6, -25.6], [25.6, -23.6], [25.6, 23.6], [23.6, 25.6], [-23.6, 25.6], [-25.6, 23.6]] }
     pour GND = { layers = [B.Cu], outline = [[-25.6, -23.6], [-23.6, -25.6], [23.6, -25.6], [25.6, -23.6], [25.6, 23.6], [23.6, 25.6], [-23.6, 25.6], [-25.6, 23.6]], connect = thermal_tht }
