@@ -2442,13 +2442,14 @@
       "title": "Pressure drop output (`pressure_drop`) between two face regions",
       "kind": "output",
       "area": "fluid",
-      "status": "pending",
+      "status": "release",
       "acceptance": "`pressure_drop` is a cataloged output operation; cold-plate, cold-plate sweep and filter studies check and run.",
       "owner": "q-fluid",
       "gaps": [
         "REG-FLUID-019"
       ],
       "witness": [
+        "check_cli plane_poiseuille_example_publishes_the_analytic_pressure_drop: 36.85 Pa vs developed 36 Pa (L/h = 30, +2.4%, band +/-5%), runmat-build-mac:~/logs/q-sim-pages-5/poi.log (2026-11-06)",
         "evidence: runmat-build-mac:~/logs/q-site-examples/check/fluid-flow_cold-plate.fea.log",
         "evidence: runmat-build-mac:~/logs/q-site-examples/check/fluid-flow_cold-plate-sweep.fea.log",
         "evidence: runmat-build-mac:~/logs/q-site-examples/check/fluid-flow_filter.fea.log",
