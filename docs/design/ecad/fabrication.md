@@ -92,3 +92,7 @@ Values print with engineering prefixes (`12 pF`, `10 kΩ`) in BOMs and netlists.
 ## Netlists
 
 `design.export` writes a circuit's netlist as `kicad_netlist`, `spice`, `edif` (EDIF 2.0.0) or `ipc356`, for other tools and test fixtures.
+
+## KiCad projects
+
+`design.export` with format `kicad` writes a circuit as a KiCad project: a `.kicad_sch` per sheet and, with a board, a `.kicad_pcb`. KiCad holds at most 32 copper layers, so the export refuses a board with more, names the board's layer count and writes no files; ODB++, IPC-2581 and Gerber write every layer of a board with any number of copper layers.
