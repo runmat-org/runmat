@@ -17,7 +17,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 mod suggestions;
-pub use suggestions::{FileState, Suggestion, MAX_PANEL_SUGGESTIONS};
+pub use suggestions::{FileState, Suggestion, SuggestionNames, MAX_PANEL_SUGGESTIONS};
 
 /// The card controls every guide and the conversation share (doc 18, §2.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -187,7 +187,8 @@ impl GuideCatalog {
 
     /// Problems in the declarations: duplicate ids, requirements naming unknown decisions,
     /// picks without an editor-pick control, commands missing from `command_ids`, more suggestions
-    /// for an editor and file state than a placeholder and [`MAX_PANEL_SUGGESTIONS`].
+    /// for an editor and file state than a placeholder and [`MAX_PANEL_SUGGESTIONS`], and
+    /// suggestion texts whose `{1}`, `{2}`, … and `names` disagree.
     pub fn lint(&self, command_ids: &[&str]) -> Vec<String> {
         let mut problems = Vec::new();
         let mut ids: Vec<&str> = self.guides.iter().map(|g| g.id.as_str()).collect();
@@ -243,6 +244,12 @@ impl GuideCatalog {
             }
         }
         for s in &self.suggestions {
+            if s.text.contains("{1}") != s.names.is_some() {
+                problems.push(format!(
+                    "suggestion {:?}: names and {{1}}, {{2}}, … in the text disagree",
+                    s.text
+                ));
+            }
             if let Some(id) = &s.command {
                 if !command_ids.contains(&id.as_str()) {
                     problems.push(format!(

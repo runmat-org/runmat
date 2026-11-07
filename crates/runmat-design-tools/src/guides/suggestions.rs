@@ -21,7 +21,12 @@ pub struct Suggestion {
     /// The file state it needs, when it needs one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<FileState>,
+    /// The prompt. With `names`, `{1}`, `{2}`, … stand for the open file's first, second, …
+    /// names of that kind, so the text names what the file holds.
     pub text: String,
+    /// What the text's `{1}`, `{2}`, … name. A file with fewer such names isn't offered it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub names: Option<SuggestionNames>,
     /// The catalog command that does it, so the suggestion never names a missing feature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -35,6 +40,14 @@ pub enum FileState {
     Empty,
     /// Some content.
     Written,
+}
+
+/// The names a suggestion's text takes from the open file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SuggestionNames {
+    /// An assembly's occurrences, by their names (`use part … as <name>`), in file order.
+    Occurrences,
 }
 
 /// The empty agent panel shows at most this many suggestions besides the placeholder.
@@ -51,7 +64,16 @@ fn suggestion(
         selection,
         state: None,
         text: text.into(),
+        names: None,
         command: cmd.map(str::to_owned),
+    }
+}
+
+/// A suggestion whose text names what the open file holds.
+fn naming(names: SuggestionNames, s: Suggestion) -> Suggestion {
+    Suggestion {
+        names: Some(names),
+        ..s
     }
 }
 
@@ -67,6 +89,7 @@ fn when(state: FileState, s: Suggestion) -> Suggestion {
 pub(super) fn catalog() -> Vec<Suggestion> {
     use FileState::{Empty, Written};
     use PickEntity::{Edge, Face, Net};
+    use SuggestionNames::Occurrences;
     vec![
         suggestion("none", None, "Make a bracket that holds 2 kN", None),
         suggestion("none", None, "Capture a schematic for a sensor node", None),
@@ -164,19 +187,53 @@ pub(super) fn catalog() -> Vec<Suggestion> {
             Written,
             suggestion("part", None, "Check this part can be machined", None),
         ),
-        suggestion(
-            "assembly",
-            None,
-            "Mate the hook to the bracket",
-            Some("assembly.mate"),
+        when(
+            Empty,
+            suggestion(
+                "assembly",
+                None,
+                "Insert the parts this assembly brings together",
+                Some("assembly.insert"),
+            ),
         ),
-        suggestion(
-            "assembly",
-            None,
-            "Explain how this assembly fits together",
-            None,
+        when(
+            Empty,
+            suggestion(
+                "assembly",
+                None,
+                "Make a hinge from two plates and a pin",
+                None,
+            ),
         ),
-        suggestion("assembly", None, "Check the parts for interference", None),
+        when(
+            Empty,
+            suggestion(
+                "assembly",
+                None,
+                "Mount a motor on a bracket with four bolts",
+                None,
+            ),
+        ),
+        when(
+            Written,
+            naming(
+                Occurrences,
+                suggestion("assembly", None, "Mate {1} to {2}", Some("assembly.mate")),
+            ),
+        ),
+        when(
+            Written,
+            suggestion(
+                "assembly",
+                None,
+                "Explain how this assembly fits together",
+                None,
+            ),
+        ),
+        when(
+            Written,
+            suggestion("assembly", None, "Check the parts for interference", None),
+        ),
         suggestion(
             "drawing",
             None,
@@ -216,10 +273,6 @@ pub(super) fn catalog() -> Vec<Suggestion> {
                 "Add a USB-C power input with ESD protection",
                 None,
             ),
-        ),
-        when(
-            Written,
-            suggestion("circuit", None, "Add a 3.3 V regulator for the GPS", None),
         ),
         when(
             Written,
@@ -360,7 +413,12 @@ mod tests {
         );
         assert_eq!(
             shown("circuit", FileState::Written)[0],
-            "Add a 3.3 V regulator for the GPS"
+            "Run ERC and fix what it finds"
+        );
+        assert_eq!(shown("assembly", FileState::Written)[0], "Mate {1} to {2}");
+        assert_eq!(
+            shown("assembly", FileState::Empty)[0],
+            "Insert the parts this assembly brings together"
         );
         assert!(c
             .lint(&[])
