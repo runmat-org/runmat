@@ -411,6 +411,16 @@ pub(crate) fn derivation_peak_fits_the_planning_law(
         exact <= estimate,
         "exact bound {exact} exceeds the estimate {estimate}"
     );
+    // Without a conformal interface to split, the distinct-pair count is the support's exact
+    // entry count, so the early check charges exactly what the built support retains.
+    if !mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .any(|face| face.role == runmat_meshing_core::BoundaryFaceRole::ConformalInterface)
+    {
+        assert_eq!(exact, estimate, "the unsplit estimate is not exact");
+    }
 }
 
 // witness: FEA-THERMAL-SOLVE-001/support_derivation_memory @ thermal_steady/tet4/numerical_kernel;

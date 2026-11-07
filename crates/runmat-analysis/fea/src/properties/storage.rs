@@ -8,11 +8,7 @@ fn add(total: &mut u64, bytes: u64) -> Result<(), String> {
     Ok(())
 }
 fn map_slots<K, V>(count: usize) -> Result<u64, String> {
-    // B-tree nodes have eleven value slots and at least five occupied slots
-    // outside the root. Three slots plus links per entry bound this structural
-    // storage; the fixed contract allowance covers partially occupied roots.
-    (count as u64)
-        .checked_mul(3 * (std::mem::size_of::<(K, V)>() + 8 * std::mem::size_of::<usize>()) as u64)
+    crate::properties::preparation::btree_storage_bound::<K, V>(count)
         .ok_or_else(|| "property map storage overflow".into())
 }
 impl CompiledPropertyMap {

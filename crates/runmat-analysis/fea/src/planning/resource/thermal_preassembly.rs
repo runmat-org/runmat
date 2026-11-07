@@ -116,16 +116,27 @@ impl ThermalPreassemblyResourceFacts {
             step.accuracy.resources.resident_byte_budget(),
         )?;
         // Admit projection, canonical validation and support construction before deriving them.
-        // Operator facts retain this estimate in the final composed numerical envelope.
-        let planning = ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(mesh)?;
-        let before_projection = history
-            .reservation_bytes()?
-            .0
-            .checked_add(model_materialization_bytes.0)
-            .and_then(|bytes| bytes.checked_add(planning.0))
-            .ok_or(ResourcePlanningError::Overflow("thermal operator planning"))?;
+        // Operator facts retain this estimate in the final composed numerical envelope. The
+        // support-entry count that sizes it runs within the builder's entry-free floor, which
+        // is admitted first.
+        let before_derivation = |planning: ByteCount| {
+            history
+                .reservation_bytes()?
+                .0
+                .checked_add(model_materialization_bytes.0)
+                .and_then(|bytes| bytes.checked_add(planning.0))
+                .ok_or(ResourcePlanningError::Overflow("thermal operator planning"))
+        };
         require_ceiling(
-            before_projection,
+            before_derivation(ThermalOperatorResourceFacts::derivation_resident_bytes(
+                mesh,
+                Some(0),
+            )?)?,
+            step.accuracy.resources.resident_byte_budget(),
+        )?;
+        let planning = ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(mesh)?;
+        require_ceiling(
+            before_derivation(planning)?,
             step.accuracy.resources.resident_byte_budget(),
         )?;
         let operators = ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?;

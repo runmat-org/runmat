@@ -87,6 +87,9 @@ impl<'a> PreparedProperties<'a> {
         // material and assignment-id owners, charged once below.
         let mut element_workspace = 0_u64;
         let mut owned_occurrences = 0_u64;
+        // Entries per output map (cells, solids, beams, shells); their tree storage is charged
+        // once per map after the pass, by the node-count law in `btree_storage_bound`.
+        let mut map_entries = [0_usize; 4];
         // This pass preserves typed ownership errors and allocates nothing: no owned
         // constitutive, section, or audit metadata has been cloned.
         visit(
@@ -109,29 +112,29 @@ impl<'a> PreparedProperties<'a> {
                 .map_err(|error| PropertyCompilationError::Resource(error.to_string()))?
                 .resident_workspace_bytes_estimate;
                 element_workspace = element_workspace.max(element);
-                let entry_bytes = match selected {
-                    SelectedProperty::Solid { .. } | SelectedProperty::Cell { .. } => {
-                        map_entry_bytes::<CompiledElementMaterial>()?
-                    }
+                let (map, entry_bytes) = match selected {
+                    SelectedProperty::Cell { .. } => (0, 0),
+                    SelectedProperty::Solid { .. } => (1, 0),
                     SelectedProperty::Beam { .. } => {
                         owned_occurrences = add(owned_occurrences, element)?;
-                        map_entry_bytes::<CompiledBeamProperty>()?
+                        (2, 0)
                     }
                     SelectedProperty::Shell { .. } => {
                         owned_occurrences = add(owned_occurrences, element)?;
-                        map_entry_bytes::<CompiledShellProperty>()?
+                        (3, 0)
                     }
                     SelectedProperty::Laminate { section, .. } => {
                         owned_occurrences = add(owned_occurrences, element)?;
-                        add(
-                            map_entry_bytes::<CompiledShellProperty>()?,
+                        (
+                            3,
                             scale(
                                 section.plies.len(),
                                 std::mem::size_of::<CompiledLaminatePly>() as u64,
                             )?,
-                        )?
+                        )
                     }
                 };
+                map_entries[map] = map_entries[map].checked_add(1).ok_or_else(overflow)?;
                 typed_bytes = add(
                     typed_bytes,
                     add(
@@ -144,6 +147,15 @@ impl<'a> PreparedProperties<'a> {
                 Ok(())
             },
         )?;
+        let [cells, solids, beams, shells] = map_entries;
+        for bytes in [
+            btree_storage_bound::<StableDigest, CompiledElementMaterial>(cells),
+            btree_storage_bound::<StableDigest, CompiledElementMaterial>(solids),
+            btree_storage_bound::<StableDigest, CompiledBeamProperty>(beams),
+            btree_storage_bound::<StableDigest, CompiledShellProperty>(shells),
+        ] {
+            typed_bytes = add(typed_bytes, bytes.ok_or_else(overflow)?)?;
+        }
         // The header contracts are refused above their limit; their encoder holds at most the
         // limit plus its copy slack.
         let header_workspace = scale(
@@ -248,16 +260,19 @@ fn selection_scratch(model: &AnalysisModel) -> Result<u64, PropertyCompilationEr
     )?;
     add(64 * 1024, add(materials, assignments)?)
 }
-fn map_entry_bytes<T>() -> Result<u64, PropertyCompilationError> {
-    // Include spare BTree node slots, not just one densely packed key/value per owner. Three
-    // slots per entry plus pointer allowance conservatively covers partial node occupancy;
-    // the fixed selection allowance covers small root allocations. Not allocator-exact.
-    scale(
-        3,
-        (std::mem::size_of::<StableDigest>()
-            + std::mem::size_of::<T>()
-            + 4 * std::mem::size_of::<usize>()) as u64,
-    )
+/// Heap bytes of a `BTreeMap<K, V>` holding `count` entries. The standard map's nodes hold at
+/// most eleven entries, and every node except the root holds at least five (a split leaves five
+/// on each side; removal rebalances to five), so a map has at most ceil(count / 5) + 1 nodes.
+/// Each is charged as an internal node: parent link, index and length, eleven keys and values,
+/// twelve child edges, and alignment padding.
+pub(in crate::properties) fn btree_storage_bound<K, V>(count: usize) -> Option<u64> {
+    if count == 0 {
+        return Some(0);
+    }
+    let node = 11_u64
+        .checked_mul((std::mem::size_of::<K>() + std::mem::size_of::<V>()) as u64)?
+        .checked_add(128)?;
+    u64::try_from(count.div_ceil(5) + 1).ok()?.checked_mul(node)
 }
 fn scale(count: usize, width: u64) -> Result<u64, PropertyCompilationError> {
     u64::try_from(count)

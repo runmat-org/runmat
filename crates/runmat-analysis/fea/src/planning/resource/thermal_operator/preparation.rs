@@ -5,9 +5,11 @@ use runmat_meshing_core::SolverMeshArtifact;
 impl ThermalOperatorResourceFacts {
     /// Additional requested-heap estimate for support derivation, including projection and mesh
     /// validation, before the support exists. Excludes borrowed input, allocator/native/RSS
-    /// overhead. The distinct support entries are bounded by the repeated clique couplings; once
-    /// the support is built, [`ThermalOperatorResourceFacts::derive`] retains the same law at the
-    /// exact entry count.
+    /// overhead. The support entries are bounded by a distinct-pair count over the mesh's
+    /// cliques ([`distinct_support_entries`]), which is exact for a mesh without finite-conductance
+    /// interfaces; once the support is built, [`ThermalOperatorResourceFacts::derive`] retains
+    /// the same law at the exact entry count. The count's scratch lies within the builder's
+    /// entry-free floor, `derivation_resident_bytes(mesh, Some(0))`, which callers admit first.
     pub fn derivation_resident_bytes_estimate(
         mesh: &SolverMeshArtifact,
     ) -> Result<ByteCount, ResourcePlanningError> {
@@ -86,15 +88,22 @@ impl ThermalOperatorResourceFacts {
         )?;
         let entries = match entries {
             Some(entries) => entries,
-            // Every row has a diagonal; each clique couples its dofs pairwise. Repeated
-            // couplings are counted repeatedly, which bounds the distinct entries from above.
-            None => widths()
-                .map(|width| count(width).and_then(|width| mul(width, width)))
-                .chain(interface_widths.map(|width| {
-                    count(width).and_then(|width| mul(mul(2, width)?, mul(2, width)?))
-                }))
-                .try_fold(nodes, |total, square| add(total, square?))?
-                .min(mul(nodes, nodes)?),
+            None => {
+                // Each conductance clique couples at most both sides of its face's dofs.
+                let conductance = interface_widths.clone().try_fold(0, |total, width| {
+                    add(total, mul(mul(2, count(width)?)?, mul(2, count(width)?)?)?)
+                })?;
+                let mesh_cliques = match distinct_support_entries(mesh)? {
+                    Some(entries) => entries,
+                    // Node ids the count cannot index: every row has a diagonal and each clique
+                    // couples its dofs pairwise; counting repeated couplings repeatedly bounds
+                    // the distinct entries from above.
+                    None => widths()
+                        .map(|width| count(width).and_then(|width| mul(width, width)))
+                        .try_fold(nodes, |total, square| add(total, square?))?,
+                };
+                add(mesh_cliques, conductance)?.min(mul(nodes, nodes)?)
+            }
         };
         let builder = super::support::construction_bytes(
             super::support::SupportCounts {
@@ -116,6 +125,104 @@ impl ThermalOperatorResourceFacts {
         .try_fold(0, add)
         .map(ByteCount)
     }
+}
+
+/// An upper bound on the support entries that the mesh's volume and boundary-face cliques
+/// produce, with the split a finite-conductance interface applies: one diagonal per row plus the
+/// distinct (row, column) pairs the cliques couple. A split gives each conformal interface node a
+/// second-side dof, so a pair on nodes `i` and `j` becomes at most `(1 + [i split]) · (1 + [j
+/// split])` pairs; the count weights each distinct pair by that. Without interfaces the bound is
+/// the exact entry count of [`super::support::build`] on the projection. Returns `None` when the
+/// node ids are not strictly increasing or a clique names an unknown node; the projection then
+/// refuses the mesh, and the caller keeps the repeated-coupling bound.
+///
+/// Scratch: row starts and the node→clique incidence (one word each), a row marker and a split
+/// bitset, all within the support builder's entry-free floor.
+fn distinct_support_entries(mesh: &SolverMeshArtifact) -> Result<Option<u64>, ResourcePlanningError> {
+    let topology = &mesh.topology;
+    let nodes = topology.nodes.as_slice();
+    if !nodes.windows(2).all(|pair| pair[0].node_id < pair[1].node_id) {
+        return Ok(None);
+    }
+    let dense = nodes.first().is_some_and(|first| {
+        nodes.last().map(|last| last.node_id - first.node_id) == Some(nodes.len() as u64 - 1)
+    });
+    let first = nodes.first().map_or(0, |node| node.node_id);
+    let index = |id: u64| -> Option<usize> {
+        if dense {
+            let offset = usize::try_from(id.checked_sub(first)?).ok()?;
+            (offset < nodes.len()).then_some(offset)
+        } else {
+            nodes.binary_search_by_key(&id, |node| node.node_id).ok()
+        }
+    };
+    let elements = topology.volume_elements.len();
+    let cliques = elements + topology.boundary_faces.len();
+    let clique = |c: usize| -> &[u64] {
+        if c < elements {
+            &topology.volume_elements[c].node_ids
+        } else {
+            &topology.boundary_faces[c - elements].node_ids
+        }
+    };
+    let rows = nodes.len();
+    let mut split = vec![0_u64; rows.div_ceil(64)];
+    for face in topology
+        .boundary_faces
+        .iter()
+        .filter(|f| f.role == runmat_meshing_core::BoundaryFaceRole::ConformalInterface)
+    {
+        for &id in &face.node_ids {
+            let Some(node) = index(id) else {
+                return Ok(None);
+            };
+            split[node / 64] |= 1 << (node % 64);
+        }
+    }
+    let weight = |node: usize| 1 + (split[node / 64] >> (node % 64) & 1);
+    // Exclusive prefix of the incidence counts; filling advances each start to its row's end.
+    let mut starts = vec![0_usize; rows + 1];
+    for c in 0..cliques {
+        for &id in clique(c) {
+            let Some(node) = index(id) else {
+                return Ok(None);
+            };
+            starts[node + 1] += 1;
+        }
+    }
+    for row in 0..rows {
+        starts[row + 1] += starts[row];
+    }
+    let mut incident = vec![0_usize; starts[rows]];
+    for c in 0..cliques {
+        for &id in clique(c) {
+            let Some(node) = index(id) else {
+                return Ok(None);
+            };
+            incident[starts[node]] = c;
+            starts[node] += 1;
+        }
+    }
+    let mut marker = vec![usize::MAX; rows];
+    let mut total = 0_u64;
+    for row in 0..rows {
+        let begin = if row == 0 { 0 } else { starts[row - 1] };
+        let row_weight = weight(row);
+        marker[row] = row;
+        total = add(total, row_weight * row_weight)?;
+        for &c in &incident[begin..starts[row]] {
+            for &id in clique(c) {
+                let Some(column) = index(id) else {
+                    return Ok(None);
+                };
+                if marker[column] != row {
+                    marker[column] = row;
+                    total = add(total, row_weight * weight(column))?;
+                }
+            }
+        }
+    }
+    Ok(Some(total))
 }
 
 /// Requested heap of the symbolic Cholesky analysis behind the proving factor's admission
