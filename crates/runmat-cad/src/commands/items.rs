@@ -164,6 +164,8 @@ pub(super) fn add(catalog: &mut Catalog) {
                         ),
                         shown(text("kind", "Type", None), "kind"),
                         shown(text("status", "Status", None), "status"),
+                        // Why a failed or degraded feature didn't regenerate (its diagnostic).
+                        shown(text("reason", "Reason", None), "reason"),
                         shown(
                             qty("rebuild_ms", "Rebuild time", "time", None),
                             "rebuild_ms",

@@ -66,6 +66,9 @@ pub enum ExchangeFormat {
     Ap242,
     /// STEP AP214, for receivers that do not read AP242.
     Ap214,
+    /// IGES 5.3: the parts' trimmed B-rep surfaces with their names and colours, for receivers
+    /// that read neither STEP schema.
+    Iges,
 }
 
 /// A named face of an exported body.

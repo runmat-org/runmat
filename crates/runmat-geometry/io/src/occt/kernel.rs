@@ -4162,6 +4162,7 @@ impl ExactQueries for OcctKernel {
             ints: vec![match format {
                 ExchangeFormat::Ap242 => 0,
                 ExchangeFormat::Ap214 => 1,
+                ExchangeFormat::Iges => 2,
             }],
             reals: vec![],
             strs: vec![doc.name.clone()],

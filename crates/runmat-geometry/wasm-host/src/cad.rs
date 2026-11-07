@@ -112,12 +112,13 @@ pub fn call(request: &str) -> String {
             }
         }
         "export" => {
-            // A part or assembly as a STEP AP242 file (`runmat_cad_wasm::exchange::export`).
+            // A part or assembly as STEP AP242 or IGES (`runmat_cad_wasm::exchange::export`), or as
+            // STL, 3MF, glTF or a face's DXF (`runmat_design_tools::exchange::host`).
             let (path, text, request) = (arg(a, 0), arg(a, 1), arg(a, 3));
             match runtime::parse_files(arg(a, 2)) {
                 Ok(files) => {
                     set_imports(&files);
-                    runmat_cad_wasm::exchange::export::export_json(path, text, &files, request)
+                    runmat_design_tools::exchange::host::export_json(path, text, &files, request)
                 }
                 Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
             }

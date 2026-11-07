@@ -3,7 +3,9 @@
 //! `{ ok: true, name, mime, text }` (the file's suggested name beside the source, its media type
 //! and its contents) or `{ ok: false, message }`.
 //!
-//! STEP AP242 carries the exact B-rep, canonical face names and the part's PMI ([`super`]). The
+//! STEP AP242 carries the exact B-rep, canonical face names and the part's PMI ([`super`]); IGES
+//! carries a part's exact B-rep and names. STL, 3MF, glTF and a face's DXF are written by the
+//! design tools' host export (`runmat_design_tools::exchange::host`), which falls back here. The
 //! active configuration travels in `values.configuration`.
 
 use crate::runtime::Files;
@@ -27,8 +29,21 @@ pub fn export_json(path: &str, text: &str, files: &Files, request: &str) -> Stri
     let values = &request["values"];
     let format = values["format"].as_str().unwrap_or("step_ap242");
     let configuration = values["configuration"].as_str().filter(|c| !c.is_empty() && *c != "default");
+    if format == "iges" {
+        if !path.ends_with(".part") {
+            return failed("IGES export writes a part");
+        }
+        return match super::part_iges_in(path, text, configuration) {
+            Ok(Some(bytes)) => match String::from_utf8(bytes) {
+                Ok(text) => json!({ "ok": true, "name": format!("{}.igs", stem(path)), "mime": "model/iges", "text": text }).to_string(),
+                Err(_) => failed("the kernel's IGES file is not text"),
+            },
+            Ok(None) => failed("this build's geometry kernel doesn't write IGES"),
+            Err(message) => failed(message),
+        };
+    }
     if !matches!(format, "step_ap242" | "step") {
-        return failed(format!("export as `{format}` isn't in this build; STEP AP242 is"));
+        return failed(format!("export as `{format}` isn't in this build; STEP AP242 and IGES are"));
     }
     let step = if path.ends_with(".part") {
         super::part_step_in(path, text, configuration)

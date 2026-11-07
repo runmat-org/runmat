@@ -199,6 +199,17 @@ pub fn part_step_in(path: &str, text: &str, configuration: Option<&str>) -> Resu
     Ok(Some(text.into_bytes()))
 }
 
+/// The part at `path` as IGES 5.3 (the exact B-rep as trimmed surfaces, with the part's and its
+/// faces' names), in the named configuration; `None` when the kernel writes no IGES. IGES has no
+/// semantic PMI, so the part's tolerances stay in STEP AP242.
+pub fn part_iges_in(path: &str, text: &str, configuration: Option<&str>) -> Result<Option<Vec<u8>>, String> {
+    let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+        .map_err(|d| first_message(&d))?;
+    let product = Product::new(&stem(path), part.document.clone(), part.result, part.display, part.kernel);
+    let doc = ExchangeDocument { name: stem(path), parts: product.parts(), occurrences: Vec::new() };
+    Ok(product.kernel.export(&doc, ExchangeFormat::Iges).ok())
+}
+
 /// The assembly at `path` as exact STEP AP242 with its hierarchy, or `None` when the kernel
 /// writes no STEP or the assembly places no part.
 pub fn assembly_step(path: &str, text: &str, files: &Files) -> Result<Option<Vec<u8>>, String> {

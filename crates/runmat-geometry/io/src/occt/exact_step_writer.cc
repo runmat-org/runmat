@@ -2,7 +2,7 @@
 // placements, part and face colours, face names and materials.
 //
 // Document encoding (one instruction per record):
-//   op 1 header:     strs [name], ints [format: 0 AP242, 1 AP214]
+//   op 1 header:     strs [name], ints [format: 0 AP242, 1 AP214, 2 IGES 5.3]
 //   op 2 part:       strs [name, material ("" none)], ints [body count, body indices into the
 //                    call's bodies...], reals [has colour, r, g, b]
 //   op 3 face name:  ints [part, body in part, face], strs [name]
@@ -10,13 +10,16 @@
 //   op 5 occurrence: strs [name, sub-assembly product name], ints [part (-1: a sub-assembly),
 //                    parent (-1: the top), same_as (an earlier sub-assembly occurrence whose
 //                    product this one uses again; -1: none)], reals [transform: rows of R, then t]
-// Lengths are written in millimetres (SI_UNIT(.MILLI.,.METRE.)), the unit STEP files usually
-// carry; the document is in metres (the kernel's unit) and OCCT scales between them.
+// IGES carries the same parts, names and colours (no assembly placements' product data), as
+// trimmed B-rep surfaces. Lengths are written in millimetres (SI_UNIT(.MILLI.,.METRE.) in STEP,
+// unit flag MM in IGES), the unit those files usually carry; the document is in metres (the kernel's unit) and OCCT scales between them.
 
 #include "runmat-geometry-io/src/occt/kernel_ffi.rs.h"
 #include "exact_kernel.hxx"
 
 #include <BRepBuilderAPI_Copy.hxx>
+#include <IGESCAFControl_Writer.hxx>
+#include <IGESControl_Controller.hxx>
 #include <BRep_Builder.hxx>
 #include <Interface_Static.hxx>
 #include <Quantity_Color.hxx>
@@ -175,6 +178,23 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
       }
     }
     st->UpdateAssemblies();
+    if (format == 2) {
+      IGESControl_Controller::Init();
+      StaticGuard unit("write.iges.unit", "MM");
+      StaticGuard brep("write.iges.brep.mode", "1");
+      IGESCAFControl_Writer w;  // reads write.iges.unit when made
+      w.SetNameMode(Standard_True);
+      w.SetColorMode(Standard_True);
+      w.SetLayerMode(Standard_True);
+      if (!w.Transfer(doc)) fail("the document could not be written as IGES");
+      std::ostringstream os;
+      if (!w.Write(os)) fail("the IGES stream could not be written");
+      const std::string bytes = os.str();
+      rust::Vec<std::uint8_t> out;
+      out.reserve(bytes.size());
+      for (unsigned char c : bytes) out.push_back(c);
+      return out;
+    }
     // The STEP statics exist once the controller is initialised; setting one before that is
     // silently ignored (the writer then falls back to AP214).
     STEPCAFControl_Controller::Init();
