@@ -1,31 +1,55 @@
 # RunMat 0.7.0 qualification index
 
-Status: qualification remains open under RM-1293. The current candidate includes
-repairs made after the historical product checkpoint documented below. Its
-completed and pending gates are listed here; historical receipts retain their
-original source and artifact identities. No push, tag, publication or deployment
-has been performed.
+Status: the agreed 0.7.0 platform qualification passes. Historical receipts retain
+their original source and artifact identities. The exclusions below remain part
+of the release disposition. No push, tag, publication or deployment has been
+performed.
 
 ## Current candidate qualification
 
-Branch: `0-7-0-rc`, committed base
-`527f4e5f32e712d502d16b26e98ea9f91f507e22`, with the frozen R1260 repair packet.
-The source repairs and final qualification receipts still require their closing
-commits. The evidence locations below are relative to the workspace parent.
+Branch: `0-7-0-rc`. Implementation checkpoint
+`2a49ca1c467256029c5a64ec165bc66ec2b35810` contains the exact 110-path frozen
+R1322 repair selection. Scientific conservation is committed at `0fb8be141a`.
+Both signatures verify. Windows shipping and dataset acceptance pass.
+Evidence locations below are relative to the workspace parent.
+The [consolidated qualification receipt](products/cross-platform-r1322.json)
+binds current results, artifact hashes and retained evidence.
 
-| Scope | Verified result | Remaining |
+| Scope | Verified result | Disposition |
 | --- | --- | --- |
-| macOS ARM64 | Fresh optimized CLI: 31/31 product cases and 3/3 dataset cases. `settings-r1287-main-products-verified.json` under `.tmp-rm1064`. | Final receipt consolidation. |
-| macOS Intel/Rosetta | Fresh optimized CLI: 31/31 product cases and 3/3 dataset cases. `.tmp-rm1064/settings-r1292-intel-acceptance-collected/collection.json`. | Final receipt consolidation; physical Intel hardware was not tested. |
-| Linux | Fresh optimized CLI: 31/31 product cases and 3/3 dataset cases. Renewed Runtime: 18,269 passed, zero failed; affected strict lint passes. `.tmp-rm1064/settings-r1306-linux-qualified-collected/collection.json`. | Shipping artifact collection and final receipt consolidation. |
-| Windows | Renewed Runtime: 18,237 passed, zero failed. Optimized runtime archive completed. | Targeted output conformance, remaining lint/benchmark, fresh CLI and dataset acceptance. |
-| Optimized WASM/SDK | Node 2 checks; pinned dataset/publication 1 scenario; Chrome products 10 cases; boundaries 12 checks; input 5 checks; exact CAD 32 assertions. All pass. `.tmp-rm1064/settings-r1302-sdk-browser-qualified.report.json`. | Final receipt consolidation. |
+| macOS ARM64 | R1322 optimized CLI: 31/31 Metal/native product cases. Three passing dataset cases and unchanged AOT inputs retain their measured identities under dependency conservation. `.tmp-rm1064/settings-r1345-main-qualified.json`. | Qualified. |
+| macOS Intel/Rosetta | R1322 optimized CLI: 31/31 Metal/native product cases. Collected binary and conserved archive/Data identities verified. `.tmp-rm1064/settings-r1344-intel-qualified-collected/collection.json`. | Qualified through Rosetta; physical Intel hardware was not tested. |
+| Linux | R1322 optimized CLI: 31/31 Vulkan/native product cases; affected strict lint passes. Fresh artifacts collected and verified; three passing dataset cases retain their measured identities. `.tmp-rm1064/settings-r1347-linux-qualified-collected/collection.json`. | Qualified. |
+| Windows | R1322 optimized CLI: 31/31 GPU/native product cases and 3/3 interpreter/JIT/native dataset cases. Complete native-output conformance passes, including cold restart and the original five-second responsiveness limits. Affected strict lint and the bounded direct-call benchmark pass. `.tmp-rm1064/settings-r1349-windows-qualified-collected/collection.json`. | Qualified. |
+| Optimized WASM/SDK | Node 2 checks; pinned dataset/publication 1 scenario; Chrome products 10 cases; boundaries 12 checks; input 5 checks; exact CAD 32 assertions. All pass. `.tmp-rm1064/settings-r1302-sdk-browser-qualified.report.json`. | Qualified; native-only follow-ups conserve these product inputs. |
 
-Mac ordinary outcome reconciliation retains 35,437 passes; Linux retains 35,438.
-Both have zero unresolved failures, 397 existing ignores and 45 routed cases
-across 813 targets. These totals conserve unaffected executions and include
-reviewed successors; they are not fresh whole-workspace runs against one binary.
-Windows reconciliation remains pending its final successor.
+Ordinary outcome reconciliation retains 35,437 passes on Mac, 35,438 on Linux
+and 35,310 on Windows. Each has zero unresolved failures, 397 existing ignores
+and 45 routed/filtered cases across 813 targets. These totals conserve unaffected
+executions and include verified successors at their measured identities.
+The records are `.tmp-rm1064/workspace-r1150-main-outcome-union.json`,
+`workspace-r1215-linux-outcome-union.json` and
+`workspace-r1328-windows-outcome-union.json` in that directory.
+
+Windows strict affected lint passes for Runtime, Java and Native Runner with
+all targets/features and warnings denied. Its direct-call benchmark produced
+36 verified rows; this unoptimized execution smoke does not establish release
+performance. The separate quality receipt is
+`.tmp-rm1064/settings-r1353-windows-checks-verified.json`.
+
+The official scientific verifier passes for authored CLI physics (12 cases) and
+driver-recovery physics (18 cases) against the committed 24,830-file inventory.
+The [113-path conservation review](scientific/reviews/cross-platform-r1322.json)
+reconstructs the original measured inventory and binds affected qualification
+evidence. Original commands, measurements, numerical assertions and exclusions
+remain in the receipts.
+
+| Current artifact | SHA-256 |
+| --- | --- |
+| ARM64 macOS CLI | `ade5f4693b7cf5a0c7c6c4d43f8c9d455a4b344143fb6193afdf0f56b19eca52` |
+| Intel macOS CLI (Rosetta execution) | `22c326cd123c581884ab837edad4be87e25041209a809a5de2034d80372431ae` |
+| Linux CLI | `7790fef59aa21da831d33186e11f497ac51295a66b66fbb40dc0aeb8aa54ab33` |
+| Windows CLI | `e689ab65ea817252576bd26a65166b56d682dc595cf1fee59717774f9675186a` |
 
 The local dev server serves the qualified SDK with manifest `3af31d7d06523523`.
 Seven served runtime, OCCT and LSP files match candidate hashes over HTTP:
@@ -83,7 +107,7 @@ Each count belongs to its named cohort; some cohorts overlap.
 | Server accounting | Eight copy/seed cases and one actual PostgreSQL initializer pass. Migration 0205 conserves 18 usage rows and three professional plans. Server terminal-output changes have separate 21-case domain and real CLI successor evidence. |
 
 The scientific verifier reconstructs the measured source from the exact
-[conservation review](scientific/reviews/windows-stack-r1059.json), checks its
+[current conservation review](scientific/reviews/cross-platform-r1322.json), checks its
 supporting evidence hashes and retains the original measurements. It does not
 relabel historical executions as fresh product tests.
 
@@ -149,8 +173,7 @@ separate from the passing numerical and product assertions above.
 
 ## Build-machine disposition
 
-Linux and Windows qualification VMs are running the current qualification work.
-Their persistent disks, warm caches and T4 configurations remain intact. They
-will be stopped after qualification and artifact collection. Main holds the
-collected Mac artifacts and receipts; the Victus holds its earlier tested
-package. Publication remains a separate authorized step.
+Qualification VMs are stopped after artifact collection and verification.
+Their persistent disks and warm caches are retained for the next build.
+Main holds the collected Mac/Linux artifacts and receipts; the Victus holds its
+earlier tested package. Publication remains a separate authorized step.
