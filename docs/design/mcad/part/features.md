@@ -217,6 +217,8 @@ A sheet-metal part carries its rules (thickness, bend radius, K-factor) on its b
 
 <!-- design:clip:mcad/weldment -->
 
+<!-- design:clip:mcad/mold -->
+
 ```part fragment
 feature base = sheet_metal.base_flange(profile = sketch.s_chain, depth = 40 mm, rules = { thickness = 2 mm, bend_radius = 3 mm, rule = k_factor(k = 0.44) })
 feature flat = sheet_metal.flat_pattern(fixed_face = feature.base.face.sheet(base, ordinal = 0))

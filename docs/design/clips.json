@@ -138,10 +138,10 @@
     },
     {
       "id": "mcad/weldment",
-      "alt": "The drone's launch stand starts as its layout sketches; Structural member places 20 by 20 by 1.5 mm square tube on every line, mitred at the frame corners, and Cut list groups the 12 members into 5 items by length and end angle.",
+      "alt": "The drone's launch stand starts as its layout sketches; Structural member places 20 by 20 by 1.5 mm 6061 aluminium square tube on every line, mitred at the frame corners, and Cut list groups the 12 members into 5 items by length and end angle, with each item's material and mass.",
       "width": 1664,
       "height": 1180,
-      "seconds": 10.1,
+      "seconds": 11.0,
       "base": "/design-assets/flow-clips/mcad/weldment/weldment"
     },
     {
@@ -167,6 +167,14 @@
       "height": 1180,
       "seconds": 17.1,
       "base": "/design-assets/flow-clips/mcad/sheet-metal/sheet-metal"
+    },
+    {
+      "id": "mcad/mold",
+      "alt": "The drone's landing skid gets a parting plane on its centre line; Core/cavity split builds a mold block 10 mm round the skid and splits it at the plane, and one half shown on its own carries the skid's impression.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 10.5,
+      "base": "/design-assets/flow-clips/mcad/mold/mold"
     }
   ]
 }
