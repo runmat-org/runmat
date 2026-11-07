@@ -222,7 +222,7 @@ function rustTypeToTs(type) {
       };
     case "runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation":
       return { type: '"real" | "complex_interleaved"', nullable: false };
-    case "AnalysisFieldStatistic":
+    case "runmat_analysis_core::FieldStatistic":
       return {
         type: '"component_magnitude_envelope" | "root_mean_square" | "variance"',
         nullable: false,
