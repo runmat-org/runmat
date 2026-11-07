@@ -89,6 +89,8 @@ Other operations add hems, jogs, miter flanges, sketched and lofted bends, tabs 
 
 `flat_pattern(fixed_face = …)` unfolds the part with the chosen face held still. The flat body sits beside the folded one and is kept out of the folded display. Each bend's development comes from the base flange's rule, so a change to the thickness or the K-factor changes the flat.
 
+<!-- design:clip:mcad/sheet-metal -->
+
 ## 4. Draw it for the shop
 
 A `flat_pattern` view draws the developed outline with its bend lines and a note on each bend (direction, angle, radius and allowance). A `bend` table lists the bends in the order of their lines.

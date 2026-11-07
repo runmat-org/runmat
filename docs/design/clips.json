@@ -159,6 +159,14 @@
       "height": 1180,
       "seconds": 13.5,
       "base": "/design-assets/flow-clips/mcad/surfaces/surfaces"
+    },
+    {
+      "id": "mcad/sheet-metal",
+      "alt": "The battery bracket starts as a 60 by 24 mm sketch; Base flange makes it a 1.5 mm aluminium plate, Edge flange folds a 14 mm flange up along its front long edge with a 1 mm inside bend radius, and Flat pattern shows the blank the laser cuts, fitted in the view.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 17.1,
+      "base": "/design-assets/flow-clips/mcad/sheet-metal/sheet-metal"
     }
   ]
 }
