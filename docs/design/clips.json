@@ -3,8 +3,8 @@
     {
       "id": "mcad/sketch",
       "alt": "A rectangle drawn on the hinge mount's top face arrives with horizontal and vertical relations, two dimensions set it to 8 by 5 mm, and Fix on a corner leaves the sketch fully defined at 0 degrees of freedom.",
-      "width": 1008,
-      "height": 1104,
+      "width": 1664,
+      "height": 1180,
       "seconds": 14.9,
       "base": "/design-assets/flow-clips/mcad/sketch/sketch"
     },
