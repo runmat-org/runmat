@@ -4,8 +4,9 @@
 //! draws ([`super::part_cache::digest`]: the part's path, text, configuration and tessellation).
 //! A caller that keeps part displays by digest passes the digests it holds (`known` in the
 //! compile options), and those prototypes come back `reused`, without their `part` display: a
-//! recompile after an edit sends only the parts that changed. A board's prototype carries no
-//! digest (its model reads several files), so it is always sent.
+//! recompile after an edit sends only the parts that changed. A board's prototype carries the
+//! digest of its model's key (the layout and every circuit file it reads,
+//! [`part_cache::board_key`]), so an unchanged board isn't sent again either.
 
 use super::part_cache;
 use runmat_cad::assembly::model::DefinitionKind;
@@ -27,7 +28,7 @@ pub fn known_from_options(options: &str) -> BTreeSet<String> {
 
 /// The digest of each prototype `assembly_display_configured` makes from `resolved`, in its
 /// order: a configured occurrence's from its document and configuration, a default one's from
-/// `digests` (the part files regenerated, by file). `None` for boards, boxes and empties.
+/// `digests` (the part files regenerated, by file). `None` for boxes and empties.
 pub fn prototype_digests(
     resolved: &ResolvedAssembly,
     documents: &BTreeMap<String, PartDocument>,

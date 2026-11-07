@@ -143,6 +143,14 @@ pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
     crate::runtime::part_cache::board_part(key, || board_display_of(&inputs))
 }
 
+/// The digest board `file`'s model is kept by ([`crate::runtime::part_cache::digest`] of its
+/// key), so an assembly can mark its prototype and a caller that holds it isn't sent it again.
+pub fn board_digest(file: &str, files: &Files) -> Option<String> {
+    let inputs = board_inputs(file, files).ok()?;
+    let key = crate::runtime::part_cache::board_key(file, &inputs.layout, &inputs.text, &inputs.circuit_files);
+    Some(crate::runtime::part_cache::digest(&key))
+}
+
 fn board_display_of(inputs: &BoardInputs) -> Result<PartDisplay, String> {
     let model = compile_inputs(inputs)?.board_model().ok_or("no board")?;
     let mm = |v: f64| (v * 1e-3) as f32;
@@ -279,6 +287,29 @@ mod tests {
         layout.push_str("\n// edited\n");
         board_display("/p/daq.circuit", &files).expect("the edited board");
         assert_eq!((stats().hits, stats().misses), (1, 2));
+    }
+
+    /// An assembly's board prototype carries its digest: a caller that holds it gets it back
+    /// `reused`, and an edit to the layout sends it whole under a new digest.
+    #[test]
+    fn a_board_prototype_a_caller_holds_is_not_sent_again() {
+        use crate::runtime::compile_json_known;
+        let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use circuit daq as daq\n}\n";
+        let mut files = daq_files();
+        files.insert("/p/rig.assembly".into(), rig.into());
+        let board = |files: &Files, known: &std::collections::BTreeSet<String>| -> serde_json::Value {
+            let out: serde_json::Value = serde_json::from_str(&compile_json_known("/p/rig.assembly", rig, files, None, known)).unwrap();
+            out["display"]["data"]["prototypes"][0].clone()
+        };
+        let first = board(&files, &Default::default());
+        let digest = first["digest"].as_str().expect("a board digest").to_owned();
+        assert_eq!(Some(digest.clone()), board_digest("/p/daq.circuit", &files));
+        assert!(first.get("part").is_some());
+        let again = board(&files, &[digest.clone()].into());
+        assert!(again.get("part").is_none() && again["reused"] == true, "{again}");
+        files.get_mut("/p/daq.circuit.layout").unwrap().push_str("\n// edited\n");
+        let edited = board(&files, &[digest.clone()].into());
+        assert!(edited.get("part").is_some() && edited["digest"] != digest.as_str());
     }
 
     #[test]

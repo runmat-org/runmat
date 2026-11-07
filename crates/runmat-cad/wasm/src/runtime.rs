@@ -481,6 +481,9 @@ pub fn resolve_assembly_in(
                         summary.digest = format!("text:{}", text.len());
                         source.add_part(summary, configured);
                         displays.insert(key.clone(), display);
+                        if let Some(d) = crate::board::board_digest(&file, files) {
+                            digests.insert(key.clone(), d);
+                        }
                     }
                     Err(message) => problems.push(Diagnostic {
                         path: path.to_owned(),
