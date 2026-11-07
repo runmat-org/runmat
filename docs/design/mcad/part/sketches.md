@@ -1,6 +1,6 @@
 ---
 description: Reference for RunMat sketches. Sketch planes, lines, arcs, circles, splines, points and construction geometry, shared points, geometric and dimensional constraints, limits and the solved cache.
-keywords: [sketch, 2D sketch, constraints, parametric sketch, coincident, tangent, horizontal, vertical, dimension, construction geometry, spline, sketch solver]
+keywords: [sketch, 2D sketch, constraints, parametric sketch, coincident, tangent, horizontal, vertical, midpoint, symmetric, dimension, construction geometry, spline, sketch solver]
 ---
 # Sketches and constraints
 
@@ -75,6 +75,10 @@ A sketch on a face moves with the face when an earlier feature changes.
 | Parallel, perpendicular | `constrain parallel(l1, l3)`, `constrain perpendicular(l1, l2)` |
 | Tangent | `constrain tangent(l1, a1)` |
 | Equal | `constrain equal(a1, a2)` |
+| Midpoint | `constrain midpoint(p1.at, l1)`: the point sits halfway along the line |
+| Concentric, coradial | `constrain concentric(c1, c2)` (one center), `constrain coradial(c1, a1)` (one center and one radius) |
+| Collinear | `constrain collinear(l1, l5)`: both lines lie on one infinite line |
+| Symmetric | `constrain symmetric(l1.start, l2.end, axis)`: two points mirror each other in a line |
 | Distance | `constrain distance(l1.start, l2.end) = 60 mm` |
 | Length | `constrain length(l1) = 80 mm` |
 | Radius, diameter | `constrain radius(c1) = 5 mm`, `constrain diameter(c1) = 10 mm` |

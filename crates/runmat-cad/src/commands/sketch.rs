@@ -61,8 +61,6 @@ const CONSTRAINTS: &[(&str, &str)] = &[
     ("collinear", "Collinear"),
     ("coradial", "Coradial"),
     ("fix", "Fix"),
-    ("pierce", "Pierce"),
-    ("curvature", "Curvature (G2)"),
 ];
 
 const DIMENSIONS: &[(&str, &str)] = &[

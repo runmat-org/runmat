@@ -529,6 +529,48 @@ fn g10_constraint_solver_adapter_solves_and_maps_back() {
 }
 
 #[test]
+fn g10c_an_angle_between_a_horizontal_and_a_vertical_line_is_a_conflict() {
+    // A rectangle drawn with its horizontal and vertical relations and its width set. An angle of
+    // 5° between the top and the right edge can only hold if the right edge shrinks to nothing:
+    // that is a conflict naming the angle, not an under-defined sketch with a collapsed profile.
+    use runmat_cad::model::SketchConstraintKind as K;
+    let mut s = rect(PlaneRef::origin_xy(), mm(0.0), mm(0.0), mm(70.0), mm(45.0));
+    for i in 0..4 {
+        let prev = format!("l{}", if i == 0 { 4 } else { i });
+        if let SketchGeometry::Line { start, .. } = &mut s.entities[i].geometry {
+            *start = PointExpr::of(&prev, PointRole::End);
+        }
+    }
+    let t = SketchTarget::entity;
+    let c = |kind| SketchConstraint { id: None, kind };
+    s.constraints = vec![
+        c(K::Horizontal { line: t("l1") }),
+        c(K::Vertical { line: t("l2") }),
+        c(K::Horizontal { line: t("l3") }),
+        c(K::Vertical { line: t("l4") }),
+        c(K::Length { line: t("l1"), value: mm(8.0) }),
+    ];
+    let units = StubUnits;
+    let ev = Evaluator {
+        units: &units,
+        dynamic: &NoDynamicValues,
+    };
+    let good = ConstraintSketchSolver
+        .solve(&s, &ev, &ValueEnv::default())
+        .expect("the rectangle solves");
+    assert_eq!(good.status, SketchSolveStatus::UnderDefined);
+    s.constraints.push(c(K::Angle {
+        a: t("l1"),
+        b: t("l2"),
+        value: runmat_cad::value::ValueExpr::deg(5.0),
+    }));
+    let bad = ConstraintSketchSolver
+        .solve(&s, &ev, &ValueEnv::default())
+        .expect_err("the angle clashes with the horizontal and vertical relations");
+    assert_eq!(bad.constraints, vec![5], "{bad:?}");
+}
+
+#[test]
 fn g10b_sketch_range_limits_clamp_and_release() {
     // A rectangle 80 wide whose height is only limited to [10, 30] mm, drawn 45 high: the
     // limit pulls it to 30 and leaves it free (one DOF) inside the range; drawn 20 it stays.

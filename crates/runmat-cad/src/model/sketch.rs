@@ -250,6 +250,33 @@ pub enum SketchConstraintKind {
     Fix {
         target: SketchTarget,
     },
+    /// `point` sits at the middle of the line `line` (a line's midpoint at the origin, a
+    /// circle's center halfway along an edge).
+    Midpoint {
+        point: SketchTarget,
+        line: SketchTarget,
+    },
+    /// Two circles or arcs share a center.
+    Concentric {
+        a: SketchTarget,
+        b: SketchTarget,
+    },
+    /// Two circles or arcs share a center and a radius.
+    Coradial {
+        a: SketchTarget,
+        b: SketchTarget,
+    },
+    /// Two lines lie on one infinite line.
+    Collinear {
+        a: SketchTarget,
+        b: SketchTarget,
+    },
+    /// Points `a` and `b` are mirror images in the line `axis`.
+    Symmetric {
+        a: SketchTarget,
+        b: SketchTarget,
+        axis: SketchTarget,
+    },
     Distance {
         a: SketchTarget,
         b: SketchTarget,

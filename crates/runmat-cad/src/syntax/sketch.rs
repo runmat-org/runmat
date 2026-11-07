@@ -128,6 +128,11 @@ fn print_kind(kind: &K, extra: Option<String>) -> Option<(String, Option<String>
         K::Horizontal { line } => ("horizontal", vec![target(line)?], None),
         K::Vertical { line } => ("vertical", vec![target(line)?], None),
         K::Fix { target: t } => ("fix", vec![target(t)?], None),
+        K::Midpoint { point, line } => ("midpoint", vec![target(point)?, target(line)?], None),
+        K::Concentric { a, b } => ("concentric", vec![target(a)?, target(b)?], None),
+        K::Coradial { a, b } => ("coradial", vec![target(a)?, target(b)?], None),
+        K::Collinear { a, b } => ("collinear", vec![target(a)?, target(b)?], None),
+        K::Symmetric { a, b, axis } => ("symmetric", vec![target(a)?, target(b)?, target(axis)?], None),
         K::Distance { a, b, value } => ("distance", vec![target(a)?, target(b)?], Some(value)),
         K::Angle { a, b, value } => ("angle", vec![target(a)?, target(b)?], Some(value)),
         K::Length { line, value } => ("length", vec![target(line)?], Some(value)),
@@ -523,7 +528,8 @@ fn lower_kind(expr: &Expr, value: Option<&Expr>) -> Result<(K, Option<Constraint
         (t.next().unwrap(), t.next().unwrap())
     };
     let kind = match call.word.as_str() {
-        "coincident" | "parallel" | "perpendicular" | "tangent" | "equal" => {
+        "coincident" | "parallel" | "perpendicular" | "tangent" | "equal" | "concentric"
+        | "coradial" | "collinear" => {
             no_value(&value)?;
             let (a, b) = pair(targets(2)?);
             match call.word.as_str() {
@@ -531,8 +537,31 @@ fn lower_kind(expr: &Expr, value: Option<&Expr>) -> Result<(K, Option<Constraint
                 "parallel" => K::Parallel { a, b },
                 "perpendicular" => K::Perpendicular { a, b },
                 "tangent" => K::Tangent { a, b },
+                "concentric" => K::Concentric { a, b },
+                "coradial" => K::Coradial { a, b },
+                "collinear" => K::Collinear { a, b },
                 _ => K::Equal { a, b },
             }
+        }
+        "symmetric" => {
+            no_value(&value)?;
+            let mut t = targets(3)?.into_iter();
+            let (a, b, axis) = (t.next().unwrap(), t.next().unwrap(), t.next().unwrap());
+            if !matches!(a, SketchTarget::Point { .. })
+                || !matches!(b, SketchTarget::Point { .. })
+                || !matches!(axis, SketchTarget::Entity { .. })
+            {
+                return Err(error(span, "`symmetric` takes two points, then the line between them"));
+            }
+            K::Symmetric { a, b, axis }
+        }
+        "midpoint" => {
+            no_value(&value)?;
+            let (point, line) = pair(targets(2)?);
+            if !matches!(point, SketchTarget::Point { .. }) || !matches!(line, SketchTarget::Entity { .. }) {
+                return Err(error(span, "`midpoint` takes a point, then a line"));
+            }
+            K::Midpoint { point, line }
         }
         "horizontal" | "vertical" | "fix" => {
             no_value(&value)?;

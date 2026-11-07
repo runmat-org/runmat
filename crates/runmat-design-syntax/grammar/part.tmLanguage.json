@@ -33,7 +33,7 @@
     },
     {
       "name": "support.function.part",
-      "match": "(?<![\\w])(?:mate_connector|edges_between|perpendicular|construction|face_fillet|sheet_metal|through_all|coincident|full_round|horizontal|up_to_next|symmetric|vertex_of|distance|parallel|vertical|weldment|body_op|boolean|chamfer|extrude|library|pattern|revolve|surface|tangent|circle|direct|emboss|fillet|import|length|mirror|origin|radius|sketch|thread|angle|curve|draft|equal|frame|limit|piece|plane|point|shell|split|sweep|up_to|axis|hole|line|loft|mold|arc|fix|rib)(?![\\w])"
+      "match": "(?<![\\w])(?:mate_connector|edges_between|perpendicular|construction|face_fillet|sheet_metal|through_all|coincident|concentric|full_round|horizontal|up_to_next|collinear|symmetric|vertex_of|coradial|diameter|distance|midpoint|parallel|vertical|weldment|body_op|boolean|chamfer|extrude|library|pattern|revolve|surface|tangent|circle|direct|emboss|fillet|import|length|mirror|origin|radius|sketch|thread|angle|curve|draft|equal|frame|limit|piece|plane|point|shell|split|sweep|up_to|axis|hole|line|loft|mold|arc|fix|rib)(?![\\w])"
     },
     {
       "name": "keyword.control.part",
@@ -41,7 +41,7 @@
     },
     {
       "name": "storage.type.part",
-      "match": "(?<![\\w])(?:configuration|feature_def|tolerance|location|material|feature|publish|output|region|sketch|datum|size|use)(?![\\w])"
+      "match": "(?<![\\w])(?:configuration|feature_def|tolerance|location|material|feature|publish|finish|output|region|sketch|datum|size|use)(?![\\w])"
     },
     {
       "name": "keyword.other.part",
@@ -78,8 +78,12 @@
           "chamfer",
           "circle",
           "coincident",
+          "collinear",
+          "concentric",
           "construction",
+          "coradial",
           "curve",
+          "diameter",
           "direct",
           "distance",
           "draft",
@@ -101,6 +105,7 @@
           "line",
           "loft",
           "mate_connector",
+          "midpoint",
           "mirror",
           "mold",
           "origin",
@@ -155,6 +160,7 @@
           "datum",
           "feature",
           "feature_def",
+          "finish",
           "location",
           "material",
           "output",

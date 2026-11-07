@@ -494,11 +494,27 @@ fn relation(values: &Map<String, Value>, sketch: &str) -> Result<SketchConstrain
         "perpendicular" => two().map(|(a, b)| K::Perpendicular { a, b })?,
         "tangent" => two().map(|(a, b)| K::Tangent { a, b })?,
         "equal" => two().map(|(a, b)| K::Equal { a, b })?,
-        other => {
-            return Err(model(format!(
-                "the sketch model has no {other} relation yet"
-            )))
+        // A point and a line, picked in either order.
+        "midpoint" => match two()? {
+            (point @ SketchTarget::Point { .. }, line @ SketchTarget::Entity { .. })
+            | (line @ SketchTarget::Entity { .. }, point @ SketchTarget::Point { .. }) => {
+                K::Midpoint { point, line }
+            }
+            _ => return Err(model("Midpoint takes a point and a line")),
+        },
+        "concentric" => two().map(|(a, b)| K::Concentric { a, b })?,
+        "coradial" => two().map(|(a, b)| K::Coradial { a, b })?,
+        "collinear" => two().map(|(a, b)| K::Collinear { a, b })?,
+        // Two points and the line they mirror in; the line may come first or last.
+        "symmetric" => {
+            let mut points = targets.iter().filter(|t| matches!(t, SketchTarget::Point { .. })).cloned();
+            let axis = targets.iter().find(|t| matches!(t, SketchTarget::Entity { .. })).cloned();
+            match (points.next(), points.next(), axis, targets.len()) {
+                (Some(a), Some(b), Some(axis), 3) => K::Symmetric { a, b, axis },
+                _ => return Err(model("Symmetric takes two points and the line between them")),
+            }
         }
+        other => return Err(model(format!("Unknown sketch relation `{other}`"))),
     }))
 }
 

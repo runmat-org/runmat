@@ -169,6 +169,88 @@ fn cache_of(
     }
 }
 
+/// A solve that shrinks a line, or a circle's or arc's radius, to nothing is a conflict.
+///
+/// A zero-length line meets any direction within the solver's tolerance, so relations that
+/// clash (an angle between a horizontal and a vertical line) would otherwise "solve" by
+/// collapsing the profile, and the sketch would read as under-defined. The failure names the
+/// latest constraint, in statement order, on a collapsed entity: the relation that clashes with
+/// the ones before it, as the solver reports the later of two redundant constraints.
+fn collapsed(
+    sketch: &Sketch,
+    start: &BTreeMap<(SketchEntityId, PointRole), [f64; 2]>,
+    radii0: &BTreeMap<SketchEntityId, f64>,
+    points: &BTreeMap<(SketchEntityId, PointRole), [f64; 2]>,
+    radii: &BTreeMap<SketchEntityId, f64>,
+) -> Option<SketchSolveFailure> {
+    let scale = start
+        .values()
+        .flat_map(|p| [p[0].abs(), p[1].abs()])
+        .fold(1e-3f64, f64::max);
+    let tiny = 1e-6 * scale;
+    let gap = |m: &BTreeMap<(SketchEntityId, PointRole), [f64; 2]>, e: &SketchEntityId, a: PointRole, b: PointRole| {
+        let (p, q) = (m.get(&(e.clone(), a))?, m.get(&(e.clone(), b))?);
+        Some((p[0] - q[0]).hypot(p[1] - q[1]))
+    };
+    let shrank = |before: Option<f64>, after: Option<f64>| matches!((before, after), (Some(b), Some(a)) if b > tiny && a <= tiny);
+    let gone: Vec<&SketchEntityId> = sketch
+        .entities
+        .iter()
+        .filter(|e| match &e.geometry {
+            G::Line { .. } => shrank(
+                gap(start, &e.id, PointRole::Start, PointRole::End),
+                gap(points, &e.id, PointRole::Start, PointRole::End),
+            ),
+            G::Arc { .. } => shrank(
+                gap(start, &e.id, PointRole::Center, PointRole::Start),
+                gap(points, &e.id, PointRole::Center, PointRole::Start),
+            ),
+            G::Circle { .. } => shrank(radii0.get(&e.id).copied(), radii.get(&e.id).copied()),
+            _ => false,
+        })
+        .map(|e| &e.id)
+        .collect();
+    if gone.is_empty() {
+        return None;
+    }
+    let names = |c: &crate::model::sketch::SketchConstraint| {
+        let text = serde_json::to_string(&c.kind).unwrap_or_default();
+        gone.iter().any(|id| text.contains(&format!("\"entity\":\"{}\"", id)))
+    };
+    let last = sketch.constraints.iter().rposition(names)?;
+    let shrunk: Vec<String> = gone.iter().map(|id| id.to_string()).collect();
+    Some(SketchSolveFailure {
+        message: format!(
+            "sketch constraints conflict: constraint {} would shrink {} to nothing",
+            last + 1,
+            shrunk.join(", ")
+        ),
+        constraints: vec![last],
+    })
+}
+
+/// The sketch as it last solved: the `solved { }` cache where it has a value, else the written
+/// coordinates. A sketch whose constraints conflict is shown this way, so adding a clashing
+/// relation leaves the drawn geometry where it was.
+pub fn last_solved(
+    sketch: &Sketch,
+    eval: &Evaluator<'_>,
+    env: &ValueEnv,
+) -> Result<SolvedSketch, SketchSolveFailure> {
+    let (points, radii) = starting_points(sketch, eval, env)?;
+    let cache = cache_of(&points, &radii);
+    Ok(SolvedSketch {
+        points,
+        radii,
+        status: SketchSolveStatus::Explicit,
+        entity_dof: BTreeMap::new(),
+        dof: None,
+        redundant: Vec::new(),
+        conflicting: Vec::new(),
+        cache,
+    })
+}
+
 /// Takes the written coordinates; checks nothing.
 #[derive(Clone, Debug, Default)]
 pub struct ExplicitSketchSolver;
@@ -206,12 +288,43 @@ impl SketchSolver for ExplicitSketchSolver {
 #[derive(Clone, Debug, Default)]
 pub struct ConstraintSketchSolver;
 
+/// The failure message of a solve that found no solution and named no conflict set.
+const NOT_CONVERGED: &str = "sketch solve did not converge";
+
 impl SketchSolver for ConstraintSketchSolver {
     fn id(&self) -> String {
         format!("runmat-constraint/{}", env!("CARGO_PKG_VERSION"))
     }
 
+    /// A solve that doesn't converge is a conflict when one constraint clashes with the rest:
+    /// the latest constraint, in statement order, whose removal lets the others solve is named
+    /// (an angle of 5° between a horizontal and a vertical line, added last, is that constraint).
     fn solve(
+        &self,
+        sketch: &Sketch,
+        eval: &Evaluator<'_>,
+        env: &ValueEnv,
+    ) -> Result<SolvedSketch, SketchSolveFailure> {
+        let failure = match self.solve_once(sketch, eval, env) {
+            Err(f) if f.constraints.is_empty() && f.message == NOT_CONVERGED => f,
+            other => return other,
+        };
+        for i in (0..sketch.constraints.len()).rev() {
+            let mut without = sketch.clone();
+            without.constraints.remove(i);
+            if self.solve_once(&without, eval, env).is_ok() {
+                return Err(SketchSolveFailure {
+                    message: format!("sketch constraints conflict: constraint {} clashes with the others", i + 1),
+                    constraints: vec![i],
+                });
+            }
+        }
+        Err(failure)
+    }
+}
+
+impl ConstraintSketchSolver {
+    fn solve_once(
         &self,
         sketch: &Sketch,
         eval: &Evaluator<'_>,
@@ -346,6 +459,18 @@ impl SketchSolver for ConstraintSketchSolver {
                     }
                 }
                 K::Fix { target: x } => C::Fix(t(x)?),
+                K::Midpoint { point, line } => C::Midpoint {
+                    point: t(point)?,
+                    line: t(line)?,
+                },
+                K::Concentric { a, b } => C::Concentric(t(a)?, t(b)?),
+                K::Coradial { a, b } => C::Coradial(t(a)?, t(b)?),
+                K::Collinear { a, b } => C::Collinear(t(a)?, t(b)?),
+                K::Symmetric { a, b, axis } => C::Symmetric {
+                    a: t(a)?,
+                    b: t(b)?,
+                    axis: t(axis)?,
+                },
                 K::Distance { a, b, value } => C::Distance {
                     a: t(a)?,
                     b: t(b)?,
@@ -430,7 +555,7 @@ impl SketchSolver for ConstraintSketchSolver {
                     constraints: map_ids(report.conflict_set()),
                 })
             }
-            Status::NotConverged => return Err(fail("sketch solve did not converge")),
+            Status::NotConverged => return Err(fail(NOT_CONVERGED)),
             _ => {}
         }
         let mut points = BTreeMap::new();
@@ -450,6 +575,9 @@ impl SketchSolver for ConstraintSketchSolver {
                     report.value(*vars.last().expect("circle has a radius")),
                 );
             }
+        }
+        if let Some(failure) = collapsed(sketch, &start, &radii0, &points, &radii) {
+            return Err(failure);
         }
         let entity_dof = curves
             .iter()

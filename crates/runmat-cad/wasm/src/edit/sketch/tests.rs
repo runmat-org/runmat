@@ -249,3 +249,81 @@ fn split_construction_and_auto_constrain() {
     let again = run(&auto, "sketch.auto-constrain", json!({ "sketch": "s1" }));
     assert_eq!(again["ok"], false, "{again}");
 }
+
+/// A plate with a mirror line (l5, x = 20), a line on l1's line (l6), two circles and a point.
+const RELATED: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n        l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n        l5 = line(start = [20 mm, -10 mm], end = [20 mm, 30 mm])\n        l6 = line(start = [50 mm, 1 mm], end = [60 mm, 1 mm])\n        c1 = circle(center = [10 mm, 10 mm], radius = 3 mm)\n        c2 = circle(center = [11 mm, 10 mm], radius = 4 mm)\n        p1 = point(at = [18 mm, 2 mm])\n    }\n}\n";
+
+#[test]
+fn every_relation_the_menu_offers_is_written_and_solved() {
+    let catalog = serde_json::to_value(runmat_cad::commands::catalog().command("sketch.constraint").unwrap()).unwrap();
+    let offered: Vec<String> = catalog["inputs"][0]["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["value"].as_str().unwrap().to_owned())
+        .collect();
+    let picks = |relation: &str| -> (Vec<&str>, &str) {
+        match relation {
+            "coincident" => (vec!["p1.at", "l1.start"], "coincident(p1.at, l1.start)"),
+            "horizontal" => (vec!["l1"], "horizontal(l1)"),
+            "vertical" => (vec!["l2"], "vertical(l2)"),
+            "parallel" => (vec!["l1", "l3"], "parallel(l1, l3)"),
+            "perpendicular" => (vec!["l1", "l2"], "perpendicular(l1, l2)"),
+            "tangent" => (vec!["l1", "c1"], "tangent(l1, c1)"),
+            "equal" => (vec!["l1", "l2"], "equal(l1, l2)"),
+            "concentric" => (vec!["c1", "c2"], "concentric(c1, c2)"),
+            // Picked line first: the point still comes first in the file.
+            "midpoint" => (vec!["l1", "p1.at"], "midpoint(p1.at, l1)"),
+            "symmetric" => (vec!["l1.start", "l1.end", "l5"], "symmetric(l1.start, l1.end, l5)"),
+            "collinear" => (vec!["l1", "l6"], "collinear(l1, l6)"),
+            "coradial" => (vec!["c1", "c2"], "coradial(c1, c2)"),
+            "fix" => (vec!["p1.at"], "fix(p1.at)"),
+            other => panic!("the Relations menu offers `{other}` and this test has no picks for it"),
+        }
+    };
+    for relation in &offered {
+        let (entities, written) = picks(relation);
+        let entities: Vec<String> = entities.iter().map(|e| format!("sketch.s1.{e}")).collect();
+        let text = applied(RELATED, "sketch.constraint", json!({ "sketch": "s1", "relation": relation, "entities": entities }));
+        assert_eq!(added(RELATED, &text), vec![format!("        constrain {written}")], "{relation}");
+    }
+}
+
+#[test]
+fn a_midpoint_relation_puts_the_point_halfway_along_the_line() {
+    let text = applied(RELATED, "sketch.constraint", json!({ "sketch": "s1", "relation": "midpoint", "entities": ["sketch.s1.p1.at", "sketch.s1.l1"] }));
+    let part = compile_part("/p/plate.part", &text).unwrap();
+    let display = serde_json::to_value(&part.display).unwrap();
+    let points = display["sketches"][0]["entities"].as_array().unwrap();
+    let at = points.iter().find(|e| e["id"] == "p1").unwrap()["points"]["at"].clone();
+    let (start, end) = {
+        let l1 = points.iter().find(|e| e["id"] == "l1").unwrap();
+        (l1["points"]["start"].clone(), l1["points"]["end"].clone())
+    };
+    for axis in 0..2 {
+        let mid = (start[axis].as_f64().unwrap() + end[axis].as_f64().unwrap()) / 2.0;
+        // Display coordinates are f32 metres.
+        assert!((at[axis].as_f64().unwrap() - mid).abs() < 1e-7, "{at} vs {start} .. {end}");
+    }
+}
+
+#[test]
+fn an_angle_that_clashes_is_a_conflict_and_leaves_the_rectangle_where_it_was() {
+    let boxed = PLATE.replace(
+        "        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n",
+        "        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n        constrain horizontal(l1)\n        constrain vertical(l2)\n        constrain horizontal(l3)\n        constrain vertical(l4)\n        constrain length(l1) = 40 mm\n",
+    );
+    let shown = |text: &str| {
+        let part = compile_part("/p/plate.part", text).unwrap();
+        serde_json::to_value(&part.display).unwrap()["sketches"][0].clone()
+    };
+    let before = shown(&boxed);
+    assert_eq!(before["status"], "under_defined", "{before}");
+    let out = run(&boxed, "sketch.dimension", json!({ "sketch": "s1", "type": "angle", "entities": ["sketch.s1.l3", "sketch.s1.l2"], "value": 5 }));
+    assert_eq!(out["ok"], true, "{out}");
+    let after = shown(out["files"][0]["text"].as_str().unwrap());
+    assert_eq!(after["status"], "over_defined", "{after}");
+    assert_eq!(after["conflicting"], json!([5]), "{after}");
+    let points = |sketch: &Value| -> Vec<Value> { sketch["entities"].as_array().unwrap().iter().map(|e| json!([e["id"], e["points"]])).collect() };
+    assert_eq!(points(&after), points(&before));
+}
