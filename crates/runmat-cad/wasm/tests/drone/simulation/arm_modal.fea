@@ -18,9 +18,9 @@
 // 746 g), and a 2:1 thrust-to-weight ratio needs 11,030 rpm, so the once-per-revolution
 // imbalance runs 130-184 Hz and the two-blade pass 260-368 Hz. The first flap mode should sit
 // above 1.2 x 368 = 442 Hz; the check below keeps the earlier 476 Hz target.
-// Check: the lofted elliptic beam (root 16 x 13 mm, tip 11 x 7 mm) under a tip load, integrated
-// station by station, gives k = 448 N/mm at 90 GPa; with the 40 g pod and the arm's effective
-// 3.8 g, f1 = sqrt(k/m)/(2 pi) = 509 Hz, 1.38 x the 368 Hz blade pass.
+// Check: the lofted elliptic beam (root 16 x 12.4 mm, tip 11 x 7 mm) under a tip load, integrated
+// station by station, gives k = 431 N/mm at 90 GPa; with the 40 g pod and the arm's effective
+// 3.8 g, f1 = sqrt(k/m)/(2 pi) = 499 Hz, 1.36 x the 368 Hz blade pass.
 
 geometry arm {
     file = "./geometry/arm_study.step"

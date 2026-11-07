@@ -21,13 +21,14 @@ part arm {
     feature knuckle = extrude(profile = sketch.knuckle_b, distance = 13 mm)
     feature beam_st0 = plane.offset(base = origin.yz, distance = 4 mm)
     sketch beam_s0 on plane.beam_st0 {
-        c = spline(points = [[0 mm, 6.5 mm], [2.594 mm, 6.315 mm], [4.49 mm, 5.766 mm], [5.993 mm, 4.869 mm], [7.096 mm, 3.648 mm], [7.772 mm, 2.107 mm], [8 mm, 0 mm], [7.772 mm, -2.107 mm], [7.096 mm, -3.648 mm], [5.993 mm, -4.869 mm], [4.49 mm, -5.766 mm], [2.594 mm, -6.315 mm], [0 mm, -6.5 mm], [-2.594 mm, -6.315 mm], [-4.49 mm, -5.766 mm], [-5.993 mm, -4.869 mm], [-7.096 mm, -3.648 mm], [-7.772 mm, -2.107 mm], [-8 mm, 0 mm], [-7.772 mm, 2.107 mm], [-7.096 mm, 3.648 mm], [-5.993 mm, 4.869 mm], [-4.49 mm, 5.766 mm], [-2.594 mm, 6.315 mm]], closed)
+        c = spline(points = [[0 mm, 6.2 mm], [2.594 mm, 6.024 mm], [4.49 mm, 5.5 mm], [5.993 mm, 4.644 mm], [7.096 mm, 3.48 mm], [7.772 mm, 2.01 mm], [8 mm, 0 mm], [7.772 mm, -2.01 mm], [7.096 mm, -3.48 mm], [5.993 mm, -4.644 mm], [4.49 mm, -5.5 mm], [2.594 mm, -6.024 mm], [0 mm, -6.2 mm], [-2.594 mm, -6.024 mm], [-4.49 mm, -5.5 mm], [-5.993 mm, -4.644 mm], [-7.096 mm, -3.48 mm], [-7.772 mm, -2.01 mm], [-8 mm, 0 mm], [-7.772 mm, 2.01 mm], [-7.096 mm, 3.48 mm], [-5.993 mm, 4.644 mm], [-4.49 mm, 5.5 mm], [-2.594 mm, 6.024 mm]], closed)
     }
-    // The beam keeps the knuckle's section out past the clevis lugs (R7.5) before it rises, so
-    // the lugs clear it at every fold angle.
+    // The beam keeps a constant 12.4 mm root depth out past the clevis lugs (R7.5) before it
+    // rises, so the lugs clear it at every fold angle. Its crown and keel sit 0.3 mm inside the
+    // knuckle's faces (6.2 mm against 6.5 mm), a deliberate shoulder where the beam meets the knuckle.
     feature beam_sta = plane.offset(base = origin.yz, distance = 9 mm)
     sketch beam_sa on plane.beam_sta {
-        c = spline(points = [[0 mm, 6.38 mm], [2.542 mm, 6.198 mm], [4.4 mm, 5.66 mm], [5.873 mm, 4.779 mm], [6.954 mm, 3.581 mm], [7.617 mm, 2.068 mm], [7.84 mm, 0 mm], [7.617 mm, -2.068 mm], [6.954 mm, -3.581 mm], [5.873 mm, -4.779 mm], [4.4 mm, -5.66 mm], [2.542 mm, -6.198 mm], [0 mm, -6.38 mm], [-2.542 mm, -6.198 mm], [-4.4 mm, -5.66 mm], [-5.873 mm, -4.779 mm], [-6.954 mm, -3.581 mm], [-7.617 mm, -2.068 mm], [-7.84 mm, 0 mm], [-7.617 mm, 2.068 mm], [-6.954 mm, 3.581 mm], [-5.873 mm, 4.779 mm], [-4.4 mm, 5.66 mm], [-2.542 mm, 6.198 mm]], closed)
+        c = spline(points = [[0 mm, 6.2 mm], [2.542 mm, 6.023 mm], [4.4 mm, 5.5 mm], [5.873 mm, 4.644 mm], [6.954 mm, 3.48 mm], [7.617 mm, 2.01 mm], [7.84 mm, 0 mm], [7.617 mm, -2.01 mm], [6.954 mm, -3.48 mm], [5.873 mm, -4.644 mm], [4.4 mm, -5.5 mm], [2.542 mm, -6.023 mm], [0 mm, -6.2 mm], [-2.542 mm, -6.023 mm], [-4.4 mm, -5.5 mm], [-5.873 mm, -4.644 mm], [-6.954 mm, -3.48 mm], [-7.617 mm, -2.01 mm], [-7.84 mm, 0 mm], [-7.617 mm, 2.01 mm], [-6.954 mm, 3.48 mm], [-5.873 mm, 4.644 mm], [-4.4 mm, 5.5 mm], [-2.542 mm, 6.023 mm]], closed)
     }
     feature beam_st1 = plane.offset(base = origin.yz, distance = let.reach * 0.45)
     sketch beam_s1 on plane.beam_st1 {

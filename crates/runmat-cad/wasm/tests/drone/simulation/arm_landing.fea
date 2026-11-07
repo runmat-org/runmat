@@ -8,8 +8,8 @@
 // Load: a 1 m/s touchdown (the descent limit) stopped over the skids' 2 mm of compliance is
 // 1^2 / (2 x 0.002) = 250 m/s^2, about 25 g; on the pod's 40 g (motor, propeller and cowl) that
 // is 0.04 kg x 250 m/s^2 = 10 N down. Check: the moment at the knuckle is 10 N x 90.6 mm =
-// 906 N mm; the root's section modulus (16 x 13 mm superellipse) is about 300 mm^3, so the
-// bending stress there is about 3.0 MPa, two orders below the laminate's 600 MPa strength. The
+// 906 N mm; the root's section modulus (16 x 12.4 mm superellipse) is about 275 mm^3, so the
+// bending stress there is about 3.3 MPa, two orders below the laminate's 600 MPa strength. The
 // lugs, 16.8 mm apart, carry the moment as a 54 N couple on the 4 mm pin.
 
 geometry arm {
