@@ -122,7 +122,7 @@ The check runs the electrical rules (undriven inputs, conflicting drivers, uncon
 
 Each finding names its pins and offers a fix where one exists, such as adding the missing capacitor. See [Rules and checks](/docs/ecad/circuit/rules-and-checks).
 
-In the Desktop, ERC on the Schematic tab runs the same electrical rules over the whole design. A clean design ends with one line under the sheet:
+In the Desktop, ERC on the Schematic tab runs the same electrical rules over the whole design and lists each finding under the sheet. Here ERC finds the microcontroller's spare PB15 pin unconnected. PB15 is an unused GPIO, so No-ERC marks it as meant to be open, and the next run ends clean:
 
 <!-- design:clip:ecad/erc -->
 

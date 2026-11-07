@@ -82,10 +82,10 @@
     },
     {
       "id": "ecad/erc",
-      "alt": "On the flight controller's mcu sheet, ERC runs over the whole design and ends with one line: Electrical rule check, no violations.",
+      "alt": "On the mcu sheet, zoomed on the microcontroller's lower pins, ERC finds one warning, the spare PB15 pin unconnected; No-ERC marks the unused pin as meant to be open, and ERC runs again with no violations.",
       "width": 1664,
       "height": 1180,
-      "seconds": 6.0,
+      "seconds": 10.8,
       "base": "/design-assets/flow-clips/ecad/erc/erc"
     },
     {
@@ -98,11 +98,35 @@
     },
     {
       "id": "ecad/drc",
-      "alt": "On the flight controller's whole board, DRC runs and ends with one line: Design rule check, no violations.",
+      "alt": "On the board, zoomed on D1, D2, R4 and R5, DRC finds the LED2_K net in two pieces; Route joins D2's cathode pad to R5's second pad on the top layer, and DRC runs again with no violations.",
       "width": 1664,
       "height": 1180,
-      "seconds": 5.9,
+      "seconds": 11.3,
       "base": "/design-assets/flow-clips/ecad/drc/drc"
+    },
+    {
+      "id": "ecad/route",
+      "alt": "With C24 moved 2.1 mm under C5, Route joins C24's +3V3 pad and then its GND pad to C5's with 0.25 mm top-layer tracks, Via drops a GND stitching via on the new ground track between the two capacitors, and the In1.Cu view shows the via joined to the ground plane.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 14.4,
+      "base": "/design-assets/flow-clips/ecad/route/route"
+    },
+    {
+      "id": "ecad/pour",
+      "alt": "On the bottom layer, Draw pour takes GND as its net, four clicks draw its outline inside the board's edge, B.Cu is set as its layer, and the bottom layer fills with ground clear of every other net's copper.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 10.3,
+      "base": "/design-assets/flow-clips/ecad/pour/pour"
+    },
+    {
+      "id": "ecad/outputs",
+      "alt": "The Fabrication outputs panel shows the fab-house package and a clean pre-flight (DRC, ERC, unrouted and schematic changes all 0); Generate writes the package and lists its 19 files under the board.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 6.9,
+      "base": "/design-assets/flow-clips/ecad/outputs/outputs"
     }
   ]
 }

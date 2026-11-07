@@ -87,6 +87,10 @@ Generate runs the pre-flight first: DRC findings, ERC findings, unrouted connect
 
 The results list every file written, with its format, the layer or role it holds and its size, and each opens or shows in its folder. A Gerber file in the list previews its layer.
 
+Here the pre-flight is clean, so Generate writes the fab-house package straight away and lists its files under the board:
+
+<!-- design:clip:ecad/outputs -->
+
 | Folder | Holds |
 |---|---|
 | `gerber/` | Gerber X2 per layer and the `.gbrjob` job file with the stackup |

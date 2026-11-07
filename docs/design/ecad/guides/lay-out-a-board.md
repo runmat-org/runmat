@@ -118,6 +118,14 @@ pour GND = { name = gnd_bottom, layers = [B.Cu], outline = [[0.5, 0.5], [19.5, 0
 - `pour GND` fills the bottom layer with ground around everything else; Fill refills pours after an edit.
 - Vias in the ground pour next to each ground pad (stitching) give the top-layer pads a short path to the plane.
 
+In the Desktop, Route joins the pads you click with a track of the width and layer you give, and Via places a via where you click, on the net of the copper under it. Here C24's two pads are routed to C5's, and a stitching via on the new ground track joins it to the In1.Cu ground plane:
+
+<!-- design:clip:ecad/route -->
+
+Draw pour takes a net, the corners of its outline and a layer, and fills that layer with the net, clear of every other net's copper. Here GND fills the bottom layer:
+
+<!-- design:clip:ecad/pour -->
+
 ## 5. Clear the design-rule check
 
 DRC runs as you edit. Each finding names the rule, the two objects and the gap between them, and selecting it selects those objects on the canvas. Typical findings are a track too close to a pad of another net, copper too near the edge, silkscreen on a pad, an unrouted connection. The check passes when DRC is clean, every connection is routed and the board has taken every schematic change:
@@ -128,7 +136,7 @@ runmat-design check baro.circuit.layout
 
 See [Board layout](/docs/ecad/layout#design-rules) for every rule.
 
-In the Desktop, DRC on the Board tab runs the full check. A clean board ends with one line under the board:
+In the Desktop, DRC on the Board tab runs the full check and lists each finding under the board. Here DRC finds the LED2_K net in two pieces, D2's cathode pad and R5. Route joins the two pads, and the next run ends clean:
 
 <!-- design:clip:ecad/drc -->
 
