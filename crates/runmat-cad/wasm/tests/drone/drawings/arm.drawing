@@ -25,7 +25,7 @@ drawing arm {
     sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
 
     view front = standard(orientation = front, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 164], display = hidden_lines)
-    view top = projected(from = front, direction = up, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 216], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 217], display = hidden_lines)
     view right = projected(from = front, direction = right, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [299, 166], display = hidden_lines)
     view a_a = section(
         from = top,
@@ -43,8 +43,8 @@ drawing arm {
         label = B,
         sheet = "1",
         model = { part = arm, from = "../mechanical/arm" },
-        at = [367, 210],
-        scale = [4, 1],
+        at = [364, 214],
+        scale = [3, 1],
         display = hidden_lines
     )
     view iso = standard(orientation = isometric, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [340, 105], scale = [1, 1], display = visible_lines)
