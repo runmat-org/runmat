@@ -200,7 +200,7 @@ fn verify_evidence(
         .endpoint_identity
         .as_ref()
         .ok_or_else(|| protocol("worker endpoint identity is missing"))?;
-    if evidence.org_id != authority.org_id
+    if evidence.org_id != authority.org_id.as_str()
         || evidence.run_identity != authority.run_id
         || evidence.allocation_lease_id != worker.allocation_lease_id
         || evidence.fencing_token != worker.fencing_token

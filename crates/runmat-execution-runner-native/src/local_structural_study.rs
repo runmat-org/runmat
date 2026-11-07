@@ -272,6 +272,20 @@ async fn execute_family_locally(
         )
         .await?,
     );
+    // One read per run: the pool less what this coordinator holds once meshing has finished.
+    let pool = match analysis_config.local_memory_capacity_bytes {
+        Some(capacity) => capacity,
+        None => crate::machine_capacity::memory_bytes()
+            .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?,
+    };
+    let worker_memory_bytes = crate::machine_capacity::worker_memory_bytes(pool)
+        .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?;
+    tracing::info!(
+        pool_bytes = pool,
+        coordinator_bytes = pool - worker_memory_bytes,
+        worker_memory_bytes,
+        "local family study worker memory"
+    );
     let planned = crate::study_family::plan_family_study(
         crate::study_family::FamilyStudyContext {
             study: &decoded.study,
@@ -285,6 +299,7 @@ async fn execute_family_locally(
             artifact_access: &decoded.artifact_access,
             program_revision: &decoded.geometry_meshing.recipe.program_revision,
             local_execution: decoded.local_execution,
+            worker_memory_bytes,
         },
         &mut |model| {
             let completed = completed_inputs.take().unwrap_or_default();
@@ -295,6 +310,7 @@ async fn execute_family_locally(
     )
     .map_err(NativeExecutionError::Protocol)?;
     drop(output);
+    crate::machine_capacity::trace_footprint("family study planned");
     emit_local_progress(
         observers,
         OPERATION,
@@ -305,10 +321,7 @@ async fn execute_family_locally(
         Some(1),
     );
     let resources = planned
-        .local_resources(
-            decoded.local_execution,
-            analysis_config.local_memory_capacity_bytes,
-        )
+        .local_resources(decoded.local_execution, worker_memory_bytes)
         .map_err(NativeExecutionError::Protocol)?;
     analysis_config.max_workers = workers.max(1);
     crate::analysis_task_pool::configure_local_analysis_envelope(&mut analysis_config, &resources);

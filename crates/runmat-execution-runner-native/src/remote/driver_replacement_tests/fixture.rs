@@ -447,7 +447,7 @@ fn worker_allocation(
     let signer = EndpointIdentitySigner::from_secret([entropy + 20; 32]).unwrap();
     let mut evidence = EndpointIdentityEvidence {
         schema_version: 1,
-        org_id: "org-1".into(),
+        org_id: crate::remote::test_ids::TEST_ORG_ID.into(),
         cluster_id: "cluster-1".into(),
         node_id: format!("node-{allocation_id}"),
         allocation_lease_id: allocation_id.into(),
@@ -497,7 +497,7 @@ pub(super) fn driver_identity_material() -> EndpointIdentityMaterial {
         entropy,
         EndpointIdentityEvidence {
             schema_version: 1,
-            org_id: "org-1".into(),
+            org_id: crate::remote::test_ids::TEST_ORG_ID.into(),
             cluster_id: "cluster-1".into(),
             node_id: "driver-node".into(),
             allocation_lease_id: DRIVER_ALLOCATION.into(),
@@ -527,10 +527,10 @@ pub(super) fn driver_authority(fence: u64, server_url: String) -> DriverAuthorit
     DriverAuthority {
         server_url,
         run_id: RUN_ID.into(),
-        org_id: "org-1".into(),
+        org_id: crate::remote::test_ids::test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: DRIVER_ALLOCATION.into(),
-        driver_lease_id: format!("driver-{fence}"),
+        driver_lease_id: crate::remote::test_ids::test_driver_lease_id(fence),
         fencing_token: fence,
         credential: format!("credential-{fence}"),
     }

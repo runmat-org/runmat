@@ -716,7 +716,7 @@ impl RemotePoolDriver {
         authoritative_unstarted: Option<&AuthoritativeUnstartedInventory>,
     ) -> NativeExecutionResult<()> {
         if self.value_scope != authority.run_id
-            || evidence.org_id != authority.org_id
+            || evidence.org_id != authority.org_id.as_str()
             || evidence.cluster_id != owner.cluster_id
             || evidence.node_id != owner.node_id
             || evidence.run_id != authority.run_id

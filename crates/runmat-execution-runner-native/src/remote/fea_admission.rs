@@ -55,15 +55,10 @@ pub(super) fn for_verified_driver(
     authority
         .validate()
         .map_err(|_| FeaRunDenied::LicenseInvalid)?;
-    let org = runmat_server_client::ids::OrgId::parse(&authority.org_id)
-        .map_err(|_| FeaRunDenied::LicenseInvalid)?;
-    let driver =
-        runmat_server_client::ids::ExecutionDriverLeaseId::parse(&authority.driver_lease_id)
-            .map_err(|_| FeaRunDenied::LicenseInvalid)?;
     let lease = runmat_fea_admission_native::NativeFeaAdmission::for_driver(
         &authority.server_url,
-        org,
-        driver,
+        authority.org_id.clone(),
+        authority.driver_lease_id.clone(),
         authority.fencing_token,
         &authority.credential,
     )?;
@@ -80,7 +75,7 @@ pub(super) fn for_verified_driver(
         FeaRunOrigin::ClusterDriver {
             run_id: authority.run_id.clone(),
             allocation_lease_id: authority.allocation_lease_id.clone(),
-            driver_lease_id: authority.driver_lease_id.clone(),
+            driver_lease_id: authority.driver_lease_id.to_string(),
             fencing_token: authority.fencing_token,
         },
     )

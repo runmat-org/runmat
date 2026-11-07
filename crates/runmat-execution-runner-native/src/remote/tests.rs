@@ -39,13 +39,7 @@ use super::driver::run_remote_driver;
 
 mod mixed_recovery;
 
-/// The Server issues prefixed organization and driver-lease identifiers, and
-/// the verified driver's FEA admission parses both before the program runs.
-const TEST_ORG_ID: &str = "org_00000000000000000000000000000001";
-
-fn test_driver_lease_id(fence: u64) -> String {
-    format!("drv_{fence:032x}")
-}
+use super::test_ids::{test_driver_lease_id, test_org_id, TEST_ORG_ID};
 
 #[derive(Default)]
 struct FakeState {
@@ -286,7 +280,7 @@ async fn remote_driver_commits_verified_externalized_results() {
         authority: DriverAuthority {
             server_url: "https://control.invalid".into(),
             run_id: run_id.into(),
-            org_id: TEST_ORG_ID.into(),
+            org_id: test_org_id(),
             project_id: "project-1".into(),
             allocation_lease_id: "allocation-1".into(),
             driver_lease_id: test_driver_lease_id(1),
@@ -379,7 +373,7 @@ async fn replacement_restores_a_verified_run_scoped_object_closure() {
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: TEST_ORG_ID.into(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
         driver_lease_id: test_driver_lease_id(2),
@@ -415,7 +409,7 @@ async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: TEST_ORG_ID.into(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
         driver_lease_id: test_driver_lease_id(4),
@@ -943,7 +937,7 @@ async fn run_encrypted_remote_request_with_prior_sequence(
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: TEST_ORG_ID.into(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
         driver_lease_id: test_driver_lease_id(driver_fence),
