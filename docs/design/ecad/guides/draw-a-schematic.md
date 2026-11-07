@@ -10,7 +10,7 @@ The Desktop's schematic canvas and the source view edit the same file. Placing a
 
 ## 1. Place parts
 
-Run New Circuit, or create `baro.circuit`. Search the parts library for each part and place it; placing writes a `component` with the part's MPN. A designator ending in `?` (`R?`) is numbered when the schematic is annotated.
+Run New Circuit, or create `baro.circuit`. Find each part in Search (the left rail) and choose Place; placing writes a `component` with the part's MPN. A designator ending in `?` (`R?`) is numbered when the schematic is annotated.
 
 ```circuit fragment
 sheet main {
