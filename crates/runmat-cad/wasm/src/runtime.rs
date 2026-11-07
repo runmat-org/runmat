@@ -20,7 +20,7 @@ use runmat_cad::sketch_solver::ConstraintSketchSolver;
 use runmat_cad::syntax::{parse_assembly_in, parse_part};
 use runmat_cad::units::StubUnits;
 use runmat_cad::value::NoDynamicValues;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub type Files = BTreeMap<String, String>;
 
 /// A problem at a UTF-16 range of one file.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Diagnostic {
     pub path: String,
     pub start: usize,
@@ -506,6 +506,10 @@ pub fn resolve_assembly_in(
                 _ => {
                     let cache_key = part_cache::assembly_key(&key, text, &ASSEMBLY_TESSELLATION);
                     digests.insert(key.clone(), part_cache::digest(&cache_key));
+                    // A probe leaves a part the cache doesn't hold for its caller to find.
+                    if part_cache::skip(&cache_key) {
+                        continue;
+                    }
                     match part_cache::assembly_part(cache_key, || {
                     regenerate_part_with(&key, text, &ASSEMBLY_TESSELLATION).map(|part| {
                         let diagnostics = regen_diagnostics(&key, &part);

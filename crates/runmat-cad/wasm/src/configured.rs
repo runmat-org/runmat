@@ -90,6 +90,9 @@ pub fn configured_displays(
         };
         // Kept across compiles by the part's document and the configuration ([`part_cache`]).
         let cache_key = part_cache::configured_key(&key.0, document, &node.configuration);
+        if part_cache::skip(&cache_key) {
+            continue;
+        }
         let part = part_cache::configured_part(cache_key, || {
             let used = std::cell::Cell::new(false);
             let (result, kernel) = regenerate_configured_watched(document, &node.configuration, &used);

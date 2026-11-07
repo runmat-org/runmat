@@ -13,9 +13,19 @@
 //! it reads ([`board_key`]).
 //!
 //! The cache holds at most [`BUDGET_BYTES`] of display meshes; the least recently used entries
-//! go first.
+//! go first. Entries are held by [`digest`] of their key.
+//!
+//! Entries also outlive the host. [`take_fresh`] writes each entry regenerated since the last
+//! take as one [`entry_frame`] (its JSON with the meshes as bytes, [`runmat_cad::display::wire`]),
+//! and [`seed`] reads such frames back in. The browser keeps them by digest (the examples ship
+//! theirs as static files, and the page stores what it regenerates), and before a compile it
+//! runs a [`probe`]: the compile with every entry the cache doesn't hold left out and listed, so
+//! the page can fetch those entries and seed them first. A digest names the key exactly, so an
+//! edited file is a new digest and regenerates; the page keeps stored entries apart per host
+//! build, since another build may regenerate differently.
 
 use super::Diagnostic;
+use runmat_cad::display::wire;
 use runmat_cad::assembly::source::{ConfigKey, PublishedGeometry};
 use runmat_cad::display::PartDisplay;
 use runmat_cad::ids::PublishName;
@@ -26,7 +36,8 @@ use runmat_cad::value::{
     ValueXref,
 };
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 /// The display meshes the cache keeps, by their array sizes: a quarter of the browser host's
@@ -35,6 +46,7 @@ use std::rc::Rc;
 pub const BUDGET_BYTES: usize = 128 << 20;
 
 /// A part file regenerated for an assembly: what the assembly reads of it.
+#[derive(Serialize, Deserialize)]
 pub struct AssemblyPart {
     /// The regeneration's diagnostics ([`super::regen_diagnostics`]).
     pub diagnostics: Vec<Diagnostic>,
@@ -45,6 +57,7 @@ pub struct AssemblyPart {
 }
 
 /// A configured occurrence's display ([`crate::configured`]).
+#[derive(Serialize, Deserialize)]
 pub struct ConfiguredPart {
     pub display: PartDisplay,
 }
@@ -63,15 +76,25 @@ struct Slot {
 
 #[derive(Default)]
 struct Cache {
+    /// By [`digest`] of the key.
     slots: HashMap<String, Slot>,
+    /// Digests regenerated (not seeded) since the last [`take_fresh`].
+    fresh: Vec<String>,
     bytes: usize,
     clock: u64,
     hits: u64,
     misses: u64,
 }
 
+/// A [`probe`] in progress: the digests it may regenerate, and those it left out.
+struct Probe {
+    allow: HashSet<String>,
+    misses: Vec<String>,
+}
+
 thread_local! {
     static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
+    static PROBE: RefCell<Option<Probe>> = const { RefCell::new(None) };
 }
 
 /// The cache's counters: entries, display bytes, hits and misses since the thread started.
@@ -156,6 +179,8 @@ pub fn board_key(file: &str, layout: &str, text: &str, circuit_files: &BTreeMap<
 }
 
 fn get(key: &str) -> Option<Entry> {
+    let key = digest(key);
+    let key = key.as_str();
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         c.clock += 1;
@@ -177,11 +202,20 @@ fn get(key: &str) -> Option<Entry> {
     })
 }
 
+/// Keeps a regenerated entry under its key.
 fn put(key: String, entry: Entry, bytes: usize) {
+    let key = digest(&key);
+    if insert(key.clone(), entry, bytes) {
+        CACHE.with(|c| c.borrow_mut().fresh.push(key));
+    }
+}
+
+/// Holds `entry` under `digest`, evicting the least recently used; false when it is too large.
+fn insert(key: String, entry: Entry, bytes: usize) -> bool {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         if bytes > BUDGET_BYTES {
-            return;
+            return false;
         }
         while c.bytes + bytes > BUDGET_BYTES {
             let Some(oldest) = c.slots.iter().min_by_key(|(_, s)| s.used).map(|(k, _)| k.clone()) else { break };
@@ -195,7 +229,142 @@ fn put(key: String, entry: Entry, bytes: usize) {
             c.bytes -= previous.bytes;
         }
         c.bytes += bytes;
+        true
     })
+}
+
+/// Runs `run` (a compile) as a probe: an entry the cache doesn't hold is regenerated only when
+/// its digest is in `allow`; any other is left out ([`skip`]) and listed. Returns `run`'s result
+/// and the digests it left out, each once, in the order met.
+pub fn probe<T>(allow: HashSet<String>, run: impl FnOnce() -> T) -> (T, Vec<String>) {
+    struct Restore(Option<Probe>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            PROBE.with(|p| *p.borrow_mut() = previous);
+        }
+    }
+    let restore = Restore(PROBE.with(|p| p.borrow_mut().replace(Probe { allow, misses: Vec::new() })));
+    let out = run();
+    let misses = PROBE.with(|p| p.borrow_mut().take()).map(|p| p.misses).unwrap_or_default();
+    drop(restore);
+    (out, misses)
+}
+
+/// Whether a compile should leave out the entry under `key`: only during a [`probe`], when the
+/// cache doesn't hold it and the probe may not regenerate it (the digest is then listed).
+pub fn skip(key: &str) -> bool {
+    PROBE.with(|p| {
+        let mut p = p.borrow_mut();
+        let Some(probe) = p.as_mut() else { return false };
+        let d = digest(key);
+        if probe.allow.contains(&d) || CACHE.with(|c| c.borrow().slots.contains_key(&d)) {
+            return false;
+        }
+        if !probe.misses.contains(&d) {
+            probe.misses.push(d);
+        }
+        true
+    })
+}
+
+/// An entry as stored outside the host: the digest it is held by and exactly one of its kinds.
+#[derive(Serialize)]
+struct StoredRef<'a> {
+    digest: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assembly: Option<&'a AssemblyPart>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    configured: Option<&'a ConfiguredPart>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    board: Option<&'a PartDisplay>,
+}
+
+/// [`StoredRef`] read back.
+#[derive(Deserialize)]
+struct Stored {
+    digest: String,
+    assembly: Option<AssemblyPart>,
+    configured: Option<ConfiguredPart>,
+    board: Option<PartDisplay>,
+}
+
+/// One stored entry: the JSON's length and the bytes' length (`u32`, little-endian), the JSON,
+/// zero padding to a multiple of 4, then the mesh bytes its references point into. A frame's
+/// length is a multiple of 4, so frames concatenate.
+pub fn entry_frame(json: &str, bytes: &[u8]) -> Vec<u8> {
+    let padded = json.len().div_ceil(4) * 4;
+    let mut out = Vec::with_capacity(8 + padded + bytes.len().div_ceil(4) * 4);
+    out.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(json.as_bytes());
+    out.resize(8 + padded, 0);
+    out.extend_from_slice(bytes);
+    out.resize(out.len().div_ceil(4) * 4, 0);
+    out
+}
+
+/// Each entry regenerated since the last call that the cache still holds, as `(digest, frame)`;
+/// the list starts over.
+pub fn take_fresh() -> Vec<(String, Vec<u8>)> {
+    let fresh = CACHE.with(|c| std::mem::take(&mut c.borrow_mut().fresh));
+    let mut out = Vec::new();
+    for d in fresh {
+        let Some(frame) = CACHE.with(|c| {
+            let c = c.borrow();
+            let slot = c.slots.get(&d)?;
+            let (json, bytes) = wire::collect(|| {
+                let none = StoredRef { digest: &d, assembly: None, configured: None, board: None };
+                let stored = match &slot.entry {
+                    Entry::Assembly(p) => StoredRef { assembly: Some(&**p), ..none },
+                    Entry::Configured(p) => StoredRef { configured: Some(&**p), ..none },
+                    Entry::Board(p) => StoredRef { board: Some(&**p), ..none },
+                };
+                serde_json::to_string(&stored)
+            });
+            Some(entry_frame(&json.ok()?, &bytes))
+        }) else {
+            continue;
+        };
+        if !out.iter().any(|(seen, _)| *seen == d) {
+            out.push((d, frame));
+        }
+    }
+    out
+}
+
+/// Holds every entry in `frames` (concatenated [`entry_frame`]s); returns how many it took. A
+/// frame that doesn't read (cut short, or written by another build) is passed over.
+pub fn seed(mut frames: &[u8]) -> usize {
+    let mut taken = 0;
+    while frames.len() >= 8 {
+        let word = |at: usize| u32::from_le_bytes([frames[at], frames[at + 1], frames[at + 2], frames[at + 3]]) as usize;
+        let (json_len, bytes_len) = (word(0), word(4));
+        let start = 8 + json_len.div_ceil(4) * 4;
+        let end = start + bytes_len;
+        if end > frames.len() {
+            break;
+        }
+        let json = &frames[8..8 + json_len];
+        let bytes = &frames[start..end];
+        let stored: Option<Stored> =
+            wire::revive(bytes, || serde_json::from_slice(json).ok());
+        if let Some(stored) = stored {
+            let entry = match (stored.assembly, stored.configured, stored.board) {
+                (Some(p), None, None) => Some((display_bytes(&p.display), Entry::Assembly(Rc::new(p)))),
+                (None, Some(p), None) => Some((display_bytes(&p.display), Entry::Configured(Rc::new(p)))),
+                (None, None, Some(d)) => Some((display_bytes(&d), Entry::Board(Rc::new(d)))),
+                _ => None,
+            };
+            if let Some((size, entry)) = entry {
+                if insert(stored.digest, entry, size) {
+                    taken += 1;
+                }
+            }
+        }
+        frames = &frames[(end.div_ceil(4) * 4).min(frames.len())..];
+    }
+    taken
 }
 
 /// The assembly part under `key`, made by `make` when the cache doesn't hold it. `make` returns
@@ -287,7 +456,7 @@ impl DynamicValueEvaluator for Watched<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{clear, stats};
+    use super::{clear, probe, seed, stats, take_fresh};
     use crate::runtime::{compile_json, Files};
     use serde_json::Value;
 
@@ -377,5 +546,38 @@ mod tests {
         // b and its configured occurrence are kept; a is regenerated each time.
         assert_eq!(s.entries, 2);
         assert_eq!(s.misses, 4, "{s:?}");
+    }
+
+    /// Stored entries read back in a fresh cache give the same compile, regenerating nothing; a
+    /// probe of an empty cache regenerates nothing and lists every entry it left out.
+    #[test]
+    fn stored_entries_seed_a_fresh_cache_exactly() {
+        clear();
+        let files = files(&block("a", 20), &block("b", 30));
+        let first = compile(&files);
+        let fresh = take_fresh();
+        assert_eq!(fresh.len(), 3, "a, b and b in `wide`");
+        assert!(take_fresh().is_empty(), "the list starts over");
+
+        clear();
+        let (_, misses) = probe(Default::default(), || compile_json("/p/rig.assembly", RIG, &files));
+        assert_eq!(stats().misses, 0, "a probe regenerates nothing");
+        // `wide`'s configured digest needs b's document, so only a and b show before seeding.
+        assert_eq!(misses.len(), 2, "{misses:?}");
+        assert!(misses.iter().all(|d| fresh.iter().any(|(f, _)| f == d)), "{misses:?}");
+
+        let all: Vec<u8> = fresh.iter().flat_map(|(_, f)| f.iter().copied()).collect();
+        assert_eq!(seed(&all), 3);
+        assert!(take_fresh().is_empty(), "seeded entries aren't fresh");
+        let (out, misses) = probe(Default::default(), || compile(&files));
+        assert!(misses.is_empty(), "{misses:?}");
+        let s = stats();
+        assert_eq!((s.hits, s.misses), (3, 0));
+        assert_eq!(out, first);
+
+        // A cut-short or foreign frame is passed over.
+        clear();
+        assert_eq!(seed(&all[..all.len() - 8]), 2);
+        assert_eq!(seed(b"not a frame at all"), 0);
     }
 }

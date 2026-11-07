@@ -137,6 +137,9 @@ fn compile_inputs(inputs: &BoardInputs) -> Result<runmat_circuit::runtime::Sessi
 pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
     let inputs = board_inputs(file, files)?;
     let key = crate::runtime::part_cache::board_key(file, &inputs.layout, &inputs.text, &inputs.circuit_files);
+    if crate::runtime::part_cache::skip(&key) {
+        return Err("its stored model isn't loaded yet".into());
+    }
     crate::runtime::part_cache::board_part(key, || board_display_of(&inputs))
 }
 

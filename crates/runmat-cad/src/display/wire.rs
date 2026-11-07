@@ -11,16 +11,102 @@
 //! The browser's CAD host returns the JSON and the bytes in one frame
 //! (`runmat_cad_call_framed`); its worker sends the bytes to the page as a transferable buffer, and
 //! the page reads each reference as a typed array over it.
+//!
+//! [`revive`] is the way back: while it runs, a reference deserializes as the array it points to
+//! in the bytes given, so a display written under [`collect`] reads back exactly (the per-part
+//! cache's stored entries, `runmat-cad-wasm` `runtime::part_cache`). Inline arrays read as
+//! before.
 
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeMap;
-use serde::Serializer;
+use serde::{Deserializer, Serializer};
 use std::cell::RefCell;
+use std::fmt;
 
 /// Arrays with fewer values than this stay inline: a reference costs about as much text.
 pub const INLINE_MAX: usize = 16;
 
 thread_local! {
     static SINK: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+    static SOURCE: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+}
+
+/// Puts back the source that was active before [`revive`], also when its closure panics.
+struct RestoreSource(Option<Vec<u8>>);
+
+impl Drop for RestoreSource {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        SOURCE.with(|s| *s.borrow_mut() = previous);
+    }
+}
+
+/// Runs `run` with mesh references read from `bytes` (the buffer [`collect`] returned).
+pub fn revive<T>(bytes: &[u8], run: impl FnOnce() -> T) -> T {
+    let _restore = RestoreSource(SOURCE.with(|s| s.borrow_mut().replace(bytes.to_vec())));
+    run()
+}
+
+/// A little-endian 4-byte value type a reference can name.
+trait Word: Sized {
+    const TAG: &'static str;
+    fn from_le(bytes: [u8; 4]) -> Self;
+}
+
+impl Word for f32 {
+    const TAG: &'static str = "$f32";
+    fn from_le(bytes: [u8; 4]) -> Self {
+        f32::from_le_bytes(bytes)
+    }
+}
+
+impl Word for u32 {
+    const TAG: &'static str = "$u32";
+    fn from_le(bytes: [u8; 4]) -> Self {
+        u32::from_le_bytes(bytes)
+    }
+}
+
+struct Words<T>(std::marker::PhantomData<T>);
+
+impl<'de, T: Word + serde::Deserialize<'de>> Visitor<'de> for Words<T> {
+    type Value = Vec<T>;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "an array or a {{\"{}\": [offset, count]}} reference", T::TAG)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<T>, A::Error> {
+        let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        while let Some(v) = seq.next_element::<T>()? {
+            out.push(v);
+        }
+        Ok(out)
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Vec<T>, A::Error> {
+        let Some((tag, [offset, count])) = map.next_entry::<String, [u64; 2]>()? else {
+            return Err(de::Error::custom("an empty mesh reference"));
+        };
+        if tag != T::TAG {
+            return Err(de::Error::custom(format!("a {tag} reference where {} belongs", T::TAG)));
+        }
+        let (offset, count) = (offset as usize, count as usize);
+        SOURCE.with(|s| {
+            let source = s.borrow();
+            let bytes = source.as_ref().ok_or_else(|| de::Error::custom("a mesh reference outside `revive`"))?;
+            let end = count.checked_mul(4).and_then(|n| n.checked_add(offset)).filter(|&e| e <= bytes.len());
+            let end = end.ok_or_else(|| de::Error::custom("a mesh reference past its bytes"))?;
+            Ok(bytes[offset..end].chunks_exact(4).map(|c| T::from_le([c[0], c[1], c[2], c[3]])).collect())
+        })
+    }
+}
+
+/// `deserialize_with` for a `Vec<f32>` mesh array: an inline array or a reference ([`revive`]).
+pub fn f32s_de<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f32>, D::Error> {
+    deserializer.deserialize_any(Words::<f32>(std::marker::PhantomData))
+}
+
+/// `deserialize_with` for a `Vec<u32>` mesh array (triangle indices).
+pub fn u32s_de<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u32>, D::Error> {
+    deserializer.deserialize_any(Words::<u32>(std::marker::PhantomData))
 }
 
 /// Puts back the sink that was active before [`collect`], also when its closure panics.
@@ -133,6 +219,10 @@ mod tests {
         // A level of 3 values stays inline.
         assert!(framed["levels"][0]["positions"].is_array());
         assert_eq!(framed["levels"][0]["positions"], plain["levels"][0]["positions"]);
+
+        // `revive` reads the references back as the same arrays.
+        let back: PartDisplay = super::revive(&bytes, || serde_json::from_value(framed.clone()).unwrap());
+        assert_eq!(back, display);
 
         // The sink is gone after `collect`.
         assert_eq!(serde_json::to_value(&display).unwrap(), plain);

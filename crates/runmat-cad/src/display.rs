@@ -54,13 +54,13 @@ pub struct FaceDisplay {
     pub label: Option<String>,
     /// The features that made it.
     pub features: Vec<String>,
-    #[serde(serialize_with = "wire::f32s")]
+    #[serde(serialize_with = "wire::f32s", deserialize_with = "wire::f32s_de")]
     pub positions: Vec<f32>,
-    #[serde(serialize_with = "wire::u32s")]
+    #[serde(serialize_with = "wire::u32s", deserialize_with = "wire::u32s_de")]
     pub triangles: Vec<u32>,
     /// The surface's outward unit normal at each position (x, y, z), when the kernel knows it;
     /// empty otherwise (the renderer then averages triangle normals over shared vertices).
-    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "wire::f32s")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "wire::f32s", deserialize_with = "wire::f32s_de")]
     pub normals: Vec<f32>,
     /// The face's surface where the kernel knows it: a plane's normal, a cylinder's axis and
     /// radius (drawing centerlines, mates on axes and faces).
@@ -74,7 +74,7 @@ pub struct EdgeDisplay {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
     pub faces: [u32; 2],
-    #[serde(serialize_with = "wire::f32s")]
+    #[serde(serialize_with = "wire::f32s", deserialize_with = "wire::f32s_de")]
     pub points: Vec<f32>,
 }
 
@@ -137,12 +137,12 @@ pub struct PartDisplay {
 /// One level of detail: every face of every body as one mesh (part coordinates, metres).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DisplayLevel {
-    #[serde(serialize_with = "wire::f32s")]
+    #[serde(serialize_with = "wire::f32s", deserialize_with = "wire::f32s_de")]
     pub positions: Vec<f32>,
-    #[serde(serialize_with = "wire::u32s")]
+    #[serde(serialize_with = "wire::u32s", deserialize_with = "wire::u32s_de")]
     pub triangles: Vec<u32>,
     /// The surface normal at each position, when the kernel knows it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "wire::f32s")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "wire::f32s", deserialize_with = "wire::f32s_de")]
     pub normals: Vec<f32>,
 }
 
