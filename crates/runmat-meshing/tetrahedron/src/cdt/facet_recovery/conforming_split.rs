@@ -1208,9 +1208,10 @@ fn split_and_admit_locally(
     ) {
         Ok((true, flips)) => flips,
         Ok((false, _)) => {
-            return Ok(LocalSplit::Declined(
-                "an illegal face remains in the new node's star after link flips".to_owned(),
-            ))
+            return Ok(LocalSplit::Declined(format!(
+                "an illegal face remains in the new node's star after link flips: {}",
+                illegal_star_face(&observed, inserted, &protected_faces, &kept_edges)
+            )))
         }
         Err(failure)
             if matches!(
@@ -1304,6 +1305,78 @@ fn split_and_admit_locally(
         None => LocalSplit::Accepted(splits),
         Some(violation) => LocalSplit::Declined(violation),
     })
+}
+
+/// Describes the first unprotected face in the star of `inserted` whose neighbor apex lies
+/// strictly inside the cell's circumsphere, for the decline reason: its corners, the apex, the
+/// face edges that must stay, and the protected triangles that share an edge with the face.
+fn illegal_star_face(
+    topology: &TopologyMutation,
+    inserted: u32,
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    kept_edges: &BTreeSet<[StableDigest; 2]>,
+) -> String {
+    let point = |vertex: u32| topology.nodes[vertex as usize].coordinates_m.canonical_value();
+    for left_index in topology.vertex_stars[inserted as usize].iter().copied() {
+        let Some(left) = topology.tetrahedron(left_index) else {
+            continue;
+        };
+        for (opposite, neighbor) in left.neighbors.iter().enumerate() {
+            let Some(right) = neighbor.and_then(|index| topology.tetrahedron(index)) else {
+                continue;
+            };
+            let face = canonical_mutation_face(topology, left.vertex_indices, opposite);
+            if left.region_id != right.region_id || protected_faces.contains(&face) {
+                continue;
+            }
+            let Some(apex) = right
+                .vertex_indices
+                .iter()
+                .copied()
+                .find(|vertex| !left.vertex_indices.contains(vertex))
+            else {
+                continue;
+            };
+            let nodes = left.vertex_indices.map(|vertex| topology.nodes[vertex as usize]);
+            if !topology
+                .insphere_nodes([
+                    nodes[0],
+                    nodes[1],
+                    nodes[2],
+                    nodes[3],
+                    topology.nodes[apex as usize],
+                ])
+                .is_ok_and(|sign| sign == PredicateSign::Positive)
+            {
+                continue;
+            }
+            let corners = (0..4)
+                .filter(|slot| *slot != opposite)
+                .map(|slot| left.vertex_indices[slot])
+                .collect::<Vec<_>>();
+            let kept = [(0, 1), (1, 2), (0, 2)]
+                .into_iter()
+                .filter(|(a, b)| {
+                    let mut key = [face[*a], face[*b]];
+                    key.sort_unstable();
+                    kept_edges.contains(&key)
+                })
+                .count();
+            let adjacent = protected_faces
+                .iter()
+                .filter(|other| other.iter().filter(|node| face.contains(node)).count() == 2)
+                .count();
+            return format!(
+                "face {:?} (opposite cell vertex {:?}) with apex {:?}; {kept} kept face edges, \
+                 {adjacent} protected triangles share a face edge, inserted node on face: {}",
+                corners.iter().map(|vertex| point(*vertex)).collect::<Vec<_>>(),
+                point(left.vertex_indices[opposite]),
+                point(apex),
+                corners.contains(&inserted)
+            );
+        }
+    }
+    "not located".to_owned()
 }
 
 fn copy_splits(splits: &[ProtectedFacetSplit]) -> Vec<ProtectedFacetSplit> {
