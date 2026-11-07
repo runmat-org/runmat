@@ -17,18 +17,25 @@
 //!
 //! The module answers for ECAD files only (`.circuit`, `.circuit.layout`). Parts, assemblies and
 //! drawings regenerate on the OCCT kernel, which the tool layer reaches natively on the server;
-//! here they answer `kernel_unavailable`, so no answer comes from the test kernel.
+//! here they answer `not_in_browser` with a plain message (no internals), so no answer comes from
+//! the test kernel.
 
 use runmat_design_tools::{call, DesignKind, Files};
 use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
 
+/// What the agent says for a part, assembly or drawing in the browser: a capability, no internals.
+const MCAD_IN_BROWSER: &str = "The agent's design tools for parts, assemblies and drawings aren't available in the browser yet. The model still regenerates in the editor.";
+/// The same for a STEP import.
+const STEP_IN_BROWSER: &str = "STEP import isn't available in the browser yet.";
+
 /// The tools this host runs on ECAD files: the read-only ones, and `design.export`, which
 /// answers the exported files for the page to write (the Desktop's Fabrication outputs).
 /// `design.import` reads KiCad, XML project, shape-string JSON and pipe-record files into staged circuit sources here (the Desktop's
-/// Import dialog); STEP import stays with the project. `design.render` draws through the
-/// server, and `design.propose_edit` stays with the project.
-const TOOLS: &[&str] = &["design.overview", "design.check", "design.inspect", "design.erc", "design.drc", "design.simulate", "design.export", "design.import"];
+/// Import dialog); STEP import stays with the project. `design.propose_edit` stages a circuit or
+/// board change here, so the sandbox's agent changes a schematic or board the way it does in a
+/// project (the page keeps or undoes it). `design.render` draws through the server.
+const TOOLS: &[&str] = &["design.overview", "design.check", "design.inspect", "design.erc", "design.drc", "design.simulate", "design.export", "design.import", "design.propose_edit"];
 
 #[wasm_bindgen]
 pub fn design_tool(name: &str, input: &str, files: &str) -> String {
@@ -80,7 +87,7 @@ fn run(name: &str, input: &str, files: &str) -> Result<Value, (String, String)> 
     let files: Files = serde_json::from_str(files).map_err(|e| ("invalid_arguments".to_owned(), format!("the files aren't a JSON object of path to text: {e}")))?;
     if name == "design.import" {
         return match input.get("format").and_then(Value::as_str) {
-            Some("step") => Err(("kernel_unavailable".into(), "STEP files import with a server project, where OCCT reads them".into())),
+            Some("step") => Err(("not_in_browser".into(), STEP_IN_BROWSER.into())),
             _ => call(name, input, &files).map_err(|e| (e.code, e.message)),
         };
     }
@@ -89,8 +96,8 @@ fn run(name: &str, input: &str, files: &str) -> Result<Value, (String, String)> 
         Some(DesignKind::Circuit | DesignKind::Layout) => {}
         Some(_) => {
             return Err((
-                "kernel_unavailable".into(),
-                "Parts, assemblies and drawings regenerate on OCCT, which the design tools run with a server project".into(),
+                "not_in_browser".into(),
+                MCAD_IN_BROWSER.into(),
             ))
         }
         None => return Err(("invalid_arguments".into(), format!("{path} isn't a circuit or a board"))),
@@ -141,17 +148,40 @@ mod tests {
         assert_eq!(data["report"]["format"], ".sch / .brd");
         assert_eq!(data["report"]["carried"]["components"], 3);
         let step = answer("design.import", r#"{"format":"step","target":"/p/a.part","files":[]}"#, "{}");
-        assert_eq!(step["error"]["code"], "kernel_unavailable");
+        assert_eq!(step["error"]["code"], "not_in_browser");
     }
 
     #[test]
     fn mcad_files_and_other_tools_refuse_with_their_reason() {
         let part = answer("design.overview", r#"{"path":"/p/a.part"}"#, r#"{"/p/a.part":""}"#);
-        assert_eq!(part["error"]["code"], "kernel_unavailable");
+        assert_eq!(part["error"]["code"], "not_in_browser");
+        // The message names a capability, never an internal (kernel, wasm, server project).
+        let said = part["error"]["message"].as_str().unwrap().to_lowercase();
+        for internal in ["occt", "kernel", "wasm", "server project"] {
+            assert!(!said.contains(internal), "{said}");
+        }
         let render = answer("design.render", r#"{"path":"/p/daq.circuit"}"#, "{}");
         assert_eq!(render["error"]["code"], "unsupported");
         let bad = answer("design.check", "{", "{}");
         assert_eq!(bad["error"]["code"], "invalid_arguments");
+    }
+
+    #[test]
+    fn a_circuit_change_stages_here_and_a_part_change_waits() {
+        let files = daq_files();
+        let text = files["/p/daq.circuit"].as_str().unwrap();
+        // A second copy of the gain resistor, wired to nothing new: the change stages with the file's new text.
+        let anchor = "        component RG = { part = \"R0402-1K\" }\n";
+        assert!(text.contains(anchor), "the daq fixture names RG");
+        let new = text.replacen(anchor, &format!("{anchor}        component R900 = {{ part = \"R0402-1K\" }}\n"), 1);
+        let input = json!({ "path": "/p/daq.circuit", "text": new }).to_string();
+        let out = answer("design.propose_edit", &input, &files.to_string());
+        let data = out.get("data").unwrap_or_else(|| panic!("a staged change, not {out}"));
+        assert_eq!(data["files"][0]["path"], "/p/daq.circuit", "{data}");
+        assert!(data["files"][0]["text"].as_str().unwrap().contains("R900"), "{data}");
+        // A part still refuses: its change needs the model regenerated.
+        let part = answer("design.propose_edit", r#"{"path":"/p/a.part","text":"part a {}"}"#, r#"{"/p/a.part":""}"#);
+        assert_eq!(part["error"]["code"], "not_in_browser");
     }
 
     #[test]
