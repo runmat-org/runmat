@@ -16,48 +16,8 @@ pub(super) struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    /// A cell's extent around its origin as placed, with room for its texts and the ports and
-    /// labels its pins get.
     fn extent(&self, i: usize, place: &Place) -> [Coord; 4] {
-        let c = &self.cells[i];
-        let lay: &UnitLayout = &c.lay;
-        let p0 = Place {
-            origin: Point::ORIGIN,
-            ..*place
-        };
-        let mut e = p0.rect(lay.extent());
-        for (k, pin) in lay.pins.iter().enumerate() {
-            let side = p0.side(pin.side);
-            let tip = p0.apply(lay.tip(pin.side, pin.at));
-            let room = match c.nets[k] {
-                Some(net) if self.nets[net].rail => PORT_ROOM,
-                // A sheet symbol's entries keep room for a label too: a net it shares with
-                // several sheets may fall back to labels when its wire can't be drawn.
-                Some(net) if self.nets[net].labelled || matches!(c.kind, CellKind::Sheet { .. }) => {
-                    2 * GRID + crate::schematic::text_width(&self.nets[net].short, crate::schematic::LABEL_TEXT)
-                        + 3 * GRID
-                }
-                Some(_) => 2 * GRID,
-                None => GRID,
-            };
-            let (dx, dy) = side.out();
-            let far = Point::new(tip.x + dx * room, tip.y + dy * room);
-            e = [
-                e[0].min(far.x),
-                e[1].min(far.y),
-                e[2].max(far.x),
-                e[3].max(far.y),
-            ];
-        }
-        // Designator above and value below (beside an upright part).
-        if place.upright() {
-            [e[0], e[1], e[2] + 9 * GRID, e[3]]
-        } else {
-            let w = crate::schematic::text_width(&c.designator, crate::schematic::DESIGNATOR_TEXT) + 4 * GRID;
-            let half = (e[2] - e[0]) / 2;
-            let grow = (w / 2 - half).max(0);
-            [e[0] - grow, e[1] - 3 * GRID, e[2] + grow, e[3] + 3 * GRID]
-        }
+        reach(self.cells, self.nets, i, place)
     }
 
     /// The pitch of a decoupling row: the upright pitch, or wider when a cap's designator or
@@ -138,12 +98,17 @@ impl Ctx<'_> {
             }
             m
         });
-        let decaps: BTreeMap<usize, Vec<usize>> = members.iter().fold(BTreeMap::new(), |mut m, &i| {
+        let mut decaps: BTreeMap<usize, Vec<usize>> = members.iter().fold(BTreeMap::new(), |mut m, &i| {
             if let Role::Decap { host: Some(h), .. } = self.roles[i] {
                 m.entry(h).or_insert_with(Vec::new).push(i);
             }
             m
         });
+        // Each row runs in the order of the host pins its caps serve, left to right: a
+        // regulator's input cap under its input side, its output cap under its output.
+        for (&h, ds) in decaps.iter_mut() {
+            ds.sort_by_key(|&d| (self.served_x(h, d, &*places), d));
+        }
         // Slot of each chain item: its extent plus feedback above and decoupling below,
         // around the item's origin.
         let up_ext = |i: usize, places: &[Place]| self.extent(i, &places[i]);
@@ -353,6 +318,26 @@ impl Ctx<'_> {
         None
     }
 
+    /// How far right of its host's origin the host pin a decoupling cap serves sits: the
+    /// host's pin on the cap's positive rail, at the host's facing.
+    fn served_x(&self, host: usize, cap: usize, places: &[Place]) -> Coord {
+        let Role::Decap { pin, .. } = self.roles[cap] else {
+            return 0;
+        };
+        let net = self.cells[cap].nets[pin];
+        let lay = &self.cells[host].lay;
+        let facing = Place {
+            origin: Point::ORIGIN,
+            ..places[host]
+        };
+        self.cells[host]
+            .nets
+            .iter()
+            .position(|x| net.is_some() && *x == net)
+            .map(|p| facing.apply(lay.tip(lay.pins[p].side, lay.pins[p].at)).x)
+            .unwrap_or(0)
+    }
+
     /// Where a decoupling row's first cap sits, from its host's origin: centred under a box;
     /// from the output end on of a series part (a buck's inductor), so the part keeps close to
     /// what feeds it.
@@ -459,5 +444,50 @@ fn decap_lift(host: &Place) -> Coord {
         0
     } else {
         4 * GRID
+    }
+}
+
+/// A cell's extent around its origin as placed, with room for its texts and the ports and
+/// labels its pins get. Placement packs by it, and a part added to a sheet with recorded places
+/// keeps it clear of them.
+pub(in crate::schematic) fn reach(cells: &[Cell], nets: &[NetInfo], i: usize, place: &Place) -> [Coord; 4] {
+    let c = &cells[i];
+    let lay: &UnitLayout = &c.lay;
+    let p0 = Place {
+        origin: Point::ORIGIN,
+        ..*place
+    };
+    let mut e = p0.rect(lay.extent());
+    for (k, pin) in lay.pins.iter().enumerate() {
+        let side = p0.side(pin.side);
+        let tip = p0.apply(lay.tip(pin.side, pin.at));
+        let room = match c.nets[k] {
+            Some(net) if nets[net].rail => PORT_ROOM,
+            // A sheet symbol's entries keep room for a label too: a net it shares with
+            // several sheets may fall back to labels when its wire can't be drawn.
+            Some(net) if nets[net].labelled || matches!(c.kind, CellKind::Sheet { .. }) => {
+                2 * GRID + crate::schematic::text_width(&nets[net].short, crate::schematic::LABEL_TEXT)
+                    + 3 * GRID
+            }
+            Some(_) => 2 * GRID,
+            None => GRID,
+        };
+        let (dx, dy) = side.out();
+        let far = Point::new(tip.x + dx * room, tip.y + dy * room);
+        e = [
+            e[0].min(far.x),
+            e[1].min(far.y),
+            e[2].max(far.x),
+            e[3].max(far.y),
+        ];
+    }
+    // Designator above and value below (beside an upright part).
+    if place.upright() {
+        [e[0], e[1], e[2] + 9 * GRID, e[3]]
+    } else {
+        let w = crate::schematic::text_width(&c.designator, crate::schematic::DESIGNATOR_TEXT) + 4 * GRID;
+        let half = (e[2] - e[0]) / 2;
+        let grow = (w / 2 - half).max(0);
+        [e[0] - grow, e[1] - 3 * GRID, e[2] + grow, e[3] + 3 * GRID]
     }
 }

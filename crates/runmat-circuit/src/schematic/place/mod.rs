@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod cluster;
 use cluster::Ctx;
+pub(super) use cluster::reach;
 
 /// A shunt hangs this far below (or above) its net.
 pub(super) const DROP: Coord = 4 * GRID;
@@ -83,11 +84,18 @@ fn number(designator: &str) -> Option<i64> {
     digits.parse().ok()
 }
 
+/// A page's automatic placement: one place per cell, and the cell each part is drawn with (a
+/// decoupling cap's IC, a feedback part's amplifier, a shunt's anchor), if any.
+pub(super) struct Placed {
+    pub places: Vec<Place>,
+    pub attach: Vec<Option<usize>>,
+}
+
 /// Places every cell of a page: origins relative to the page's top-left content corner (y
-/// up, so items go negative), and each sheet symbol's pin sides. Returns one place per cell.
-pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
+/// up, so items go negative), and each sheet symbol's pin sides.
+pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Placed {
     let first = place_once(cells, nets);
-    if face_partners(cells, &first) {
+    if face_partners(cells, &first.places) {
         place_once(cells, nets)
     } else {
         first
@@ -137,7 +145,7 @@ fn face_partners(cells: &mut [Cell], places: &[Place]) -> bool {
     true
 }
 
-fn place_once(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
+fn place_once(cells: &mut [Cell], nets: &[NetInfo]) -> Placed {
     let n = cells.len();
     let rail = |net: Option<usize>| net.is_some_and(|k| nets[k].rail);
     let signal = |net: Option<usize>| net.is_some_and(|k| !nets[k].rail);
@@ -601,7 +609,15 @@ fn place_once(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
             places[*i].origin = Point::new(o.x + dx, o.y + dy);
         }
     }
-    places
+    let attach = (0..n)
+        .map(|i| match roles[i] {
+            Role::Decap { host, .. } => host,
+            Role::Feedback { host } => Some(host),
+            Role::Shunt { .. } => anchor.get(&i).map(|a| a.0),
+            _ => None,
+        })
+        .collect();
+    Placed { places, attach }
 }
 
 /// Shelf packing of cluster boxes in rows of `width`, first fit: each box goes in the first

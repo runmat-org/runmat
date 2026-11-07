@@ -363,6 +363,105 @@ fn the_flight_controller_power_sheet_reads_as_drawn_by_hand() {
     }
 }
 
+/// The flight controller's files with the lock's recorded places, and `edit` applied to the
+/// circuit (old, new) pairs.
+fn flight_controller_edited(edits: &[(&str, &str)]) -> (SchematicIndex, SchematicIndex) {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone/electrical/flight_controller");
+    let mut files: Files = ["circuit", "circuit.lock"]
+        .iter()
+        .map(|ext| {
+            let f = format!("flight_controller.{ext}");
+            (format!("/p/{f}"), std::fs::read_to_string(dir.join(&f)).unwrap())
+        })
+        .collect();
+    let circuit = "/p/flight_controller.circuit";
+    assert!(files["/p/flight_controller.circuit.lock"].contains("\nplace power/U3 "), "the lock records the power sheet");
+    let before = drawn(&files, circuit);
+    let mut text = files[circuit].clone();
+    for (old, new) in edits {
+        assert_eq!(text.matches(old).count(), 1, "{old}");
+        text = text.replace(old, new);
+    }
+    files.insert(circuit.into(), text);
+    (before, drawn(&files, circuit))
+}
+
+/// An agent's edit adds a GPS supply to the recorded power sheet: an LDO fed from +5 V with its
+/// input and output caps. The caps stand under the LDO, input cap on the input side, output cap
+/// on the output side; the new block keeps clear of every drawn symbol, port and text, stays in
+/// the page's frame, off its title block, and nothing recorded moves.
+#[test]
+fn a_new_regulator_lands_with_its_caps_on_a_recorded_sheet() {
+    let (before, after) = flight_controller_edited(&[
+        (
+            "        component C19 = { part = \"C0402-1U\" }\n",
+            "        component C19 = { part = \"C0402-1U\" }\n        component U6 = { part = \"LDO-3V3-SOT23\" }\n        component C24 = { part = \"C0402-1U\" }\n        component C25 = { part = \"C0402-1U\" }\n",
+        ),
+        (
+            "        net \"+3V3\" = { class = supply, global = true }\n        net SW",
+            "        net \"+3V3\" = { class = supply, global = true }\n        net \"+3V3_GPS\" = { class = supply, global = true }\n        net SW",
+        ),
+        (", U3.VIN, U3.EN, \"C18.1\"]", ", U3.VIN, U3.EN, \"C18.1\", U6.VIN, U6.EN, \"C24.1\"]"),
+        (
+            "        connect = [\"net.+3V3\", U3.VOUT, \"C19.1\"]\n",
+            "        connect = [\"net.+3V3\", U3.VOUT, \"C19.1\"]\n        connect = [\"net.+3V3_GPS\", U6.VOUT, \"C25.1\"]\n",
+        ),
+        ("U3.GND, \"C18.2\", \"C19.2\",", "U3.GND, \"C18.2\", \"C19.2\", U6.GND, \"C24.2\", \"C25.2\","),
+    ]);
+    let page = |i: &SchematicIndex| i.sheets.iter().find(|s| s.path == "/pwr").cloned().expect("the power page");
+    let (old, pwr) = (page(&before), page(&after));
+    for s in &old.symbols {
+        let now = pwr.symbols.iter().find(|n| n.key == s.key).expect("still drawn");
+        assert_eq!((now.x_mm, now.y_mm, now.rotation), (s.x_mm, s.y_mm, s.rotation), "{} moved", s.designator);
+    }
+    assert_eq!((pwr.frame.as_str(), pwr.width_mm), (old.frame.as_str(), old.width_mm), "the frame grew");
+    dump("fc-gps", &after);
+    check_page(&pwr);
+    let sym = |d: &str| pwr.symbols.iter().find(|s| s.designator == d).unwrap_or_else(|| panic!("{d} drawn"));
+    let pin = |d: &str, p: &str| {
+        let q = sym(d).pins.iter().find(|q| q.name == p).unwrap_or_else(|| panic!("{d}.{p}"));
+        (q.x_mm, q.y_mm)
+    };
+    let (u6, c24, c25) = (body_box(sym("U6")), body_box(sym("C24")), body_box(sym("C25")));
+    // As far under U6 as U3's own caps stand under U3: a row a port's height below the IC.
+    let (u3, c18) = (body_box(sym("U3")), body_box(sym("C18")));
+    let row = u3[1] - c18[3];
+    for (cap, b) in [("C24", c24), ("C25", c25)] {
+        let below = u6[1] - b[3];
+        assert!(below > 0.0 && below <= row + EPS, "{cap} {b:?} stands under U6 {u6:?} as C18 stands under U3 ({row} mm)");
+        assert!(b[0] > u6[0] - 15.0 && b[2] < u6[2] + 15.0, "{cap} {b:?} is under U6 {u6:?}");
+    }
+    let (vin, vout) = (pin("U6", "VIN"), pin("U6", "VOUT"));
+    assert!(vin.0 < vout.0, "U6 reads input to output: VIN {vin:?}, VOUT {vout:?}");
+    assert!(c24[2] <= c25[0], "the input cap C24 {c24:?} stands on the input side of the output cap C25 {c25:?}");
+    // Everything the new parts draw (bodies, texts, ports) keeps clear of the old drawing and
+    // of the title block, inside the frame.
+    let new_boxes: Vec<[f64; 4]> = {
+        let old_boxes = runmat_circuit::schematic::page_boxes(&old);
+        runmat_circuit::schematic::page_boxes(&pwr)
+            .into_iter()
+            .filter(|b| !old_boxes.iter().any(|o| o.iter().zip(b).all(|(x, y)| (x - y).abs() < EPS)))
+            .collect()
+    };
+    let title = [pwr.width_mm - 10.0 - 130.0 - 2.0, 0.0, pwr.width_mm, 10.0 + 5.0 * 6.0 + 2.0];
+    for b in &new_boxes {
+        assert!(!overlaps(b, &title, 0.0), "{b:?} reaches the title block {title:?}");
+        assert!(b[0] >= 10.0 && b[2] <= pwr.width_mm - 10.0 && b[1] >= 10.0 && b[3] <= pwr.height_mm - 10.0, "{b:?} leaves the frame");
+    }
+    for s in old.symbols.iter() {
+        let b = body_box(s);
+        for d in ["U6", "C24", "C25"] {
+            assert!(!overlaps(&body_box(sym(d)), &b, 0.0), "{d} sits on {}", s.designator);
+        }
+    }
+    // On the sheet's grid: whole 1.27 mm steps from the recorded U3.
+    let grid = |v: f64| ((v / 1.27).round() * 1.27 - v).abs() < 1e-3;
+    for d in ["U6", "C24", "C25"] {
+        let (s, u3) = (sym(d), sym("U3"));
+        assert!(grid(s.x_mm - u3.x_mm) && grid(s.y_mm - u3.y_mm), "{d} is on the grid");
+    }
+}
+
 /// Annotating records the places; an added part goes to free space and nothing else moves.
 #[test]
 fn recorded_places_stick_through_an_edit() {

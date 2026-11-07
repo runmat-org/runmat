@@ -19,9 +19,10 @@
 //!   symbol, power ports (VCC up, GND down) instead of rail wires, labels where a wire would be
 //!   long or a net leaves the sheet, no-connect crosses on pins marked no-connect (a `no_erc`
 //!   mark or a not-connected pin type); other pins on no net are drawn open for ERC to flag.
-//! - **Places stick.** A symbol whose place is recorded in the lock (`schematic.annotate` and
-//!   `schematic.move` record them) stays exactly there; new symbols go to the nearest free
-//!   spot, so one edit never reshuffles the sheet.
+//! - **Places stick** ([`stick`]). A symbol whose place is recorded in the lock
+//!   (`schematic.annotate` and `schematic.move` record them) stays exactly there; new symbols go
+//!   to the nearest free spot inside the frame and off the title block, a new IC with its new
+//!   caps as one block, so one edit never reshuffles the sheet.
 //!
 //! Lengths are millimetres on the page (origin bottom left, y up); every list is sorted by
 //! placement, so identical designs give identical bytes.
@@ -30,6 +31,7 @@ pub(crate) mod hand;
 mod pages;
 mod place;
 pub mod route;
+mod stick;
 pub mod symbol;
 mod units;
 
@@ -708,9 +710,11 @@ fn page(
             .filter(|(_, p)| p.page == page_no)
             .map(|(key, p)| (key.clone(), *p))
             .collect();
-        let mut places = place::place(&mut cells, &infos);
+        let mut placed = place::place(&mut cells, &infos);
         let recorded = cells.iter().any(|c| stored.contains_key(&c.key));
-        stick(&cells, &mut places, &stored);
+        let title_rows = 5.0 + if nl.variant.is_some() { 1.0 } else { 0.0 };
+        stick::stick(&cells, &infos, &mut placed, &stored, title_rows);
+        let places = placed.places;
         let mut drawn = draw::page(nl, path, sheet_name, sheets, &cells, &places, &infos, !recorded);
         if k > 0 {
             drawn.page = 2;
@@ -722,66 +726,6 @@ fn page(
         out.push(drawn);
     }
     out
-}
-
-/// Recorded places override the automatic ones (stored in paper mm, y down from the top; the
-/// content's top-left corner sits [`MARGIN`] in). Unrecorded symbols on a page with recorded
-/// ones move to the nearest spot clear of them.
-fn stick(cells: &[Cell], places: &mut [Place], stored: &BTreeMap<String, SchPlace>) {
-    let mut fixed: Vec<[Coord; 4]> = Vec::new();
-    let rect = |c: &Cell, p: &Place| {
-        let e = p.rect(c.lay.extent());
-        [e[0] - 3 * GRID, e[1] - 3 * GRID, e[2] + 3 * GRID, e[3] + 3 * GRID]
-    };
-    let mut free: Vec<usize> = Vec::new();
-    for (i, c) in cells.iter().enumerate() {
-        match stored.get(&c.key) {
-            Some(s) => {
-                let o = Point::new(s.x - MARGIN, MARGIN - s.y);
-                places[i] = match c.kind {
-                    // A sheet symbol is recorded by its top-left corner.
-                    CellKind::Sheet { .. } => Place::at(Point::new(
-                        o.x + c.lay.half_w,
-                        o.y - c.lay.half_h,
-                    )),
-                    _ => Place {
-                        origin: o,
-                        rotation: s.rotation,
-                        mirror: s.mirror,
-                    },
-                };
-                fixed.push(rect(c, &places[i]));
-            }
-            None => free.push(i),
-        }
-    }
-    if fixed.is_empty() {
-        return;
-    }
-    let hits = |r: &[Coord; 4], all: &[[Coord; 4]]| {
-        all.iter()
-            .any(|f| r[0] < f[2] && f[0] < r[2] && r[1] < f[3] && f[1] < r[3])
-    };
-    for i in free {
-        let base = places[i];
-        let mut best = base;
-        'search: for ring in 0..400 {
-            let d = ring as Coord * 2 * GRID;
-            let offsets = [(d, 0), (0, -d), (-d, 0), (0, d), (d, -d), (-d, -d), (d, d), (-d, d)];
-            for (dx, dy) in offsets {
-                let p = Place {
-                    origin: Point::new(base.origin.x + dx, base.origin.y + dy),
-                    ..base
-                };
-                if !hits(&rect(&cells[i], &p), &fixed) {
-                    best = p;
-                    break 'search;
-                }
-            }
-        }
-        places[i] = best;
-        fixed.push(rect(&cells[i], &best));
-    }
 }
 
 mod draw;
