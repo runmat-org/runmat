@@ -23,3 +23,12 @@ pub fn import_figure_scene(scene: &[u8]) -> Result<Option<u32>, JsValue> {
 pub fn close_geometry_scene(handle: u32) -> bool {
     runmat_runtime::builtins::plotting::close_geometry_scene(handle)
 }
+
+/// The SDK's admission marker, so the `runmat` package can load this renderer-only build as its
+/// native module (Desktop design viewports draw through it before the full runtime arrives). The
+/// full build exports the same function from `api::init`.
+#[cfg(all(target_arch = "wasm32", feature = "graphics-replay"))]
+#[wasm_bindgen(js_name = stringElementWireSchemaVersion)]
+pub fn string_element_wire_schema_version() -> u16 {
+    runmat_execution::schema::STRING_ELEMENT_WIRE_SCHEMA_VERSION
+}
