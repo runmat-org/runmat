@@ -38,6 +38,25 @@ pub(super) fn available_memory() -> io::Result<u64> {
     available_bytes(&counters, page_size as u64)
 }
 
+/// This process's physical footprint: its resident and compressed dirty memory, the figure the
+/// kernel charges it for memory pressure.
+pub(super) fn process_footprint() -> io::Result<u64> {
+    // SAFETY: rusage_info_v2 contains integer counters; zero is valid for every field.
+    let mut usage = unsafe { std::mem::zeroed::<libc::rusage_info_v2>() };
+    // SAFETY: the flavor matches the typed buffer, which the kernel fills in place.
+    let status = unsafe {
+        libc::proc_pid_rusage(
+            std::process::id() as libc::c_int,
+            libc::RUSAGE_INFO_V2,
+            (&mut usage as *mut libc::rusage_info_v2).cast(),
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(usage.ri_phys_footprint)
+}
+
 fn available_bytes(counters: &libc::vm_statistics64, page_size: u64) -> io::Result<u64> {
     // Free pages already include speculative pages (Darwin vm_statistics.h).
     // Inactive pages are reclaimable estimates, not a guaranteed allocation.
