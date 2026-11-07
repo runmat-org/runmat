@@ -26,15 +26,27 @@ pub fn build_thermal_resource_plan(
     chunk_bytes: usize,
     prepared: PreparedThermalResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let numerical = workload
+        .prepare_primary_fields(mesh)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    build_thermal_resource_plan_from(workload, mesh, &numerical, chunk_bytes, prepared)
+}
+
+/// The same plan from a preparation the caller already derived for this workload and mesh, so a
+/// host that also projects the outputs from it derives the preassembly once.
+pub fn build_thermal_resource_plan_from(
+    workload: &ThermalWorkload,
+    mesh: &SolverMeshArtifact,
+    numerical: &crate::execution::PreparedThermalPrimarySolve<'_>,
+    chunk_bytes: usize,
+    prepared: PreparedThermalResourceFacts,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let invalid = |error: &dyn std::fmt::Display| ResourcePlanningError::Invalid(error.to_string());
     if workload.backend != crate::ComputeBackend::Cpu {
         return Err(ResourcePlanningError::Invalid(
             "thermal host resource planning requires an explicit CPU backend".into(),
         ));
     }
-    let numerical = workload
-        .prepare_primary_fields(mesh)
-        .map_err(|e| invalid(&e))?;
     let transport = numerical
         .transport_profile(chunk_bytes)
         .map_err(|e| invalid(&e))?;
@@ -92,7 +104,7 @@ pub fn build_thermal_resource_plan(
             "thermal prepared envelopes do not cover canonical inputs and outputs".into(),
         ));
     }
-    build_resource_plan(FeaResourcePlanningInput {
+    let plan = build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::ThermalSolve(source),
         demand: FeaResourceDemand::ThermalSolve(ThermalSolveResourceDemand {
@@ -124,5 +136,19 @@ pub fn build_thermal_resource_plan(
             accelerators: Vec::new(),
         },
         accuracy_ceiling: step.accuracy.resources,
-    })
+    })?;
+    let breakdown = &plan.breakdown;
+    tracing::info!(
+        memory_bytes = plan.request.memory_bytes,
+        input_encoded_payload_bytes = breakdown.input_encoded_payload_bytes.0,
+        input_transport_closure_bytes = breakdown.input_transport_closure_bytes.0,
+        input_decoded_resident_bytes = breakdown.input_decoded_resident_bytes.0,
+        output_set_bytes = breakdown.output_set_bytes.0,
+        workspace_bytes = breakdown.workspace_bytes.0,
+        phase_resident_bytes = breakdown.phase_resident_bytes.0,
+        phase_scratch_bytes = breakdown.phase_scratch_bytes.0,
+        phase_retained_bytes = breakdown.phase_retained_bytes.0,
+        "thermal resource plan terms"
+    );
+    Ok(plan)
 }

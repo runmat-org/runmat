@@ -147,7 +147,9 @@ mod structural_facts;
 mod symbolic;
 mod thermal;
 mod thermal_backend_evidence;
-pub use thermal::{build_thermal_resource_plan, PreparedThermalResourceFacts};
+pub use thermal::{
+    build_thermal_resource_plan, build_thermal_resource_plan_from, PreparedThermalResourceFacts,
+};
 mod thermal_field_construction;
 mod thermal_history;
 mod thermal_manifest_catalog;
