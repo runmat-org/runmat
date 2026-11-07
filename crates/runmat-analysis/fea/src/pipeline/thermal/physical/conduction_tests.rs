@@ -81,7 +81,7 @@ fn below_factor_of(
     input
 }
 
-// witness: FEA-THERMAL-SOLVER-001/conduction_multigrid @ thermal_steady/tet4/numerical_kernel;
+// witness: FEA-THERMAL-SOLVE-001/conduction_multigrid @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial;
 //   boundary: On a two-layer joint box with a contact conductance, a budget below the proving
 //   factor selects the conduction multigrid (AMG-PCG, no proving factor), and its
@@ -120,7 +120,7 @@ fn conduction_multigrid_matches_the_proving_factorization() {
     }
 }
 
-// witness: FEA-THERMAL-SOLVER-001/conduction_multigrid_usage @ thermal_steady/tet4/numerical_kernel;
+// witness: FEA-THERMAL-SOLVE-001/conduction_multigrid_usage @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial;
 //   boundary: A usage allowance that runs out inside the conduction multigrid solve refuses the
 //   run with the typed usage error.
@@ -151,7 +151,7 @@ fn conduction_multigrid_accounting_refusal_is_typed_usage() {
     assert!(matches!(error, FeaRunError::Usage(_)), "{error:?}");
 }
 
-// witness: FEA-THERMAL-SOLVER-001/conduction_multigrid_anchor @ thermal_steady/tet4/numerical_kernel;
+// witness: FEA-THERMAL-SOLVE-001/conduction_multigrid_anchor @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial;
 //   boundary: A body with no prescribed temperature and no convection is refused on the
 //   conduction multigrid path with an error naming the undetermined temperature.
@@ -182,7 +182,7 @@ fn conduction_multigrid_refuses_an_unanchored_body() {
     );
 }
 
-// witness: FEA-THERMAL-SOLVER-001/support_derivation_memory_interface @ thermal_steady/tet4/numerical_kernel;
+// witness: FEA-THERMAL-SOLVE-001/support_derivation_memory_interface @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial;
 //   boundary: With a finite contact conductance the split projection and the interface cliques
 //   stay within the planning law.
@@ -208,7 +208,7 @@ fn run_peak(input: &ThermalWorkload, mesh: &runmat_meshing_core::SolverMeshArtif
     })
 }
 
-// witness: FEA-THERMAL-SOLVER-001/steady_reservation @ thermal_steady/tet4/numerical_kernel;
+// witness: FEA-THERMAL-SOLVE-001/steady_reservation @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial;
 //   boundary: The measured requested-heap peak of a whole steady linear run, on both solve paths,
 //   fits the preassembly reservation the run admits.

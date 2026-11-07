@@ -290,7 +290,7 @@ fn thermal_admission_reserves_the_proving_factor_and_no_energy_budget() {
     }
 }
 
-// witness: FEA-THERMAL-SOLVER-001/conduction_multigrid_plan @ thermal_steady/tet4/resource_plan;
+// witness: FEA-THERMAL-SOLVE-001/conduction_multigrid_plan @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial;
 //   boundary: The conduction multigrid solver term (AMG, PCG vectors, proof inventory) is below
 //   the proving factor's on box meshes and the gap grows with the mesh; on these sizes the
@@ -397,7 +397,7 @@ pub(crate) fn derivation_peak_fits_the_planning_law(
     assert!(exact <= estimate, "exact bound {exact} exceeds the estimate {estimate}");
 }
 
-// witness: FEA-THERMAL-SOLVER-001/support_derivation_memory @ thermal_steady/tet4/numerical_kernel;
+// witness: FEA-THERMAL-SOLVE-001/support_derivation_memory @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial;
 //   boundary: The thermal support derivation (projection, clique support, symbolic factor
 //   analysis) never requests more heap than the planning law at the exact support size, and the

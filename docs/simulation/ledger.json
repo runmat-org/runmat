@@ -13710,6 +13710,24 @@
               ]
             }
           ]
+        },
+        {
+          "id": "heat_generation",
+          "criterion": "Volumetric heat generation and total-power heat sources on named regions integrate to the declared heat rate.",
+          "evidence_kind": "physical_balance",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
         }
       ],
       "dependencies": []
@@ -13779,6 +13797,132 @@
               ],
               "executions": [
                 "public_study"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conduction_multigrid",
+          "criterion": "An AMG-preconditioned CG steady conduction solve, chosen when the factor does not fit the admitted budget, agrees with the proving direct factorization within its tolerance.",
+          "evidence_kind": "execution_equivalence",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conduction_multigrid_usage",
+          "criterion": "A ledger refusal inside the multigrid conduction solve stays a typed usage refusal.",
+          "evidence_kind": "rejection_invariant",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conduction_multigrid_anchor",
+          "criterion": "A conduction model with a body that has no prescribed temperature or positive convection is refused as undetermined before the multigrid path solves.",
+          "evidence_kind": "rejection_invariant",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conduction_multigrid_plan",
+          "criterion": "Solver selection compares the whole preassembly totals of the factor and multigrid paths against the admitted budget.",
+          "evidence_kind": "resource_admission",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "steady_reservation",
+          "criterion": "The steady thermal reservation stays at or above the measured whole-run heap peak.",
+          "evidence_kind": "resource_admission",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "support_derivation_memory",
+          "criterion": "Thermal support-pattern derivation stays within its distinct-entry planning law.",
+          "evidence_kind": "resource_admission",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "support_derivation_memory_interface",
+          "criterion": "Support-pattern derivation with finite-conductance interfaces stays within its planning law.",
+          "evidence_kind": "resource_admission",
+          "envelopes": [
+            {
+              "formulations": [
+                "thermal_steady"
+              ],
+              "meshes": [
+                "tet4"
+              ],
+              "executions": [
+                "numerical_kernel"
               ]
             }
           ]
