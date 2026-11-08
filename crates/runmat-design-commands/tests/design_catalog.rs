@@ -24,6 +24,7 @@ fn merged_catalog_is_sound() {
         EditorKind::Drawing,
         EditorKind::Circuit,
         EditorKind::CircuitLayout,
+        EditorKind::Fea,
     ] {
         assert!(
             c.rows.iter().any(|r| r.editor == editor),

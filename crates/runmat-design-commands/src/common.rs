@@ -19,7 +19,7 @@ pub fn common() -> Catalog {
             "view.display",
             "Display style",
             "display",
-            &[Part, Assembly, Circuit, CircuitLayout],
+            &[Part, Assembly, Circuit, CircuitLayout, Fea],
         )
         .desc("Choose how the model is drawn.")
         .kw(&["shaded", "wireframe", "hidden lines", "x-ray"])
@@ -42,7 +42,7 @@ pub fn common() -> Catalog {
             "view.grid",
             "Grid",
             "grid",
-            &[Part, Assembly, Drawing, Circuit, CircuitLayout],
+            &[Part, Assembly, Drawing, Circuit, CircuitLayout, Fea],
         )
         .desc("Show the grid and set its spacing.")
         .inputs(vec![
@@ -54,7 +54,7 @@ pub fn common() -> Catalog {
             "view.section",
             "Section view",
             "section",
-            &[Part, Assembly, Circuit, CircuitLayout],
+            &[Part, Assembly, Circuit, CircuitLayout, Fea],
         )
         .desc("Cut the view with one or more section planes.")
         .kw(&["cut", "clip", "cross section"])
@@ -86,7 +86,7 @@ pub fn common() -> Catalog {
             "view.section-off",
             "Section off",
             "section-off",
-            &[Part, Assembly, Circuit, CircuitLayout],
+            &[Part, Assembly, Circuit, CircuitLayout, Fea],
         )
         .desc("Remove the section planes.")
         .edit(view_action("section_off")),
@@ -94,7 +94,7 @@ pub fn common() -> Catalog {
             "view.measure",
             "Measure",
             "measure",
-            &[Part, Assembly, Drawing, Circuit, CircuitLayout],
+            &[Part, Assembly, Drawing, Circuit, CircuitLayout, Fea],
         )
         .desc("Measure distance, angle, radius or path length; results stay pinned in the view.")
         .kw(&["distance", "angle", "radius", "dimension", "ruler"])
@@ -127,7 +127,7 @@ pub fn common() -> Catalog {
         ])
         .preview()
         .edit(analyze("measure")),
-        cmd("view.fit", "Fit", "fit", DESIGN)
+        cmd("view.fit", "Fit", "fit", &[Part, Assembly, Drawing, Circuit, CircuitLayout, Fea])
             .desc("Fit the whole model in the view.")
             .kw(&["zoom", "extents"])
             .edit(view_action("fit")),

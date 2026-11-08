@@ -7,6 +7,8 @@ use EditorKind::*;
 use SelectKind as K;
 
 pub(super) const CAD_3D: &[EditorKind] = &[Part, Assembly];
+/// The 3D editors plus the .fea study view, which shares their viewport toolbar.
+const VIEW_3D: &[EditorKind] = &[Part, Assembly, Fea];
 
 pub(super) fn add(catalog: &mut Catalog) {
     let mut commands = vec![
@@ -14,7 +16,7 @@ pub(super) fn add(catalog: &mut Catalog) {
             "view.select-filter",
             "Selection filter",
             "select-filter",
-            CAD_3D,
+            VIEW_3D,
         )
         .desc("Choose what clicks in the view select.")
         .kw(&["filter", "pick"])
@@ -52,25 +54,25 @@ pub(super) fn add(catalog: &mut Catalog) {
         .kw(&["config", "variant", "design table"])
         .inputs(vec![text("configuration", "Configuration", None)])
         .edit(view_action("configuration")),
-        cmd("view.front", "Front", "view-front", CAD_3D)
+        cmd("view.front", "Front", "view-front", VIEW_3D)
             .desc("Look at the model from the front.")
             .edit(view_action("front")),
-        cmd("view.back", "Back", "view-back", CAD_3D)
+        cmd("view.back", "Back", "view-back", VIEW_3D)
             .desc("Look at the model from the back.")
             .edit(view_action("back")),
-        cmd("view.top", "Top", "view-top", CAD_3D)
+        cmd("view.top", "Top", "view-top", VIEW_3D)
             .desc("Look at the model from the top.")
             .edit(view_action("top")),
-        cmd("view.bottom", "Bottom", "view-bottom", CAD_3D)
+        cmd("view.bottom", "Bottom", "view-bottom", VIEW_3D)
             .desc("Look at the model from the bottom.")
             .edit(view_action("bottom")),
-        cmd("view.left", "Left", "view-left", CAD_3D)
+        cmd("view.left", "Left", "view-left", VIEW_3D)
             .desc("Look at the model from the left.")
             .edit(view_action("left")),
-        cmd("view.right", "Right", "view-right", CAD_3D)
+        cmd("view.right", "Right", "view-right", VIEW_3D)
             .desc("Look at the model from the right.")
             .edit(view_action("right")),
-        cmd("view.isometric", "Isometric", "view-iso", CAD_3D)
+        cmd("view.isometric", "Isometric", "view-iso", VIEW_3D)
             .desc("Look at the model from the isometric corner.")
             .kw(&["iso"])
             .edit(view_action("isometric")),
@@ -141,6 +143,69 @@ pub(super) fn add(catalog: &mut Catalog) {
         }
     }
     catalog.add_commands(commands);
+    catalog.rows.push(fea_rows());
+}
+
+/// The .fea study view's viewport toolbar: the 3D view cluster with the items a meshed study
+/// supports. It has no command tabs; setup and results controls stay in the study view.
+/// Visibility joins once a geometry pick reports the body (assembly node) it hit.
+fn fea_rows() -> EditorRows {
+    let view_cluster = vec![
+        variants(
+            "view.display.menu",
+            "Shaded",
+            "display",
+            "view.display",
+            "style",
+            &[
+                ("shaded", "Shaded"),
+                ("shaded_edges", "Shaded with edges"),
+                ("xray", "X-ray edges"),
+                ("wireframe", "Wireframe"),
+            ],
+        ),
+        variants(
+            "view.select-filter.menu",
+            "Select",
+            "select-filter",
+            "view.select-filter",
+            "filter",
+            &[("face", "Faces"), ("edge", "Edges"), ("body", "Bodies")],
+        ),
+        c("view.grid"),
+        menu(
+            "view.section.menu",
+            "Section",
+            "section",
+            vec![e("view.section"), e("view.section-off")],
+        ),
+        menu(
+            "view.orient.menu",
+            "View",
+            "view-iso",
+            vec![
+                e("view.isometric"),
+                e("view.front"),
+                e("view.back"),
+                e("view.top"),
+                e("view.bottom"),
+                e("view.left"),
+                e("view.right"),
+                e("view.fit"),
+            ],
+        ),
+        c("view.measure"),
+    ];
+    EditorRows {
+        editor: Fea,
+        mode: EditMode::Model,
+        tabs: Vec::new(),
+        default_tab: String::new(),
+        view_cluster,
+        document_bar: Vec::new(),
+        shortcut_box: Vec::new(),
+        mode_actions: Vec::new(),
+    }
 }
 
 /// The 3D view cluster (part, assembly, circuit 3D): display, filter, visibility, grid, section,

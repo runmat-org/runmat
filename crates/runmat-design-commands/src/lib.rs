@@ -106,6 +106,9 @@ pub enum EditorKind {
     Circuit,
     #[serde(rename = "circuit.layout")]
     CircuitLayout,
+    /// The .fea study view: only its viewport toolbar (the 3D view cluster) comes from here.
+    #[serde(rename = "fea")]
+    Fea,
 }
 
 impl EditorKind {
@@ -116,6 +119,7 @@ impl EditorKind {
             EditorKind::Drawing => "drawing",
             EditorKind::Circuit => "circuit",
             EditorKind::CircuitLayout => "circuit.layout",
+            EditorKind::Fea => "fea",
         }
     }
 }
@@ -937,7 +941,8 @@ impl Catalog {
                     ));
                 }
             }
-            if !rows.tabs.iter().any(|t| t.id == rows.default_tab) {
+            // A view-only row (the .fea study view's toolbar) has no tabs.
+            if !rows.tabs.is_empty() && !rows.tabs.iter().any(|t| t.id == rows.default_tab) {
                 problems.push(format!(
                     "{} default tab {} is missing",
                     rows.editor.as_str(),
