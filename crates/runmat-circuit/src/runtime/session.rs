@@ -360,6 +360,11 @@ impl Session {
         }
         self.timings.read += t.elapsed();
         let t = now();
+        // The circuit's declared pairs: DRC checks their gap, coupling and skew.
+        let pairs = match (&self.schematic, parsed.board.as_ref()) {
+            (Some(s), Some(board)) => super::coupled::pair_nets(&s.project, board),
+            _ => Vec::new(),
+        };
         let (rules, rule_errors) = {
             let board = parsed.board.as_ref().expect("a layout without errors has a board");
             let (mut rules, errors) = BoardRules::for_board(board);
@@ -367,7 +372,7 @@ impl Session {
                 .into_iter()
                 .map(|e| Diagnostic::error(&path, Some(text), 0, 0, format!("{e:?}")))
                 .collect();
-            rules.rebuild(&BoardGraph::new(board, &[]));
+            rules.rebuild(&BoardGraph::new(board, &pairs));
             (rules, rule_errors)
         };
         self.timings.rules = t.elapsed();
@@ -387,10 +392,10 @@ impl Session {
             // The re-read numbered the zones afresh: find each cached fill's zone by content.
             fills.rekey(&board.zones);
         }
-        let (reports, _) = fill_zones_cached(board, &rules, &[], &mut fills, &dirty);
+        let (reports, _) = fill_zones_cached(board, &rules, &pairs, &mut fills, &dirty);
         self.timings.fill = t.elapsed();
         let t = now();
-        let drc = Drc::run(board, &rules, &[], &reports);
+        let drc = Drc::run(board, &rules, &pairs, &reports);
         self.timings.drc = t.elapsed();
         let s = self.schematic.as_ref().expect("synced");
         let t = now();
@@ -518,13 +523,15 @@ impl Session {
             }
         }
         let t = now();
-        let g = BoardGraph::new(board, &[]);
+        // The pairs the whole run took: a board edit doesn't change the circuit's pairs.
+        let pairs = drc.diff_pairs().to_vec();
+        let g = BoardGraph::new(board, &pairs);
         rules.single.items_changed(&g, &changed, &removed);
         rules.pair.items_changed(&g, &changed, &removed);
         drop(g);
         self.timings.rules = t.elapsed();
         let t = now();
-        let (reports, fill_change) = fill_zones_cached(board, &rules, &[], &mut fills, &dirty);
+        let (reports, fill_change) = fill_zones_cached(board, &rules, &pairs, &mut fills, &dirty);
         self.timings.fill = t.elapsed();
         let t = now();
         let mut drc_changed = changed.clone();

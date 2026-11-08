@@ -701,9 +701,11 @@ pub fn compile(path: &str, text: &str, files: &Files, options: &CompileOptions) 
                 format!("{e:?}"),
             ));
         }
-        rules.rebuild(&BoardGraph::new(&board, &[]));
-        let fills = fill_zones(&mut board, &rules, &[]);
-        let drc = Drc::run(&board, &rules, &[], &fills);
+        // The circuit's declared pairs: DRC checks their gap, coupling and skew.
+        let pairs = coupled::pair_nets(&project, &board);
+        rules.rebuild(&BoardGraph::new(&board, &pairs));
+        let fills = fill_zones(&mut board, &rules, &pairs);
+        let drc = Drc::run(&board, &rules, &pairs, &fills);
         add_board(&mut index, &board, &rules, &drc);
         let (forward, back) = plans(&project, &board, options.eco.as_ref());
         add_eco(&mut index, &forward, &back, &board);

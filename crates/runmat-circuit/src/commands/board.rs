@@ -82,7 +82,7 @@ pub(super) fn add(c: &mut Catalog) {
             .preview()
             .edit(add_to("track", Section::Copper)),
         brd("board.diff-pair", "Diff pair", "diff-pair", "Route a differential pair together, at its gap from pad to pad.")
-            .inputs(vec![pick("pair", "Pair", &[K::Net]), qty("width", "Width", "length", Some(0.12)), qty("gap", "Gap", "length", Some(0.15)), layer()])
+            .inputs(vec![pick("pair", "Pair", &[K::Net]), qty("width", "Width", "length", Some(0.12)), qty("gap", "Gap", "length", Some(0.15)), layer().optional().help("Empty: the top layer.")])
             .preview()
             .edit(add_to("track_pair", Section::Copper)),
         brd("board.multi-route", "Multi-route", "multi-route", "Route several nets as a bus.")

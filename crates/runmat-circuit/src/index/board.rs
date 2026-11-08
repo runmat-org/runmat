@@ -60,6 +60,59 @@ pub struct BoardIndex {
     /// The ratsnest: links still needed to join each net's copper islands.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unrouted: Vec<crate::display::AirwireRow>,
+    /// Each net on the board, in board order: routed length, rules and its pair.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nets: Vec<NetRow>,
+}
+
+/// A board net: its routed length (tracks and via spans), the track width and clearance its
+/// rules give, and on a differential pair the other net and the length difference (skew).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NetRow {
+    pub name: String,
+    pub length_mm: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width_mm: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clearance_mm: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pair: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skew_mm: Option<f64>,
+}
+
+/// The board's net rows: one pass over the copper for every net's length.
+fn net_rows(board: &Board, rules: &BoardRules, graph: &BoardGraph, pairs: &[(NetId, NetId)]) -> Vec<NetRow> {
+    let mut length = vec![0.0f64; board.nets.len()];
+    for t in board.tracks.values() {
+        if let Some(n) = t.net {
+            length[n.0 as usize] += t.length();
+        }
+    }
+    for v in board.vias.values() {
+        if let Some(n) = v.net {
+            length[n.0 as usize] += board.stackup.span_length(v.from, v.to) as f64;
+        }
+    }
+    let round = |nm: f64| (nm / 1.0e6 * 1.0e4).round() / 1.0e4;
+    let partner = |n: NetId| pairs.iter().find_map(|&(p, q)| if p == n { Some(q) } else if q == n { Some(p) } else { None });
+    board
+        .nets
+        .iter()
+        .enumerate()
+        .map(|(i, net)| {
+            let id = NetId(i as u32);
+            let other = partner(id);
+            NetRow {
+                name: net.name.clone(),
+                length_mm: round(length[i]),
+                width_mm: rules.len(graph, BItem::Net(i as u32), props::TRACK_WIDTH).map(mm),
+                clearance_mm: rules.len(graph, BItem::Net(i as u32), props::CLEARANCE).map(mm),
+                pair: other.map(|o| board.nets[o.0 as usize].name.clone()),
+                skew_mm: other.map(|o| round((length[i] - length[o.0 as usize]).abs())),
+            }
+        })
+        .collect()
 }
 
 /// A placement room: its members and its outline's bounding box.
@@ -602,6 +655,7 @@ pub fn add_board_reusing(
             }
             _ => crate::display::unrouted(board),
         },
+        nets: net_rows(board, rules, &graph, drc.diff_pairs()),
     });
 }
 

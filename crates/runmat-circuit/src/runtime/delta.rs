@@ -78,7 +78,7 @@ fn board_delta(old: &BoardIndex, new: &BoardIndex) -> Value {
 /// The board's delta without its keyed tables: the whole fields and the keyless row runs.
 fn small_fields(old: &BoardIndex, new: &BoardIndex) -> Value {
     // Every field is compared here or in a keyed patch: a new field fails to compile until it is.
-    let BoardIndex { name: _, layers: _, footprints: _, pads: _, tracks: _, vias: _, zones: _, rules: _, drc: _, rooms: _, outline: _, keepouts: _, texts: _, graphics: _, dimensions: _, fiducials: _, unrouted: _ } = new;
+    let BoardIndex { name: _, layers: _, footprints: _, pads: _, tracks: _, vias: _, zones: _, rules: _, drc: _, rooms: _, outline: _, keepouts: _, texts: _, graphics: _, dimensions: _, fiducials: _, unrouted: _, nets: _ } = new;
     let mut fields = Map::new();
     let mut put = |name: &str, changed: bool, value: Value| {
         if changed {
@@ -90,7 +90,7 @@ fn small_fields(old: &BoardIndex, new: &BoardIndex) -> Value {
             $(put(stringify!($name), old.$name != new.$name, to_value(&new.$name));)*
         };
     }
-    field!(name, layers, rules, rooms, outline, keepouts, texts, graphics, dimensions, fiducials);
+    field!(name, layers, rules, rooms, outline, keepouts, texts, graphics, dimensions, fiducials, nets);
     let mut rows = Map::new();
     if let Some(p) = runs_patch(&old.drc, &new.drc) {
         rows.insert("drc".into(), p);
@@ -170,6 +170,7 @@ impl PatchBase {
                 fiducials: std::mem::take(&mut old.fiducials),
                 // The patch reuses the old links of the nets it didn't touch.
                 unrouted: old.unrouted.clone(),
+                nets: std::mem::take(&mut old.nets),
             },
             eco: std::mem::take(&mut index.eco),
             back_annotation: std::mem::take(&mut index.back_annotation),

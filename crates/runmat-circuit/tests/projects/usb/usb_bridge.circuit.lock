@@ -1,0 +1,46 @@
+entry 3b2c2be0-0e91-8bcf-b444-8e970100400b net /+3V3
+entry cb84aca0-52f1-8d79-bb4e-4547d452b8cb net /BOOT0
+entry f0bf4881-cdfd-8678-b342-9025b7fe2754 component /C1 designator=C1
+entry 76ead9dc-e478-81c0-8cce-f5f488c6444f component /C2 designator=C2
+entry 7cce53c2-2c05-8974-b492-c9ff1e02a133 component /C3 designator=C3
+entry 1dd9be84-e938-80e3-bb8e-ec10488f31ab component /C4 designator=C4
+entry f9c4e74e-5210-83f1-bb91-ee682e9bc6dc component /C5 designator=C5
+entry 0d212a38-1585-8ea9-a392-5d92ae772b7f net /GND
+entry 5f8fe56d-e319-8f97-8a1d-63613eeb30be component /J1 designator=J1
+entry 26198955-c871-8fec-afb9-ef1cc95a18ca net /NRST
+entry a88c01b8-df64-8754-8322-7e3e60e50d9b component /R1 designator=R1
+entry befe3726-769e-80e5-b966-28856b1526f8 component /R2 designator=R2
+entry c466d9cf-6fd7-8c49-bf17-680a680f8c44 component /U1 designator=U1
+entry 75ef1682-04a9-866a-aeb8-68c7a7fb0bd1 component /U2 designator=U2
+entry ba81d326-1ddc-8475-af31-f8d79dc4db0a net /USB_DN
+entry 3d04bee7-24bf-8462-82f6-a9cfb804a6e7 net /USB_DP
+entry 35ea3b41-8670-8751-8168-e582931cd4ff net /VBUS
+entry c49f5d72-410e-8fc1-94e0-98f693d2fe5e net /VCAP
+fp /+3V3 /C2.1,/C3.1,/C4.1,/R1.1,/U1.VDD,/U1.VDDA,/U2.VOUT
+fp /BOOT0 /R2.1,/U1.BOOT0
+fp /C1 5884b3d6-4fd9-87f3-a37a-bfdf5d04441d|GND,VBUS
+fp /C2 5884b3d6-4fd9-87f3-a37a-bfdf5d04441d|+3V3,GND
+fp /C3 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /C4 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /C5 e6517d62-caf2-8354-a15d-4ec7c594d6b3|GND,VCAP
+fp /GND /C1.2,/C2.2,/C3.2,/C4.2,/C5.2,/J1.4,/R2.2,/U1.VSS,/U1.VSSA,/U2.GND
+fp /J1 4f4faabc-3a4d-89e5-b2ea-1658a08fb24d|GND,USB_DN,USB_DP,VBUS
+fp /NRST /R1.2,/U1.NRST
+fp /R1 f0b7343f-4c49-88f7-8a3b-7c46bf087762|+3V3,NRST
+fp /R2 f0b7343f-4c49-88f7-8a3b-7c46bf087762|BOOT0,GND
+fp /U1 8a5fb81d-61d0-86be-936c-76caa4bd5a2c|+3V3,BOOT0,GND,NRST,USB_DN,USB_DP,VCAP
+fp /U2 5fef276e-5d9f-87b7-a405-8a5aeef03e55|+3V3,GND,VBUS
+fp /USB_DN /J1.2,/U1.PA11
+fp /USB_DP /J1.3,/U1.PA12
+fp /VBUS /C1.1,/J1.1,/U2.EN,/U2.VIN
+fp /VCAP /C5.1,/U1.VCAP
+place main/C1 99.06 99.06 270
+place main/C2 199.39 151.13 270
+place main/C3 214.63 151.13 270
+place main/C4 229.87 151.13 270
+place main/C5 171.45 83.82 270
+place main/J1 69.85 91.44 0 mirror
+place main/R1 158.75 68.58 270
+place main/R2 184.15 88.9 270
+place main/U1 214.63 97.79 0
+place main/U2 123.19 90.17 0

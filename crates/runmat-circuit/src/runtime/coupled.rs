@@ -8,7 +8,12 @@ use super::*;
 use crate::geom::mm;
 use crate::layout::NetId;
 
-/// The board nets of the circuit's declared pairs.
+/// The board nets of the circuit's declared pairs, as DRC, zone fills and rules take them.
+pub(super) fn pair_nets(project: &Project, board: &Board) -> Vec<(NetId, NetId)> {
+    pairs(project, board).into_iter().map(|(_, p, n)| (p, n)).collect()
+}
+
+/// The board nets of the circuit's declared pairs, by pair name.
 fn pairs(project: &Project, board: &Board) -> Vec<(String, NetId, NetId)> {
     let nl = &project.netlist;
     nl.diff_pairs
@@ -87,7 +92,7 @@ pub(super) fn tune_length(project: &Project, request: &EditRequest) -> Result<Ed
     let mut summary = String::new();
     let (change, ()) = board_edit::edit_board(&layout.path, &layout.text, |board| {
         let id = board.net(&net).ok_or_else(|| format!("`{net}` is not a net on the board"))?;
-        let pairs: Vec<(NetId, NetId)> = pairs(project, board).into_iter().map(|(_, p, n)| (p, n)).collect();
+        let pairs = pair_nets(project, board);
         let t = crate::pair::tune_length(board, id, target, tolerance, &pairs)?;
         summary = format!(
             "Tuned {net} from {:.3} mm to {:.3} mm with {} meander(s) {:.3} mm tall",

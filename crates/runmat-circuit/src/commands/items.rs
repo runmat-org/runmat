@@ -118,6 +118,8 @@ pub(super) fn add(c: &mut Catalog) {
                     shown(qty("clearance", "Clearance", "length", None), "clearance"),
                     shown(qty("width", "Track width", "length", None), "width"),
                     shown(qty("length", "Routed length", "length", None), "length"),
+                    shown(text("pair", "Diff pair with", None), "pair"),
+                    shown(qty("skew", "Pair skew", "length", None), "skew"),
                 ],
             )],
         ),

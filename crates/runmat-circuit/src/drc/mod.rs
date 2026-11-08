@@ -282,6 +282,11 @@ fn graphic_prims(g: &Graphic, t: &crate::geom::Transform) -> Vec<Prim> {
 }
 
 impl Drc {
+    /// The differential pairs the run checked.
+    pub fn diff_pairs(&self) -> &[(NetId, NetId)] {
+        &self.diff_pairs
+    }
+
     /// Full check.
     pub fn run(
         board: &Board,
