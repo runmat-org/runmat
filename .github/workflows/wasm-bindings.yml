@@ -136,6 +136,13 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Verify publication credentials before compiling
+        if: github.event_name == 'push' || inputs.publish
+        working-directory: bindings/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm whoami --registry=https://registry.npmjs.org > /dev/null
+
       - name: Setup Chrome and ChromeDriver
         id: setup_chrome
         uses: browser-actions/setup-chrome@v2
@@ -348,8 +355,8 @@ jobs:
             bindings/ts/browser-product.acceptance.json
           if-no-files-found: error
 
-      - name: Preserve built SDK after acceptance failure
-        if: failure() && steps.bindings_build.outcome == 'success'
+      - name: Retain the built SDK candidate
+        if: ${{ !cancelled() && steps.bindings_build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: wasm-bindings-built-candidate-${{ github.run_attempt }}
@@ -359,7 +366,10 @@ jobs:
             bindings/ts/package-lock.json
             bindings/ts/LICENSE.md
             bindings/ts/FREE-USE.md
+            bindings/ts/browser-product.artifacts.json
+            bindings/ts/browser-product.acceptance.json
           if-no-files-found: error
+          retention-days: 7
 
       - name: Pack the already-built package without lifecycle rebuilds
         id: package_archive
@@ -368,8 +378,7 @@ jobs:
         run: |
           set -euo pipefail
           node ../../scripts/distribution/third-party-notices.cjs verify dist
-          archive_json="$(npm pack --ignore-scripts --json)"
-          archive="$(PACKAGE_ARCHIVE_JSON="$archive_json" node -e 'const value=JSON.parse(process.env.PACKAGE_ARCHIVE_JSON); if (!Array.isArray(value) || value.length !== 1 || typeof value[0].filename !== "string") throw new Error("npm pack returned no unique archive"); process.stdout.write(value[0].filename)')"
+          archive="$(npm pack --ignore-scripts --json | node -e 'const value=JSON.parse(require("node:fs").readFileSync(0, "utf8")); if (!Array.isArray(value) || value.length !== 1 || typeof value[0].filename !== "string") throw new Error("npm pack returned no unique archive"); process.stdout.write(value[0].filename)')"
           test -f "$archive"
           packed_root="${RUNNER_TEMP}/runmat-bindings-package"
           mkdir -p "$packed_root"
