@@ -288,10 +288,19 @@ pub fn place(ctx: &mut Ctx<'_>) {
                     Corner::TopLeft => [f.x0, stacks[k]],
                 };
                 let b = BoxR::new(snapped[0], snapped[1] - h, snapped[0] + w, snapped[1]);
-                let spot = if ctx.occ.free(&b, &id, 0.0, &[]) {
+                // A table keeps clear of the centring marks. One on the frame's right edge steps
+                // left of the mark before it looks elsewhere, so it keeps its place on the title
+                // block.
+                let marks = super::border::centring_marks(ctx.size, &f);
+                let clear = |b: &BoxR| marks.iter().all(|(p, q)| !b.grow(0.5).crossed_by(*p, *q));
+                let stepped = [snapped[0] - super::border::CENTRING_REACH - SPACE / 2.0, snapped[1]];
+                let stepped_box = BoxR::new(stepped[0], stepped[1] - h, stepped[0] + w, stepped[1]);
+                let spot = if ctx.occ.free(&b, &id, 0.0, &[]) && clear(&b) {
                     snapped
+                } else if corner != Corner::TopLeft && ctx.occ.free(&stepped_box, &id, 0.0, &[]) && clear(&stepped_box) {
+                    stepped
                 } else {
-                    match nearest_free(&ctx.occ, &id, w, h, b.center(), 2.5, 1.0, &|_| true) {
+                    match nearest_free(&ctx.occ, &id, w, h, b.center(), 2.5, 1.0, &clear) {
                         Some(n) => [n.x0, n.y1],
                         None => {
                             ctx.finding("table_no_room", &id, format!("Table {} has no room on the sheet; it overlaps what is there", &id[id.find(':').map_or(0, |i| i + 1)..]));

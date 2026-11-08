@@ -2617,8 +2617,6 @@ impl PlotOverlay {
         let scale = font_scale.max(0.75);
         let base = plot_rect.width().min(plot_rect.height()).max(1.0);
         let gizmo_size = (base * 0.16).clamp(44.0, 110.0) * scale;
-        let pad = (30.0 * scale).round();
-        let origin = Pos2::new(plot_rect.min.x + pad, plot_rect.max.y - pad);
 
         struct AxisItem {
             label: &'static str,
@@ -2668,12 +2666,30 @@ impl PlotOverlay {
 
         let painter = ui.painter();
 
-        painter.circle_filled(origin, 2.0 * scale, Color32::from_gray(210));
-
         let axis_len = gizmo_size * 0.65;
         let head_len = (8.0 * scale).min(axis_len * 0.35);
         let head_w = 5.0 * scale;
         let font = FontId::proportional(11.0 * scale);
+        // Inset the origin so every arm and its label stays whole (the label sits 10 px past the
+        // tip and is about 8 px across).
+        let dirs: Vec<[f32; 2]> = axes
+            .iter()
+            .filter_map(|a| {
+                let d = egui::Vec2::new(a.dir_world.x, -a.dir_world.y);
+                let m = d.length();
+                (m.is_finite() && m >= 1e-4).then(|| [d.x / m, d.y / m])
+            })
+            .collect();
+        let [ox, oy] = crate::core::triad::triad_origin(
+            [plot_rect.min.x, plot_rect.min.y],
+            [plot_rect.max.x, plot_rect.max.y],
+            (30.0 * scale).round(),
+            axis_len + 16.0 * scale,
+            &dirs,
+        );
+        let origin = Pos2::new(ox, oy);
+
+        painter.circle_filled(origin, 2.0 * scale, Color32::from_gray(210));
 
         for a in axes.iter() {
             let dir2 = egui::Vec2::new(a.dir_world.x, -a.dir_world.y);

@@ -2,8 +2,8 @@ runmat 0.7
 std 1
 
 // The camera drone's assembly drawing at 1:2 on A2, third-angle projection: the front view with
-// the plan view above it, an isometric beside them, balloons on the main items and the parts
-// list on the title block.
+// the plan view above it, an isometric at 1:1.6 beside them, balloons on the main items and the
+// parts list beside the title block.
 drawing drone {
     format a2 = {
         size = { size = iso, name = A2 },
@@ -18,9 +18,9 @@ drawing drone {
 
     sheet "1" = { format = a2, scale = [1, 2], projection = third_angle }
 
-    view front = standard(orientation = front, sheet = "1", model = { assembly = drone, from = ".." }, at = [130, 80], display = visible_lines)
-    view top = projected(from = front, direction = up, sheet = "1", model = { assembly = drone, from = ".." }, at = [130, 215], display = visible_lines)
-    view iso = standard(orientation = isometric, sheet = "1", model = { assembly = drone, from = ".." }, at = [343, 315], display = visible_lines)
+    view front = standard(orientation = front, sheet = "1", model = { assembly = drone, from = ".." }, at = [121, 80], display = visible_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { assembly = drone, from = ".." }, at = [121, 215], display = visible_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { assembly = drone, from = ".." }, at = [400, 323], scale = [5, 8], display = visible_lines)
 
     annotation b1 = balloon(occurrence = [{ name = body_top }], table = parts, view = iso)
     annotation b2 = balloon(occurrence = [{ name = body_bottom }], table = parts, view = front)
@@ -31,5 +31,5 @@ drawing drone {
     annotation b7 = balloon(occurrence = [{ name = vision_front_left }], table = parts, view = iso)
     annotation b8 = balloon(occurrence = [{ name = light_pipe }], table = parts, view = iso)
 
-    table parts = bom(view = iso, sheet = "1", at = [0, 0])
+    table parts = bom(view = iso, sheet = "1", at = [228, 222.5])
 }

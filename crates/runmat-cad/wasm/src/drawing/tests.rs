@@ -241,6 +241,43 @@ fn auto_drawing_lays_out_views_a_section_and_hole_callouts() {
 /// A parts list counts a part by its part number: four brackets set to two widths are one line,
 /// quantity 4. A part with no `description` reads its output's name as words.
 #[test]
+fn a_parts_list_on_the_title_block_steps_left_of_the_right_centring_mark() {
+    // Ten pins of different sizes on A4: the parts list on the title block reaches past the
+    // right centring mark at mid-height.
+    let pin = "runmat 0.7\nstd 1\n\npart pin {\n    input radius : length = 2 mm\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = input.radius)\n    }\n    feature body = extrude(profile = sketch.s, distance = 4 mm)\n    output pin = { body = feature.body.body }\n}\n";
+    let uses: String = (1..=10)
+        .map(|k| format!("    use part pin as p{k} {{\n        configuration = {{ select = inputs, values = {{ radius = {k} mm }} }}\n        placement = {{ placement = offset, offset = {{ translation = [{} mm, 0 mm, 0 mm] }} }}\n    }}\n", 30 * k))
+        .collect();
+    let rig = format!("runmat 0.7\nstd 1\n\nassembly rig {{\n{uses}}}\n");
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a4 = { size = { size = iso, name = A4 }, title_block = [] }\n    sheet \"1\" = { format = a4, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [70, 120], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0])\n}\n";
+    let files: Files = [("/p/pin.part".to_owned(), pin.to_owned()), ("/p/rig.assembly".to_owned(), rig)].into();
+    let out: Value = serde_json::from_str(&compile_json("/p/rig.drawing", drawing, &files)).unwrap();
+    let layout = &out["projection"]["data"]["layouts"]["1"];
+    let lines = out["projection"]["data"]["bom_tables"]["parts"]["lines"].as_array().map_or(0, |l| l.len());
+    assert_eq!(lines, 10, "{}", out["projection"]["data"]["bom_tables"]);
+    assert!(layout["findings"].as_array().is_some_and(|f| f.is_empty()), "{}", layout["findings"]);
+    let mut b = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+    for p in layout["primitives"].as_array().unwrap().iter().filter(|p| p["id"] == "table:parts") {
+        let s = &p["shape"];
+        let pts: Vec<f64> = match s["type"].as_str() {
+            Some("rect") => {
+                let (x, y, w, h) = (s["x"].as_f64().unwrap(), s["y"].as_f64().unwrap(), s["w"].as_f64().unwrap(), s["h"].as_f64().unwrap());
+                vec![x, y, x + w, y + h]
+            }
+            Some("polyline") => s["points"].as_array().unwrap().iter().filter_map(Value::as_f64).collect(),
+            _ => vec![],
+        };
+        for c in pts.chunks(2) {
+            b = [b[0].min(c[0]), b[1].min(c[1]), b[2].max(c[0]), b[3].max(c[1])];
+        }
+    }
+    // A4: the frame's right edge is at 287 mm and the mark reaches 5 mm in at 105 mm.
+    assert!(b[1] < 105.0 && b[3] > 105.0, "the table does not reach the mark's height: {b:?}");
+    assert!(b[2] <= 287.0 - 5.0 - 1.0, "the table runs into the centring mark: {b:?}");
+    assert!(b[2] >= 287.0 - 5.0 - 4.0, "the table left the title block's corner: {b:?}");
+}
+
+#[test]
 fn a_parts_list_groups_one_part_number_and_fills_its_description() {
     let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n    use part bracket as c {\n        configuration = { select = inputs, values = { width = 90 mm } }\n        placement = { placement = offset, offset = { translation = [0 mm, 100 mm, 0 mm] } }\n    }\n    use part bracket as d {\n        configuration = { select = inputs, values = { width = 70 mm } }\n        placement = { placement = offset, offset = { translation = [100 mm, 100 mm, 0 mm] } }\n    }\n}\n";
     let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation b1 = balloon(occurrence = [{ name = c }], table = parts, view = iso)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0])\n}\n";

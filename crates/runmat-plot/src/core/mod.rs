@@ -13,6 +13,7 @@ pub mod interaction;
 pub mod plot_renderer;
 pub mod renderer;
 pub mod scene;
+pub mod triad;
 pub mod viewport;
 
 pub use camera::{Camera, CameraController, CameraViewPreset, MouseButton, ProjectionType};

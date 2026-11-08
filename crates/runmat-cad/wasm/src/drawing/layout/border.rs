@@ -11,6 +11,15 @@ use super::marks::{line, prim, text};
 use super::solver::{BoxR, Class};
 use super::{xy, Ctx, Shape, Xy};
 
+/// How far a centring mark reaches inside the frame, in mm.
+pub const CENTRING_REACH: f64 = 5.0;
+
+/// The parts of the centring marks inside the frame, as segments. A table keeps clear of them.
+pub fn centring_marks(size: Xy, f: &BoxR) -> [(Xy, Xy); 4] {
+    let (mx, my, r) = (size[0] / 2.0, size[1] / 2.0, CENTRING_REACH);
+    [([mx, f.y0], [mx, f.y0 + r]), ([mx, f.y1], [mx, f.y1 - r]), ([f.x0, my], [f.x0 + r, my]), ([f.x1, my], [f.x1 - r, my])]
+}
+
 /// The drawing frame's inside, by the standard.
 pub fn frame_box(size: Xy, iso: bool) -> BoxR {
     let left = if iso { 20.0 } else { 10.0 };
@@ -72,9 +81,11 @@ pub fn draw(ctx: &mut Ctx<'_>) {
         }
     }
     out.push(prim("", "frame", "Frame", "frame", Shape::Rect { x: edge, y: edge, w: w - 2.0 * edge, h: h - 2.0 * edge }));
-    // Centring marks: from the trimmed edge to 5 mm inside the frame, at each side's middle.
+    // Centring marks: from the trimmed edge to `CENTRING_REACH` inside the frame, at each side's
+    // middle.
     let (mx, my) = (w / 2.0, h / 2.0);
-    for pts in [[mx, 0.0, mx, f.y0 + 5.0], [mx, h, mx, f.y1 - 5.0], [0.0, my, f.x0 + 5.0, my], [w, my, f.x1 - 5.0, my]] {
+    let r = CENTRING_REACH;
+    for pts in [[mx, 0.0, mx, f.y0 + r], [mx, h, mx, f.y1 - r], [0.0, my, f.x0 + r, my], [w, my, f.x1 - r, my]] {
         out.push(prim("", "frame", "Frame", "thick", line(pts.to_vec())));
     }
     ctx.push(out);

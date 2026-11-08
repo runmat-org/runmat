@@ -1567,11 +1567,30 @@ fn draw_3d_orientation_gizmo(canvas: &mut Canvas, axes: &AxesView) {
     let scale = ((axes.viewport.2.min(axes.viewport.3) as f32) / 720.0).clamp(0.8, 1.6);
     let gizmo_size =
         ((axes.viewport.2.min(axes.viewport.3) as f32) * 0.16).clamp(44.0, 110.0) * scale;
-    let pad = (30.0 * scale).round() as i32;
-    let origin = Vec2::new(
-        (axes.viewport.0 as i32 + pad) as f32,
-        ((axes.viewport.1 + axes.viewport.3) as i32 - pad) as f32,
+    let axis_len = gizmo_size * 0.65;
+    // Inset the origin so every arm and its label stays whole (see `core::triad`).
+    let dirs: Vec<[f32; 2]> = axis_items
+        .iter()
+        .filter_map(|a| {
+            let d = Vec2::new(a.dir_world.x, -a.dir_world.y);
+            let m = d.length();
+            (m.is_finite() && m >= 1e-4).then(|| [d.x / m, d.y / m])
+        })
+        .collect();
+    let (vx, vy, vw, vh) = (
+        axes.viewport.0 as f32,
+        axes.viewport.1 as f32,
+        axes.viewport.2 as f32,
+        axes.viewport.3 as f32,
     );
+    let [ox, oy] = crate::core::triad::triad_origin(
+        [vx, vy],
+        [vx + vw, vy + vh],
+        (30.0 * scale).round(),
+        axis_len + 16.0 * scale,
+        &dirs,
+    );
+    let origin = Vec2::new(ox.round(), oy.round());
     canvas.draw_disc(
         origin,
         (2.0 * scale).max(1.0),
@@ -1580,7 +1599,6 @@ fn draw_3d_orientation_gizmo(canvas: &mut Canvas, axes: &AxesView) {
         false,
     );
 
-    let axis_len = gizmo_size * 0.65;
     let head_len = (8.0 * scale).min(axis_len * 0.35);
     let head_w = 5.0 * scale;
     for a in &axis_items {
