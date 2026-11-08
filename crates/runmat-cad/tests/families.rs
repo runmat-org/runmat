@@ -339,6 +339,7 @@ fn base_flange_flat_pattern_and_edge_flange_on_the_kernel() {
     let Some(FeatureRecord::FlatPattern {
         development: Some(development),
         layout,
+        ..
     }) = r.state.records.get(&fid("flat"))
     else {
         panic!("no flat record")
@@ -455,6 +456,10 @@ fn unfold_and_fold_in_place_keep_the_sheet_and_its_names() {
     assert!(close(along, 0.025 + 0.045 + ba, 2e-4), "{lo:?} {hi:?}");
     let flat_bend = generated_face("unfold", Role::BendFace, "up+base", 0);
     assert_eq!(count_faces(&r, &d, &[flat_bend]), vec![1]);
+    // The unfolded sheet draws in the model, with its one bend's line on both faces.
+    let shown = runmat_cad::display::part_display(&r, &env.kernel, &runmat_cad::regen::kernel::TessellationOptions::default());
+    assert!(!shown.bodies[0].flat_pattern);
+    assert_eq!(shown.bodies[0].bend_lines.len(), 12);
     d.features.push(Feature::new(
         "fold",
         FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends: Vec::new() }),
@@ -794,6 +799,7 @@ fn a_plate_with_a_bend_and_a_jog_flattens_to_its_plate_with_the_bend_lines() {
     let Some(FeatureRecord::FlatPattern {
         layout,
         development: None,
+        ..
     }) = r.state.records.get(&fid("flat"))
     else {
         panic!("no plate flat record")

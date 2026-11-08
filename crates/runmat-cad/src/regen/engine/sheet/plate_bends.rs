@@ -570,6 +570,7 @@ impl<'a, 'b> Run<'a, 'b> {
             FeatureRecord::FlatPattern {
                 layout,
                 development: None,
+                in_place: false,
             },
         );
         let develop = labeled(vec![tool], Vec::new(), Combine::New, false);

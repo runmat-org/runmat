@@ -133,5 +133,8 @@ fn unfold_flattens_a_bent_sheet_and_fold_bends_it_back() {
     let again = extents(&folded);
     for k in 0..3 {
         near(again[k], before[k], 1e-3, "folded back");
-    }
+    }    // The flat pattern of the bent section holds its first flat still and regenerates.
+    let flat = edit(&bent, "sheet-metal.flat-pattern", json!({}));
+    assert!(flat.contains("sheet_metal.flat_pattern(fixed_face = feature.flange1.face.sheet(l1"), "{flat}");
+    compile(&flat);
 }

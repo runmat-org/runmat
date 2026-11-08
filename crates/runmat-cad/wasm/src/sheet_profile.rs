@@ -4,7 +4,8 @@
 //!   depth, an open chain is swept `depth` along the sketch normal (the form always carries a
 //!   depth, so the lowering writes it only for an open chain);
 //! - the face a flat pattern holds still: the base flange's plate face, as the guide's parts
-//!   name it (`feature.base.face.sheet(plate, ordinal = 1)`).
+//!   name it (`feature.base.face.sheet(plate, ordinal = 1)`), or for a bent section the flat of
+//!   its sketch's first curve (`feature.base.face.sheet(l1, ordinal = 1)`).
 
 use crate::edit::model;
 use crate::picks::Picks;
@@ -30,7 +31,7 @@ pub fn closed_profile(picks: &Picks, id: &str) -> bool {
     !ends.is_empty() && ends.iter().all(|p| ends.iter().filter(|q| *q == p).count() % 2 == 0)
 }
 
-/// The flat pattern's fixed face: the first base flange's plate face.
+/// The flat pattern's fixed face: the first base flange's plate face, or its first flat.
 pub fn flat_fixed_face(picks: &Picks) -> Result<Value, EditFailure> {
     let base = picks
         .document
@@ -38,5 +39,17 @@ pub fn flat_fixed_face(picks: &Picks) -> Result<Value, EditFailure> {
         .iter()
         .find(|f| matches!(f.kind, FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { .. })))
         .ok_or_else(|| model("a flat pattern unfolds a base flange; this part has none"))?;
-    picks.reference(&format!("feature.{}.face.sheet(plate, ordinal = 1)", base.id.0))
+    // A plate holds its plate face still; a bent section the flat of its first curve.
+    let FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. }) = &base.kind else {
+        unreachable!("found as a base flange")
+    };
+    if closed_profile(picks, &profile.sketch.0) {
+        return picks.reference(&format!("feature.{}.face.sheet(plate, ordinal = 1)", base.id.0));
+    }
+    let first = match picks.document.features.iter().find(|f| f.id == profile.sketch).map(|f| &f.kind) {
+        Some(FeatureKind::Sketch(sketch)) => sketch.entities.iter().find(|e| !e.construction).map(|e| e.id.0.clone()),
+        _ => None,
+    }
+    .ok_or_else(|| model("the base flange's sketch has no curve to hold still"))?;
+    picks.reference(&format!("feature.{}.face.sheet({first}, ordinal = 1)", base.id.0))
 }

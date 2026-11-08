@@ -44,6 +44,9 @@ impl<'a, 'b> Run<'a, 'b> {
             grain: None,
         };
         let compiled = self.sheet_metal(i, id, &flat)?;
+        if let Some(FeatureRecord::FlatPattern { in_place, .. }) = self.st.records.get_mut(id) {
+            *in_place = true;
+        }
         Ok(self.in_place(compiled, body))
     }
 

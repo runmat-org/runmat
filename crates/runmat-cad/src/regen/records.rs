@@ -53,6 +53,10 @@ pub enum FeatureRecord {
         layout: FlatLayout,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         development: Option<Development>,
+        /// An unfold's flat, which takes the bent sheet's place in the model; a flat pattern's
+        /// is a separate body kept out of the folded view.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        in_place: bool,
     },
     /// The bends a sketched bend or jog made in a flat plate (the base flange `base`), as bend
     /// lines in the plate's own frame: the plate keeps its developed outline.

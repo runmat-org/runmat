@@ -489,6 +489,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     FeatureRecord::FlatPattern {
                         layout,
                         development: Some(dev),
+                        in_place: false,
                     },
                 );
                 Ok(op(

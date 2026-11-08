@@ -104,8 +104,8 @@ pub struct BodyDisplay {
     /// pattern drawing and an on-demand show draw it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flat_pattern: bool,
-    /// A flat pattern's bend lines on both faces of the blank: segments as start and end
-    /// points (x, y, z, metres), six numbers each. Empty for every other body.
+    /// A flat pattern's or an unfolded sheet's bend lines on both faces of the blank: segments
+    /// as start and end points (x, y, z, metres), six numbers each. Empty for every other body.
     #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "wire::f32s", deserialize_with = "wire::f32s_de")]
     pub bend_lines: Vec<f32>,
 }
@@ -421,8 +421,8 @@ fn body_display(
     }
 }
 
-/// The bend lines of the flat pattern body `index` (see [`BodyDisplay::bend_lines`]): each line
-/// of its feature's layout on the blank's two faces.
+/// The bend lines of body `index` when a flat pattern or an unfold made it (see
+/// [`BodyDisplay::bend_lines`]): each line of its feature's layout on the blank's two faces.
 pub fn flat_pattern_bend_lines(result: &RegenResult, index: usize) -> Vec<f32> {
     let Some(body) = result.state.bodies.get(index) else {
         return Vec::new();
@@ -458,7 +458,7 @@ pub fn is_flat_pattern_body(result: &RegenResult, index: usize) -> bool {
     let flat = |name: &EntityName| match name {
         EntityName::Generated(g) => matches!(
             result.state.records.get(&g.feature),
-            Some(crate::regen::records::FeatureRecord::FlatPattern { .. })
+            Some(crate::regen::records::FeatureRecord::FlatPattern { in_place: false, .. })
         ),
         _ => false,
     };
@@ -502,9 +502,7 @@ pub fn part_display(
                     &result.state.names,
                 );
                 display.flat_pattern = flat_pattern;
-                if flat_pattern {
-                    display.bend_lines = flat_pattern_bend_lines(result, i);
-                }
+                display.bend_lines = flat_pattern_bend_lines(result, i);
                 out.bodies.push(display);
             }
             Err(error) => out.problems.push(DisplayProblem {
