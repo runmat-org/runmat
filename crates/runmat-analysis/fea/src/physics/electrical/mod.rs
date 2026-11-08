@@ -4,6 +4,7 @@
 //! Production, authored native dispatch, resource admission and restart remain closed.
 mod assembly;
 mod boundary;
+pub mod cross_section;
 mod recovery;
 mod response;
 pub(crate) use response::closure_target;
