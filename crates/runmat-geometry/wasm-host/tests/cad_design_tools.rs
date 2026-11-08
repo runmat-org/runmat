@@ -83,3 +83,18 @@ fn mates_place_the_tubes_and_inspect_finds_a_sunk_tube_overlapping() {
     let overlaps = out["data"]["sections"]["interference"]["result"]["overlaps"].as_array().cloned().unwrap_or_default();
     assert_eq!(overlaps.len(), 2, "{out:#}");
 }
+
+#[test]
+fn an_overview_here_lists_the_drawing_and_assembly_that_use_a_part_without_regenerating_them() {
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing tube {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [{ label = \"Title\", source = { source = literal, text = \"Tube\" } }] }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view front = standard(orientation = front, sheet = \"1\", model = { part = tube }, at = [200, 150], display = hidden_lines)\n}\n";
+    let clear = skid(0.0);
+    let files = [("/p/plate.part", PLATE), ("/p/tube.part", TUBE), ("/p/skid.assembly", clear.as_str()), ("/p/tube.drawing", drawing)];
+    let out = tool("design.overview", json!({ "path": "/p/tube.part" }), &files);
+    let links = out["data"]["links"].as_array().cloned().unwrap_or_else(|| panic!("links, not {out:#}"));
+    for user in ["/p/skid.assembly", "/p/tube.drawing"] {
+        let link = links.iter().find(|l| l["path"] == user).unwrap_or_else(|| panic!("{user} in {out:#}"));
+        assert_eq!(link["status"], runmat_design_tools::overview::NOT_CHECKED_HERE, "{link}");
+    }
+    // The part itself is checked on OCCT.
+    assert!(out["data"].to_string().contains("design.check"), "{out:#}");
+}

@@ -12,7 +12,8 @@ use runmat_design_syntax::{
 static MODELS_CHECKED: AtomicBool = AtomicBool::new(true);
 
 /// Whether an overview checks the parts, assemblies and drawings it links (on by default). The
-/// browser's design tools, which have no OCCT, turn it off.
+/// browser's CAD host turns it off: its heap is bounded, and a product's links regenerated one
+/// after another exhaust it.
 pub fn check_linked_models(on: bool) {
     MODELS_CHECKED.store(on, Ordering::Relaxed);
 }
@@ -159,7 +160,10 @@ fn status_of(path: &str, files: &Files, ran: &mut Ran) -> (String, Level, String
     // A part, assembly or drawing regenerates on OCCT. Where the tools run without it (the
     // browser), checking one would compile it on the test kernel: slow for a whole product (the
     // drone recompiles its parts) and not the answer the editor gives. The link says so instead.
-    if DesignKind::of(path).is_some_and(|k| k.is_model()) && !MODELS_CHECKED.load(Ordering::Relaxed) {
+    // A drawing regenerates the models its views show, so it counts as one (the drone's drawing
+    // projects the whole product).
+    let regenerates = DesignKind::of(path).is_some_and(|k| k.is_model() || k == DesignKind::Drawing);
+    if regenerates && !MODELS_CHECKED.load(Ordering::Relaxed) {
         // The link itself comes from reading the files, as design.inspect does.
         ran.note("design.inspect");
         return (NOT_CHECKED_HERE.into(), Level::Info, "design.inspect".into());
