@@ -583,7 +583,12 @@ pub fn propose(input: &ProposeEditInput, files: &Files) -> Result<StagedChange, 
     let text = text_of(files, &input.path)?;
     let from_replace = match &input.replace {
         Some(replace) if input.text.is_none() && input.command.is_none() => Some(replaced(text, replace)?),
-        Some(_) => return Err(ToolError::invalid("give one of `text`, `replace` or `command`")),
+        Some(_) => {
+            let other = if input.text.is_some() { "`text`".to_owned() } else { format!("`command` {:?}", input.command.as_deref().unwrap_or("")) };
+            return Err(ToolError::invalid(format!(
+                "`replace` came with {other}; give one of them: for a text change keep `replace` and leave `command` and `text` null"
+            )));
+        }
         None => None,
     };
     let text_input = from_replace.as_ref().or(input.text.as_ref());
@@ -673,6 +678,20 @@ mod tests {
         let input: ProposeEditInput =
             serde_json::from_value(json!({ "path": "/a.circuit", "command": "board.route" })).unwrap();
         assert_eq!(input.command.as_deref(), Some("board.route"));
+    }
+
+    #[test]
+    fn a_command_beside_replace_is_refused_naming_both() {
+        let input: ProposeEditInput = serde_json::from_value(json!({
+            "path": "/a.circuit",
+            "command": "x",
+            "replace": [{ "old": "b", "new": "c" }],
+        }))
+        .unwrap();
+        let files: Files = [("/a.circuit".to_string(), "b\n".to_string())].into_iter().collect();
+        let message = propose(&input, &files).err().expect("refused").message;
+        assert!(message.contains("`replace` came with `command` \"x\""), "{message}");
+        assert!(message.contains("leave `command` and `text` null"), "{message}");
     }
 
     #[test]
