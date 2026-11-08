@@ -899,6 +899,12 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
         }
     }
 
+    // A fasten more than a quarter turn from its start begins where it lands (a drag follows
+    // its own continuation from the current pose).
+    if drag_request.is_none() {
+        crate::seed::seed_fastens(sys, &mut x, &is_free);
+    }
+
     let compiled = compile(sys, &x);
     let mut ops: Vec<Option<Op>> = compiled
         .iter()

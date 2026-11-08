@@ -12,7 +12,9 @@
 //!
 //! # Solve
 //!
-//! [`solve`] splits the system into connected components. A constructive pre-pass recognises
+//! [`solve`] first places each body fastened more than a quarter turn from its start where its
+//! fasten puts it (closed form, from the connector frames). It then splits the system into
+//! connected components. A constructive pre-pass recognises
 //! rigid clusters (Fudos–Hoffmann triangles, oriented clusters, loci on fixed geometry) and
 //! places them. A Dulmage–Mendelsohn decomposition then splits each component into an
 //! over-determined block, square blocks in dependency order and an under-determined block,
@@ -57,6 +59,7 @@ mod ids;
 mod linalg;
 mod report;
 mod residual;
+mod seed;
 mod solver;
 mod system;
 
