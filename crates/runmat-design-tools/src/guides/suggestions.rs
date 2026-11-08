@@ -40,6 +40,14 @@ pub enum FileState {
     Empty,
     /// Some content.
     Written,
+    /// A part with sheet-metal features: its own checks (flat pattern, bend reliefs) replace
+    /// a machined part's.
+    SheetMetal,
+}
+
+impl FileState {
+    /// Every file state, for checks that walk them all.
+    pub const ALL: [FileState; 3] = [FileState::Empty, FileState::Written, FileState::SheetMetal];
 }
 
 /// The names a suggestion's text takes from the open file.
@@ -87,7 +95,7 @@ fn when(state: FileState, s: Suggestion) -> Suggestion {
 
 /// Every suggestion, per editor and file state: the placeholder first, then the panel's.
 pub(super) fn catalog() -> Vec<Suggestion> {
-    use FileState::{Empty, Written};
+    use FileState::{Empty, SheetMetal, Written};
     use PickEntity::{Edge, Face, Net};
     use SuggestionNames::Occurrences;
     vec![
@@ -186,6 +194,32 @@ pub(super) fn catalog() -> Vec<Suggestion> {
         when(
             Written,
             suggestion("part", None, "Check this part can be machined", None),
+        ),
+        when(
+            SheetMetal,
+            suggestion(
+                "part",
+                None,
+                "Add a 15 mm flange to the open edges",
+                Some("sheet-metal.edge-flange"),
+            ),
+        ),
+        when(
+            SheetMetal,
+            suggestion(
+                "part",
+                None,
+                "Check this part under a 2 kN load",
+                Some("study.new"),
+            ),
+        ),
+        when(
+            SheetMetal,
+            suggestion("part", None, "Explain how this part is built", None),
+        ),
+        when(
+            SheetMetal,
+            suggestion("part", None, "Check the flat pattern and bend reliefs", None),
         ),
         when(
             Empty,
@@ -416,6 +450,11 @@ mod tests {
             "Run ERC and fix what it finds"
         );
         assert_eq!(shown("assembly", FileState::Written)[0], "Mate {1} to {2}");
+        // A sheet-metal part is offered its own checks, never machining.
+        let sheet = shown("part", FileState::SheetMetal);
+        assert!(sheet.len() > 1 && sheet.len() <= MAX_PANEL_SUGGESTIONS + 1, "{sheet:?}");
+        assert!(sheet.contains(&"Check the flat pattern and bend reliefs".to_owned()), "{sheet:?}");
+        assert!(!sheet.iter().any(|t| t.contains("machined")), "{sheet:?}");
         assert_eq!(
             shown("assembly", FileState::Empty)[0],
             "Insert the parts this assembly brings together"

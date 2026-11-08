@@ -229,7 +229,7 @@ impl GuideCatalog {
             }
         }
         for editor in self.suggestions.iter().map(|s| s.editor.as_str()) {
-            for state in [FileState::Empty, FileState::Written] {
+            for state in FileState::ALL {
                 let shown = self
                     .suggestions
                     .iter()
