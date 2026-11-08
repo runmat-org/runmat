@@ -429,3 +429,59 @@ fn entity_supports_must_be_ordered_finite_edges_or_vertices() {
         .push(request.entity_supports[0].clone());
     assert!(request.validate().is_err());
 }
+
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A face that does not bound a supported edge receives that edge's sizing graded by
+//   distance through `evaluate_at`, the same size an interior volume point at that location
+//   receives, and keeps its own uniform size far from the support. This local fixture does not
+//   discharge original-model meshing, physical quality, resource or scientific gates.
+#[test]
+fn every_scope_receives_entity_local_sizing_graded_by_distance() {
+    let (request, edge, face) = graded_request(1.3, true);
+    let resolver = ResolvedMetricField::new(&request).unwrap();
+    let face_only = BTreeSet::from([face]);
+    let constant = resolver.resolve_constant(&face_only).unwrap().metric;
+    assert_eq!(constant.xx, 0.01, "the face does not bound the edge");
+    let face_length = |point| {
+        resolver
+            .evaluate_at(constant, &[], point)
+            .unwrap()
+            .xx
+            .sqrt()
+            .recip()
+    };
+    let volume_length = |point| {
+        resolver
+            .evaluate_graded(constant, &resolver.all_local_sources().unwrap(), point)
+            .unwrap()
+            .xx
+            .sqrt()
+            .recip()
+    };
+    for point in [
+        [0.5, 0.0, 0.0],
+        [0.5, 1.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [0.5, 100.0, 0.0],
+    ] {
+        assert_eq!(face_length(point), volume_length(point));
+    }
+    assert!((face_length([0.5, 1.0, 0.0]) - (0.1 + 0.3 * (1.0 - 0.1))).abs() < 1e-9);
+    assert!((face_length([0.5, 100.0, 0.0]) - 10.0).abs() < 1e-9);
+    // Incident scopes evaluate the same field.
+    let incident = BTreeSet::from([edge, face_only.into_iter().next().unwrap()]);
+    let incident_constant = resolver.resolve_constant(&incident).unwrap().metric;
+    assert_eq!(
+        resolver
+            .evaluate_at(incident_constant, &[], [0.5, 1.0, 0.0])
+            .unwrap(),
+        resolver
+            .evaluate_graded(
+                incident_constant,
+                &resolver.local_sources(&incident).unwrap(),
+                [0.5, 1.0, 0.0]
+            )
+            .unwrap()
+    );
+}

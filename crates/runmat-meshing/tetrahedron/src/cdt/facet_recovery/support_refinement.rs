@@ -11,8 +11,9 @@ use super::conforming_split::{
 };
 use super::{
     cavity::{
-        candidate_node, insert_candidate_in_place, recovered_segments_exist, InPlaceCandidate, segment_hits_triangle_interior, steiner_lineage,
-        try_insert_candidate_with_conflicts, CandidateInsertion, CandidateInsertionResult,
+        candidate_node, insert_candidate_in_place, recovered_segments_exist,
+        segment_hits_triangle_interior, steiner_lineage, try_insert_candidate_with_conflicts,
+        CandidateInsertion, CandidateInsertionResult, InPlaceCandidate,
     },
     error, node_index, segment_error, support_edge_exists, DelaunayFacetRecoveryError,
     DelaunayFacetRecoveryErrorKind, DelaunayFacetSteinerInsertion, DelaunayRecoveredFacetTriangle,
@@ -150,7 +151,9 @@ pub(super) fn ensure_support_triangle_edges_in_place(
     })?;
     match outcome {
         InPlaceTemporarySegment::Declined(reason) => {
-            work.reject(format!("in-place temporary support segment declined: {reason}"));
+            work.reject(format!(
+                "in-place temporary support segment declined: {reason}"
+            ));
             Ok(None)
         }
         InPlaceTemporarySegment::Conflicts(conflicts) => {
@@ -230,7 +233,10 @@ pub(super) fn split_segment_encroached_by_support_edge(
     else {
         return Ok(None);
     };
-    let declined = work.last_rejection().unwrap_or("no reason recorded").to_owned();
+    let declined = work
+        .last_rejection()
+        .unwrap_or("no reason recorded")
+        .to_owned();
     work.clear_rejection();
     let Some(splits) = split_recovered_segment_edge_in_place(
         working,
@@ -241,7 +247,10 @@ pub(super) fn split_segment_encroached_by_support_edge(
         work,
     )?
     else {
-        let detail = work.last_rejection().unwrap_or("no reason recorded").to_owned();
+        let detail = work
+            .last_rejection()
+            .unwrap_or("no reason recorded")
+            .to_owned();
         work.reject(format!(
             "{declined}; the recovered segment edge that the support edge encroaches could not \
              be split: {detail}"
@@ -254,6 +263,92 @@ pub(super) fn split_segment_encroached_by_support_edge(
         constraint_index,
         protected_facet_split_count = splits.len(),
         "a missing support edge encroached a recovered segment edge, which was split"
+    );
+    Ok(Some(splits))
+}
+
+/// After the flip and cavity recoveries declined a support triangle whose edges all exist: when
+/// the triangle's obtuse corner lies inside the diametral ball of the recovered segment edge
+/// opposite it, that segment edge is split (with its encroachment cascade) and the facet is
+/// retried on the refined segments. This is the segment-before-facet rule of Ruppert and
+/// Shewchuk refinement. The triangle's circumcenter lies beyond the segment, outside the facet,
+/// and a facet-interior node of the needle lies close to all three corners, so splitting the
+/// segment is the refinement that removes the needle. The split runs on the working topology
+/// first and on the canonical topology when the local split declines; both admit the result
+/// exactly. Returns `None`, with the rejection kept, when no segment edge is encroached this
+/// way or both splits decline.
+pub(super) fn split_segment_encroached_by_apex(
+    working: &mut super::working::FacetRecoveryWorking,
+    pending: &PendingSupportTriangle,
+    protected_triangles: &[DelaunayRecoveredFacetTriangle],
+    protected_edges: &[[StableDigest; 2]],
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Option<Vec<ProtectedFacetSplit>>, DelaunayFacetRecoveryError> {
+    let Some(encroached) = encroachment::segment_edge_encroached_by_apex(
+        working.topology(),
+        pending.triangle.node_identities,
+        protected_edges,
+    ) else {
+        return Ok(None);
+    };
+    let declined = work
+        .last_rejection()
+        .unwrap_or("no reason recorded")
+        .to_owned();
+    work.clear_rejection();
+    let splits = match split_recovered_segment_edge_in_place(
+        working,
+        encroached,
+        protected_triangles,
+        protected_edges,
+        constraint_index,
+        work,
+    )? {
+        Some(splits) => Some(splits),
+        None => {
+            let in_place = work
+                .last_rejection()
+                .unwrap_or("no reason recorded")
+                .to_owned();
+            work.clear_rejection();
+            let canonical = working.canonical_call(constraint_index, work, |source, work| {
+                Ok(try_split_recovered_segment_edge(
+                    source,
+                    encroached,
+                    protected_triangles,
+                    constraint_index,
+                    work,
+                )?
+                .map(|refined| {
+                    *source = refined.recovery;
+                    refined.splits
+                }))
+            })?;
+            if canonical.is_none() {
+                let detail = work
+                    .last_rejection()
+                    .unwrap_or("no reason recorded")
+                    .to_owned();
+                work.reject(format!(
+                    "{declined}; the recovered segment edge {encroached:?} opposite the support \
+                     triangle's obtuse corner could not be split: {detail}; in-place split: \
+                     {in_place}"
+                ));
+            }
+            canonical
+        }
+    };
+    let Some(splits) = splits else {
+        return Ok(None);
+    };
+    work.cavity_steiner_node(constraint_index)?;
+    tracing::info!(
+        event_code = "meshing.tetrahedron.facet_recovery.obtuse_segment_split",
+        constraint_index,
+        protected_facet_split_count = splits.len(),
+        "a support triangle's obtuse corner encroached the recovered segment edge opposite it, \
+         which was split"
     );
     Ok(Some(splits))
 }
@@ -399,8 +494,11 @@ pub(super) fn ensure_support_triangle_edges(
         )?
         else {
             let coordinates = conflict.map(|identity| {
-                node_index(&recovery.topology, identity)
-                    .map(|index| recovery.topology.nodes[index].coordinates_m.canonical_value())
+                node_index(&recovery.topology, identity).map(|index| {
+                    recovery.topology.nodes[index]
+                        .coordinates_m
+                        .canonical_value()
+                })
             });
             let detail = work
                 .last_rejection()
@@ -409,8 +507,13 @@ pub(super) fn ensure_support_triangle_edges(
             work.reject(format!(
                 "temporary support segment for edge {:?} conflicts with recovered segment edge \
                  {coordinates:?}, which could not be split: {detail}",
-                edge.map(|identity| node_index(&recovery.topology, identity)
-                    .map(|index| recovery.topology.nodes[index].coordinates_m.canonical_value())),
+                edge.map(
+                    |identity| node_index(&recovery.topology, identity).map(|index| recovery
+                        .topology
+                        .nodes[index]
+                        .coordinates_m
+                        .canonical_value())
+                ),
             ));
             return Ok(SupportTriangleEdgeState::Unavailable);
         };
@@ -479,8 +582,7 @@ pub(super) fn interior_support_node(
     let [first, second, third] = triangle_indices;
     let triangle_indices = [first?, second?, third?];
     for edge in protected_edges.iter().copied() {
-        let [Some(first), Some(second)] =
-            edge.map(|identity| node_index(topology, identity))
+        let [Some(first), Some(second)] = edge.map(|identity| node_index(topology, identity))
         else {
             return Err(error(
                 DelaunayFacetRecoveryErrorKind::InvalidTopology,
@@ -507,9 +609,7 @@ pub(super) fn interior_support_node(
                 .map(|index| {
                     (
                         identity,
-                        topology.nodes()[index]
-                            .coordinates_m
-                            .canonical_value(),
+                        topology.nodes()[index].coordinates_m.canonical_value(),
                     )
                 })
                 .ok_or_else(|| {
@@ -617,7 +717,10 @@ pub(super) fn refine_support_triangle_interior_in_place(
                 work,
             )?
             else {
-                let reason = work.last_rejection().unwrap_or("no reason recorded").to_owned();
+                let reason = work
+                    .last_rejection()
+                    .unwrap_or("no reason recorded")
+                    .to_owned();
                 work.reject(format!(
                     "in-place interior node conflicts with recovered segment edge {:?}; its split \
                      declined: {reason}",
