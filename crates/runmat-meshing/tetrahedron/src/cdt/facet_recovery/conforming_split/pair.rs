@@ -16,6 +16,7 @@ pub(super) fn split_pair_at_shared_vertex(
     other: [StableDigest; 2],
     protected: &[DelaunayRecoveredFacetTriangle],
     protected_edges: &[[StableDigest; 2]],
+    placement: DisjointPairPlacement,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Result<Vec<ProtectedFacetSplit>, String>, DelaunayFacetRecoveryError> {
@@ -38,6 +39,26 @@ pub(super) fn split_pair_at_shared_vertex(
                 Ok(points) => points,
                 Err(reason) => return Ok(Err(reason)),
             },
+            None if placement == DisjointPairPlacement::Aligned => {
+                let (edge_node, edge_recovered) = recovered_segment_midpoint_on(
+                    working.topology(),
+                    &working.segments,
+                    edge_location.0,
+                    edge_location.1,
+                )
+                .map_err(super::super::segment_error)?;
+                match aligned_split_point(
+                    working.topology(),
+                    &working.segments,
+                    other,
+                    other_location,
+                    edge_node.coordinates_m.canonical_value(),
+                    constraint_index,
+                )? {
+                    Ok(other_split) => [(edge_node, edge_recovered), other_split],
+                    Err(reason) => return Ok(Err(reason)),
+                }
+            }
             // Disjoint edges that encroach each other (the midpoint split of either swallows
             // the other's star) are split at both midpoints in one edit.
             None => [edge_location, other_location]
@@ -108,6 +129,7 @@ pub(super) fn split_pair_at_shared_vertex(
             let mut observed = trial.observe_edge_changes();
             let mut protected = protected.to_vec();
             let mut all_splits = Vec::new();
+            let mut retriangulated = Vec::new();
             let mut halves = vec![
                 [edge[0], edge_node.identity],
                 [edge[1], edge_node.identity],
@@ -157,8 +179,24 @@ pub(super) fn split_pair_at_shared_vertex(
                 let Ok(index) = observed.append_node(node) else {
                     return Ok(Err("a split node was rejected".to_owned()));
                 };
-                let (removed, created, splits) =
-                    split_edge(&observed, index, split, &protected, strategy, constraint_index)?;
+                // Each split re-triangulates the facet triangles its node encroaches, bounded by
+                // the kept edges: the triangles between two nearly parallel split segments are
+                // fanned around the first node, then around the second.
+                let CavitySplit {
+                    removed,
+                    created,
+                    splits,
+                    retriangulated: fans,
+                } = split_edge_with_facet_cavities(
+                    &observed,
+                    index,
+                    node,
+                    split,
+                    &protected,
+                    &kept_edges,
+                    strategy,
+                    constraint_index,
+                )?;
                 // A constrained cavity that holds the whole star of a kept edge (a recovered
                 // segment edge or a half of the first split) would delete that edge, and no link
                 // flip can bring it back. The edge-star split removes only cells around the split
@@ -181,18 +219,31 @@ pub(super) fn split_pair_at_shared_vertex(
                         swallowed.push(interval);
                     }
                 }
-                let (removed, created, splits) = if removed.is_empty() || swallows_kept_edge {
-                    split_edge(
+                let CavitySplit {
+                    removed,
+                    created,
+                    splits,
+                    retriangulated: fans,
+                } = if removed.is_empty() || swallows_kept_edge {
+                    split_edge_with_facet_cavities(
                         &observed,
                         index,
+                        node,
                         split,
                         &protected,
+                        &kept_edges,
                         SplitStrategy::EdgeStar,
                         constraint_index,
                     )?
                 } else {
-                    (removed, created, splits)
+                    CavitySplit {
+                        removed,
+                        created,
+                        splits,
+                        retriangulated: fans,
+                    }
                 };
+                retriangulated.extend(fans);
                 if removed.is_empty() {
                     return Ok(Err("a split produced no replacement".to_owned()));
                 }
@@ -247,6 +298,11 @@ pub(super) fn split_pair_at_shared_vertex(
                 }
             }
             let protected_faces = protected_face_set(&protected);
+            if retriangulated_face_missing(&observed, &retriangulated, &protected_faces) {
+                return Ok(Err(
+                    "a re-triangulated facet triangle is not a face after link flips".to_owned(),
+                ));
+            }
             let mut replaced = [edge, other]
                 .into_iter()
                 .chain(encroached.iter().map(|(split, _, _)| *split))
@@ -372,6 +428,67 @@ pub(super) fn split_pair_at_shared_vertex(
         }
         return Ok(outcome);
     }
+}
+
+/// Where a pair split of two disjoint segment edges places its points.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum DisjointPairPlacement {
+    /// Both dyadic midpoints.
+    Midpoints,
+    /// The midpoint of `edge`, and the dyadic point of `other` nearest the projection of that
+    /// midpoint onto `other`. Two nearly parallel edges a small gap apart then get split points
+    /// facing each other, and the facet triangles between them are fanned into short rungs.
+    Aligned,
+}
+
+/// The dyadic split point of `other` nearest the projection of `point` onto it.
+fn aligned_split_point(
+    topology: &impl crate::cdt::insertion::topology_access::TetrahedralTopology,
+    segments: &[crate::cdt::DelaunayRecoveredSegment],
+    other: [StableDigest; 2],
+    location: (usize, usize),
+    point: [f64; 3],
+    constraint_index: u32,
+) -> Result<
+    Result<(DelaunayVolumeNode, crate::cdt::DelaunayRecoveredSegmentNode), String>,
+    DelaunayFacetRecoveryError,
+> {
+    let at = |identity: StableDigest| {
+        topology
+            .node_index(identity)
+            .map(|index| {
+                topology.nodes()[index as usize]
+                    .coordinates_m
+                    .canonical_value()
+            })
+            .ok_or_else(|| invalid(constraint_index, "split segment vertex is missing"))
+    };
+    let (start, end) = (at(other[0])?, at(other[1])?);
+    let direction = [0, 1, 2].map(|axis| end[axis] - start[axis]);
+    let length_squared = direction.iter().map(|value| value * value).sum::<f64>();
+    if length_squared <= 0.0 || !length_squared.is_finite() {
+        return Ok(Err("the aligned split edge has no length".to_owned()));
+    }
+    let along = [0, 1, 2]
+        .map(|axis| (point[axis] - start[axis]) * direction[axis])
+        .iter()
+        .sum::<f64>()
+        / length_squared;
+    // Keep the point well inside the interval; the dyadic search rounds it to the nearest
+    // parameter that lies strictly inside.
+    let along = along.clamp(0.25, 0.75);
+    let distance_m = along * length_squared.sqrt();
+    Ok(crate::cdt::segment_recovery::recovered_segment_point_on(
+        topology,
+        segments,
+        location.0,
+        location.1,
+        Some((other[0], distance_m)),
+    )
+    .map_err(super::super::segment_error)?
+    .ok_or_else(|| {
+        format!("no dyadic point lies {distance_m} m from the aligned edge's first vertex")
+    }))
 }
 
 pub(super) type EncroachedCornerSegment = (
