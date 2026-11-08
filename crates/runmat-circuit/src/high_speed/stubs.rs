@@ -179,3 +179,30 @@ pub fn via_stubs(board: &Board, rules: &BoardRules, g: &BoardGraph) -> Vec<ViaSt
 pub fn depth_mm(depth: Coord) -> f64 {
     (depth as f64 / mm(1.0) as f64 * 1000.0).round() / 1000.0
 }
+
+/// Every back-drill on the board under its own rules, with its via's position, for the drill
+/// files and the fabrication drawing.
+pub fn board_backdrills(board: &Board) -> Vec<(crate::geom::Point, Backdrill)> {
+    if board.vias.is_empty() {
+        return vec![];
+    }
+    let (mut rules, _) = BoardRules::for_board(board);
+    let g = BoardGraph::new(board, &[]);
+    rules.rebuild(&g);
+    let mut out = vec![];
+    for st in via_stubs(board, &rules, &g) {
+        let Some(v) = board.vias.get(&st.via) else { continue };
+        out.extend(st.stubs.into_iter().filter_map(|s| s.backdrill).map(|b| (v.at, b)));
+    }
+    out.sort_by_key(|(at, b)| (b.face, b.must_not_cut, b.diameter, b.depth, *at));
+    out
+}
+
+/// The copper layers a back-drill cuts, 1-based top first: from its face to the layer next to
+/// its must-not-cut layer.
+pub fn cut_layers(b: &Backdrill, copper_count: CopperIndex) -> (CopperIndex, CopperIndex) {
+    match b.face {
+        Face::Top => (1, b.must_not_cut),
+        Face::Bottom => (b.must_not_cut + 2, copper_count),
+    }
+}

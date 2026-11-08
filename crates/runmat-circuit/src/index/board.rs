@@ -69,6 +69,9 @@ pub struct BoardIndex {
     /// Matched-length groups, each member against the group's target.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub length_groups: Vec<super::high_speed::LengthGroupRow>,
+    /// Vias with a stub past their connected layers, and their back-drills.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub via_stubs: Vec<super::high_speed::ViaStubRow>,
 }
 
 /// A board net: its routed length (tracks and via spans), the track width and clearance its
@@ -664,6 +667,7 @@ pub fn add_board_reusing(
         nets: net_rows(board, rules, &graph, drc.diff_pairs()),
         controlled: super::high_speed::controlled_rows(board),
         length_groups: super::high_speed::group_rows(board, rules, &graph),
+        via_stubs: super::high_speed::stub_rows(board, rules, &graph),
     });
 }
 

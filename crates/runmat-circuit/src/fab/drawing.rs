@@ -385,6 +385,36 @@ pub fn stackup_rows(board: &Board) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// One note per back-drill face and must-not-cut layer: how many holes, the drill, the depth
+/// from that face and the residual stub the fabricator must hold.
+pub fn backdrill_notes(board: &Board) -> Vec<String> {
+    use crate::high_speed::stubs::board_backdrills;
+    let names = board.stackup.copper_names();
+    let mut groups: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
+    for (_, b) in board_backdrills(board) {
+        groups.entry((b.face, b.must_not_cut)).or_default().push(b);
+    }
+    groups
+        .into_iter()
+        .map(|((face, keep), bs)| {
+            let dias: std::collections::BTreeSet<_> = bs.iter().map(|b| b.diameter).collect();
+            let depth = bs.iter().map(|b| b.depth).max().unwrap_or(0);
+            let residual = bs.iter().map(|b| b.residual).max().unwrap_or(0);
+            format!(
+                "Back-drill {} hole{} from the {} face with a {} mm drill, {:.3} mm deep; must not cut layer {} ({}); stub left at most {:.3} mm",
+                bs.len(),
+                if bs.len() == 1 { "" } else { "s" },
+                face.word(),
+                dias.iter().map(|d| format!("{:.3}", to_mm(*d))).collect::<Vec<_>>().join(" / "),
+                to_mm(depth),
+                keep + 1,
+                names.get(keep as usize).cloned().unwrap_or_default(),
+                to_mm(residual)
+            )
+        })
+        .collect()
+}
+
 /// An arrowhead at `tip` pointing along (`dx`, `dy`) (a unit axis direction): two strokes.
 fn arrowhead(d: &mut Drawing, tip: Point, dx: Coord, dy: Coord) {
     let (len, half) = (mm(1.0), mm(0.35));
@@ -496,6 +526,7 @@ pub fn fabrication_drawing(board: &Board, revision: Option<&str>) -> Drawing {
         "Copper to board edge at least {:.3} mm",
         to_mm(l.min_copper_to_edge)
     ));
+    notes.extend(backdrill_notes(board));
     notes.push("Dimensions in millimeters; drill diameters are finished hole sizes".into());
     let mut y = top - mm(4.0);
     d.text(Point::new(left, y), TEXT, "NOTES");

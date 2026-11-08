@@ -121,9 +121,61 @@ pub fn drill_table(board: &Board) -> Vec<DrillRow> {
     rows
 }
 
-/// Excellon drill files: one per plated span (`PTH`, then blind/buried spans) and one for
-/// non-plated holes, keyed by file name.
+/// Excellon drill files: one per plated span (`PTH`, then blind/buried spans), one for
+/// non-plated holes and one per back-drill face and depth layer ([`backdrill_files`]), keyed by
+/// file name.
 pub fn excellon(board: &Board) -> BTreeMap<String, String> {
+    let mut out = plated_and_npth(board);
+    out.extend(backdrill_files(board));
+    out
+}
+
+/// One Excellon file per back-drill face and must-not-cut layer: non-plated, controlled-depth
+/// holes (`BackDrill`), each tool's depth from that face in a comment, as the fabrication
+/// drawing's note states it.
+pub fn backdrill_files(board: &Board) -> BTreeMap<String, String> {
+    use crate::high_speed::stubs::{board_backdrills, cut_layers};
+    let n = board.copper_count();
+    let names = board.stackup.copper_names();
+    let mut groups: BTreeMap<_, Vec<_>> = BTreeMap::new();
+    for (at, b) in board_backdrills(board) {
+        groups.entry((b.face, b.must_not_cut)).or_default().push((at, b));
+    }
+    let mut out = BTreeMap::new();
+    for ((face, keep), holes) in groups {
+        let (a, z) = cut_layers(&holes[0].1, n);
+        let mut tools: Vec<(Coord, Coord)> = holes.iter().map(|(_, b)| (b.diameter, b.depth)).collect();
+        tools.sort();
+        tools.dedup();
+        let mut s = String::new();
+        let _ = writeln!(s, "M48\n; DRILL file {{RunMat runmat-circuit {}}}", env!("CARGO_PKG_VERSION"));
+        let _ = writeln!(s, "; FORMAT={{-:-/ absolute / metric / decimal}}");
+        let _ = writeln!(s, "; #@! TF.FileFunction,NonPlated,{a},{z},Blind");
+        let _ = writeln!(
+            s,
+            "; back-drill from the {} face; must not cut layer {} ({})",
+            face.word(),
+            keep + 1,
+            names.get(keep as usize).cloned().unwrap_or_default()
+        );
+        let _ = writeln!(s, "FMAT,2\nMETRIC\nG90");
+        for (i, (dia, depth)) in tools.iter().enumerate() {
+            let _ = writeln!(s, "; #@! TA.AperFunction,NonPlated,Blind,BackDrill\n; T{} depth {:.3} mm from the {} face\nT{}C{:.3}", i + 1, to_mm(*depth), face.word(), i + 1, to_mm(*dia));
+        }
+        s.push_str("%\nG05\n");
+        for (i, tool) in tools.iter().enumerate() {
+            let _ = writeln!(s, "T{}", i + 1);
+            for (at, _) in holes.iter().filter(|(_, b)| (b.diameter, b.depth) == *tool) {
+                let _ = writeln!(s, "X{:.4}Y{:.4}", to_mm(at.x), to_mm(at.y));
+            }
+        }
+        s.push_str("M30\n");
+        out.insert(format!("{}-Backdrill-{}-{a}-{z}.drl", board.name, face.word()), s);
+    }
+    out
+}
+
+fn plated_and_npth(board: &Board) -> BTreeMap<String, String> {
     let n = board.copper_count();
     let spans = holes(board);
     let mut out = BTreeMap::new();

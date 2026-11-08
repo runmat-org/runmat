@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 mod board;
 mod eco;
 mod high_speed;
-pub use high_speed::{ControlledClassRow, ControlledLayerRow, LengthGroupRow, LengthMemberRow};
+pub use high_speed::{stub_rows, BackdrillRow, ControlledClassRow, ControlledLayerRow, LengthGroupRow, LengthMemberRow, ViaStubRow};
 
 pub use board::*;
 pub use eco::*;

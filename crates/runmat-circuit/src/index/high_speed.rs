@@ -1,5 +1,5 @@
 //! Board projection rows for high-speed design: each impedance class's solved width and gap
-//! per layer, and each matched-length group's members against its target.
+//! per layer, each matched-length group's members against its target, and each via stub.
 
 use crate::board_rules::{BoardGraph, BoardRules};
 use crate::high_speed::{controlled_layers, groups, ImpedanceTarget};
@@ -122,4 +122,84 @@ pub fn group_rows(board: &Board, rules: &BoardRules, g: &BoardGraph) -> Vec<Leng
             name: grp.name,
         })
         .collect()
+}
+
+/// A via with a stub past the layers its net connects on.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ViaStubRow {
+    /// The via's item id.
+    pub via: u64,
+    pub net: String,
+    pub x_mm: f64,
+    pub y_mm: f64,
+    /// The drilled copper span, `F.Cu-B.Cu`.
+    pub span: String,
+    /// The outermost connected layers, `F.Cu-In1.Cu`.
+    pub connected: String,
+    /// The longest stub left, after any back-drill.
+    pub stub_mm: f64,
+    /// The longest stub drilled, before back-drill.
+    pub drilled_mm: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_mm: Option<f64>,
+    /// The delay the stubs add to the net, ps.
+    pub delay_ps: f64,
+    /// `ok`, `over` (past `stub_max`) or `none` (no limit).
+    pub status: String,
+    pub backdrills: Vec<BackdrillRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BackdrillRow {
+    /// `top` or `bottom`.
+    pub face: String,
+    pub diameter_mm: f64,
+    pub depth_mm: f64,
+    pub must_not_cut: String,
+    pub residual_mm: f64,
+}
+
+/// The board's via stubs, longest first.
+pub fn stub_rows(board: &Board, rules: &BoardRules, g: &BoardGraph) -> Vec<ViaStubRow> {
+    let names = board.stackup.copper_names();
+    let name = |l: crate::layer_set::CopperIndex| names.get(l as usize).cloned().unwrap_or_default();
+    let mm = |v: crate::geom::Coord| round(v as f64 * 1e-6, 3);
+    let mut rows: Vec<ViaStubRow> = crate::high_speed::stubs::via_stubs(board, rules, g)
+        .into_iter()
+        .filter_map(|st| {
+            let v = board.vias.get(&st.via)?;
+            Some(ViaStubRow {
+                via: st.via.0,
+                net: board.net_name(st.net).to_owned(),
+                x_mm: mm(v.at.x),
+                y_mm: mm(v.at.y),
+                span: format!("{}-{}", name(v.from), name(v.to)),
+                connected: format!("{}-{}", name(st.connected.0), name(st.connected.1)),
+                stub_mm: mm(st.length),
+                drilled_mm: mm(st.stubs.iter().map(|s| s.drilled).max().unwrap_or(0)),
+                max_mm: st.max.map(mm),
+                delay_ps: round(st.delay, 2),
+                status: match st.max {
+                    Some(m) if st.length > m => "over",
+                    Some(_) => "ok",
+                    None => "none",
+                }
+                .to_owned(),
+                backdrills: st
+                    .stubs
+                    .iter()
+                    .filter_map(|s| s.backdrill.as_ref())
+                    .map(|b| BackdrillRow {
+                        face: b.face.word().to_owned(),
+                        diameter_mm: mm(b.diameter),
+                        depth_mm: mm(b.depth),
+                        must_not_cut: name(b.must_not_cut),
+                        residual_mm: mm(b.residual),
+                    })
+                    .collect(),
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| b.stub_mm.total_cmp(&a.stub_mm).then(a.net.cmp(&b.net)).then(a.via.cmp(&b.via)));
+    rows
 }

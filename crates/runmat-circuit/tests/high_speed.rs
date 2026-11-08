@@ -322,10 +322,28 @@ fn a_via_stub_past_its_connected_layer_is_checked_and_back_drilled() {
     assert_eq!((bd.face, bd.must_not_cut, bd.diameter, bd.residual, bd.depth), (Face::Bottom, 1, mm(0.5), mm(0.2), expected - mm(0.2)));
     assert_eq!(st[0].length, mm(0.2));
     assert!(codes(&drc, "via-stub").is_empty(), "{:#?}", codes(&drc, "via-stub"));
+    // The board projection lists the via with its stub, limit and back-drill.
+    let rows = runmat_circuit::index::stub_rows(&b, &r, &g);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].net.as_str(), rows[0].connected.as_str(), rows[0].stub_mm, rows[0].max_mm, rows[0].status.as_str()), ("SIG", "F.Cu-In1.Cu", 0.2, Some(0.3), "ok"));
+    assert_eq!((rows[0].backdrills[0].face.as_str(), rows[0].backdrills[0].must_not_cut.as_str(), rows[0].backdrills[0].diameter_mm), ("bottom", "In1.Cu", 0.5));
     let after = timing(&b)[&sig];
     assert_eq!(after.length, before.length);
     // About 1.0 mm of stub at ~6.9 ps/mm, half of it seen: ~3.5 ps, down to ~0.7 ps at 0.2 mm.
     assert!((2.4..3.2).contains(&(before.delay - after.delay)), "{before:?} {after:?}");
+
+    // The drill files carry it as a controlled-depth, non-plated drill from the bottom through
+    // layers 3 and 4, and the fabrication drawing's notes state its depth and must-not-cut layer.
+    let files = runmat_circuit::fab::excellon(&b);
+    let bd_file = &files["hs-Backdrill-bottom-3-4.drl"];
+    assert!(bd_file.contains("TF.FileFunction,NonPlated,3,4,Blind") && bd_file.contains("BackDrill"), "{bd_file}");
+    assert!(bd_file.contains(&format!("depth {:.3} mm from the bottom face", (expected - mm(0.2)) as f64 * 1e-6)) && bd_file.contains("T1C0.500") && bd_file.contains("X20.0000Y10.0000"), "{bd_file}");
+    assert!(files.contains_key("hs-PTH-1-4.drl"), "{:?}", files.keys());
+    let notes = runmat_circuit::fab::drawing::backdrill_notes(&b);
+    assert_eq!(notes, vec![format!(
+        "Back-drill 1 hole from the bottom face with a 0.500 mm drill, {:.3} mm deep; must not cut layer 2 (In1.Cu); stub left at most 0.200 mm",
+        (expected - mm(0.2)) as f64 * 1e-6
+    )]);
 }
 
 /// A buried via's stub is inside the board: back-drill can't reach it, and DRC says so.
