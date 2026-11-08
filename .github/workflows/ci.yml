@@ -158,7 +158,7 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
       # Bound concurrent compiler/linker working sets on the smaller Windows
       # runner. Linux's 16-core lane has more memory for parallel compilation.
-      CARGO_BUILD_JOBS: ${{ runner.os == 'Windows' && '2' || runner.os == 'macOS' && '4' || '8' }}
+      CARGO_BUILD_JOBS: ${{ startsWith(matrix.name, 'windows-') && '2' || startsWith(matrix.name, 'macos-') && '4' || '8' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -452,7 +452,7 @@ jobs:
     env:
       # Each whole-crate release producer is large. Serializing them on the
       # smaller Mac/Windows builders avoids swap contention between producers.
-      CARGO_BUILD_JOBS: ${{ runner.os == 'Linux' && '8' || '1' }}
+      CARGO_BUILD_JOBS: ${{ matrix.platform.target == 'x86_64-unknown-linux-gnu' && '8' || '1' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
