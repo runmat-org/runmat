@@ -56,6 +56,7 @@ jobs:
           scripts/runtime/builtin-example-verifier/protocol.test.mjs
           scripts/development/check-reviewed-architecture.test.mjs
           scripts/development/verify-fea-lint-debt.test.mjs
+          infra/scripts/bootstrap-vcpkg-tool.test.mjs
 
   build-and-test:
     name: ${{ matrix.name }}
@@ -211,6 +212,7 @@ jobs:
         env:
           RUNMAT_VCPKG_REF: 2026.06.01
           RUNMAT_VCPKG_TRIPLET: x64-linux-runmat-dynamic-release
+          GH_TOKEN: ${{ github.token }}
         run: infra/scripts/ensure-linux-vcpkg-occt.sh
 
       - name: Install macOS native dependencies
@@ -242,6 +244,8 @@ jobs:
       - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.needs_occt
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target x86_64-pc-windows-msvc
 
       - name: Enable Windows compiler for native interoperability tests
@@ -560,6 +564,8 @@ jobs:
       - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
 
       - name: Install Rust release target

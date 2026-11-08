@@ -41,7 +41,10 @@ fi
 if [[ ! -x "${VCPKG_ROOT}/vcpkg" ]]; then
   echo "Cloning vcpkg ${VCPKG_REF} into ${VCPKG_ROOT}"
   git clone --depth 1 --branch "${VCPKG_REF}" https://github.com/microsoft/vcpkg.git "${VCPKG_ROOT}"
-  "${VCPKG_ROOT}/bootstrap-vcpkg.sh" -disableMetrics
+  if ! "${VCPKG_ROOT}/bootstrap-vcpkg.sh" -disableMetrics; then
+    echo "Direct vcpkg bootstrap failed; retrieving the pinned tool through GitHub's asset API"
+    node "${REPOSITORY_ROOT}/infra/scripts/bootstrap-vcpkg-tool.mjs" "${VCPKG_ROOT}"
+  fi
   echo "${VCPKG_REF}" > "${VCPKG_MARKER}"
 fi
 

@@ -186,6 +186,8 @@ jobs:
       - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
 
       - name: Build release CLI with embedded AOT runtime (Unix)

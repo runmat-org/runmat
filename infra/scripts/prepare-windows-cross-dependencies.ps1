@@ -44,7 +44,11 @@ if ($LASTEXITCODE -ne 0 -or $resolvedRevision -ne $vcpkgRevision) {
 $vcpkg = Join-Path $VcpkgRoot 'vcpkg.exe'
 if (-not (Test-Path -LiteralPath $vcpkg)) {
     & (Join-Path $VcpkgRoot 'bootstrap-vcpkg.bat') -disableMetrics
-    if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed with exit code $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning 'Direct vcpkg bootstrap failed; retrieving the pinned tool through the GitHub asset API'
+        & node (Join-Path $PSScriptRoot 'bootstrap-vcpkg-tool.mjs') $VcpkgRoot
+        if ($LASTEXITCODE -ne 0) { throw "Pinned vcpkg fallback failed with exit code $LASTEXITCODE" }
+    }
 }
 
 # The pinned vcpkg finder can select an ambient LLVM/MinGW Fortran compiler on
