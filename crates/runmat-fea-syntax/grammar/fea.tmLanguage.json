@@ -60,7 +60,7 @@
     },
     {
       "name": "storage.type.fea",
-      "match": "(?<![\\w])(?:fluid_structure_interaction|conjugate_heat_transfer|modal_response_spectrum|prestressed_harmonic|prestressed_modal|response_spectrum|thermomechanical|electromagnetic|random_response|modal_transient|electrothermal|modal_harmonic|structural|tetrahedra|nonlinear|transient|triangles|acoustic|adaptive|buckling|harmonic|thermal|preload|static|steady|fluid|modal|lines)(?![\\w])"
+      "match": "(?<![\\w])(?:fluid_structure_interaction|conjugate_heat_transfer|modal_response_spectrum|prestressed_harmonic|prestressed_modal|response_spectrum|thermomechanical|electromagnetic|line_parameters|random_response|modal_transient|electrothermal|modal_harmonic|structural|tetrahedra|nonlinear|transient|triangles|acoustic|adaptive|buckling|harmonic|thermal|preload|static|steady|fluid|modal|lines)(?![\\w])"
     },
     {
       "name": "constant.language.fea",
@@ -185,6 +185,7 @@
           "fluid",
           "fluid_structure_interaction",
           "harmonic",
+          "line_parameters",
           "lines",
           "modal",
           "modal_harmonic",
