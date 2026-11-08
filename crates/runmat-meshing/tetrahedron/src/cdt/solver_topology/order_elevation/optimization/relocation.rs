@@ -25,6 +25,7 @@ pub(in crate::cdt::solver_topology::order_elevation) fn relocate_interior_corner
         cancellation,
         jacobian_work,
         candidate_work,
+        counters: _,
     } = work;
     let element = topology
         .volume_elements

@@ -1,6 +1,7 @@
 //! One-node candidate evaluation and ownership transfer; scheduling stays with the parent.
+use super::repair_state::{RepairState, StarSignature};
 use super::*;
-pub(super) struct NodeOptimizer<'source, 'view, 'work> {
+pub(super) struct NodeOptimizer<'source, 'view, 'work, 'state> {
     pub(super) input: &'view ProjectionInput<'source>,
     pub(super) evaluation: PreparedEvaluation<'source, 'view>,
     pub(super) options: DelaunaySolverTopologyOptions,
@@ -9,9 +10,11 @@ pub(super) struct NodeOptimizer<'source, 'view, 'work> {
     pub(super) candidate_work: &'work mut u64,
     pub(super) improve_valid_nodes: bool,
     pub(super) invalid_elements: &'work [usize],
+    pub(super) counters: &'work super::super::counters::ElevationCounters,
+    pub(super) repair: &'work mut RepairState<'state>,
 }
 
-impl NodeOptimizer<'_, '_, '_> {
+impl NodeOptimizer<'_, '_, '_, '_> {
     pub(super) fn optimize(
         &mut self,
         topology: &mut SolverMeshTopology,
@@ -57,6 +60,8 @@ impl NodeOptimizer<'_, '_, '_> {
                     candidate_work: self.candidate_work,
                     improve_valid_nodes: self.improve_valid_nodes,
                     invalid_elements: self.invalid_elements,
+                    counters: self.counters,
+                    repair: &mut *self.repair,
                 };
                 operation.optimize_node(topology, movable)
             },
@@ -160,16 +165,24 @@ impl NodeOptimizer<'_, '_, '_> {
         topology: &mut SolverMeshTopology,
         request: RepairRequest<'_>,
     ) -> Result<bool, DelaunaySolverTopologyError> {
-        let initial_profile = jacobian::optimization_margin_profile_elements(
+        use super::super::counters::ElevationCounters as C;
+        let signature = StarSignature::of(
             topology,
-            request.movable.incident_elements.iter().copied(),
-            self.cancellation,
-            crate::cdt::solver_topology::storage::Storage(Some(self.evaluation.control)),
+            request.movable,
+            [
+                &request.initial,
+                &request.endpoints[0],
+                &request.endpoints[1],
+            ],
         )?;
-        let mut best_candidate = None::<(
-            crate::cdt::solver_topology::storage::ReservedBuffer<'_, u64>,
-            Candidate,
-        )>;
+        if self
+            .repair
+            .declined_unchanged(request.movable.node_id, &signature)
+        {
+            C::add(&self.counters.repairs_unchanged, 1);
+            return Ok(false);
+        }
+        C::add(&self.counters.repairs, 1);
         let storage = crate::cdt::solver_topology::storage::Storage(Some(self.evaluation.control));
         let mut candidates = storage.vector(0)?;
         for fraction in REPAIR_CANDIDATE_FRACTIONS {
@@ -248,39 +261,56 @@ impl NodeOptimizer<'_, '_, '_> {
                 )?;
             }
         }
-        for candidate in candidates {
-            topology.nodes[request.node_index].coordinates_m =
-                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
-                    candidate.coordinates_m.canonical_value(),
-                );
-            topology.nodes[request.node_index].exact_parameters =
-                storage.parameters(&candidate.exact_parameters)?;
-            let profile = jacobian::optimization_margin_profile_elements(
-                topology,
-                request.movable.incident_elements.iter().copied(),
-                self.cancellation,
-                crate::cdt::solver_topology::storage::Storage(Some(self.evaluation.control)),
-            )?;
+        C::add(&self.counters.repair_candidates, candidates.len() as u64);
+        if candidates.is_empty() {
+            // No candidate can improve on the initial profile, so it is not taken.
+            C::add(&self.counters.repairs_without_candidates, 1);
+            topology.nodes[request.node_index] = request.initial;
+            self.repair.decline(request.movable.node_id, signature)?;
+            return Ok(false);
+        }
+        let initial_profile = self.repair.profile(
+            topology,
+            request.movable.incident_elements,
+            self.cancellation,
+            self.counters,
+        )?;
+        let profiles = candidate_profiles(
+            topology,
+            request.movable,
+            &candidates,
+            self.cancellation,
+            self.counters,
+        )?;
+        let mut best = None::<usize>;
+        for (index, profile) in profiles.iter().enumerate() {
             if profile_improves(
                 &initial_profile,
-                best_candidate
-                    .as_ref()
-                    .map(|(profile, _)| profile.as_slice()),
-                &profile,
+                best.map(|best| profiles[best].as_slice()),
+                profile,
             ) {
-                best_candidate = Some((profile, candidate));
+                best = Some(index);
             }
-            topology.nodes[request.node_index] = storage.node(&request.initial)?;
         }
-        if let Some((_, candidate)) = best_candidate {
+        if let Some(best) = best {
+            let candidate = candidates.swap_remove(best);
             topology.nodes[request.node_index].coordinates_m =
                 runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
                     candidate.coordinates_m.canonical_value(),
                 );
             topology.nodes[request.node_index].exact_parameters = candidate.exact_parameters;
-            return Ok(topology.nodes[request.node_index] != request.initial);
+            let moved = topology.nodes[request.node_index] != request.initial;
+            if moved {
+                C::add(&self.counters.repair_moves, 1);
+                self.repair.moved(request.movable.node_id);
+                return Ok(true);
+            }
+            topology.nodes[request.node_index] = request.initial;
+            self.repair.decline(request.movable.node_id, signature)?;
+            return Ok(false);
         }
         topology.nodes[request.node_index] = request.initial;
+        self.repair.decline(request.movable.node_id, signature)?;
         Ok(false)
     }
 
@@ -318,4 +348,57 @@ impl NodeOptimizer<'_, '_, '_> {
             })
         }))
     }
+}
+
+/// The sorted margin profile of the node's incident elements with the node at each candidate, in
+/// candidate order. It equals placing the node at each candidate in turn and profiling its
+/// incident elements; the elements are independent, so they are profiled on all admitted cores.
+pub(super) fn candidate_profiles(
+    topology: &SolverMeshTopology,
+    movable: &MovableNode,
+    candidates: &[Candidate],
+    cancellation: &dyn MeshingCancellationSignal,
+    counters: &super::super::counters::ElevationCounters,
+) -> Result<Vec<Vec<u64>>, DelaunaySolverTopologyError> {
+    use super::super::counters::ElevationCounters as C;
+    let elements = movable.incident_elements;
+    if elements.is_empty() {
+        return Err(invalid("Tet10 optimization margin profile is empty"));
+    }
+    let mut bases = Vec::with_capacity(elements.len());
+    for &element in elements {
+        let coordinates = jacobian::element_coordinates(topology, element)?;
+        let slots = topology.volume_elements[element]
+            .node_ids
+            .iter()
+            .enumerate()
+            .filter(|(_, id)| **id == movable.node_id)
+            .map(|(slot, _)| slot)
+            .collect::<Vec<_>>();
+        bases.push((coordinates, slots));
+    }
+    let tasks = (0..candidates.len())
+        .flat_map(|candidate| (0..elements.len()).map(move |element| (candidate, element)))
+        .collect::<Vec<_>>();
+    let margins = runmat_cpu_execution::ordered_map(&tasks, |&(candidate, element)| {
+        let (mut coordinates, slots) = bases[element].clone();
+        let point = candidates[candidate].coordinates_m.canonical_value();
+        for slot in slots {
+            coordinates[slot] = point;
+        }
+        jacobian::margin_key(coordinates, cancellation)
+    });
+    C::add(&counters.profiles, candidates.len() as u64);
+    C::add(&counters.profile_margins, tasks.len() as u64);
+    let mut profiles = Vec::with_capacity(candidates.len());
+    let mut margins = margins.into_iter();
+    for _ in candidates {
+        let mut profile = Vec::with_capacity(elements.len());
+        for margin in margins.by_ref().take(elements.len()) {
+            profile.push(margin?);
+        }
+        profile.sort_unstable();
+        profiles.push(profile);
+    }
+    Ok(profiles)
 }
