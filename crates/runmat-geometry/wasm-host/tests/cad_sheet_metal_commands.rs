@@ -133,8 +133,18 @@ fn unfold_flattens_a_bent_sheet_and_fold_bends_it_back() {
     let again = extents(&folded);
     for k in 0..3 {
         near(again[k], before[k], 1e-3, "folded back");
-    }    // The flat pattern of the bent section holds its first flat still and regenerates.
+    }
+    // The flat pattern of the bent section holds its first flat still and regenerates.
     let flat = edit(&bent, "sheet-metal.flat-pattern", json!({}));
     assert!(flat.contains("sheet_metal.flat_pattern(fixed_face = feature.flange1.face.sheet(l1"), "{flat}");
     compile(&flat);
+    // After an unfold and fold, the sheet is bent again and its flat pattern develops it (it
+    // was refused: the folded body lost the base flange's body name).
+    let lines = |text: &str| -> usize {
+        let bodies = compile(text)["display"]["data"]["bodies"].as_array().cloned().unwrap_or_default();
+        bodies.iter().map(|b| b["bend_lines"].as_array().map_or(0, Vec::len)).sum()
+    };
+    let after = edit(&folded, "sheet-metal.flat-pattern", json!({}));
+    let (developed, refolded) = (lines(&flat), lines(&after));
+    assert!(refolded > 0 && refolded == developed, "the blank carries the bend's lines as before the unfold ({refolded} vs {developed}): {after}");
 }

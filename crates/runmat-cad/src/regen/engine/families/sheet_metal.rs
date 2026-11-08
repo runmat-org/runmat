@@ -59,6 +59,30 @@ impl<'a, 'b> Run<'a, 'b> {
         })
     }
 
+    /// The sheet record of the base flange a face belongs to: its body's, else the base flange
+    /// that named the face (a fold rebuilds the body in place, and the rebuilt body can lose
+    /// its body name while its faces answer to the base flange again).
+    pub(in crate::regen::engine) fn sheet_of_face(
+        &self,
+        h: &EntityHandle,
+    ) -> Option<(
+        FeatureId,
+        SheetRules,
+        Option<crate::model::sheet_metal::Section>,
+        f64,
+    )> {
+        self.sheet_of(h.body as usize).or_else(|| {
+            self.st.entity_names(h).iter().find_map(|n| match self.st.records.get(n.maker()) {
+                Some(FeatureRecord::Sheet {
+                    rules,
+                    section,
+                    depth,
+                }) => Some((n.maker().clone(), rules.clone(), section.clone(), *depth)),
+                _ => None,
+            })
+        })
+    }
+
     /// The sheet record of the base flange that made a body.
     pub(in crate::regen::engine) fn sheet_of(
         &self,
@@ -342,10 +366,10 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             SheetMetalFeature::FlatPattern { fixed_face, .. } => {
                 let h = self.face_handle(i, id, "fixed_face", fixed_face)?;
-                if let Some((maker, rules, None, _)) = self.sheet_of(h.body as usize) {
+                if let Some((maker, rules, None, _)) = self.sheet_of_face(&h) {
                     return self.plate_flat(i, id, &h, &maker, &rules, &simple, true);
                 }
-                let Some((maker, rules, Some(sec), depth)) = self.sheet_of(h.body as usize) else {
+                let Some((maker, rules, Some(sec), depth)) = self.sheet_of_face(&h) else {
                     return Err(self.error(
                         id,
                         Some("fixed_face"),
