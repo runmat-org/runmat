@@ -75,14 +75,14 @@ double admitted_parameter(double value,
 // UResolution is a global estimate from the surface's largest parametric speed, so near a slow
 // corner a pcurve can run past that padding while its surface point stays inside the edge's
 // tolerance tube (an exported EV battery pack: u = 1 + 6e-9 against 1 + 1.1e-9 padding). Clamp a
-// non-periodic parameter onto the domain when the surface point it names lies within the face's
-// largest edge tolerance (times the 1.1 sampling allowance of incidence validation) of the
-// clamped point. Import admits each edge's measured curve/pcurve gap into that tolerance, so it
-// is the one bound. Clamping only keeps evaluation on the trimmed surface: incidence validation
-// still holds the clamped point to the edge tolerance. Larger overshoots stay outside and are
-// rejected by admitted_parameter.
+// non-periodic parameter onto the domain when the surface point it names lies within the larger
+// of the face's largest edge tolerance (times the 1.1 sampling allowance of incidence
+// validation) and kAdmissibleEdgeGapM of the clamped point. Clamping only keeps evaluation on the
+// trimmed surface: incidence validation still holds the clamped point to the edge tolerance.
+// Larger overshoots stay outside and are rejected by admitted_parameter.
 void admit_tolerant_overshoot(const BRepAdaptor_Surface& surface,
                               const TopoDS_Face& face,
+                              double meters_per_source_unit,
                               const std::array<double, 4>& bounds,
                               double& u,
                               double& v) {
@@ -91,7 +91,8 @@ void admit_tolerant_overshoot(const BRepAdaptor_Surface& surface,
   if (!u_out && !v_out) {
     return;
   }
-  const double tolerance = 1.1 * BRep_Tool::MaxTolerance(face, TopAbs_EDGE);
+  const double tolerance = std::max(1.1 * BRep_Tool::MaxTolerance(face, TopAbs_EDGE),
+                                    kAdmissibleEdgeGapM / meters_per_source_unit);
   if (!std::isfinite(tolerance) || tolerance <= 0.0) {
     return;
   }
@@ -197,7 +198,7 @@ OcctSurfaceDerivativesPayload exact_surface_derivatives(std::uint64_t session_id
   if (bounds[0] > bounds[1] || bounds[2] > bounds[3]) {
     throw std::runtime_error("OCCT exact surface has a reversed parameter domain");
   }
-  admit_tolerant_overshoot(surface, context.face, bounds, u, v);
+  admit_tolerant_overshoot(surface, context.face, context.meters_per_source_unit, bounds, u, v);
   u = admitted_parameter(u, bounds[0], bounds[1], surface.IsUPeriodic(),
                          surface.IsUPeriodic() ? surface.UPeriod() : 0.0, "U parameter");
   v = admitted_parameter(v, bounds[2], bounds[3], surface.IsVPeriodic(),

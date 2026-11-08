@@ -7,6 +7,12 @@
 namespace runmat_geometry_io {
 namespace occt_backend {
 
+// How far, in metres, an evaluated pcurve may run past its face's trimmed parameter domain in 3D
+// before evaluation clamps it, when that exceeds the face's edge tolerance (incidence validation
+// still holds the clamped point to the edge tolerance). Import no longer uses it: edge tolerance
+// admission is bounded by the request's geometric tolerance (admissible_edge_gap_m).
+inline constexpr double kAdmissibleEdgeGapM = 1.0e-6;
+
 enum class OcctCadFormat : std::uint8_t;
 enum class OcctFeatureKind : std::uint8_t;
 enum class OcctFeatureEntityKind : std::uint8_t;
