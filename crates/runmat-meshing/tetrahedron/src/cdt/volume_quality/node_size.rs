@@ -1,10 +1,10 @@
 //! Size is measured along edges under the metric field at their endpoints.
 //!
 //! A boundary node carries the field its faces were meshed with: each face's constant sizing
-//! intersected with the face's incident entity-local sources graded to the node, exactly as the
-//! surface stage evaluates it. An interior node carries its region's constant sizing intersected
-//! with every entity-local source and every face's constant sizing, each graded by distance from
-//! its support. An edge's metric length is the integral of the metric along it
+//! intersected with every entity-local source graded to the node, as the surface stage evaluates
+//! it (`ResolvedMetricField::evaluate_at`). An interior node carries its region's constant sizing
+//! intersected with every entity-local source and every face's constant sizing, each graded by
+//! distance from its support. An edge's metric length is the integral of the metric along it
 //! (`integrated_edge_length`), so a cell next to a fine feature is measured by the sizes at its
 //! own corners rather than by one tensor for the whole cell. Anisotropic sizing (for example
 //! proximity across a thin section) keeps its directions all the way into the interior.
@@ -26,7 +26,6 @@ use crate::cdt::DelaunayVolumeNode;
 
 struct FaceScope {
     constant: MetricTensor3,
-    local: Vec<LocalMetricSource>,
 }
 
 pub(in crate::cdt) struct NodeSizeField {
@@ -116,9 +115,7 @@ impl NodeSizeField {
                 .resolve_constant(incident)
                 .map_err(metric_error)?
                 .metric;
-            let local = node.field.local_sources(incident).map_err(metric_error)?;
-            node.faces
-                .insert(face.clone(), FaceScope { constant, local });
+            node.faces.insert(face.clone(), FaceScope { constant });
         }
         node.all_local = node.field.all_local_sources().map_err(metric_error)?;
         Ok(node)
@@ -171,7 +168,7 @@ impl NodeSizeField {
                     })?;
                     let at_face = self
                         .field
-                        .evaluate_graded(scope.constant, &scope.local, point)
+                        .evaluate_at(scope.constant, &[], point)
                         .map_err(metric_error)?;
                     metric = Some(match metric {
                         None => at_face,

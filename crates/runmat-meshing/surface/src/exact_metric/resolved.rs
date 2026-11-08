@@ -128,7 +128,7 @@ impl ResolvedFaceMetricField {
         let physical_metric = pullback_identity(derivative_u_m, derivative_v_m);
         let local_metric = self
             .resolver
-            .evaluate_graded(record.resolved.metric, &record.local, point_m)
+            .evaluate_at(record.resolved.metric, &record.local, point_m)
             .map_err(|error| invalid_evaluation(source_face_id, error.to_string()))?;
         let sizing_metric = pullback_metric(local_metric, derivative_u_m, derivative_v_m);
         physical_metric.validate().map_err(|reason| {
