@@ -22,7 +22,9 @@ pub struct ProposeEditInput {
     pub text: Option<String>,
     /// A catalog command id (`part.extrude`, `part.fillet`, `part.suppress`,
     /// `assembly.fix`, `board.route`, `schematic.update-board`, …). Give this or `text`.
-    #[serde(default)]
+    /// A blank id counts as no command: models fill every optional field and send `""` beside
+    /// `replace`.
+    #[serde(default, deserialize_with = "blank_as_none")]
     pub command: Option<String>,
     /// The command's values by field id, numbers in the field's unit (`{ "depth": 12 }` for
     /// 12 mm); selection fields take Outline ids or names.
@@ -37,6 +39,11 @@ pub struct ProposeEditInput {
     /// change of a few lines.
     #[serde(default)]
     pub replace: Option<Vec<Replacement>>,
+}
+
+fn blank_as_none<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.filter(|text| !text.trim().is_empty()))
 }
 
 /// One replacement of [`ProposeEditInput::replace`].
@@ -652,6 +659,20 @@ mod tests {
         assert_eq!(replaced("a\nb\nc\n", &[r("b\n", "b\nx\n")]).unwrap(), "a\nb\nx\nc\n");
         assert!(replaced("a\na\n", &[r("a", "b")]).unwrap_err().message.contains("matches 2 places"));
         assert!(replaced("a\n", &[r("z", "b")]).unwrap_err().message.contains("doesn't match"));
+    }
+
+    #[test]
+    fn a_blank_command_beside_replace_counts_as_no_command() {
+        let input: ProposeEditInput = serde_json::from_value(json!({
+            "path": "/a.circuit",
+            "command": "",
+            "replace": [{ "old": "b", "new": "c" }],
+        }))
+        .unwrap();
+        assert!(input.command.is_none());
+        let input: ProposeEditInput =
+            serde_json::from_value(json!({ "path": "/a.circuit", "command": "board.route" })).unwrap();
+        assert_eq!(input.command.as_deref(), Some("board.route"));
     }
 
     #[test]
