@@ -448,8 +448,10 @@ fn model_of(display: &Value) -> Model {
     model
 }
 
-/// The silhouette of each curved face under `depth`: mesh edges inside the face whose two
-/// triangles face opposite ways.
+/// The silhouette of each curved face under `depth`: mesh edges inside the face between a
+/// triangle facing the viewer and one that doesn't. A tessellation can put a facet exactly
+/// edge-on at the silhouette (a cylinder's facet whose normal is square to the view): the
+/// silhouette is then the edge between the facing triangle and that facet.
 fn silhouettes(model: &Model, depth: P3) -> Vec<Edge> {
     let mut out = Vec::new();
     for (fi, face) in model.faces.iter().enumerate() {
@@ -467,7 +469,7 @@ fn silhouettes(model: &Model, depth: P3) -> Vec<Edge> {
         for uses in by_edge.values() {
             if let [(f1, a, b), (f2, _, _)] = uses.as_slice() {
                 let scale = 1e-9;
-                if (f1 > &scale && f2 < &-scale) || (f1 < &-scale && f2 > &scale) {
+                if (*f1 > scale) != (*f2 > scale) {
                     out.push(Edge {
                         points: vec![*a, *b],
                         faces: [fi, fi],

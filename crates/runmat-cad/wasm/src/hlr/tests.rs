@@ -134,3 +134,30 @@ fn the_front_and_right_views_show_the_cut_and_the_hole_hidden() {
         assert!(len > 9.0, "right: hidden line at y = {y} is {len} mm");
     }
 }
+
+/// A hole tessellated with facets square to the view at both sides (an octagon turned 22.5°,
+/// as OCCT may mesh it): seen from the front, both silhouettes draw, at x = ±r cos 22.5°.
+#[test]
+fn a_facet_edge_on_at_the_silhouette_still_draws_it() {
+    let r = 2.0;
+    let ring = |z: f64| -> Vec<P3> {
+        (0..8)
+            .map(|k| {
+                let a = (22.5 + 45.0 * k as f64).to_radians();
+                [r * a.cos(), r * a.sin(), z]
+            })
+            .collect()
+    };
+    let (lo, hi) = (ring(0.0), ring(10.0));
+    let mut tris = Vec::new();
+    for k in 0..8 {
+        let j = (k + 1) % 8;
+        tris.push([lo[k], lo[j], hi[j]]);
+        tris.push([lo[k], hi[j], hi[k]]);
+    }
+    let model = Model { faces: vec![Face { tris }], edges: Vec::new(), axes: Vec::new() };
+    let front = axes("front");
+    let xs: Vec<f64> = silhouettes(&model, front.depth).iter().map(|e| dot(e.points[0], front.u)).collect();
+    let x = r * 22.5_f64.to_radians().cos();
+    assert!(xs.iter().any(|u| (u - x).abs() < 1e-9) && xs.iter().any(|u| (u + x).abs() < 1e-9), "silhouettes at {xs:?}");
+}
