@@ -38,6 +38,10 @@ pub struct GeometryScenePickResult {
     pub barycentric_coordinates: [f32; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topology_selection: Option<GeometrySceneTopologySelection>,
+    /// The owner nodes (bodies, assembly components) of the chunk hit, outermost first, as the
+    /// scene's `hidden_owner_node_ids` names them. Empty when the scene names none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owner_node_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +55,9 @@ pub struct GeometryScenePickIndex {
     scene_diagonal: f32,
     /// Instanced chunks, picked per placement in the prototype's coordinates.
     instanced: Vec<super::pick_instances::InstancedPick>,
+    /// Regions and owner nodes the view hides: picks pass through them.
+    hidden_regions: HashSet<String>,
+    hidden_owners: HashSet<String>,
 }
 
 impl GeometryScenePickIndex {
@@ -92,6 +99,7 @@ impl GeometryScenePickIndex {
                     region_id: region.map(|item| item.region_id.clone()),
                     region_label: region.and_then(|item| item.label.clone()),
                     region_tag: region.and_then(|item| item.tag.clone()),
+                    owner_node_ids: chunk.owner_node_ids.clone(),
                 });
             }
         }
@@ -109,7 +117,24 @@ impl GeometryScenePickIndex {
             feature_edge_neighbors,
             scene_diagonal: scene.bounds.size().length().max(1.0e-6),
             instanced: super::pick_instances::build(scene),
+            hidden_regions: HashSet::new(),
+            hidden_owners: HashSet::new(),
         }
+    }
+
+    /// Follows the view's hidden regions and owner nodes, so picks pass through what isn't drawn.
+    pub fn set_hidden(&mut self, presentation: &GeometryScenePresentation) {
+        self.hidden_regions = presentation.hidden_region_ids.iter().cloned().collect();
+        let owners: BTreeSet<String> = self.triangles.iter().flat_map(|t| t.owner_node_ids.iter().cloned()).collect();
+        self.hidden_owners = presentation
+            .resolved_hidden_owner_node_ids(owners.iter().map(String::as_str), &BTreeSet::new())
+            .into_iter()
+            .collect();
+    }
+
+    fn hidden(&self, triangle: &IndexedTriangle) -> bool {
+        triangle.region_id.as_ref().is_some_and(|id| self.hidden_regions.contains(id))
+            || triangle.owner_node_ids.iter().any(|id| self.hidden_owners.contains(id))
     }
 
     #[cfg(test)]
@@ -189,6 +214,7 @@ impl GeometryScenePickIndex {
                 position, triangle.a, triangle.b, triangle.c,
             ),
             topology_selection,
+            owner_node_ids: triangle.owner_node_ids.clone(),
         })
     }
 
@@ -499,6 +525,9 @@ impl GeometryScenePickIndex {
                     let Some(triangle) = self.triangles.get(triangle_index) else {
                         continue;
                     };
+                    if self.hidden(triangle) {
+                        continue;
+                    }
                     if let Some(hit_distance) =
                         ray_intersects_triangle(ray, triangle.a, triangle.b, triangle.c)
                     {
@@ -549,6 +578,7 @@ struct IndexedTriangle {
     region_id: Option<String>,
     region_label: Option<String>,
     region_tag: Option<String>,
+    owner_node_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

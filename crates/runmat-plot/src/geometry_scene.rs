@@ -18,6 +18,9 @@ mod paint;
 mod pick;
 mod pick_instances;
 mod section_cap;
+mod section_cut;
+#[cfg(test)]
+mod section_cut_tests;
 
 pub use pick::{
     GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest, GeometryScenePickResult,
@@ -258,6 +261,10 @@ pub struct GeometryScenePresentation {
     pub hidden_owner_node_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolated_owner_node_ids: Option<Vec<String>>,
+    /// Regions left out of the view: their triangles and boundary segments draw nothing and
+    /// picks pass through them, as hidden owner nodes do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_region_ids: Vec<String>,
     #[serde(
         default,
         deserialize_with = "deserialize_explicit_optional_section",
@@ -299,6 +306,7 @@ impl Default for GeometryScenePresentation {
             show_grid: None,
             hidden_owner_node_ids: None,
             isolated_owner_node_ids: None,
+            hidden_region_ids: Vec::new(),
             section: None,
             view_preset: None,
             projection: None,
@@ -318,6 +326,7 @@ impl GeometryScenePresentation {
                 .any(|selection| matches!(selection, GeometrySceneTopologySelection::Face { .. }))
             || !self.region_colors.is_empty()
             || !self.region_highlights.is_empty()
+            || !self.hidden_region_ids.is_empty()
             || self.active_section().is_some()
     }
 
@@ -390,6 +399,17 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct GeometrySceneSection {
     pub plane: GeometrySceneSectionPlane,
+    /// A second cutting plane. With two planes the view removes only what lies on the removed
+    /// side of both, a corner cutaway; each plane is capped where the removed corner meets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_plane: Option<GeometrySceneSectionPlane>,
+    /// Fill the solid's cut faces. Off leaves the cut open, showing the model's inside.
+    #[serde(default = "default_section_cap")]
+    pub cap: bool,
+}
+
+fn default_section_cap() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1046,10 +1066,32 @@ impl GeometrySceneChunk {
                 colored
             );
         }
+        if !presentation.hidden_region_ids.is_empty() {
+            render_data = self.render_data_without_regions(render_data, &presentation.hidden_region_ids);
+        }
         if let Some(section) = presentation.active_section() {
             render_data = self.render_data_with_section(render_data, section);
         }
         render_data
+    }
+
+    /// Leaves out the triangles (or, on a line chunk, the segments) of the hidden regions.
+    fn render_data_without_regions(&self, render_data: RenderData, hidden: &[String]) -> RenderData {
+        let lines = matches!(
+            render_data.pipeline_type,
+            PipelineType::Lines | PipelineType::LinesNoDepth
+        );
+        let regions = if lines { &self.segment_regions } else { &self.regions };
+        let ranges: Vec<GeometrySceneTriangleRange> = regions
+            .iter()
+            .filter(|region| hidden.iter().any(|id| id == &region.region_id))
+            .flat_map(|region| region.triangle_ranges.iter().copied())
+            .collect();
+        if ranges.is_empty() {
+            return render_data;
+        }
+        let per = if lines { 2 } else if render_data.pipeline_type == PipelineType::Triangles { 3 } else { return render_data };
+        section_cut::without_primitives(render_data, per, &ranges)
     }
 
     fn render_data_with_section(
@@ -1060,24 +1102,8 @@ impl GeometrySceneChunk {
         let Some(plane) = section_plane(&section.plane) else {
             return render_data;
         };
-        match render_data.pipeline_type {
-            PipelineType::Triangles => {
-                // The solid's cut faces close what the clip opens.
-                let cap = section_cap::section_cap(&triangles_of(&render_data), plane);
-                let mut clipped = clip_triangle_render_data(render_data, plane);
-                if !cap.is_empty() {
-                    clipped.vertices.extend(cap);
-                    let count = clipped.vertices.len();
-                    clipped.bounds = Some(bounds_from_vertices(&clipped.vertices));
-                    if let Some(call) = clipped.draw_calls.first_mut() {
-                        call.vertex_count = count;
-                    }
-                }
-                clipped
-            }
-            PipelineType::Lines => clip_line_render_data(render_data, plane),
-            _ => render_data,
-        }
+        let second = section.second_plane.as_ref().and_then(section_plane);
+        section_cut::cut(render_data, plane, second, section.cap)
     }
 
     fn is_edge_chunk(&self) -> bool {
@@ -1126,72 +1152,6 @@ fn geometry_region_role_color(role: Option<&str>) -> [f32; 4] {
         "selection" => GEOMETRY_SELECTED_REGION_COLOR,
         _ => GEOMETRY_HOVER_REGION_COLOR,
     }
-}
-
-fn clip_triangle_render_data(mut render_data: RenderData, plane: (Vec3, Vec3)) -> RenderData {
-    let mut clipped_vertices = Vec::new();
-    if let Some(indices) = render_data.indices.as_ref() {
-        for triangle in indices.chunks_exact(3) {
-            let Some(vertices) = triangle_vertices_from_indices(&render_data.vertices, triangle)
-            else {
-                continue;
-            };
-            push_clipped_triangle(vertices, plane, &mut clipped_vertices);
-        }
-    } else {
-        for triangle in render_data.vertices.chunks_exact(3) {
-            push_clipped_triangle(
-                [triangle[0], triangle[1], triangle[2]],
-                plane,
-                &mut clipped_vertices,
-            );
-        }
-    }
-    let bounds = bounds_from_vertices(&clipped_vertices);
-    let vertex_count = clipped_vertices.len();
-    render_data.vertices = clipped_vertices;
-    render_data.indices = None;
-    render_data.bounds = Some(bounds);
-    render_data.draw_calls = vec![DrawCall {
-        vertex_offset: 0,
-        vertex_count,
-        index_offset: None,
-        index_count: None,
-        instance_count: 1,
-    }];
-    render_data
-}
-
-fn clip_line_render_data(mut render_data: RenderData, plane: (Vec3, Vec3)) -> RenderData {
-    let mut clipped_vertices = Vec::new();
-    if let Some(indices) = render_data.indices.as_ref() {
-        for line in indices.chunks_exact(2) {
-            let Some(a) = render_data.vertices.get(line[0] as usize).copied() else {
-                continue;
-            };
-            let Some(b) = render_data.vertices.get(line[1] as usize).copied() else {
-                continue;
-            };
-            push_clipped_line(a, b, plane, &mut clipped_vertices);
-        }
-    } else {
-        for line in render_data.vertices.chunks_exact(2) {
-            push_clipped_line(line[0], line[1], plane, &mut clipped_vertices);
-        }
-    }
-    let bounds = bounds_from_vertices(&clipped_vertices);
-    let vertex_count = clipped_vertices.len();
-    render_data.vertices = clipped_vertices;
-    render_data.indices = None;
-    render_data.bounds = Some(bounds);
-    render_data.draw_calls = vec![DrawCall {
-        vertex_offset: 0,
-        vertex_count,
-        index_offset: None,
-        index_count: None,
-        instance_count: 1,
-    }];
-    render_data
 }
 
 /// Every triangle of `render_data`, indexed or not.

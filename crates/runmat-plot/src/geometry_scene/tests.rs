@@ -559,6 +559,8 @@ fn presentation_section_clips_triangle_render_data() {
                 offset: None,
                 label: Some("midplane".to_string()),
             },
+            second_plane: None,
+            cap: true,
         })),
         ..Default::default()
     });

@@ -393,6 +393,10 @@ pub(crate) mod wasm {
                     index: GeometryScenePickIndex::build(&scene),
                 });
             }
+            let presentation = &entry.geometry_presentation;
+            if let Some(cached) = entry.geometry_pick_index.as_mut() {
+                cached.index.set_hidden(presentation);
+            }
             Ok(entry.geometry_pick_index.as_ref().and_then(|cached| {
                 entry
                     .renderer

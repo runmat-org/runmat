@@ -34,15 +34,18 @@ pub(super) fn add(catalog: &mut Catalog) {
             ],
         )])
         .edit(view_action("select_filter")),
-        cmd("view.visibility", "Visibility", "visibility", CAD_3D)
-            .desc("Show or hide planes, sketches, hidden bodies and annotations.")
-            .kw(&["hide", "show", "planes"])
-            .inputs(vec![
-                flag("planes", "Planes", true),
-                flag("sketches", "Sketches", true),
-                flag("annotations", "Annotations", true),
-                flag("hidden", "Hidden items", false),
-            ])
+        cmd("view.visibility", "Visibility", "visibility", VIEW_3D)
+            .desc("Hide or show the selected bodies, components or regions, or show everything again.")
+            .kw(&["hide", "show", "unhide"])
+            .inputs(vec![choice(
+                "action",
+                "Action",
+                &[
+                    ("hide", "Hide selected"),
+                    ("show", "Show selected"),
+                    ("show_all", "Show all"),
+                ],
+            )])
             .edit(view_action("visibility")),
         cmd(
             "view.configuration",
@@ -148,7 +151,7 @@ pub(super) fn add(catalog: &mut Catalog) {
 
 /// The .fea study view's viewport toolbar: the 3D view cluster with the items a meshed study
 /// supports. It has no command tabs; setup and results controls stay in the study view.
-/// Visibility joins once a geometry pick reports the body (assembly node) it hit.
+/// Visibility hides picked regions, or bodies when the filter selects bodies.
 fn fea_rows() -> EditorRows {
     let view_cluster = vec![
         variants(
@@ -171,6 +174,18 @@ fn fea_rows() -> EditorRows {
             "view.select-filter",
             "filter",
             &[("face", "Faces"), ("edge", "Edges"), ("body", "Bodies")],
+        ),
+        variants(
+            "view.visibility.menu",
+            "Visibility",
+            "visibility",
+            "view.visibility",
+            "action",
+            &[
+                ("hide", "Hide selected"),
+                ("show", "Show selected"),
+                ("show_all", "Show all"),
+            ],
         ),
         c("view.grid"),
         menu(
@@ -242,7 +257,18 @@ pub(super) fn cluster_3d(extra: Vec<RowItem>) -> Vec<RowItem> {
                 ("sketch", "Sketches"),
             ],
         ),
-        c("view.visibility"),
+        variants(
+            "view.visibility.menu",
+            "Visibility",
+            "visibility",
+            "view.visibility",
+            "action",
+            &[
+                ("hide", "Hide selected"),
+                ("show", "Show selected"),
+                ("show_all", "Show all"),
+            ],
+        ),
         c("view.grid"),
         menu(
             "view.section.menu",
