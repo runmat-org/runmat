@@ -5382,6 +5382,12 @@
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:24",
       "capability": "Page-shown syntax: TL, sound power, impedance tables, normal velocity from state, pressure drop, buoyancy, carreau and power_law, sampled waveforms, WSS and OSI, species and transport, porous, lubrication family, heat_generation in W, rpm, fractional-power units, mass_flow_rate sweeps",
       "maps": "FEA-PUBLIC-LANGUAGE-001/output_expression_forms|FEA-PUBLIC-LANGUAGE-001/input_forms|FEA-PUBLIC-LANGUAGE-001/unit_and_source_forms"
+    },
+    {
+      "id": "SIMPAGES-14",
+      "source": "sister-comms/2026-11-05-fea-to-private-simulation-pages-plan.md:30",
+      "capability": "Thermal stress over a time history (thermomechanical transient, e.g. one braking stop)",
+      "maps": "FEA-COUPLING-THERMOELASTIC-002/*"
     }
   ],
   "requirements": [
