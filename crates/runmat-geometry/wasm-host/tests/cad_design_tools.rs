@@ -98,3 +98,47 @@ fn an_overview_here_lists_the_drawing_and_assembly_that_use_a_part_without_regen
     // The part itself is checked on OCCT.
     assert!(out["data"].to_string().contains("design.check"), "{out:#}");
 }
+
+/// Every file of the camera drone fixture, keyed `/p/drone/<relative path>`.
+fn drone() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, at: &str, all: &mut Vec<(String, String)>) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name.ends_with(".step") {
+                continue;
+            }
+            if e.path().is_dir() {
+                walk(&e.path(), &format!("{at}/{name}"), all);
+            } else if let Ok(text) = std::fs::read_to_string(e.path()) {
+                all.push((format!("{at}/{name}"), text));
+            }
+        }
+    }
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runmat-cad/wasm/tests/drone");
+    let mut all = Vec::new();
+    walk(&dir, "/p/drone", &mut all);
+    assert!(all.iter().any(|(p, _)| p == "/p/drone/drone.assembly"), "the drone project");
+    all
+}
+
+#[test]
+fn on_the_drone_a_change_checks_only_its_pairs_and_a_ray_finds_the_lower_shell() {
+    let all = drone();
+    let files: Vec<(&str, &str)> = all.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+    // The skid as the change: only its pairs are checked, and it overlaps nothing on OCCT.
+    let out = tool("design.inspect", json!({ "path": "/p/drone/drone.assembly", "sections": ["interference"], "changed": ["skid_left", "skid_right"] }), &files);
+    let interference = &out["data"]["sections"]["interference"];
+    assert_eq!(interference["result"]["changed"], json!(["skid_left", "skid_right"]), "{out:#}");
+    assert_eq!(interference["result"]["overlaps"].as_array().map(Vec::len), Some(0), "{out:#}");
+    assert_eq!(interference["problems"].as_array().map(Vec::len), Some(0), "{out:#}");
+    // Straight up from under the belly, limited to the lower shell: the first hit enters it,
+    // with an outward normal that faces down.
+    let out = tool("design.inspect", json!({ "path": "/p/drone/drone.assembly", "sections": ["surface"],
+        "ray": { "from": [0.0, 20.0, -200.0], "direction": [0.0, 0.0, 1.0], "occurrences": ["body_bottom"] } }), &files);
+    let hits = out["data"]["sections"]["surface"]["hits"].as_array().cloned().unwrap_or_else(|| panic!("hits, not {out:#}"));
+    assert!(!hits.is_empty(), "{out:#}");
+    assert_eq!(hits[0]["occurrence"], "body_bottom", "{out:#}");
+    assert_eq!(hits[0]["entering"], true, "{out:#}");
+    assert!(hits[0]["normal"][2].as_f64().unwrap() < -0.5, "{out:#}");
+    assert!(hits.iter().all(|h| h["occurrence"] == "body_bottom"), "{out:#}");
+}
