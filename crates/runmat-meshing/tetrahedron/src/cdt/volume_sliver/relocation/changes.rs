@@ -5,19 +5,23 @@ use runmat_meshing_core::StableDigest;
 
 use crate::cdt::DelaunayVolumeTopology;
 
-/// Adds to `changed` every node of a cell that `candidate` has and `current` lacks, and of a cell
-/// that `current` has and `candidate` lacks. Cells match by nodes (identity and coordinates) and
-/// region.
+/// The cells `candidate` has and `current` lacks, and the cells `current` has and `candidate`
+/// lacks, as indices into each topology's cells. Cells match by nodes (identity and
+/// coordinates) and region.
 ///
 /// Both topologies list nodes by identity and cells by sorted vertex indices. The candidate's
 /// shared nodes map to current indices in increasing order, so its mapped cell keys keep that
 /// order and one merge pairs equal cells. A cell the merge cannot pair counts as changed, so an
 /// input out of this order only enlarges the result.
-pub(super) fn record_changed_nodes(
+pub(in crate::cdt::volume_sliver) struct ChangedCells {
+    pub(in crate::cdt::volume_sliver) added: Vec<usize>,
+    pub(in crate::cdt::volume_sliver) removed: Vec<usize>,
+}
+
+pub(in crate::cdt::volume_sliver) fn changed_cells(
     current: &DelaunayVolumeTopology,
     candidate: &DelaunayVolumeTopology,
-    changed: &mut BTreeSet<StableDigest>,
-) {
+) -> ChangedCells {
     let mut cursor = 0;
     let mapped = candidate
         .nodes
@@ -34,21 +38,22 @@ pub(super) fn record_changed_nodes(
         key.sort_unstable();
         key
     };
-    let mut add = |nodes: &[crate::cdt::DelaunayVolumeNode], vertices: [u32; 4]| {
-        changed.extend(vertices.map(|vertex| nodes[vertex as usize].identity));
+    let mut changes = ChangedCells {
+        added: Vec::new(),
+        removed: Vec::new(),
     };
     let mut next = 0;
-    for cell in &candidate.tetrahedra {
+    for (index, cell) in candidate.tetrahedra.iter().enumerate() {
         let vertices = cell.vertex_indices.map(|vertex| mapped[vertex as usize]);
         let [Some(a), Some(b), Some(c), Some(d)] = vertices else {
-            add(&candidate.nodes, cell.vertex_indices);
+            changes.added.push(index);
             continue;
         };
         let key = sorted([a, b, c, d]);
         while next < current.tetrahedra.len()
             && sorted(current.tetrahedra[next].vertex_indices) < key
         {
-            add(&current.nodes, current.tetrahedra[next].vertex_indices);
+            changes.removed.push(next);
             next += 1;
         }
         if next < current.tetrahedra.len()
@@ -57,11 +62,28 @@ pub(super) fn record_changed_nodes(
         {
             next += 1;
         } else {
-            add(&candidate.nodes, cell.vertex_indices);
+            changes.added.push(index);
         }
     }
-    for cell in &current.tetrahedra[next..] {
-        add(&current.nodes, cell.vertex_indices);
+    changes.removed.extend(next..current.tetrahedra.len());
+    changes
+}
+
+/// Adds to `changed` every node of a cell in `changes` (see [`changed_cells`]).
+pub(in crate::cdt::volume_sliver) fn record_changed_nodes(
+    current: &DelaunayVolumeTopology,
+    candidate: &DelaunayVolumeTopology,
+    changes: &ChangedCells,
+    changed: &mut BTreeSet<StableDigest>,
+) {
+    let mut add = |nodes: &[crate::cdt::DelaunayVolumeNode], vertices: [u32; 4]| {
+        changed.extend(vertices.map(|vertex| nodes[vertex as usize].identity));
+    };
+    for index in &changes.added {
+        add(&candidate.nodes, candidate.tetrahedra[*index].vertex_indices);
+    }
+    for index in &changes.removed {
+        add(&current.nodes, current.tetrahedra[*index].vertex_indices);
     }
 }
 
@@ -104,14 +126,18 @@ mod tests {
         moved.push(node(6, [0.1, 0.1, -1.]));
         let candidate = topology(moved, vec![[0, 1, 2, 3], [0, 1, 2, 4]]);
         let mut changed = BTreeSet::new();
-        record_changed_nodes(&current, &candidate, &mut changed);
+        record_changed_nodes(
+            &current,
+            &candidate,
+            &changed_cells(&current, &candidate),
+            &mut changed,
+        );
         let expected = [1, 2, 3, 5, 6]
             .map(|seed| StableDigest::from_bytes([seed; 32]))
             .into_iter()
             .collect::<BTreeSet<_>>();
         assert_eq!(changed, expected);
-        changed.clear();
-        record_changed_nodes(&current, &current, &mut changed);
-        assert!(changed.is_empty());
+        let unchanged = changed_cells(&current, &current);
+        assert!(unchanged.added.is_empty() && unchanged.removed.is_empty());
     }
 }

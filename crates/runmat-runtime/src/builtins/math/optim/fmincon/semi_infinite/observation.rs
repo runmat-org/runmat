@@ -71,6 +71,7 @@ pub(in crate::builtins::math::optim::fmincon) async fn observe(
     direction: &[f64],
     alpha: Option<f64>,
 ) -> BuiltinResult<bool> {
+    #[cfg_attr(not(feature = "plot-core"), allow(unused_mut))]
     let mut domain = evaluator
         .semi_infinite
         .take()

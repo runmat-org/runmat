@@ -7788,6 +7788,7 @@ dependencies = [
  "anyhow",
  "futures",
  "libc",
+ "rayon",
  "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-canonical-codec",
@@ -8236,6 +8237,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-server-client",
  "runmat-simulation-usage",
+ "serde_json",
  "tokio",
  "uuid",
 ]
@@ -9094,6 +9096,7 @@ dependencies = [
  "sha2 0.11.0",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "url",
  "uuid",
  "webbrowser 0.8.15",

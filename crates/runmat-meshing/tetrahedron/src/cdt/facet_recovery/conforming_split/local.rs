@@ -6,37 +6,48 @@ pub(super) enum LocalSplit {
     Accepted(Vec<ProtectedFacetSplit>),
     /// The cavity holds the whole star of this other recovered segment edge.
     Encroached([StableDigest; 2]),
+    /// Link flips leave an illegal face in the node's star that carries this other recovered
+    /// segment interval as a face edge.
+    Blocked {
+        reason: String,
+        segment: [StableDigest; 2],
+    },
     Declined(String),
 }
 
+/// A segment split replacement together with the re-triangulation of the protected facet
+/// triangles that the split node encroaches (see `segment_split_cavities`).
+pub(super) struct CavitySplit {
+    pub(super) removed: BTreeSet<u32>,
+    pub(super) created: Vec<([u32; 4], Option<runmat_geometry_core::PersistentEntityId>)>,
+    pub(super) splits: Vec<ProtectedFacetSplit>,
+    /// The fan triangles of the facet cavities; the caller requires each one that stays
+    /// protected to be a face of the admitted topology.
+    pub(super) retriangulated: Vec<DelaunayRecoveredFacetTriangle>,
+}
+
+/// Splits `edge` at the appended node `inserted`. Protected triangles of the facets on the edge
+/// whose circumcircle holds the node leave protection and are re-triangulated in their facet;
+/// the split and the link flips then see them as ordinary faces, and the caller's admission
+/// requires their replacements. `segment_edges` bounds the facet cavities and includes `edge`.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn split_and_admit_locally(
-    topology: &mut TopologyMutation,
+pub(super) fn split_edge_with_facet_cavities(
+    topology: &TopologyMutation,
+    inserted: u32,
     node: DelaunayVolumeNode,
     edge: [StableDigest; 2],
     protected: &[DelaunayRecoveredFacetTriangle],
-    protected_edges: &[[StableDigest; 2]],
+    segment_edges: &BTreeSet<[StableDigest; 2]>,
     strategy: SplitStrategy,
     constraint_index: u32,
-    options: crate::cdt::DelaunayInsertionOptions,
-    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
-) -> Result<LocalSplit, DelaunayFacetRecoveryError> {
-    let mut split_edge_key = edge;
-    split_edge_key.sort_unstable();
-    // Protected triangles of the facets on the edge whose circumcircle holds the node leave
-    // protection and are re-triangulated in their facet; the split and the link flips then see
-    // them as ordinary faces, and the admission below requires their replacements.
+) -> Result<CavitySplit, DelaunayFacetRecoveryError> {
     let cavities = super::super::facet_delaunay::segment_split_cavities(
-        &*topology,
+        topology,
         protected,
         edge,
         node.identity,
         node.coordinates_m.canonical_value(),
-        &protected_edges
-            .iter()
-            .copied()
-            .chain([split_edge_key])
-            .collect(),
+        segment_edges,
         MAXIMUM_SPLIT_FACET_CAVITY_TRIANGLES,
     );
     let released = cavities
@@ -53,12 +64,8 @@ pub(super) fn split_and_admit_locally(
                     .all(|endpoint| triangle.node_identities.contains(endpoint))
         })
         .collect::<Vec<_>>();
-    let mut observed = topology.observe_edge_changes();
-    let Ok(inserted) = observed.append_node(node) else {
-        return Ok(LocalSplit::Declined("duplicate node".to_owned()));
-    };
     let (removed, created, mut splits) = split_edge(
-        &observed,
+        topology,
         inserted,
         edge,
         &split_protection,
@@ -94,6 +101,72 @@ pub(super) fn split_and_admit_locally(
             }));
         }
     }
+    Ok(CavitySplit {
+        removed,
+        created,
+        splits,
+        retriangulated,
+    })
+}
+
+/// Whether a re-triangulated facet triangle that is still protected is missing as a face.
+pub(super) fn retriangulated_face_missing(
+    topology: &TopologyMutation,
+    retriangulated: &[DelaunayRecoveredFacetTriangle],
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+) -> bool {
+    retriangulated.iter().any(|triangle| {
+        let mut face = triangle.node_identities;
+        face.sort_unstable();
+        if !protected_faces.contains(&face) {
+            return false;
+        }
+        let [Some(a), Some(b), Some(c)] =
+            triangle.node_identities.map(|identity| topology.node_index(identity))
+        else {
+            return true;
+        };
+        topology.face_incidence([a, b, c]).is_empty()
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn split_and_admit_locally(
+    topology: &mut TopologyMutation,
+    node: DelaunayVolumeNode,
+    edge: [StableDigest; 2],
+    protected: &[DelaunayRecoveredFacetTriangle],
+    protected_edges: &[[StableDigest; 2]],
+    strategy: SplitStrategy,
+    constraint_index: u32,
+    options: crate::cdt::DelaunayInsertionOptions,
+    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
+) -> Result<LocalSplit, DelaunayFacetRecoveryError> {
+    let mut split_edge_key = edge;
+    split_edge_key.sort_unstable();
+    let mut observed = topology.observe_edge_changes();
+    let Ok(inserted) = observed.append_node(node) else {
+        return Ok(LocalSplit::Declined("duplicate node".to_owned()));
+    };
+    let CavitySplit {
+        removed,
+        created,
+        mut splits,
+        retriangulated,
+    } = split_edge_with_facet_cavities(
+        &observed,
+        inserted,
+        node,
+        edge,
+        protected,
+        &protected_edges
+            .iter()
+            .copied()
+            .chain([split_edge_key])
+            .collect(),
+        strategy,
+        constraint_index,
+    )?;
     if removed.is_empty() {
         return Ok(LocalSplit::Declined("empty replacement".to_owned()));
     }
@@ -131,13 +204,30 @@ pub(super) fn split_and_admit_locally(
     ) {
         Ok((true, flips)) => flips,
         Ok((false, _)) => {
-            return Ok(LocalSplit::Declined(format!(
+            let illegal = illegal_star_face(&observed, inserted, &protected_faces, &kept_edges);
+            let reason = format!(
                 "an illegal face remains in the new node's star after link flips (split edge {:?}): {}",
                 edge.map(|identity| observed
                     .node_index(identity)
                     .map(|index| observed.nodes[index as usize].coordinates_m.canonical_value())),
-                illegal_star_face(&observed, inserted, &protected_faces, &kept_edges)
-            )))
+                illegal.description
+            );
+            // A recovered segment interval on the illegal face, other than a half of the split,
+            // keeps the face: no link flip removes it while that interval stays unsplit.
+            return Ok(
+                match illegal.kept_edges.into_iter().find(|kept| {
+                    !kept.contains(&node.identity)
+                        && *kept != split_edge_key
+                        && protected_edges.iter().any(|candidate| {
+                            let mut candidate = *candidate;
+                            candidate.sort_unstable();
+                            candidate == *kept
+                        })
+                }) {
+                    Some(segment) => LocalSplit::Blocked { reason, segment },
+                    None => LocalSplit::Declined(reason),
+                },
+            );
         }
         Err(failure)
             if matches!(
@@ -173,25 +263,10 @@ pub(super) fn split_and_admit_locally(
         protected_face_keys(&current)
     };
     // The re-triangulated facet triangles that the flips kept must exist as faces.
-    if !retriangulated.is_empty() {
-        let missing = retriangulated.iter().any(|triangle| {
-            let mut face = triangle.node_identities;
-            face.sort_unstable();
-            if !protected_faces.contains(&face) {
-                return false;
-            }
-            let [Some(a), Some(b), Some(c)] =
-                triangle.node_identities.map(|identity| observed.node_index(identity))
-            else {
-                return true;
-            };
-            observed.face_incidence([a, b, c]).is_empty()
-        });
-        if missing {
-            return Ok(LocalSplit::Declined(
-                "a re-triangulated facet triangle is not a face after link flips".to_owned(),
-            ));
-        }
+    if retriangulated_face_missing(&observed, &retriangulated, &protected_faces) {
+        return Ok(LocalSplit::Declined(
+            "a re-triangulated facet triangle is not a face after link flips".to_owned(),
+        ));
     }
     // The split edge is replaced by its two halves; every other recovered segment edge that a
     // removed cell carried must survive.
@@ -236,12 +311,18 @@ pub(super) fn split_and_admit_locally(
 /// Describes the first unprotected face in the star of `inserted` whose neighbor apex lies
 /// strictly inside the cell's circumsphere, for the decline reason: its corners, the apex, the
 /// face edges that must stay, and the protected triangles that share an edge with the face.
+pub(super) struct IllegalStarFace {
+    pub(super) description: String,
+    /// The face edges in `kept_edges`, sorted.
+    pub(super) kept_edges: Vec<[StableDigest; 2]>,
+}
+
 pub(super) fn illegal_star_face(
     topology: &TopologyMutation,
     inserted: u32,
     protected_faces: &BTreeSet<[StableDigest; 3]>,
     kept_edges: &BTreeSet<[StableDigest; 2]>,
-) -> String {
+) -> IllegalStarFace {
     let point = |vertex: u32| topology.nodes[vertex as usize].coordinates_m.canonical_value();
     for left_index in topology.vertex_stars[inserted as usize].iter().copied() {
         let Some(left) = topology.tetrahedron(left_index) else {
@@ -281,20 +362,24 @@ pub(super) fn illegal_star_face(
                 .map(|slot| left.vertex_indices[slot])
                 .collect::<Vec<_>>();
             let at = |identity: &StableDigest| topology.node_index(*identity).map(point);
-            let kept = [(0, 1), (1, 2), (0, 2)]
+            let kept_keys = [(0, 1), (1, 2), (0, 2)]
                 .into_iter()
                 .filter_map(|(a, b)| {
                     let mut key = [face[a], face[b]];
                     key.sort_unstable();
-                    kept_edges.contains(&key).then(|| key.map(|identity| at(&identity)))
+                    kept_edges.contains(&key).then_some(key)
                 })
+                .collect::<Vec<_>>();
+            let kept = kept_keys
+                .iter()
+                .map(|key| key.map(|identity| at(&identity)))
                 .collect::<Vec<_>>();
             let adjacent = protected_faces
                 .iter()
                 .filter(|other| other.iter().filter(|node| face.contains(node)).count() == 2)
                 .map(|other| other.map(|identity| at(&identity)))
                 .collect::<Vec<_>>();
-            return format!(
+            let description = format!(
                 "face {:?} (opposite cell vertex {:?}) with apex {:?}; {} kept face edges {kept:?}, \
                  {} protected triangles share a face edge {adjacent:?}, inserted node on face: {}",
                 corners.iter().map(|vertex| point(*vertex)).collect::<Vec<_>>(),
@@ -304,9 +389,16 @@ pub(super) fn illegal_star_face(
                 adjacent.len(),
                 corners.contains(&inserted)
             );
+            return IllegalStarFace {
+                description,
+                kept_edges: kept_keys,
+            };
         }
     }
-    "not located".to_owned()
+    IllegalStarFace {
+        description: "not located".to_owned(),
+        kept_edges: Vec::new(),
+    }
 }
 
 pub(super) fn copy_splits(splits: &[ProtectedFacetSplit]) -> Vec<ProtectedFacetSplit> {

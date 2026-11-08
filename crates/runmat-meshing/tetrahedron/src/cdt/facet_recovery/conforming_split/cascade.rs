@@ -107,6 +107,7 @@ pub(super) fn split_with_encroachment_cascade(
                         encroached,
                         &protected,
                         &protected_edges,
+                        DisjointPairPlacement::Midpoints,
                         constraint_index,
                         work,
                     )? {
@@ -132,6 +133,7 @@ pub(super) fn split_with_encroachment_cascade(
                         encroached,
                         &protected,
                         &protected_edges,
+                        DisjointPairPlacement::Midpoints,
                         constraint_index,
                         work,
                     )? {
@@ -187,7 +189,34 @@ pub(super) fn split_with_encroachment_cascade(
                             .canonical_value()
                     ))
                 )),
-                LocalSplit::Declined(reason) => {
+                LocalSplit::Blocked { reason, segment } if !blocked_done.contains(&segment) => {
+                    // The node and a nearly parallel recovered segment edge leave an illegal face
+                    // that carries that edge, and the facet triangles between the two edges hold
+                    // the node in their circumcircles. Split both edges in one edit, the other one
+                    // at the point facing the node, with the facet triangles between them fanned
+                    // around both nodes in each facet.
+                    blocked_done.push(segment);
+                    match split_pair_at_shared_vertex(
+                        working,
+                        edge,
+                        segment,
+                        &protected,
+                        &protected_edges,
+                        DisjointPairPlacement::Aligned,
+                        constraint_index,
+                        work,
+                    )? {
+                        Ok(accepted) => {
+                            splits.extend(accepted);
+                            return Ok(true);
+                        }
+                        Err(pair) => reasons.push(format!(
+                            "in-place {strategy:?} split declined: {reason}; pair split with the \
+                             blocking segment edge declined: {pair}"
+                        )),
+                    }
+                }
+                LocalSplit::Blocked { reason, .. } | LocalSplit::Declined(reason) => {
                     reasons.push(format!("in-place {strategy:?} split declined: {reason}"))
                 }
             }

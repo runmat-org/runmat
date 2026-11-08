@@ -8,4 +8,5 @@ pub mod packages;
 pub mod public_api;
 pub mod ids;
 mod lease_http;
+pub mod lease_retry;
 pub use lease_http::ServerLeaseTransportError;

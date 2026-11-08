@@ -28,11 +28,10 @@ pub struct ResolvedCurveMetricField {
 
 #[derive(Debug, Clone, PartialEq)]
 struct EdgeMetricRecord {
-    /// Contributions that apply uniformly along the edge, graded over edge adjacency.
+    /// Contributions that apply uniformly along the edge, graded over edge adjacency. Every
+    /// entity-local source of the request is graded by distance from its exact support at each
+    /// query point (`ResolvedMetricField::evaluate_at`), as on faces and in the volume.
     resolved: ResolvedMetricEvaluation,
-    /// Edge-local sources of this edge and the edges meeting it at a vertex, graded by distance
-    /// from their exact supports at each query point.
-    local: Vec<runmat_meshing_size::metric::LocalMetricSource>,
     faces: Vec<usize>,
 }
 
@@ -77,7 +76,6 @@ impl ResolvedCurveMetricField {
         // feature: a gap at one end of a long edge would refine the corners at its other end.
         let adjacency = TopologyMetricIncidence::edge_adjacency(topology);
         let mut by_edge = BTreeMap::new();
-        let mut local_by_edge = BTreeMap::new();
         for edge in &topology.edges {
             let incident = incidence.incident_edge_entities(edge);
             let intersection_error = |error: runmat_meshing_size::metric::MetricContractError| {
@@ -90,22 +88,16 @@ impl ResolvedCurveMetricField {
             let resolved = resolver
                 .resolve_constant(&incident)
                 .map_err(intersection_error)?;
-            // The edge, its vertices (a gap closing at an endpoint is sized from the vertex)
-            // and the edges meeting it.
-            let mut local_entities = adjacency.get(&edge.id).cloned().unwrap_or_default();
-            local_entities.insert(edge.id.clone());
-            local_entities.extend(edge.start_vertex_id.iter().cloned());
-            local_entities.extend(edge.end_vertex_id.iter().cloned());
-            let local = resolver
-                .local_sources(&local_entities)
-                .map_err(intersection_error)?;
             by_edge.insert(edge.id.clone(), resolved);
-            local_by_edge.insert(edge.id.clone(), local);
         }
-        grade_metric_evaluations(request.maximum_grading_ratio, &adjacency, &mut by_edge)
-        .map_err(|error| {
-            SharedCurveError::invalid_request("resolved curve metric grading", error.to_string())
-        })?;
+        grade_metric_evaluations(request.maximum_grading_ratio, &adjacency, &mut by_edge).map_err(
+            |error| {
+                SharedCurveError::invalid_request(
+                    "resolved curve metric grading",
+                    error.to_string(),
+                )
+            },
+        )?;
         let mut records = BTreeMap::new();
         for edge in &topology.edges {
             if let Some(control) = control {
@@ -172,17 +164,7 @@ impl ResolvedCurveMetricField {
             })?;
             resolved.active_sources = provenance.active_sources;
             resolved.applied_contribution_count = provenance.applied_contribution_count;
-            let local = local_by_edge
-                .remove(&edge.id)
-                .expect("resolved every exact edge");
-            records.insert(
-                edge.id.clone(),
-                EdgeMetricRecord {
-                    resolved,
-                    local,
-                    faces,
-                },
-            );
+            records.insert(edge.id.clone(), EdgeMetricRecord { resolved, faces });
         }
         if let Some(control) = control {
             let slots = face_metrics
@@ -260,7 +242,7 @@ impl CurveMetricField for ResolvedCurveMetricField {
         };
         let edge_metric = self
             .resolver
-            .evaluate_graded(resolved.metric, &record.local, query.point_m)
+            .evaluate_at(resolved.metric, &[], query.point_m)
             .map_err(failure(
                 "graded edge metric",
                 format!("uniform {:?} at {:?}", resolved.metric, query.point_m),
@@ -271,7 +253,7 @@ impl CurveMetricField for ResolvedCurveMetricField {
         for face in &record.faces {
             let face_metric = self
                 .resolver
-                .evaluate_graded(
+                .evaluate_at(
                     self.face_metrics[*face].metric,
                     &self.face_local[*face],
                     query.point_m,

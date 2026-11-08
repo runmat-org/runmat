@@ -12,9 +12,10 @@ use std::{
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     thread,
+    time::{Duration, Instant},
 };
 
 const TOKEN: &str = "fixture-local-fea-key";
@@ -23,6 +24,26 @@ const ORG: &str = "org_00000000000000000000000000000001";
 pub struct AdmissionServer {
     stop: Arc<AtomicBool>,
     task: Option<thread::JoinHandle<()>>,
+    journal: Arc<Mutex<Journal>>,
+}
+
+/// Close the port after `after` lease requests, as a restarting Server does, and listen
+/// again on the same port once `down` has passed.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub struct Outage {
+    pub after: usize,
+    pub down: Duration,
+}
+
+/// What the test Server saw: each lease request's route and status, every receipt, and how
+/// long the port was actually closed.
+#[derive(Default)]
+#[allow(dead_code)]
+pub struct Journal {
+    pub requests: Vec<(String, &'static str)>,
+    pub receipts: Vec<Value>,
+    pub closed_for: Option<Duration>,
 }
 
 impl AdmissionServer {
@@ -36,14 +57,51 @@ impl AdmissionServer {
     }
 
     pub fn configure(command: &mut Command, root: &Path) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        Self::configure_with(command, root, None)
+    }
+
+    #[allow(dead_code)]
+    pub fn journal(&self) -> std::sync::MutexGuard<'_, Journal> {
+        self.journal.lock().unwrap()
+    }
+
+    pub fn configure_with(command: &mut Command, root: &Path, outage: Option<Outage>) -> Self {
+        let mut listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let address = listener.local_addr().unwrap();
+        let endpoint = format!("http://{address}");
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
+        let journal = Arc::new(Mutex::new(Journal::default()));
+        let recorded = journal.clone();
         let task = thread::spawn(move || {
             let mut leases = HashMap::<String, Lease>::new();
+            let mut outage = outage;
             while !stopping.load(Ordering::Acquire) {
+                if let Some(planned) =
+                    outage.filter(|o| {
+                    let journal = recorded.lock().unwrap();
+                    let leases = journal.requests.iter();
+                    leases.filter(|(path, _)| path.contains("/simulation/")).count() >= o.after
+                })
+                {
+                    outage = None;
+                    drop(listener);
+                    let closed = Instant::now();
+                    thread::sleep(planned.down);
+                    // The closed connections can hold the port briefly; keep trying.
+                    listener = loop {
+                        match TcpListener::bind(address) {
+                            Ok(listener) => break listener,
+                            Err(_) if closed.elapsed() < planned.down * 4 => {
+                                thread::sleep(Duration::from_millis(250))
+                            }
+                            Err(error) => panic!("test lease listener did not return: {error}"),
+                        }
+                    };
+                    listener.set_nonblocking(true).unwrap();
+                    recorded.lock().unwrap().closed_for = Some(closed.elapsed());
+                }
                 match listener.accept() {
                     Ok((mut socket, _)) => {
                         // Accepted sockets can inherit the listener's nonblocking mode.
@@ -55,7 +113,14 @@ impl AdmissionServer {
                         socket
                             .set_write_timeout(Some(std::time::Duration::from_secs(5)))
                             .unwrap();
-                        let (status, body) = handle(&mut socket, &mut leases);
+                        let (path, status, body) = handle(&mut socket, &mut leases);
+                        if let Some(path) = path {
+                            let mut journal = recorded.lock().unwrap();
+                            if path.ends_with("/settle") && status.starts_with("200") {
+                                journal.receipts.push(body.clone());
+                            }
+                            journal.requests.push((path, status));
+                        }
                         let body = serde_json::to_vec(&body).unwrap();
                         let header = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n", body.len());
                         let _ = socket.write_all(header.as_bytes());
@@ -71,6 +136,7 @@ impl AdmissionServer {
         let server = Self {
             stop,
             task: Some(task),
+            journal,
         };
         // Exercise actual file-credential login, with an isolated default org.
         let mut login = Command::new(env!("CARGO_BIN_EXE_runmat"));
@@ -149,11 +215,16 @@ fn executes_fea(command: &Command) -> bool {
     })
 }
 
-fn handle(socket: &mut TcpStream, leases: &mut HashMap<String, Lease>) -> (&'static str, Value) {
+fn handle(
+    socket: &mut TcpStream,
+    leases: &mut HashMap<String, Lease>,
+) -> (Option<String>, &'static str, Value) {
     let Some((path, body)) = request(socket) else {
-        return operations::invalid();
+        let (status, body) = operations::invalid();
+        return (None, status, body);
     };
-    operations::handle(&path, body, leases)
+    let (status, body) = operations::handle(&path, body, leases);
+    (Some(path), status, body)
 }
 fn request(socket: &mut TcpStream) -> Option<(String, Value)> {
     let mut bytes = Vec::new();

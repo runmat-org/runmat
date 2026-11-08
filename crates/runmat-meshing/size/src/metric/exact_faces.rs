@@ -2,10 +2,11 @@
 //!
 //! Without entity supports every face has one constant metric and fine faces constrain their
 //! graph neighbors to at most the grading ratio times their size. With supports, a face keeps
-//! only its own uniform contributions; entity-local sizing on its edges and vertices, and the
-//! uniform sizing of each finer neighbor across their shared edges, are graded by distance at
-//! each evaluated point. A fine fillet then refines its neighbors near the fillet, not across
-//! their whole extent.
+//! only its own uniform contributions; every entity-local source of the request (whether or not
+//! it lies on the face) and the uniform sizing of each finer neighbor across their shared edges
+//! are graded by distance at each evaluated point (`ResolvedMetricField::evaluate_at`). A fine
+//! fillet then refines its neighbors near the fillet, not across their whole extent, and a face
+//! near a thin gap is as fine there as the volume beside it.
 use super::*;
 use crate::{grading::grade_metric_evaluations, incidence::TopologyMetricIncidence};
 use runmat_geometry_core::{ExactBRepTopology, GeometryEvaluationControl, GeometryEvaluationError};
@@ -29,7 +30,10 @@ impl From<MetricContractError> for ExactFaceMetricResolutionError {
         Self::Metric(value)
     }
 }
-/// Uniform sizing of one exact face plus the sources graded from it pointwise.
+/// Uniform sizing of one exact face plus the face's own sources graded pointwise: the uniform
+/// sizing of finer neighbors from their shared edges. Consumers evaluate the face with
+/// `ResolvedMetricField::evaluate_at(uniform.metric, &local, point)`, which adds every
+/// entity-local source of the request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExactFaceSizing {
     pub uniform: ResolvedMetricEvaluation,
@@ -112,12 +116,11 @@ impl ResolvedMetricField {
         let mut sizing = BTreeMap::new();
         for face in &topology.faces {
             checkpoint()?;
-            let local = self.local_sources(&incidence.incident_face_entities(face))?;
             sizing.insert(
                 face.id.clone(),
                 ExactFaceSizing {
                     uniform: uniform[&face.id].clone(),
-                    local,
+                    local: Vec::new(),
                 },
             );
         }

@@ -1,5 +1,7 @@
 //! Public predefined operators and real typed progress plots.
-use super::{common, inputs, invalid, operators, random, ScalarCooperation};
+#[cfg(feature = "plot-core")]
+use super::common;
+use super::{inputs, invalid, operators, random, ScalarCooperation};
 use crate::BuiltinResult;
 use runmat_builtins::{OptimPlotKind as Plot, OptimTemperature};
 use runmat_value::Value;

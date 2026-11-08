@@ -123,7 +123,7 @@ pub(super) fn validate_prepared_face_metric_evaluation(
 
     let expected = &record.provenance;
     let local_metric = resolver
-        .evaluate_graded(record.metric.metric, &record.local, expected_point)
+        .evaluate_at(record.metric.metric, &record.local, expected_point)
         .map_err(|error| invalid(&face.id, error.to_string()))?;
     let sizing_metric = independent_pullback(local_metric, expected_u, expected_v);
     sizing_metric
