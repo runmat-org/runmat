@@ -37,7 +37,10 @@ function Install-VcpkgPackage {
     )
 
     for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
-        & $vcpkg install "${Package}:$Triplet" "--overlay-ports=$OverlayPorts" @ExtraArguments
+        # Keep installed SDKs, downloaded tools, binary caches and build logs.
+        # Completed native objects and package-staging copies are disposable.
+        & $vcpkg install "${Package}:$Triplet" "--overlay-ports=$OverlayPorts" `
+            --clean-buildtrees-after-build --clean-packages-after-build @ExtraArguments
         if ($LASTEXITCODE -eq 0) {
             return
         }

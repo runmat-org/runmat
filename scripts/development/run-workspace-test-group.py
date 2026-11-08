@@ -384,7 +384,7 @@ def main() -> int:
     parser.add_argument("--shard-count", type=int, default=1, help="number of disjoint command shards")
     parser.add_argument(
         "--reclaim-completed-test-binaries", action="store_true",
-        help="remove completed root test executables from this exclusive CI target directory",
+        help="reclaim completed test executables and compact Windows dependency archives under disk pressure",
     )
     parser.add_argument(
         "--benchmark-smokes", action="store_true",
