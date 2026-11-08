@@ -8,7 +8,7 @@ use runmat_runtime::analysis::fea_run_admission::{
     FeaLocalOrganization, FeaRunAdmission, FeaRunBudget, FeaRunDenied, FeaRunKind, FeaRunOutcome,
     FeaRunPermit, FeaRunRequest, FeaRunUsage,
 };
-use runmat_server_client::ids::{ExecutionDriverLeaseId, OrgId, SimulationLeaseId};
+use runmat_server_client::ids::{ExecutionDriverLeaseId, OrgId};
 use runmat_server_client::{auth, simulation::*};
 use runmat_simulation_usage::{MeasurementVersion, OperationCount};
 use uuid::Uuid;
@@ -275,17 +275,17 @@ impl FeaRunAdmission for NativeFeaAdmission {
 /// lets idle connections observe peer closure before the next heartbeat uses the pool.
 async fn serve(
     mut session: LeaseSession,
-    lease: SimulationLease,
+    mut lease: SimulationLease,
     mut receiver: tokio::sync::mpsc::Receiver<Command>,
 ) {
     while let Some(command) = receiver.recv().await {
         match command {
             Command::Heartbeat(usage, reply) => {
-                let result = session.usage(&lease, &usage).await;
+                let result = session.usage(&mut lease, &usage).await;
                 let _ = reply.send(result);
             }
             Command::Settle(request, reply) => {
-                let result = session.settle(&lease.lease_id, &request).await;
+                let result = session.settle(&lease, &request).await;
                 let _ = reply.send(result);
                 break;
             }
@@ -299,9 +299,44 @@ type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 
 /// (local sign-in tokens live minutes), so every lease request asks for the current one.
 trait AccessTokens: Send {
     /// The token to send now: the stored token, refreshed first when it is about to expire.
-    fn current(&mut self) -> BoxFuture<'_, Result<String, FeaRunDenied>>;
+    fn current(&mut self) -> BoxFuture<'_, Result<String, Failure>>;
     /// A new token from the stored refresh token, after the server rejected the current one.
-    fn refreshed(&mut self) -> BoxFuture<'_, Result<String, FeaRunDenied>>;
+    fn refreshed(&mut self) -> BoxFuture<'_, Result<String, Failure>>;
+}
+
+/// A failed lease exchange: the denial the run reports, and whether the server was only
+/// unreachable (transport failure or 5xx), so the outage policy may try again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Failure {
+    denied: FeaRunDenied,
+    transient: bool,
+}
+impl From<FeaRunDenied> for Failure {
+    fn from(denied: FeaRunDenied) -> Self {
+        Self {
+            denied,
+            transient: false,
+        }
+    }
+}
+impl From<Failure> for FeaRunDenied {
+    fn from(failure: Failure) -> Self {
+        failure.denied
+    }
+}
+impl From<SimulationLeaseError> for Failure {
+    fn from(error: SimulationLeaseError) -> Self {
+        Self {
+            transient: error.is_transient(),
+            denied: denial(error),
+        }
+    }
+}
+fn unreachable() -> Failure {
+    Failure {
+        denied: FeaRunDenied::ServerUnreachable,
+        transient: true,
+    }
 }
 
 /// The signed-in person's stored credentials (`runmat login`), read again for every request so
@@ -309,7 +344,7 @@ trait AccessTokens: Send {
 struct StoredSignIn;
 
 impl StoredSignIn {
-    async fn token(force: bool) -> Result<String, FeaRunDenied> {
+    async fn token(force: bool) -> Result<String, Failure> {
         let mut config = auth::RemoteConfig::load().map_err(|_| FeaRunDenied::LicenseInvalid)?;
         let server =
             auth::resolve_server_url(&config, None).map_err(|_| FeaRunDenied::LicenseInvalid)?;
@@ -319,17 +354,15 @@ impl StoredSignIn {
         } else {
             tokio::time::timeout(timeout, auth::resolve_auth_token(&mut config, &server)).await
         };
-        token
-            .map_err(|_| FeaRunDenied::ServerUnreachable)?
-            .map_err(auth_denial)
+        token.map_err(|_| unreachable())?.map_err(auth_failure)
     }
 }
 
 impl AccessTokens for StoredSignIn {
-    fn current(&mut self) -> BoxFuture<'_, Result<String, FeaRunDenied>> {
+    fn current(&mut self) -> BoxFuture<'_, Result<String, Failure>> {
         Box::pin(Self::token(false))
     }
-    fn refreshed(&mut self) -> BoxFuture<'_, Result<String, FeaRunDenied>> {
+    fn refreshed(&mut self) -> BoxFuture<'_, Result<String, Failure>> {
         Box::pin(Self::token(true))
     }
 }
@@ -347,20 +380,53 @@ struct LeaseSession {
 
 /// One lease request with the session's token handling: refresh before sending, and on a 401
 /// refresh and send once more. Lease requests carry absolute totals, so a repeat is safe.
+/// Evaluates to `Result<_, Failure>`.
 macro_rules! with_current_token {
-    ($session:expr, |$client:ident| $call:expr) => {{
-        $session.prepare().await?;
-        let first = {
-            let $client = &$session.client;
-            $call.await
-        };
-        match first {
-            Err(error) if $session.tokens.is_some() && unauthorized(&error) => {
-                $session.after_rejection().await?;
+    ($session:expr, |$client:ident| $call:expr) => {
+        async {
+            $session.prepare().await?;
+            let first = {
                 let $client = &$session.client;
-                $call.await.map_err(denial)
+                $call.await
+            };
+            match first {
+                Err(error) if $session.tokens.is_some() && unauthorized(&error) => {
+                    $session.after_rejection().await?;
+                    let $client = &$session.client;
+                    $call.await.map_err(Failure::from)
+                }
+                other => other.map_err(Failure::from),
             }
-            other => other.map_err(denial),
+        }
+        .await
+    };
+}
+
+/// A renewal or settlement under the shared outage policy: while the server is unreachable
+/// the request is resent with backoff inside the lease's outage window, then the original
+/// denial is returned. Usage and settlement carry absolute totals, and the server accepts an
+/// equal total again (and replays a settlement), so a resent request never counts twice.
+macro_rules! through_outage {
+    ($operation:literal, $lease:expr, $session:expr, |$client:ident| $call:expr) => {{
+        let mut clock = runmat_server_client::lease_retry::LeaseRetry::for_lease(
+            std::time::Duration::from_secs($lease.heartbeat_seconds),
+            $lease.expires_at,
+        )
+        .begin($operation);
+        loop {
+            match with_current_token!($session, |$client| $call) {
+                Err(failure) if failure.transient => {
+                    if !clock.retry(&failure.denied).await {
+                        break Err(failure.denied);
+                    }
+                }
+                other => {
+                    if other.is_ok() {
+                        clock.recovered();
+                    }
+                    break other.map_err(FeaRunDenied::from);
+                }
+            }
         }
     }};
 }
@@ -369,7 +435,7 @@ impl LeaseSession {
     async fn person(
         server: String,
         mut tokens: Box<dyn AccessTokens>,
-    ) -> Result<Self, FeaRunDenied> {
+    ) -> Result<Self, Failure> {
         let token = tokens.current().await?;
         let client = SimulationLeaseClient::new(&server, &token).map_err(denial)?;
         Ok(Self {
@@ -403,28 +469,30 @@ impl LeaseSession {
         Ok(())
     }
 
-    async fn prepare(&mut self) -> Result<(), FeaRunDenied> {
+    async fn prepare(&mut self) -> Result<(), Failure> {
         let Some(tokens) = self.tokens.as_mut() else {
             return Ok(());
         };
         let token = tokens.current().await?;
-        self.use_token(token)
+        Ok(self.use_token(token)?)
     }
 
-    async fn after_rejection(&mut self) -> Result<(), FeaRunDenied> {
+    async fn after_rejection(&mut self) -> Result<(), Failure> {
         let Some(tokens) = self.tokens.as_mut() else {
             return Ok(());
         };
         let token = tokens.refreshed().await?;
-        self.use_token(token)
+        Ok(self.use_token(token)?)
     }
 
     async fn usage(
         &mut self,
-        lease: &SimulationLease,
+        lease: &mut SimulationLease,
         usage: &ReportSimulationUsage,
     ) -> Result<FeaRunBudget, FeaRunDenied> {
-        let hold = with_current_token!(self, |client| client.usage(&lease.lease_id, usage))?;
+        let hold = through_outage!("simulation usage", lease, self, |client| client
+            .usage(&lease.lease_id, usage))?;
+        lease.expires_at = hold.expires_at;
         budget(
             hold.budget_ops,
             hold.granted_ops,
@@ -435,10 +503,12 @@ impl LeaseSession {
 
     async fn settle(
         &mut self,
-        lease: &SimulationLeaseId,
+        lease: &SimulationLease,
         request: &SettleSimulationLease,
     ) -> Result<(), FeaRunDenied> {
-        with_current_token!(self, |client| client.settle(lease, request)).map(|_| ())
+        through_outage!("simulation settle", lease, self, |client| client
+            .settle(&lease.lease_id, request))
+        .map(|_| ())
     }
 }
 
@@ -505,18 +575,19 @@ async fn open(
     Ok((session, lease, initial))
 }
 
-fn auth_denial(error: anyhow::Error) -> FeaRunDenied {
+/// A failed token refresh. Only a refresh that never got an answer, or got a 5xx, is transient.
+fn auth_failure(error: anyhow::Error) -> Failure {
     if error.downcast_ref::<auth::SignInRequired>().is_some() {
-        return FeaRunDenied::SignInRequired;
+        return FeaRunDenied::SignInRequired.into();
     }
     if let Some(error) = error.downcast_ref::<reqwest::Error>() {
         return match error.status().map(|status| status.as_u16()) {
-            Some(401 | 403) => FeaRunDenied::SignInRequired,
-            Some(400..=499) => FeaRunDenied::LicenseInvalid,
-            _ => FeaRunDenied::ServerUnreachable,
+            Some(401 | 403) => FeaRunDenied::SignInRequired.into(),
+            Some(400..=499) => FeaRunDenied::LicenseInvalid.into(),
+            _ => unreachable(),
         };
     }
-    FeaRunDenied::LicenseInvalid
+    FeaRunDenied::LicenseInvalid.into()
 }
 
 impl FeaRunPermit for Permit {
@@ -628,7 +699,7 @@ mod tests {
             FeaRunDenied::ServerUnreachable
         );
         assert_eq!(
-            auth_denial(auth::SignInRequired.into()),
+            auth_failure(auth::SignInRequired.into()).denied,
             FeaRunDenied::SignInRequired
         );
         let invalid = NativeFeaAdmission::from_selection(FeaLocalOrganization::Invalid);
@@ -703,6 +774,7 @@ mod tests {
 #[cfg(test)]
 mod token_refresh_tests {
     use super::*;
+    use runmat_server_client::ids::SimulationLeaseId;
     use std::sync::atomic::AtomicI64;
     use std::sync::Arc;
 
@@ -723,7 +795,7 @@ mod token_refresh_tests {
         }
     }
     impl AccessTokens for FakeTokens {
-        fn current(&mut self) -> BoxFuture<'_, Result<String, FeaRunDenied>> {
+        fn current(&mut self) -> BoxFuture<'_, Result<String, Failure>> {
             Box::pin(async move {
                 if self.clock.load(Ordering::SeqCst) + 30 >= self.expires_at {
                     return Ok(self.refresh());
@@ -731,7 +803,7 @@ mod token_refresh_tests {
                 Ok(format!("token-{}", self.issued))
             })
         }
-        fn refreshed(&mut self) -> BoxFuture<'_, Result<String, FeaRunDenied>> {
+        fn refreshed(&mut self) -> BoxFuture<'_, Result<String, Failure>> {
             Box::pin(async move { Ok(self.refresh()) })
         }
     }
@@ -848,14 +920,14 @@ mod token_refresh_tests {
         let clock = Arc::new(AtomicI64::new(1_000));
         let refreshes = Arc::new(AtomicU64::new(0));
         let mut session = session(&endpoint, &clock, &refreshes).await;
-        let lease = lease();
-        session.usage(&lease, &usage(1)).await.unwrap();
+        let mut lease = lease();
+        session.usage(&mut lease, &usage(1)).await.unwrap();
         // Four minutes in, the 5-minute token is still good.
         clock.store(1_240, Ordering::SeqCst);
-        session.usage(&lease, &usage(2)).await.unwrap();
+        session.usage(&mut lease, &usage(2)).await.unwrap();
         // Ten minutes in: past expiry, so the session refreshes before sending.
         clock.store(1_600, Ordering::SeqCst);
-        session.usage(&lease, &usage(3)).await.unwrap();
+        session.usage(&mut lease, &usage(3)).await.unwrap();
         let seen = server.await.unwrap();
         let bearers: Vec<_> = seen.iter().map(|(_, bearer)| bearer.as_str()).collect();
         assert_eq!(bearers, ["token-1", "token-1", "token-2"]);
@@ -869,7 +941,7 @@ mod token_refresh_tests {
         let clock = Arc::new(AtomicI64::new(1_000));
         let refreshes = Arc::new(AtomicU64::new(0));
         let mut session = session(&endpoint, &clock, &refreshes).await;
-        let budget = session.usage(&lease(), &usage(5)).await.unwrap();
+        let budget = session.usage(&mut lease(), &usage(5)).await.unwrap();
         assert_eq!(budget.granted_ops, OperationCount::from_operations(1000));
         let seen = server.await.unwrap();
         assert!(seen.iter().all(|(path, _)| path.contains("/usage")));
@@ -884,10 +956,13 @@ mod token_refresh_tests {
         let refreshes = Arc::new(AtomicU64::new(0));
         let mut session = session(&endpoint, &clock, &refreshes).await;
         assert_eq!(
-            session.usage(&lease(), &usage(5)).await,
+            session.usage(&mut lease(), &usage(5)).await,
             Err(FeaRunDenied::SignInRequired)
         );
         // One retry, not a loop.
         assert_eq!(server.await.unwrap().len(), 2);
     }
 }
+
+#[cfg(test)]
+mod outage_tests;

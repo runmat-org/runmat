@@ -76,6 +76,21 @@ fn repository_fixture(temp: &TempDir) -> PathBuf {
 }
 
 fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
+    runmat_from_repository_through(temp, args, None).0
+}
+
+/// Run from the repository against the test Server, optionally closing the Server's port
+/// mid-run. Returns the output, each lease route and status, the receipts and the outage.
+fn runmat_from_repository_through(
+    temp: &TempDir,
+    args: &[&str],
+    outage: Option<fea_admission::Outage>,
+) -> (
+    Output,
+    Vec<(String, &'static str)>,
+    Vec<Value>,
+    Option<std::time::Duration>,
+) {
     let repository = repository_fixture(temp);
     let config = temp.path().join("runmat.toml");
     let artifact_root =
@@ -107,8 +122,25 @@ fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
             "RUNMAT_EXECUTION_STATE_DIR",
             temp.path().join("execution-state"),
         );
-    let _admission = fea_admission::AdmissionServer::for_command(&mut command, temp.path());
-    command.output().expect("run repository FEA example")
+    let admission = match outage {
+        Some(_) => Some(fea_admission::AdmissionServer::configure_with(
+            &mut command,
+            temp.path(),
+            outage,
+        )),
+        None => fea_admission::AdmissionServer::for_command(&mut command, temp.path()),
+    };
+    let output = command.output().expect("run repository FEA example");
+    let Some(admission) = admission else {
+        return (output, Vec::new(), Vec::new(), None);
+    };
+    let journal = admission.journal();
+    (
+        output,
+        journal.requests.clone(),
+        journal.receipts.clone(),
+        journal.closed_for,
+    )
 }
 
 fn assert_fea_checks(temp: &TempDir, path: &str) {
@@ -725,6 +757,55 @@ fn acoustic_cavity_example_runs_its_certified_frequency_sweep() {
     let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
     assert_eq!(manifest["public_run"]["run_status"], "completed");
     assert_eq!(manifest["public_run"]["numerically_acceptable"], true);
+}
+
+/// A Server restart during a run (its port closed for 30 s) ends neither the lease nor the
+/// run, and the receipt carries exactly the operations of an uninterrupted run.
+#[test]
+fn a_server_restart_mid_run_keeps_the_lease_and_meters_the_same_operations() {
+    let path = "docs/simulation/examples/acoustic-cavity-harmonic.fea";
+    let steady_temp = TempDir::new().unwrap();
+    let (steady, _, steady_receipts, _) = runmat_from_repository_through(
+        &steady_temp,
+        &["run", path, "--json"],
+        Some(fea_admission::Outage {
+            after: usize::MAX,
+            down: std::time::Duration::ZERO,
+        }),
+    );
+    assert!(
+        steady.status.success(),
+        "{}",
+        String::from_utf8_lossy(&steady.stderr)
+    );
+    let temp = TempDir::new().unwrap();
+    let (output, requests, receipts, closed_for) = runmat_from_repository_through(
+        &temp,
+        &["run", path, "--json"],
+        Some(fea_admission::Outage {
+            after: 1,
+            down: std::time::Duration::from_secs(30),
+        }),
+    );
+    assert!(
+        output.status.success(),
+        "{path} failed through a Server restart:\nrequests={requests:?}\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let closed_for = closed_for.expect("the Server's port was closed mid-run");
+    assert!(closed_for >= std::time::Duration::from_secs(30));
+    eprintln!("lease requests through a {closed_for:?} outage: {requests:?}");
+    assert!(requests[0].0.ends_with("/simulation/leases"));
+    assert!(requests.iter().all(|(_, status)| status.starts_with("200")));
+    let metered = |receipts: &[Value]| {
+        receipts
+            .iter()
+            .map(|r| (r["outcome"].clone(), r["usedOps"].clone(), r["totalOps"].clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(metered(&receipts), metered(&steady_receipts));
 }
 
 #[test]
