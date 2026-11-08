@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -270,12 +271,60 @@ def shard_commands(commands: list[list[str]], index: int, count: int) -> list[li
     return commands[index::count]
 
 
+WINDOWS_ARCHIVE_FREE_SPACE = 32 * 1024 ** 3
+WINDOWS_ARCHIVE_MIN_BYTES = 16 * 1024 ** 2
+
+
+def compact_windows_archives(target_directory: Path) -> int:
+    """Compress completed dependency archives under disk pressure; retain their bytes."""
+    if os.name != "nt" or not target_directory.is_dir():
+        return 0
+    if shutil.disk_usage(target_directory).free >= WINDOWS_ARCHIVE_FREE_SPACE:
+        return 0
+    dependencies = target_directory / "debug" / "deps"
+    if not dependencies.is_dir():
+        return 0
+    if any(directory.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+           for directory in (target_directory, dependencies.parent, dependencies)):
+        raise RuntimeError("dependency archive compression refuses a redirected directory")
+    candidates = []
+    with os.scandir(dependencies) as entries:
+        for entry in entries:
+            if Path(entry.name).suffix.lower() not in {".rlib", ".rmeta", ".lib", ".dll", ".pdb"}:
+                continue
+            info = entry.stat(follow_symlinks=False)
+            if (not stat.S_ISREG(info.st_mode) or info.st_size < WINDOWS_ARCHIVE_MIN_BYTES
+                    or info.st_file_attributes & (stat.FILE_ATTRIBUTE_COMPRESSED
+                                                   | stat.FILE_ATTRIBUTE_REPARSE_POINT)):
+                continue
+            candidates.append((info.st_size, entry.path))
+    before = shutil.disk_usage(target_directory).free
+    compressed = 0
+    compact = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "compact.exe")
+    for _, archive in sorted(candidates, reverse=True):
+        if shutil.disk_usage(target_directory).free >= WINDOWS_ARCHIVE_FREE_SPACE:
+            break
+        result = subprocess.run([compact, "/C", "/I", "/Q", archive],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                encoding="utf-8", errors="replace", check=False)
+        if (result.returncode or not Path(archive).stat().st_file_attributes
+                & stat.FILE_ATTRIBUTE_COMPRESSED):
+            print(f"Dependency archive compression failed for {archive}: {result.stdout}", flush=True)
+        else:
+            compressed += 1
+    after = shutil.disk_usage(target_directory).free
+    print(f"Windows dependency archive compression: {compressed} files; "
+          f"{before // (1024 ** 3)} -> {after // (1024 ** 3)} GiB free", flush=True)
+    return compressed
+
+
 def run_batch(command: list[str], repo_root: Path, target_directory: Path, reclaim: bool,
               environment: dict[str, str] | None = None) -> int:
     """Retain dependencies; release only completed root test executables in CI."""
     command = [*command[:2], "--message-format=json-render-diagnostics", *command[2:]]
     print("+ " + " ".join(command), flush=True)
     if reclaim and os.name == "nt":
+        compact_windows_archives(target_directory)
         checked_volumes: set[str] = set()
         for directory in (repo_root, target_directory):
             existing = directory.resolve()
@@ -322,6 +371,7 @@ def run_batch(command: list[str], repo_root: Path, target_directory: Path, recla
             # MSVC emits a matching root PDB; dependency PDBs stay in the cache.
             if os.name == "nt":
                 executable.with_suffix(".pdb").unlink(missing_ok=True)
+        compact_windows_archives(target_directory)
     return code
 
 

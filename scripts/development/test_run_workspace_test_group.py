@@ -85,6 +85,24 @@ class ScientificRoutingTests(unittest.TestCase):
                                  and path.suffix != ".d" for path in (target / "debug/deps").glob("only_a-*")))
             self.assertTrue(list((target / "debug/deps").glob("liba-*.rlib")))
             self.assertTrue((target / "debug" / ("a.exe" if os.name == "nt" else "a")).is_file())
+            if os.name == "nt":
+                libraries = {path: path.read_bytes() for path in (target / "debug/deps").glob("*.rlib")}
+                usage = runner.shutil.disk_usage(target)
+                with patch.object(runner, "WINDOWS_ARCHIVE_MIN_BYTES", 1), \
+                        patch.object(runner.shutil, "disk_usage", return_value=usage._replace(free=0)):
+                    self.assertGreater(runner.compact_windows_archives(target), 0)
+                    self.assertEqual(runner.compact_windows_archives(target), 0)
+                for path, contents in libraries.items():
+                    self.assertEqual(path.read_bytes(), contents)
+                    self.assertTrue(path.stat().st_file_attributes & runner.stat.FILE_ATTRIBUTE_COMPRESSED)
+                # Relink the reclaimed test root against the retained compressed
+                # libraries. Cargo must reuse those exact dependency archives.
+                with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target), "CARGO_NET_OFFLINE": "true"}):
+                    self.assertEqual(runner.run_batch(
+                        ["cargo", "test", "-p", "a", "-p", "b", "--test", "only_a"], root, target, True), 0)
+                for path, contents in libraries.items():
+                    self.assertEqual(path.read_bytes(), contents)
+                    self.assertTrue(path.stat().st_file_attributes & runner.stat.FILE_ATTRIBUTE_COMPRESSED)
 
     def test_native_stack_matches_command_host_without_mutating_parent(self):
         with patch.dict(runner.os.environ, {"RUST_MIN_STACK": "2097152", "RUST_TEST_THREADS": "1"}):
