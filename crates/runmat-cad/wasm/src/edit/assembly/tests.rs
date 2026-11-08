@@ -342,3 +342,42 @@ fn an_override_on_a_missing_component_is_retargeted_or_removed() {
     let removed = apply(1);
     assert!(!removed.contains("override"), "{removed}");
 }
+
+#[test]
+fn mirrored_copies_land_where_the_seeds_reflection_lies() {
+    let c = compile(RIG);
+    let selection = [format!("occurrence:{}", c.uuid("block"))];
+    // The block (20 x 20 x 15 mm, symmetric about its mid-planes) sits at y = 10..30 mm; its
+    // image about the front plane takes y = -30..-10 mm, the same way up.
+    let text = run(
+        RIG,
+        json!({ "command": "assembly.mirror", "selection": selection, "values": { "plane": ["origin:front"], "result": "copy" } }),
+    );
+    assert!(text.contains("mirror mirror1"), "{text}");
+    let after = compile(&text);
+    let rows = after.index["occurrences"].as_array().unwrap();
+    let image = rows
+        .iter()
+        .map(|r| r["path"].as_str().unwrap())
+        .find(|p| p.contains("mirror1"))
+        .unwrap_or_else(|| panic!("no image in {rows:?}"))
+        .to_owned();
+    let t = after.transform(&image);
+    let expected = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.03, -0.03, 0.04];
+    for (k, (got, want)) in t.iter().zip(expected).enumerate() {
+        assert!((got - want).abs() < 1e-9, "transform[{k}] = {got}, want {want}: {t:?}\n{text}");
+    }
+    // About a face: the plate's top (z = 10 mm) reflects the pin standing on it at z = 25 mm.
+    let text = run(
+        RIG,
+        json!({ "command": "assembly.mirror", "values": { "components": [format!("occurrence:{}", c.uuid("pin"))], "plane": [c.face("plate", top)], "result": "copy" } }),
+    );
+    compile(&text);
+    // An opposite-hand part swaps the file (the pin stands in for the block's other hand).
+    let text = run(
+        RIG,
+        json!({ "command": "assembly.mirror", "selection": selection, "values": { "plane": ["origin:right"], "result": "opposite", "opposite": "pin.part" } }),
+    );
+    assert!(text.contains("pin"), "{text}");
+    compile(&text);
+}

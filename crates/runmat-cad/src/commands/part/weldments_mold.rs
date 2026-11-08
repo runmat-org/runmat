@@ -191,7 +191,7 @@ pub(super) fn mold() -> Vec<CommandDescriptor> {
         ),
         m(
             "mold.core-cavity",
-            "Core/cavity split",
+            "Core/cavity",
             "core-cavity",
             "core_cavity",
             "Split a mold block round the part into core and cavity.",

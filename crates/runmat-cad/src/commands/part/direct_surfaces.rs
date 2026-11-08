@@ -151,26 +151,22 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             "Extruded surface",
             "surface-extrude",
             "extrude",
-            "Extrude open or closed curves into a surface.",
-            {
-                let mut f = vec![picks(
-                    "profile",
-                    "Curves",
-                    &[K::Sketch, K::SketchEntity, K::Edge],
-                )];
-                f.extend(end_fields("", "End"));
-                f
-            },
+            "Extrude a sketch's curves, open or closed, into a surface.",
+            vec![
+                pick("profile", "Sketch", &[K::Sketch]),
+                length("depth", "Depth", 10.0).drag(Manipulator::Arrow),
+                flag("symmetric", "Both sides", false),
+            ],
         ),
         s(
             "surface.revolve",
             "Revolved surface",
             "surface-revolve",
             "revolve",
-            "Revolve curves into a surface.",
+            "Revolve a sketch's curves into a surface.",
             vec![
-                picks("profile", "Curves", &[K::Sketch, K::SketchEntity, K::Edge]),
-                pick("axis", "Axis", &[K::Axis, K::Edge, K::SketchEntity]),
+                pick("profile", "Sketch", &[K::Sketch]),
+                pick("axis", "Axis", &[K::Axis, K::Edge]),
                 angle("angle", "Angle", 360.0).drag(Manipulator::Angle),
             ],
         ),
@@ -179,11 +175,10 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             "Swept surface",
             "surface-sweep",
             "sweep",
-            "Sweep a curve along a path.",
+            "Sweep a sketch's curves along another sketch's path.",
             vec![
-                pick("profile", "Profile", &[K::Sketch, K::Curve, K::Edge]),
-                pick("path", "Path", &[K::Sketch, K::Curve, K::Edge]),
-                picks("guides", "Guide curves", &[K::Curve, K::Edge]).optional(),
+                pick("profile", "Profile", &[K::Sketch]),
+                pick("path", "Path", &[K::Sketch]),
             ],
         ),
         s(
@@ -241,28 +236,19 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             "Planar surface",
             "surface-planar",
             "planar",
-            "Fill a planar boundary.",
-            vec![picks("boundary", "Boundary", &[K::Edge, K::Sketch])],
+            "Fill a closed sketch with a flat surface.",
+            vec![pick("profile", "Sketch", &[K::Sketch])],
         ),
         s(
             "surface.ruled",
             "Ruled surface",
             "surface-ruled",
             "ruled",
-            "Extend a ruled surface from edges.",
+            "Grow strips from edges along their faces' normal, tilted outward by an angle.",
             vec![
                 picks("edges", "Edges", &[K::Edge]),
-                choice(
-                    "type",
-                    "Type",
-                    &[
-                        ("tangent", "Tangent to surface"),
-                        ("normal", "Normal to surface"),
-                        ("tapered", "Tapered to vector"),
-                        ("sweep", "Sweep"),
-                    ],
-                ),
                 length("distance", "Distance", 10.0).drag(Manipulator::Arrow),
+                angle("angle", "Angle", 0.0),
             ],
         ),
         s(
@@ -285,11 +271,6 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             vec![
                 picks("edges", "Edges", &[K::Edge]),
                 length("distance", "Distance", 5.0).drag(Manipulator::Arrow),
-                choice(
-                    "type",
-                    "Type",
-                    &[("same", "Same surface"), ("linear", "Linear")],
-                ),
             ],
         ),
         s(
@@ -367,11 +348,15 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             "Cut with surface",
             "surface-cut",
             "cut_with_surface",
-            "Cut a solid with a surface.",
+            "Cut a solid with a surface, keeping one side.",
             vec![
-                pick("surface", "Surface", &[K::Face]),
-                picks("bodies", "Bodies", &[K::Body]),
-                flag("flip", "Flip side", false),
+                pick("surface", "Surface", &[K::Face, K::Body]),
+                pick("body", "Solid", &[K::Body, K::Face]),
+                radio(
+                    "keep",
+                    "Keep",
+                    &[("positive", "Front of the surface"), ("negative", "Behind the surface")],
+                ),
             ],
         ),
         s(
@@ -379,11 +364,8 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             "Mid-surface",
             "mid-surface",
             "mid_surface",
-            "Make mid-surfaces between face pairs for shell studies.",
-            vec![
-                picks("pairs", "Face pairs", &[K::Face]),
-                flag("auto", "Find pairs", true),
-            ],
+            "Make mid-surfaces between pairs of opposite faces for shell studies.",
+            vec![picks("pairs", "Face pairs", &[K::Face])],
         ),
     ]
 }

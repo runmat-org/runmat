@@ -193,7 +193,7 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
             "break_corner",
             "Chamfer or round a flat corner.",
             vec![
-                picks("edges", "Corner edges", &[K::Edge, K::Vertex]),
+                picks("edges", "Corner edges", &[K::Edge]),
                 choice(
                     "break",
                     "Type",
@@ -262,13 +262,13 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
             .desc("Unfold chosen bends to work on the flat.")
             .inputs(vec![
                 pick("fixed", "Fixed face", &[K::Face]),
-                picks("bends", "Bends", &[K::Face, K::Feature]),
+                picks("bends", "Bends", &[K::Face]).optional(),
             ])
             .when(sheet_metal())
             .edit(add_feature_variant("sheet_metal", "sheet_metal", "unfold")),
         cmd("sheet-metal.fold", "Fold", "fold", P)
             .desc("Fold unfolded bends back.")
-            .inputs(vec![picks("bends", "Bends", &[K::Face, K::Feature])])
+            .inputs(vec![picks("bends", "Bends", &[K::Face]).optional()])
             .when(sheet_metal())
             .edit(add_feature_variant("sheet_metal", "sheet_metal", "fold")),
         cmd(

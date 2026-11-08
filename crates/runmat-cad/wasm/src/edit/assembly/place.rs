@@ -82,7 +82,7 @@ fn width_mm(document: &AssemblyDocument, files: &Files, file: &str) -> Option<f6
 }
 
 /// `assembly.insert`: the file as new components. The first component of an assembly is fixed
-/// (as SolidWorks fixes it); later ones float unless "Fix in place" is on. A click position
+/// (the usual convention); later ones float unless "Fix in place" is on. A click position
 /// (`x`, `y`, `z` in mm) places the first instance; further instances stand beside it along X
 /// with a fifth of the definition's width between them.
 pub(super) fn insert(
@@ -100,11 +100,6 @@ pub(super) fn insert(
         _ if file.ends_with(".assembly") => DefinitionRef::assembly(&file),
         _ if file.ends_with(".circuit") => DefinitionRef::circuit(&file),
         _ if file.ends_with(".part") => DefinitionRef::part(&file, None),
-        "step" | "library" => {
-            return Err(model(
-                "STEP and library parts are inserted from the Files panel in this build",
-            ))
-        }
         _ => return Err(model("insert a .part, .assembly or .circuit file")),
     };
     let count = number(values, "quantity").unwrap_or(1.0).max(1.0) as usize;
@@ -284,7 +279,7 @@ fn place_component(
 
 /// Turns component `name` by `angle` radians about the assembly direction `axis` through its
 /// origin: a mate that must rotate a component from a degenerate start (parallel faces for a
-/// perpendicular mate) places it there first, as SolidWorks moves a part when a mate is added.
+/// perpendicular mate) places it there first, the way a part moves when a mate is added.
 pub(super) fn turn(
     document: &mut AssemblyDocument,
     name: &str,

@@ -200,6 +200,7 @@ fn board_display_of(inputs: &BoardInputs) -> Result<PartDisplay, String> {
             triangle_count: body.triangle_count as u32,
             color: Some(body.color.map(|c| c as f32)),
             flat_pattern: false,
+            bend_lines: Vec::new(),
         })
         .collect();
     Ok(PartDisplay {

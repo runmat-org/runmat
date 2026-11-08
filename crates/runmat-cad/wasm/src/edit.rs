@@ -211,7 +211,10 @@ fn part_edit(
                         Some(kind) => Some(kind),
                         None => match crate::mold_edits::mold_kind(command, &request.values, &picks)? {
                             Some(kind) => Some(kind),
-                            None => crate::features::feature_kind(command, &request.values, &picks)?,
+                            None => match crate::sheet_metal_edits::sheet_metal_kind(command, &request.values, &picks)? {
+                                Some(kind) => Some(kind),
+                                None => crate::features::feature_kind(command, &request.values, &picks)?,
+                            },
                         },
                     },
                 },

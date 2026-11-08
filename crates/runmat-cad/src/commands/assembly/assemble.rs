@@ -10,7 +10,7 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             "assembly.insert",
             "Insert",
             "insert",
-            "Insert a part, assembly, circuit board, STEP file or library part.",
+            "Insert a part, assembly or circuit board from the project.",
         )
         .kw(&["add component", "place", "instance"])
         .inputs(vec![
@@ -21,8 +21,6 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
                     ("part", "Part"),
                     ("assembly", "Assembly"),
                     ("circuit", "Circuit board"),
-                    ("step", "STEP file"),
-                    ("library", "Library part"),
                 ],
             ),
             text("file", "File", Some("bracket.part")),
@@ -202,7 +200,7 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             "assembly.mirror",
             "Mirror components",
             "mirror",
-            "Mirror components about a plane, as copies or opposite-hand parts.",
+            "Mirror components about a plane, as copies or as an opposite-hand part.",
         )
         .inputs(vec![
             pick("plane", "Mirror plane", &[K::Plane, K::Face]),
@@ -212,9 +210,11 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
                 "Result",
                 &[
                     ("copy", "Mirrored copies"),
-                    ("opposite", "Opposite-hand parts"),
+                    ("opposite", "Opposite-hand part"),
                 ],
             ),
+            text("opposite", "Opposite-hand file", Some("bracket-right.part"))
+                .shown("result", &["opposite"]),
         ])
         .when(occurrences())
         .preview()

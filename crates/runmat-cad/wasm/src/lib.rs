@@ -54,6 +54,7 @@ mod xref_repairs;
 pub mod runtime;
 pub mod study_checks;
 mod mold_edits;
+mod sheet_metal_edits;
 mod sheet_profile;
 mod surface_edits;
 mod weldment_edits;

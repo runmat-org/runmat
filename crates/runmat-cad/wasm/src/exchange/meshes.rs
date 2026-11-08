@@ -68,6 +68,17 @@ pub fn assembly_meshes(
     files: &Files,
     configuration: Option<&str>,
 ) -> Result<AssemblyMeshes, Vec<Diagnostic>> {
+    assembly_meshes_with(path, text, files, configuration, &TessellationOptions::default())
+}
+
+/// [`assembly_meshes`] tessellated with `options` (an export's mesh resolution).
+pub fn assembly_meshes_with(
+    path: &str,
+    text: &str,
+    files: &Files,
+    configuration: Option<&str>,
+    options: &TessellationOptions,
+) -> Result<AssemblyMeshes, Vec<Diagnostic>> {
     let resolution = resolve_assembly_in(path, text, files, configuration)?;
     let resolved = &resolution.resolved;
     let mut out = AssemblyMeshes {
@@ -90,12 +101,11 @@ pub fn assembly_meshes(
                             continue;
                         };
                         let (result, kernel) = regenerate_configured(document, &node.configuration);
-                        let options = TessellationOptions::default();
                         let bodies = result
                             .state
                             .bodies
                             .iter()
-                            .filter_map(|b| kernel.tessellate(&b.handle, &options).ok())
+                            .filter_map(|b| kernel.tessellate(&b.handle, options).ok())
                             .collect();
                         let output = document.parts.first();
                         (

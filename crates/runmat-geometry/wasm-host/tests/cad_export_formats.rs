@@ -186,3 +186,18 @@ impl GeometryEvaluationControl for Unlimited {
         Ok(())
     }
 }
+
+#[test]
+fn mesh_resolution_sets_how_finely_the_hole_is_cut() {
+    let triangles = |resolution: &str| {
+        let b = bytes(&export(json!({ "format": "stl", "resolution": resolution })));
+        u32::from_le_bytes(b[80..84].try_into().unwrap())
+    };
+    let (fine, standard, coarse) = (triangles("fine"), triangles("standard"), triangles("coarse"));
+    assert!(fine > standard && standard > coarse, "fine {fine}, standard {standard}, coarse {coarse}");
+    // A resolution the form doesn't offer is refused.
+    runmat_geometry_wasm_host::cad::install_occt();
+    let request = json!({ "command": "manage.export", "values": { "format": "stl", "resolution": "draft" } }).to_string();
+    let out = call("export", ["/p/plate.part", PLATE, "{}", &request]);
+    assert_eq!(out["ok"], false, "{out}");
+}

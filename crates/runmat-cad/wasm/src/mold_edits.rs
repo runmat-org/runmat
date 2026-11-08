@@ -1,4 +1,4 @@
-//! The Mold tab's Core/cavity split as `mold.core_cavity(part, parting, margin)`: a block
+//! The Mold tab's Core/cavity as `mold.core_cavity(part, parting, margin)`: a block
 //! `margin` round the picked part, less the part, split by the parting plane into the core
 //! (below the plane) and the cavity (above it). A face picked for the part stands for its body.
 

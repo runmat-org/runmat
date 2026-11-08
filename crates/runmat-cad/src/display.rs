@@ -104,6 +104,10 @@ pub struct BodyDisplay {
     /// pattern drawing and an on-demand show draw it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flat_pattern: bool,
+    /// A flat pattern's bend lines on both faces of the blank: segments as start and end
+    /// points (x, y, z, metres), six numbers each. Empty for every other body.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "wire::f32s", deserialize_with = "wire::f32s_de")]
+    pub bend_lines: Vec<f32>,
 }
 
 /// A body the kernel could not draw, with why.
@@ -413,7 +417,36 @@ fn body_display(
         triangle_count: mesh.triangle_count() as u32,
         color: None,
         flat_pattern: false,
+        bend_lines: Vec::new(),
     }
+}
+
+/// The bend lines of the flat pattern body `index` (see [`BodyDisplay::bend_lines`]): each line
+/// of its feature's layout on the blank's two faces.
+pub fn flat_pattern_bend_lines(result: &RegenResult, index: usize) -> Vec<f32> {
+    let Some(body) = result.state.bodies.get(index) else {
+        return Vec::new();
+    };
+    let layout = body.names.body.iter().chain(body.names.faces.iter().flatten()).find_map(|name| match name {
+        EntityName::Generated(g) => match result.state.records.get(&g.feature) {
+            Some(crate::regen::records::FeatureRecord::FlatPattern { layout, .. }) => Some(layout),
+            _ => None,
+        },
+        _ => None,
+    });
+    let Some(layout) = layout else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for face in [0.0, layout.depth] {
+        let frame = layout.frame.offset(face);
+        for line in &layout.bend_lines {
+            for p in [line.start, line.end] {
+                out.extend(frame.to_world(p).map(|c| c as f32));
+            }
+        }
+    }
+    out
 }
 
 /// Whether the regeneration's body `index` is a sheet metal flat pattern: the body a
@@ -469,6 +502,9 @@ pub fn part_display(
                     &result.state.names,
                 );
                 display.flat_pattern = flat_pattern;
+                if flat_pattern {
+                    display.bend_lines = flat_pattern_bend_lines(result, i);
+                }
                 out.bodies.push(display);
             }
             Err(error) => out.problems.push(DisplayProblem {

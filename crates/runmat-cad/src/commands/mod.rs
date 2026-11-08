@@ -53,6 +53,22 @@ pub const UNBUILT: &[&str] = &[
     "part.wrap",
     "part.body-promote",
     "part.where-used",
+    // Surfaces: untrim has no kernel operation yet; replacing solid faces with a surface is
+    // Direct's Replace face.
+    "surface.untrim",
+    "surface.replace-face",
+    // Sheet metal the regeneration doesn't build yet: lofted bends, converting a solid, tabs
+    // and slots.
+    "sheet-metal.lofted-bend",
+    "sheet-metal.convert",
+    "sheet-metal.tab-and-slot",
+    // Assembly fasteners: the runtime publishes no edge paths for a rule to run along and has
+    // no catalog of a fastener family's sizes, so rules, smart fasteners, the library and hole
+    // series are written in Source until it does.
+    "assembly.fastener-rule",
+    "assembly.smart-fasteners",
+    "assembly.fastener-library",
+    "assembly.hole-series",
     // Direct: relations kept while a face moves.
     "direct.live-relations",
     // Manage.

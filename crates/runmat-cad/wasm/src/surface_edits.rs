@@ -12,6 +12,21 @@
 //! - `surface.thicken` → `surface.thicken(bodies, thickness, both_sides)`: a sheet grown into a
 //!   solid on its normal side, the other side (a negative thickness) or both.
 //!
+//! - `surface.extrude` → `surface.extrude(profile, start, end)`: a sketch's curves swept along
+//!   its normal, `depth` long (centred on the sketch with `symmetric`);
+//! - `surface.revolve` → `surface.revolve(profile, axis, angle)`;
+//! - `surface.sweep` → `surface.sweep(profile, path)`: a sketch's curves swept along another's;
+//! - `surface.planar` → `surface.planar(profile)`: a flat patch inside a closed sketch;
+//! - `surface.ruled` → `surface.ruled(edges, distance, angle)`: strips along edges, turned
+//!   `angle` outward from the faces they bound;
+//! - `surface.offset` → `surface.offset(faces, distance)`: faces copied along their normals;
+//! - `surface.extend` → `surface.extend(edges, distance)`: a sheet grown past its edges;
+//! - `surface.delete-hole` → `surface.delete_hole(edges)`: a sheet's hole closed;
+//! - `surface.cut` → `surface.cut_with_surface(body, surface, keep)`: a solid cut by a sheet,
+//!   one side of the sheet's normal kept;
+//! - `surface.mid-surface` → `surface.mid_surface(body, pairs)`: a thin solid's mid-surface
+//!   from opposite faces, picked in pairs.
+//!
 //! A face picked where a body is wanted stands for the body that holds it.
 
 use crate::edit::model;
@@ -125,6 +140,94 @@ pub fn surface_kind(command: &str, values: &Values, picks: &Picks) -> Result<Opt
                 "thicken",
                 json!({ "feature": "surface", "kind": "thicken", "bodies": bodies(values, "surface", picks)?, "thickness": thickness, "both_sides": side == "both" }),
             )
+        }
+        "surface.extrude" => {
+            let profile = json!({ "sketch": picks.sketch(&some(values, "profile", "the sketch")?[0])? });
+            let depth = value(values, "depth", "mm")?;
+            let (start, end) = if values.get("symmetric").and_then(Value::as_bool).unwrap_or(false) {
+                match depth.get("value").and_then(Value::as_f64) {
+                    Some(d) if depth.get("form").and_then(Value::as_str) == Some("quantity") => {
+                        (json!({ "form": "quantity", "value": -d / 2.0, "unit": "mm" }), json!({ "form": "quantity", "value": d / 2.0, "unit": "mm" }))
+                    }
+                    _ => return Err(model("a symmetric extruded surface takes a number; write the start and end in the source")),
+                }
+            } else {
+                (json!({ "form": "quantity", "value": 0, "unit": "mm" }), depth)
+            };
+            ("extrude", json!({ "feature": "surface", "kind": "extrude", "profile": profile, "start": start, "end": end }))
+        }
+        "surface.revolve" => (
+            "revolve",
+            json!({
+                "feature": "surface",
+                "kind": "revolve",
+                "profile": { "sketch": picks.sketch(&some(values, "profile", "the sketch")?[0])? },
+                "axis": picks.axis(&some(values, "axis", "the axis")?[0])?,
+                "angle": value(values, "angle", "deg")?,
+            }),
+        ),
+        "surface.sweep" => (
+            "sweep",
+            json!({
+                "feature": "surface",
+                "kind": "sweep",
+                "profile": { "sketch": picks.sketch(&some(values, "profile", "the profile sketch")?[0])? },
+                "path": { "sketch": picks.sketch(&some(values, "path", "the path sketch")?[0])? },
+            }),
+        ),
+        "surface.planar" => (
+            "planar",
+            json!({ "feature": "surface", "kind": "planar", "profile": { "sketch": picks.sketch(&some(values, "profile", "the closed sketch")?[0])? } }),
+        ),
+        "surface.ruled" => (
+            "ruled",
+            json!({
+                "feature": "surface",
+                "kind": "ruled",
+                "edges": picks.references(&some(values, "edges", "the edges")?)?,
+                "distance": value(values, "distance", "mm")?,
+                "angle": value(values, "angle", "deg")?,
+            }),
+        ),
+        "surface.offset" => (
+            "offset",
+            json!({ "feature": "surface", "kind": "offset", "faces": picks.references(&some(values, "faces", "the faces")?)?, "distance": value(values, "distance", "mm")? }),
+        ),
+        "surface.extend" => (
+            "extend",
+            json!({ "feature": "surface", "kind": "extend", "edges": picks.references(&some(values, "edges", "the edges")?)?, "distance": value(values, "distance", "mm")? }),
+        ),
+        "surface.delete-hole" => (
+            "delete_hole",
+            json!({ "feature": "surface", "kind": "delete_hole", "edges": picks.references(&some(values, "edges", "the hole's edges")?)? }),
+        ),
+        "surface.cut" => {
+            let surface = body_of(&some(values, "surface", "the cutting surface")?[0]);
+            let body = body_of(&some(values, "body", "the solid to cut")?[0]);
+            if surface == body {
+                return Err(model("a body can't be cut with itself"));
+            }
+            let keep = match text(values, "keep", "positive") {
+                k @ ("positive" | "negative") => k,
+                other => return Err(model(format!("keep the side the surface faces (positive) or the other (negative), not `{other}`"))),
+            };
+            (
+                "cut_with_surface",
+                json!({ "feature": "surface", "kind": "cut_with_surface", "body": picks.reference(&body)?, "surface": picks.reference(&surface)?, "keep": keep }),
+            )
+        }
+        "surface.mid-surface" => {
+            let faces = some(values, "pairs", "opposite faces in pairs")?;
+            if faces.len() % 2 != 0 {
+                return Err(model("pick the faces in pairs: each face, then the face opposite it"));
+            }
+            let body = body_of(&faces[0]);
+            if faces.iter().any(|f| body_of(f) != body) {
+                return Err(model("every face of a mid-surface is on one body"));
+            }
+            let refs = picks.references(&faces)?;
+            let pairs: Vec<Value> = refs.chunks(2).map(|p| json!([p[0], p[1]])).collect();
+            ("mid_surface", json!({ "feature": "surface", "kind": "mid_surface", "body": picks.reference(&body)?, "pairs": pairs }))
         }
         _ => return Ok(None),
     };

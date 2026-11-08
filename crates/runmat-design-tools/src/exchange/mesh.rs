@@ -152,6 +152,16 @@ pub fn model_scene(path: &str, files: &Files) -> Result<Scene3d, ToolError> {
 
 /// [`model_scene`] of a part or an assembly in its named configuration `configuration`.
 pub fn model_scene_in(path: &str, files: &Files, configuration: Option<&str>) -> Result<Scene3d, ToolError> {
+    model_scene_with(path, files, configuration, &Default::default())
+}
+
+/// [`model_scene_in`] tessellated with `options` (an export's mesh resolution).
+pub fn model_scene_with(
+    path: &str,
+    files: &Files,
+    configuration: Option<&str>,
+    options: &runmat_cad::regen::kernel::TessellationOptions,
+) -> Result<Scene3d, ToolError> {
     let text = text_of(files, path)?;
     let not_compiled = |d: Vec<runmat_cad_wasm::runtime::Diagnostic>| {
         ToolError::new(
@@ -182,7 +192,7 @@ pub fn model_scene_in(path: &str, files: &Files, configuration: Option<&str>) ->
                     .state
                     .bodies
                     .get(body["index"].as_u64().unwrap_or(0) as usize)
-                    .and_then(|b| part.kernel.tessellate(&b.handle, &Default::default()).ok());
+                    .and_then(|b| part.kernel.tessellate(&b.handle, options).ok());
                 bodies.push(match exact {
                     Some(m) => exact_body_mesh(name, material.clone(), &m),
                     None => body_mesh(name, material.clone(), body),
@@ -204,7 +214,7 @@ pub fn model_scene_in(path: &str, files: &Files, configuration: Option<&str>) ->
         DesignKind::Assembly => {
             // Exact: the kernel's f64 tessellation of each part configuration, placed at the
             // resolved tree's f64 world transforms (the canvas display holds f32).
-            let exact = runmat_cad_wasm::exchange::meshes::assembly_meshes(path, text, files, configuration)
+            let exact = runmat_cad_wasm::exchange::meshes::assembly_meshes_with(path, text, files, configuration, options)
                 .map_err(not_compiled)?;
             for p in &exact.prototypes {
                 let mut name = stem(&p.file);

@@ -57,7 +57,7 @@ pub fn model_family(path: &str, files: &Files, format: ExportFormat, notes: &mut
     let name = stem(path);
     let mut out = Vec::new();
     for c in family(names) {
-        out.extend(model_export(path, files, format, c.as_deref(), &format!("{name}{}", suffix(&c)), notes)?);
+        out.extend(model_export(path, files, format, c.as_deref(), &format!("{name}{}", suffix(&c)), notes, &Default::default())?);
     }
     notes.push(format!("{} configurations of {path}", out.len()));
     Ok(out)

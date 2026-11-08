@@ -36,7 +36,7 @@ mod three_mf;
 
 use dxf::{drawing_dxf, flat_pattern_dxf};
 use mesh::floats;
-pub use mesh::{glb, model_meshes, model_scene, model_scene_in, stl, Mesh, Placed, Scene3d, Shape};
+pub use mesh::{glb, model_meshes, model_scene, model_scene_in, model_scene_with, stl, Mesh, Placed, Scene3d, Shape};
 pub use three_mf::{scene_model, three_mf};
 pub use step::step;
 
@@ -329,9 +329,10 @@ pub(crate) fn model_export(
     configuration: Option<&str>,
     file_stem: &str,
     notes: &mut Vec<String>,
+    options: &runmat_cad::regen::kernel::TessellationOptions,
 ) -> Result<Vec<ExportedFile>, ToolError> {
     let name = stem(path);
-    let scene = model_scene_in(path, files, configuration)?;
+    let scene = model_scene_with(path, files, configuration, options)?;
     let meshes = scene.world_meshes();
     let mut note = |n: &str| {
         if !notes.iter().any(|x| x == n) {
@@ -387,7 +388,7 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
         }
         ExportFormat::Bom => vec![family::bom_csv(&input.path, files)?],
         ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf => {
-            model_export(&input.path, files, input.format, config, &name, &mut notes)?
+            model_export(&input.path, files, input.format, config, &name, &mut notes, &Default::default())?
         }
         ExportFormat::Dxf => match kind {
             DesignKind::Drawing => {

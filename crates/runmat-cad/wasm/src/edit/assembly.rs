@@ -18,6 +18,7 @@
 mod explode;
 mod frames;
 mod mate;
+mod mirror;
 mod place;
 #[cfg(test)]
 mod explode_tests;
@@ -293,6 +294,10 @@ pub(super) fn edit(
         "assembly.pattern" => {
             let names = selected_names(&compiled, request)?;
             place::pattern(&mut document, &compiled, &names, &request.values)?
+        }
+        "assembly.mirror" => {
+            let names = selected_names(&compiled, request)?;
+            mirror::mirror(&mut document, &compiled, files, &names, &request.values)?
         }
         "assembly.mate" => mate::mate(&mut document, &compiled, &request.values)?,
         "repair.repair" => repair(path, text, files, &mut document, &request.values, &mut others)?,

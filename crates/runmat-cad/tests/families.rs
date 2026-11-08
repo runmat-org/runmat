@@ -226,7 +226,7 @@ pub fn count_faces(r: &RegenResult, d: &PartDocument, refs: &[Reference]) -> Vec
 }
 
 /// The flat pattern's body draws only on demand: the display marks it, the folded part's bounds
-/// leave it out and the assembly levels skip it, as SolidWorks shows the folded state.
+/// leave it out and the assembly levels skip it, so the folded state is what shows.
 #[test]
 fn the_flat_pattern_body_is_marked_and_kept_out_of_the_folded_display() {
     use runmat_cad::display::{display_levels, is_flat_pattern_body, part_display};
@@ -262,6 +262,33 @@ fn the_flat_pattern_body_is_marked_and_kept_out_of_the_folded_display() {
     let json = serde_json::to_value(&shown).unwrap();
     assert!(json["bodies"][0].get("flat_pattern").is_none());
     assert_eq!(json["bodies"][1]["flat_pattern"], true);
+    // The one bend's line on both faces of the blank, across its 40 mm width (the flange
+    // depth), inside the blank's box; the folded body has none.
+    assert!(shown.bodies[0].bend_lines.is_empty());
+    let lines = &shown.bodies[1].bend_lines;
+    assert_eq!(lines.len(), 2 * 6, "{lines:?}");
+    let (lo, hi) = body_box_of(&shown.bodies[1]);
+    for seg in lines.chunks(6) {
+        let length = ((seg[3] - seg[0]).powi(2) + (seg[4] - seg[1]).powi(2) + (seg[5] - seg[2]).powi(2)).sqrt();
+        assert!((length - 0.04).abs() < 1e-5, "{seg:?}");
+        for (k, v) in seg.iter().enumerate() {
+            assert!(*v >= lo[k % 3] - 1e-6 && *v <= hi[k % 3] + 1e-6, "{seg:?} outside {lo:?} {hi:?}");
+        }
+    }
+    assert!(json["bodies"][0].get("bend_lines").is_none());
+}
+
+fn body_box_of(body: &runmat_cad::display::BodyDisplay) -> ([f32; 3], [f32; 3]) {
+    let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    for face in &body.faces {
+        for p in face.positions.chunks(3) {
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+    }
+    (lo, hi)
 }
 
 #[test]
