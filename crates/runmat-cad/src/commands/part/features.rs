@@ -396,6 +396,9 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 text("name", "Name", Some("pivot")),
                 pick("on", "On", &[K::Face, K::Edge, K::Vertex]),
                 choice("origin", "Origin", &[("centroid", "Middle of the face or edge"), ("center", "Axis of a round face")]),
+                offset("offset_x", "Offset X", 0.0).drag(Manipulator::Triad),
+                offset("offset_y", "Offset Y", 0.0),
+                offset("offset_z", "Offset Z", 0.0),
                 flag("flip", "Flip primary axis", false),
                 angle("rotate", "Rotate", 0.0),
             ])

@@ -110,9 +110,18 @@ fn connector(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
         None | Some(Value::Null) => None,
         Some(_) => Some(value(values, "rotate", "deg")?),
     };
+    // Offsets along the connector's own X, Y and Z; written only when one is set.
+    let zero = |k: &str| matches!(values.get(k), None | Some(Value::Null)) || values.get(k).and_then(Value::as_f64) == Some(0.0);
+    let axis = |k: &str| if zero(k) { Ok(json!({ "form": "quantity", "value": 0, "unit": "mm" })) } else { value(values, k, "mm") };
+    let offset = if ["offset_x", "offset_y", "offset_z"].iter().all(|k| zero(k)) {
+        None
+    } else {
+        Some(json!([axis("offset_x")?, axis("offset_y")?, axis("offset_z")?]))
+    };
     Ok(json!({
         "feature": "mate_connector",
         "placement": placement,
+        "offset": offset,
         "rotation": rotation,
         "flip": flag(values, "flip"),
     }))
@@ -278,7 +287,13 @@ mod tests {
         let (t, _) = added("part.mate-connector", json!({ "name": "", "on": [E1] }));
         assert!(t.contains("feature connector1 = mate_connector(") && t.contains("edge_midpoint"), "{t}");
         let (t, _) = added("part.mate-connector", json!({ "on": [V] }));
-        assert!(t.contains("on = vertex"), "{t}");
+        assert!(t.contains("on = vertex") && !t.contains("offset"), "{t}");
+        // Offsets move the origin along the connector's own axes: 5 mm up the face normal.
+        let (t, refs) = added("part.mate-connector", json!({ "name": "lifted", "on": [TOP], "offset_x": 0, "offset_y": 0, "offset_z": 5 }));
+        assert!(t.contains("offset = [0 mm, 0 mm, 5 mm]"), "{t}");
+        let z0 = refs[0]["lines"][0][2].as_f64().unwrap();
+        // The display is in metres: the 10 mm top face plus 5 mm.
+        assert!((z0 - 0.015).abs() < 1e-6, "connector origin z {z0}");
         assert!(refuses("part.mate-connector", json!({ "name": "body", "on": [TOP] })).contains("body"));
         assert!(refuses("part.mate-connector", json!({ "name": "2x", "on": [TOP] })).contains("name"));
     }
