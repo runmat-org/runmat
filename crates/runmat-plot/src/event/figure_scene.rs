@@ -237,9 +237,7 @@ impl FigureScene {
         for (index, lines) in self.geometry_lines.into_iter().enumerate() {
             chunks.push(lines.restore(format!("{scene_id}:lines:{index}"))?);
         }
-        if chunks.is_empty() {
-            return Err("figure scene does not contain renderable mesh plots".to_string());
-        }
+        // A scene with no chunks is valid: everything is hidden, and the grid and triad stay.
         let mut scene = crate::GeometryScene::new(scene_id, revision, chunks);
         scene.title = self.metadata.title;
         scene.overlay = self.geometry_overlay;

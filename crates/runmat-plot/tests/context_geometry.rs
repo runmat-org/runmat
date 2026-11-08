@@ -401,3 +401,18 @@ async fn the_corner_triad_and_grid_are_scene_options() {
     assert!(!saved.show_grid && !saved.show_orientation_triad);
     assert!(grey_scene(true, true, true).show_orientation_triad);
 }
+
+/// With every item hidden the scene has no chunks; it still loads, and draws its grid and
+/// corner triad.
+#[tokio::test]
+async fn an_empty_scene_keeps_its_grid_and_triad() {
+    let mut scene = GeometryScene::new("empty", 1, Vec::new());
+    scene.show_grid = true;
+    scene.show_orientation_triad = true;
+    let scene = FigureScene::from_geometry_scene(&scene)
+        .into_geometry_scene("empty", 1)
+        .expect("an empty scene loads");
+    assert!(scene.chunks.is_empty() && scene.show_grid && scene.show_orientation_triad);
+    let rgba = render("empty", &scene).await;
+    assert!(triad_ink(&rgba, [0.0, 0.6, 0.4, 1.0]) > 20, "corner triad missing");
+}
