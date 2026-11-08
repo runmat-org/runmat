@@ -1,0 +1,69 @@
+entry 84ff1b9f-b73d-879a-b70e-4b36cbed2b66 net /+3V3
+entry c26198b6-d8cd-8c10-9f73-dde4677d4603 component /C1 designator=C1
+entry 1d9314ed-8a66-81fb-8f8d-5c50b37bf9d6 net /DQ0
+entry e762e7f0-ba76-8b0a-895b-a8cd34b469d2 net /DQ1
+entry 2542b60f-b6de-88f3-9bc6-dc56ce66d371 net /DQ2
+entry f46d2249-44c2-8c59-af9a-1dcc2aa34f98 net /DQ3
+entry c3597d69-ac31-8e58-9c69-f7c5f4bed7e3 net /DQ4
+entry 86cd1329-ab70-8a37-861d-c4be754a1621 net /DQ5
+entry 01b75062-bd0b-878c-a739-41681d690801 net /DQ6
+entry c6b9379b-bc48-850d-86cf-e1f46a8f399a net /DQ7
+entry 8f11c0a9-d1c0-8ed6-b938-7f8d2ad5d1d0 net /GND
+entry 9f5fe1e7-fdee-8820-b50d-1ce8270066d3 component /J1 designator=J1
+entry ad009e0b-5b03-8646-aff9-577e37e7e79f net /MDQ0
+entry 6a8f2a56-ea82-8eae-8d2a-844b1fa9bfd2 net /MDQ1
+entry 389fdaba-0bcd-8b8e-b838-69ed6c449179 net /MDQ2
+entry 2f3f2fd5-b1fd-811f-a2f5-91974f1034d7 net /MDQ3
+entry 95c224ad-f96f-8bfa-a07d-d158f75eb419 net /MDQ4
+entry 8c6179c9-9f9e-8168-bda9-486ec6ba2f0b net /MDQ5
+entry e850988c-9388-83c1-adba-e81847f9f98c net /MDQ6
+entry deefeda8-39b8-8976-9d0a-90f8a69c94f3 net /MDQ7
+entry 1b323ae1-ec93-862e-8ec7-becb9e3b135d component /R1 designator=R1
+entry 60a68ca8-5ddf-8f27-970e-91d176148951 component /R2 designator=R2
+entry 3a59e8fd-b8b7-8db5-ba2c-081c815f7ca8 component /R3 designator=R3
+entry 9c569f2c-355c-8543-9870-d60c21d576ed component /R4 designator=R4
+entry d6b93c4c-1f80-8075-811b-839be72fea86 component /R5 designator=R5
+entry 5acf0c7d-7234-8034-9d2d-2b2d142a2285 component /R6 designator=R6
+entry 12694ecf-f6fc-8697-a829-e1390c3e8a96 component /R7 designator=R7
+entry 9f1ccb46-a5c7-800b-9aea-9df690c2b31c component /R8 designator=R8
+entry 9502c7d2-bd36-8068-96d6-3290f9e03e25 component /U1 designator=U1
+fp /+3V3 /C1.1,/U1.VDD,/U1.VDDA
+fp /C1 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /DQ0 /J1.1,/R1.2
+fp /DQ1 /J1.2,/R2.2
+fp /DQ2 /J1.3,/R3.2
+fp /DQ3 /J1.4,/R4.2
+fp /DQ4 /J1.5,/R5.2
+fp /DQ5 /J1.6,/R6.2
+fp /DQ6 /J1.7,/R7.2
+fp /DQ7 /J1.8,/R8.2
+fp /GND /C1.2,/J1.10,/J1.9,/U1.VSS,/U1.VSSA
+fp /J1 ea9321e3-6e65-859b-b3bb-f20234b4af8e|DQ0,DQ1,DQ2,DQ3,DQ4,DQ5,DQ6,DQ7,GND
+fp /MDQ0 /R1.1,/U1.PB0
+fp /MDQ1 /R2.1,/U1.PB1
+fp /MDQ2 /R3.1,/U1.PB2
+fp /MDQ3 /R4.1,/U1.PB3
+fp /MDQ4 /R5.1,/U1.PB4
+fp /MDQ5 /R6.1,/U1.PB5
+fp /MDQ6 /R7.1,/U1.PB6
+fp /MDQ7 /R8.1,/U1.PB7
+fp /R1 33d35937-bef6-83ce-97cb-3e9315f8c7cb|DQ0,MDQ0
+fp /R2 33d35937-bef6-83ce-97cb-3e9315f8c7cb|DQ1,MDQ1
+fp /R3 33d35937-bef6-83ce-97cb-3e9315f8c7cb|DQ2,MDQ2
+fp /R4 33d35937-bef6-83ce-97cb-3e9315f8c7cb|DQ3,MDQ3
+fp /R5 33d35937-bef6-83ce-97cb-3e9315f8c7cb|DQ4,MDQ4
+fp /R6 33d35937-bef6-83ce-97cb-3e9315f8c7cb|DQ5,MDQ5
+fp /R7 33d35937-bef6-83ce-97cb-3e9315f8c7cb|DQ6,MDQ6
+fp /R8 33d35937-bef6-83ce-97cb-3e9315f8c7cb|DQ7,MDQ7
+fp /U1 8a5fb81d-61d0-86be-936c-76caa4bd5a2c|+3V3,GND,MDQ0,MDQ1,MDQ2,MDQ3,MDQ4,MDQ5,MDQ6,MDQ7
+place main/C1 198.12 162.56 270
+place main/J1 198.12 191.77 0 mirror
+place main/R1 234.95 115.57 0
+place main/R2 234.95 132.08 0
+place main/R3 234.95 148.59 0
+place main/R4 234.95 165.1 0
+place main/R5 234.95 181.61 0
+place main/R6 234.95 198.12 0
+place main/R7 234.95 214.63 0
+place main/R8 234.95 231.14 0
+place main/U1 198.12 109.22 0 mirror

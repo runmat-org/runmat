@@ -132,3 +132,24 @@ fn tune_length_reaches_a_delay_target_with_each_pattern_and_tune_group_matches_a
     let err = runtime::edit(LAYOUT, &grouped[LAYOUT], &grouped, &request("board.tune-group", json!({ "group": "usb" }))).unwrap_err();
     assert!(err.message.contains("no member of usb is short"), "{}", err.message);
 }
+
+/// The USB pair over a split in In1.Cu (ground left, 3.3 V right): Diff pair still routes it,
+/// and DRC reports where each line crosses the split, at the edge of the pour it leaves.
+#[test]
+fn diff_pair_over_a_plane_split_routes_and_drc_reports_the_crossing() {
+    let mut files = hs_board(&[
+        "pour GND = { layers = [In1.Cu], outline = [[-14.6, -9.6], [4, -9.6], [4, 9.6], [-14.6, 9.6]] }",
+        "pour \"+3V3\" = { layers = [In1.Cu], outline = [[4.4, -9.6], [14.6, -9.6], [14.6, 9.6], [4.4, 9.6]] }",
+    ]);
+    let summary = run(&mut files, "board.diff-pair", json!({ "pair": "net:USB_DP" }));
+    assert!(summary.starts_with("Routed USB"), "{summary}");
+    let b = index(&files);
+    let found: Vec<_> = b.drc.iter().filter(|r| r.code == "return-path").collect();
+    assert_eq!(found.len(), 2, "{:#?}", b.drc);
+    for r in &found {
+        // Named in the track's own direction: ground to 3.3 V, or back.
+        assert!(r.message.contains("crosses a split in its reference plane In1.Cu (`GND` to `+3V3`)") || r.message.contains("crosses a split in its reference plane In1.Cu (`+3V3` to `GND`)"), "{}", r.message);
+        let x = r.at.unwrap()[0];
+        assert!((3.5..4.5).contains(&x), "{r:?}");
+    }
+}

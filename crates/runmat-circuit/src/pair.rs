@@ -138,7 +138,10 @@ pub(crate) fn add_checked(board: &mut Board, pairs: &[(NetId, NetId)], layer: Co
     rules.rebuild(&BoardGraph::new(&b, pairs));
     let fills = crate::zone::fill_zones(&mut b, &rules, pairs);
     let drc = Drc::run(&b, &rules, pairs, &fills);
-    let hit = drc.findings().into_iter().find(|f| f.items.iter().any(|i| matches!(i, BItem::Track(id) if new.contains(id))) && f.code != "diff-pair-uncoupled" && f.code != "skew" && f.code != "length").cloned();
+    // Placement checks only: lengths, skew and coupling are what tuning changes, and a line
+    // over a plane split is reported, not refused.
+    const REPORTED: [&str; 5] = ["diff-pair-uncoupled", "skew", "length", "length-match", "return-path"];
+    let hit = drc.findings().into_iter().find(|f| f.items.iter().any(|i| matches!(i, BItem::Track(id) if new.contains(id))) && !REPORTED.contains(&f.code.as_str())).cloned();
     if let Some(f) = hit {
         for id in &new {
             board.tracks.remove(id);
@@ -310,6 +313,28 @@ pub fn tune(board: &mut Board, net: NetId, target: f64, tolerance: f64, pairs: &
         return Err(format!("{name} is {before:.3} mm, longer than {target} mm; meanders only add length, so shorten its route"));
     }
     let run = longest_run(board, net).ok_or_else(|| format!("{name} has no straight track to meander"))?;
+    tune_on(board, net, &run, target, tolerance, pairs, pattern, outside)
+}
+
+/// `net`'s straight tracks, longest first: where meanders can go.
+pub fn straight_runs(board: &Board, net: NetId) -> Vec<crate::layout::Track> {
+    let mut v: Vec<_> = board.tracks.values().filter(|t| t.net == Some(net) && matches!(t.geom, TrackGeom::Segment { .. })).cloned().collect();
+    v.sort_by(|a, b| b.length().total_cmp(&a.length()).then(a.id.cmp(&b.id)));
+    v
+}
+
+/// [`tune`] with the meanders on `run`, one of `net`'s straight tracks.
+#[allow(clippy::too_many_arguments)]
+pub fn tune_on(board: &mut Board, net: NetId, run: &crate::layout::Track, target: f64, tolerance: f64, pairs: &[(NetId, NetId)], pattern: Pattern, outside: f64) -> Result<Tuning, String> {
+    let before = net_track_length(board, net) + outside;
+    let name = board.nets[net.0 as usize].name.clone();
+    let missing = target - before;
+    if missing.abs() <= tolerance {
+        return Err(format!("{name} is {before:.3} mm, already within {tolerance} mm of {target} mm"));
+    }
+    if missing < 0.0 {
+        return Err(format!("{name} is {before:.3} mm, longer than {target} mm; meanders only add length, so shorten its route"));
+    }
     let (a, b) = run.endpoints();
     let (mut rules, _) = BoardRules::for_board(board);
     rules.rebuild(&BoardGraph::new(board, pairs));
@@ -319,7 +344,7 @@ pub fn tune(board: &mut Board, net: NetId, target: f64, tolerance: f64, pairs: &
     // A bump (or tooth) uses two pitches of the run; a pitch is kept clear at each end.
     let most = ((l - 2.0 * pitch) / (2.0 * pitch)).floor().max(0.0) as usize;
     if most == 0 {
-        return Err(format!("{name}'s longest straight track is {:.3} mm, too short to meander at this width and clearance", l / 1e6));
+        return Err(format!("{name}'s straight track is {:.3} mm, too short to meander at this width and clearance", l / 1e6));
     }
     let mut last = String::new();
     // Fewer, taller bumps first; then more, lower ones.
@@ -347,8 +372,8 @@ pub fn tune(board: &mut Board, net: NetId, target: f64, tolerance: f64, pairs: &
         }
     }
     Err(if last.is_empty() {
-        format!("{name} needs {missing:.3} mm more; its longest straight track can't hold meanders that tall (5 mm at most)")
+        format!("{name} needs {missing:.3} mm more; its straight track can't hold meanders that tall (5 mm at most)")
     } else {
-        format!("no meander on {name}'s longest track passes DRC: {last}")
+        format!("no meander on {name}'s track passes DRC: {last}")
     })
 }

@@ -12,7 +12,7 @@ use super::groups::{groups, Basis, Status};
 use super::signals::signal_of;
 use crate::board_rules::{BoardGraph, BoardRules};
 use crate::layout::{Board, NetId};
-use crate::pair::{longest_run, tune, Pattern, Tuning};
+use crate::pair::{tune_on, Pattern, Tuning};
 
 /// A tuning target: a length (mm) or a delay (ps).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -41,30 +41,63 @@ pub fn tune_net(board: &mut Board, net: NetId, target: Target, tolerance: f64, p
         let t = net_timing(board, &rules, &g);
         (signal_of(board, &rules, &g, net, &t), t.get(&net).copied().unwrap_or_default())
     };
-    let (sig, own) = signal(board);
-    match target {
-        Target::Length(mm) => {
-            let outside = (sig.timing.length - own.length) * 1e-6;
-            let tuning = tune(board, net, mm, tolerance, pairs, pattern, outside)?;
-            Ok(Tuned { net: name, basis: Basis::Length, before: tuning.before, after: tuning.after, tuning })
-        }
-        Target::Delay(ps) => {
-            let run = longest_run(board, net).ok_or_else(|| format!("{name} has no straight track to meander"))?;
-            let per_mm = DelayModel::new(&board.stackup).ps_per_mm(run.layer, run.width);
-            let before = sig.timing.delay;
-            if (ps - before).abs() <= tolerance {
-                return Err(format!("{name} is {before:.2} ps, already within {tolerance} ps of {ps} ps"));
+    let (sig, _) = signal(board);
+    let before = match target {
+        Target::Length(_) => sig.timing.length * 1e-6,
+        Target::Delay(_) => sig.timing.delay,
+    };
+    let (goal, unit) = match target {
+        Target::Length(mm) => (mm, "mm"),
+        Target::Delay(ps) => (ps, "ps"),
+    };
+    if (goal - before).abs() <= tolerance {
+        return Err(format!("{name} is {before:.2} {unit}, already within {tolerance} {unit} of {goal} {unit}"));
+    }
+    if goal < before {
+        let what = if unit == "ps" { "slower than" } else { "longer than" };
+        return Err(format!("{name} is {before:.2} {unit}, {what} {goal} {unit}; meanders only add length, so shorten its route"));
+    }
+    // The net's own straight tracks first, longest first, then the other nets of its signal
+    // (the far side of a series resistor): the first meander that passes DRC wins.
+    let timing = {
+        let (mut rules, _) = BoardRules::for_board(board);
+        let g = BoardGraph::new(board, pairs);
+        rules.rebuild(&g);
+        net_timing(board, &rules, &g)
+    };
+    let mut nets = vec![net];
+    nets.extend(sig.nets.iter().copied().filter(|&n| n != net));
+    let model = DelayModel::new(&board.stackup);
+    let mut first_err: Option<String> = None;
+    for c in nets {
+        let own_c = timing.get(&c).copied().unwrap_or_default().length * 1e-6;
+        for run in crate::pair::straight_runs(board, c) {
+            let attempt = match target {
+                Target::Length(mm) => {
+                    let outside = sig.timing.length * 1e-6 - own_c;
+                    tune_on(board, c, &run, mm, tolerance, pairs, pattern, outside)
+                }
+                Target::Delay(ps) => {
+                    let per_mm = model.ps_per_mm(run.layer, run.width);
+                    tune_on(board, c, &run, own_c + (ps - before) / per_mm, tolerance / per_mm, pairs, pattern, 0.0)
+                }
+            };
+            match attempt {
+                Ok(tuning) => {
+                    let after = match target {
+                        Target::Length(_) => signal(board).0.timing.length * 1e-6,
+                        Target::Delay(_) => signal(board).0.timing.delay,
+                    };
+                    let basis = if unit == "ps" { Basis::Delay } else { Basis::Length };
+                    return Ok(Tuned { net: name, basis, before, after, tuning });
+                }
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
             }
-            if ps < before {
-                return Err(format!("{name} is {before:.2} ps, slower than {ps} ps; meanders only add delay, so shorten its route"));
-            }
-            let own_mm = own.length * 1e-6;
-            let length_target = own_mm + (ps - before) / per_mm;
-            let tuning = tune(board, net, length_target, tolerance / per_mm, pairs, pattern, 0.0)?;
-            let after = signal(board).0.timing.delay;
-            Ok(Tuned { net: name, basis: Basis::Delay, before, after, tuning })
         }
     }
+    Err(first_err.unwrap_or_else(|| format!("{name} has no straight track to meander")))
 }
 
 /// Tunes every short member of group `group` to the group's target. Members already matched
@@ -86,7 +119,9 @@ pub fn tune_group(board: &mut Board, group: &str, pattern: Pattern, pairs: &[(Ne
         Basis::Delay => Target::Delay(grp.target),
     };
     // Two short members that form a declared pair are tuned together, so they stay coupled.
-    let short: Vec<_> = grp.members.iter().filter(|m| m.status == Status::Short).collect();
+    // The furthest from the target first: it needs the most room.
+    let mut short: Vec<_> = grp.members.iter().filter(|m| m.status == Status::Short).collect();
+    short.sort_by(|a, b| a.deviation.total_cmp(&b.deviation));
     let mut out = vec![];
     let mut done = std::collections::BTreeSet::new();
     for m in &short {

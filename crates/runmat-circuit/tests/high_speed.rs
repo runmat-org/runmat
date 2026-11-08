@@ -392,6 +392,13 @@ fn a_pour_of_the_net_connects_its_via() {
     assert_eq!(connected_layers(&b, &b.vias[&v]), vec![0, 3]);
     let (r, _) = checked(&b, &[]);
     assert!(via_stubs(&b, &r, &BoardGraph::new(&b, &[])).is_empty());
+    // Into an In1.Cu plane instead: a real stub below it, but a ground via's stub with no
+    // limit isn't listed for the outline.
+    b.zones.get_mut(&id).unwrap().layers = vec![1];
+    let (r, _) = checked(&b, &[]);
+    let g = BoardGraph::new(&b, &[]);
+    assert_eq!(via_stubs(&b, &r, &g).len(), 1);
+    assert!(runmat_circuit::index::stub_rows(&b, &r, &g).is_empty());
 }
 
 fn pour(b: &mut Board, net: NetId, layer: u32, x0: f64, x1: f64, holes: Vec<Vec<Point>>) {

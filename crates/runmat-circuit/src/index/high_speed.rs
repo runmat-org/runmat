@@ -159,13 +159,22 @@ pub struct BackdrillRow {
     pub residual_mm: f64,
 }
 
-/// The board's via stubs, longest first.
+/// The board's via stubs that matter (see the filter), longest first.
 pub fn stub_rows(board: &Board, rules: &BoardRules, g: &BoardGraph) -> Vec<ViaStubRow> {
     let names = board.stackup.copper_names();
     let name = |l: crate::layer_set::CopperIndex| names.get(l as usize).cloned().unwrap_or_default();
     let mm = |v: crate::geom::Coord| round(v as f64 * 1e-6, 3);
     let mut rows: Vec<ViaStubRow> = crate::high_speed::stubs::via_stubs(board, rules, g)
         .into_iter()
+        // Stubs that matter: a net with a limit, a back-drill or an impedance target. A ground
+        // or supply via's stub into its plane is listed nowhere.
+        .filter(|st| {
+            let net = crate::board_rules::BItem::Net(st.net.0);
+            st.max.is_some()
+                || st.stubs.iter().any(|s| s.backdrill.is_some())
+                || rules.value(g, net, crate::board_rules::props::IMPEDANCE).is_some()
+                || rules.value(g, net, crate::board_rules::props::DIFF_IMPEDANCE).is_some()
+        })
         .filter_map(|st| {
             let v = board.vias.get(&st.via)?;
             Some(ViaStubRow {

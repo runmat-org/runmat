@@ -165,6 +165,8 @@ DRC runs incrementally as the board is edited, and in full in a check:
 | `length-match` | a match-group member outside its group's target by more than the tolerance, in mm or ps |
 | `impedance`, `diff-impedance` | a track, or a coupled pair run, more than 10 % off its class's target impedance on its layer |
 | `diff-pair-gap`, `diff-pair-uncoupled` | a pair's gap off target (a class's solved gap on that layer); too much uncoupled length |
+| `return-path` | a controlled track crossing a split in its reference plane, or running over a gap in it |
+| `via-stub` | a via whose stub past its net's connected layers is longer than `stub_max`, after any back-drill |
 | `min-spokes` | a thermal relief with too few spokes |
 
 ## High-speed design
@@ -212,7 +214,7 @@ rule clk = { select = ":net(CLK_P)", skew_max = 1 ps }
 - With no `match_tolerance`, the tolerance is 0.1 mm, or 1 ps in a delay group.
 - `skew_max` on a pair limits the difference between its two nets, as a length or a delay.
 
-Each track's delay comes from its layer's propagation velocity: `√εeff / c`, where `εeff` is the stripline's Dk or the microstrip's effective permittivity at that width. A via adds its span at the Dk of the dielectric it crosses. A member routed on an inner layer reaches a delay target with less copper than one on an outer layer.
+Each track's delay comes from its layer's propagation velocity: `√εeff / c`, where `εeff` is the stripline's Dk or the microstrip's effective permittivity at that width. A via adds the span between the layers its net connects on, at the Dk of the dielectric it crosses, plus half the delay of any stub (see [Via stubs and back-drill](#via-stubs-and-back-drill)). A member routed on an inner layer reaches a delay target with less copper than one on an outer layer.
 
 The outline's **Length groups** folder lists each member's length or delay against the target: matched, short (needs tuning) or long (needs a shorter route). DRC reports each member outside the tolerance (`length-match`).
 
@@ -224,7 +226,7 @@ The outline's **Length groups** folder lists each member's length or delay again
 | Accordion | rectangular bumps alternating sides, centered on the run |
 | Sawtooth | triangular teeth to one side, for a run with little room beside it |
 
-**Tune group** tunes every short member of a group to the group's target with the chosen pattern, and reports any member it could not bring in.
+**Tune group** tunes every short member of a group to the group's target with the chosen pattern, and reports any member it could not bring in. Two short members that form a declared pair are tuned together: one meander follows the centreline of the pair's longest coupled run, and each net follows it at half the pair's pitch, so the pair keeps its gap and coupling through the meander. A rectangular bump adds the same length to both nets, so the pair's skew stays as it was; tune that separately with Tune length on the shorter net.
 
 ### Lengths through series parts
 
@@ -236,6 +238,51 @@ rule series = { select = "footprint#R21", through_delay = 8 ps }
 ```
 
 A part's body adds no length. Groups, DRC and Tune length use the signal's total.
+
+### Via stubs and back-drill
+
+A via is plated through every layer it is drilled through, but its net connects only where its tracks or pads touch the barrel. The barrel past the outermost connected layer is a stub. A through via that takes a signal from F.Cu to In1.Cu on a 1.6 mm board leaves about 1 mm of stub hanging down to the bottom copper. A stub resonates when it is a quarter wave long, so at multi-gigabit rates it notches the channel; well below that it loads the line as a small capacitance.
+
+RunMat measures each via's stub from the stackup: from the centre of the last connected layer to the outer face of the drilled span's end copper. Set limits and back-drill on a net or class:
+
+```circuit.layout fragment
+net_class pcie = { diff_impedance = 85, stub_max = 0.25 mm, backdrill = true }
+rule fab_tolerance = { select = ":net-class(pcie)", backdrill_stub = 0.15 mm, backdrill_oversize = 0.25 mm }
+```
+
+| Property | Meaning |
+|---|---|
+| `stub_max` | the longest stub allowed; DRC reports a longer one (`via-stub`) at the via |
+| `backdrill` | `true` drills out each stub that reaches the board surface, from that surface |
+| `backdrill_stub` | the stub the back-drill leaves past the connected layer, the fabricator's depth tolerance (0.2 mm when unset) |
+| `backdrill_oversize` | how much wider the back-drill is than the via's drill (0.2 mm when unset) |
+
+A back-drill enters from the stub's face and stops `backdrill_stub` short of the connected layer, its must-not-cut layer. A stub inside the board (a buried via's, or a blind via's inner end) can't be back-drilled; the `via-stub` finding says so, and a shorter via span is the fix.
+
+Stubs count in delay, not in length. An open stub much shorter than a quarter wave acts as a shunt capacitance `C = t_stub / Z`, which delays an edge on a `Z` line by `Z·C/2`, so each stub adds half its own propagation delay to its net. Length groups, delay targets and Tune length use that delay. Back-drilling a 1 mm stub to 0.2 mm takes about 2.8 ps off the net.
+
+The outline's **Via stubs** folder lists each via with a stub: its length as drilled and after back-drill, red when over `stub_max`. Its Properties give the connected span, the delay the stub adds, and each back-drill's face, drill, depth and must-not-cut layer.
+
+**Fabrication outputs** write the back-drills as their own Excellon file per face and must-not-cut layer (`<board>-Backdrill-bottom-3-4.drl`: non-plated, controlled-depth, each tool's depth from its face), and the fabrication drawing adds a note per file, for example:
+
+> Back-drill 4 holes from the bottom face with a 0.500 mm drill, 0.816 mm deep; must not cut layer 2 (In1.Cu); stub left at most 0.200 mm
+
+### Return paths over plane splits
+
+A controlled line's return current flows in its reference plane, under the track. Where the plane has a gap, or the track crosses from one pour to another of a different net, the return current detours around the gap: the line sees a step in impedance and the loop it forms radiates.
+
+DRC checks each track of a net with an `impedance` or `diff_impedance` target against its reference planes: the copper layers next to it in the stack that carry a pour. It walks the track's centreline in 0.1 mm steps and reports `return-path` where:
+
+- the pour under the track changes net (a split: `` `USB_DP` on F.Cu crosses a split in its reference plane In1.Cu (`GND` to `+3V3`) ``), marked where the first pour ends;
+- the track runs over no pour for longer than `return_gap_max` (0.5 mm when unset), marked where the gap starts. The default is longer than a via's antipad, so a track's own via doesn't count.
+
+```circuit.layout fragment
+net_class usb = { diff_impedance = 90, return_gap_max = 1 mm }
+rule debug_uart = { select = ":net(UART_TX)", return_path = true }
+rule rf_out = { select = ":net(RF_OUT)", return_path = false }
+```
+
+`return_path = true` checks a net with no impedance target; `return_path = false` turns the check off. To fix a finding, route the line over one continuous pour or move the split. Where a stitching capacitor across the split carries the return current, turn the check off for that net.
 
 ### Cross-sections for field-solved impedance
 
