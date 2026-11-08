@@ -50,12 +50,14 @@ impl FeaObjectDetails {
                     FeaSymbolKind::Mesh,
                     &study.mesh.mesh_id,
                 )?);
-                dependencies.push(declaration(
-                    &study.model.model.module_path,
-                    FeaSymbolKind::Model,
-                    &study.model.model.model_id,
-                )?);
-                for argument in &study.model.arguments {
+                if let Some(model) = &study.model {
+                    dependencies.push(declaration(
+                        &model.model.module_path,
+                        FeaSymbolKind::Model,
+                        &model.model.model_id,
+                    )?);
+                }
+                for argument in study.model.iter().flat_map(|model| &model.arguments) {
                     if let AuthoredModelArgumentValue::Constant(AuthoredInputValue::Material(
                         material,
                     )) = &argument.value

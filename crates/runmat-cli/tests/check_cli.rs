@@ -242,9 +242,9 @@ fn canonical_fea_documentation_examples_check_cleanly() {
     }
 }
 
-// The trace-impedance example is written in its final form. `runmat check` rejects it until
-// `electromagnetic line_parameters` and the `cross_section` geometry land (ledger rows
-// electromagnetic.line_parameters and electromagnetic.cross_section_geometry). When it starts
+// The trace-impedance example is written in its final form. Its `cross_section` geometries,
+// triangle meshes and model-less studies lower; `runmat check` rejects it until the
+// line-parameter outputs land (ledger rows electromagnetic.line_parameters.*). When it starts
 // checking, move it into `canonical_fea_documentation_examples_check_cleanly`.
 #[test]
 fn trace_impedance_example_waits_for_the_line_parameters_procedure() {
@@ -262,8 +262,11 @@ fn trace_impedance_example_waits_for_the_line_parameters_procedure() {
     );
     assert!(!text.trim().is_empty(), "{path}: check failed without a diagnostic");
     // Each rejection names the ledger row that owns it.
+    assert!(
+        !text.contains("cross_section_geometry") && !text.contains("fea.semantic.mesh"),
+        "{path}: the cross-section geometry should lower\n{text}"
+    );
     for id in [
-        "pending:electromagnetic.cross_section_geometry",
         "pending:electromagnetic.line_parameters.impedance",
         "pending:electromagnetic.line_parameters.differential_pair",
     ] {

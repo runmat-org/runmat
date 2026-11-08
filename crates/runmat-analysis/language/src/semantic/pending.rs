@@ -19,7 +19,6 @@ pub const SIGNAL_HARMONIC_NONCONSTANT_VALUE: &str = "signal.harmonic-nonconstant
 pub const UNIT_SIEMENS: &str = "language.unit.siemens";
 pub const PLASTIC_LAW_IDENTIFIER: &str = "language.plastic-law-identifier";
 pub const OUTPUT_MODE_LOCATION: &str = "output.mode-location";
-pub const CROSS_SECTION_GEOMETRY: &str = "electromagnetic.cross_section_geometry";
 pub const LINE_IMPEDANCE: &str = "electromagnetic.line_parameters.impedance";
 pub const LINE_EFFECTIVE_PERMITTIVITY: &str = "electromagnetic.line_parameters.effective_permittivity";
 pub const LINE_DELAY: &str = "electromagnetic.line_parameters.delay";

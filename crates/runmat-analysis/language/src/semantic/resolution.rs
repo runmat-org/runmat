@@ -118,22 +118,29 @@ impl CheckedFeaProgram {
             .map(|model| (model.reference(), model))
             .collect::<BTreeMap<_, _>>();
         let mut models = BTreeMap::new();
-        let mut visiting = BTreeSet::new();
-        collect_model_closure(
-            &study.model.model,
-            &available_models,
-            &mut visiting,
-            &mut models,
-        )?;
-        let root = models.get(&study.model.model).ok_or_else(|| {
-            AnalysisRootResolutionError::MissingModel {
-                module_path: study.model.model.module_path.clone(),
-                model_id: study.model.model.model_id.clone(),
+        match &study.model {
+            Some(instance) => {
+                let mut visiting = BTreeSet::new();
+                collect_model_closure(
+                    &instance.model,
+                    &available_models,
+                    &mut visiting,
+                    &mut models,
+                )?;
+                let root = models.get(&instance.model).ok_or_else(|| {
+                    AnalysisRootResolutionError::MissingModel {
+                        module_path: instance.model.module_path.clone(),
+                        model_id: instance.model.model_id.clone(),
+                    }
+                })?;
+                study.validate(root, geometry)
             }
-        })?;
-        study
-            .validate(root, geometry)
-            .map_err(|error| AnalysisRootResolutionError::InvalidStudy(error.to_string()))?;
+            None => study.validate(
+                &runmat_analysis_core::AuthoredModel::empty(&study.module_path, &study.study_id),
+                geometry,
+            ),
+        }
+        .map_err(|error| AnalysisRootResolutionError::InvalidStudy(error.to_string()))?;
 
         let material_catalog = self
             .materials

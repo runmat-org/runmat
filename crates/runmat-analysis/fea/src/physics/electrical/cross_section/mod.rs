@@ -20,6 +20,7 @@
 //! factored once per dielectric set by the shared sparse Cholesky on the admitted CPU plan.
 //! The first version is lossless: conductor and dielectric loss (R and G per length) are a
 //! separate capability.
+mod authored;
 mod geometry;
 mod lines;
 mod mesh;

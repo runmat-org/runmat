@@ -130,6 +130,9 @@ where
                 limits,
             )
         }
+        GeometryDefinitionSource::CrossSection(_) => Err(GeometryFeatureError::InvalidPlan(
+            "a cross-section is meshed and solved by the transmission-line solver; no geometry kernel materializes it".into(),
+        )),
         GeometryDefinitionSource::Generated(generated) => {
             reject_dependency(dependency.as_ref(), "generated")?;
             let request =

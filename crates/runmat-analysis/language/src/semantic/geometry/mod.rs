@@ -1,4 +1,5 @@
 mod command;
+mod cross_section;
 mod feature;
 mod generated;
 mod regeneration;
@@ -83,32 +84,33 @@ fn definition(
     let construct = named_block(&declaration.statements, "construct");
     let derive = named_block(&declaration.statements, "derive");
     let generated = generated::block(&declaration.statements);
-    if named_block(&declaration.statements, "cross_section").is_some() {
-        error(
-            declaration,
-            declaration.span,
-            format!(
-                "`cross_section` geometry is not yet in the current release{}",
-                super::pending::marker(super::pending::CROSS_SECTION_GEOMETRY)
-            ),
-            diagnostics,
-        );
-        return None;
-    }
+    let section = named_block(&declaration.statements, "cross_section");
     let source_count = usize::from(imported)
         + usize::from(construct.is_some())
         + usize::from(derive.is_some())
-        + usize::from(generated.is_some());
+        + usize::from(generated.is_some())
+        + usize::from(section.is_some());
     if source_count != 1 {
         error(
             declaration,
             declaration.span,
-            "geometry requires exactly one imported, constructed, derived, or generated source",
+            "geometry requires exactly one imported, constructed, derived, generated, or cross_section source",
             diagnostics,
         );
         return None;
     }
-    let source = if imported {
+    let source = if let Some(statements) = section {
+        if declaration.source.is_some() || !regions.is_empty() {
+            error(
+                declaration,
+                declaration.span,
+                "a cross_section geometry has no `from` source and no regions; its traces are named in the section",
+                diagnostics,
+            );
+            return None;
+        }
+        cross_section::source(bound, declaration, statements, diagnostics)?
+    } else if imported {
         if declaration.source.is_some() {
             error(
                 declaration,

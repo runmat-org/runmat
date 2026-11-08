@@ -28,6 +28,9 @@ pub enum GeometryDefinitionSource {
     Constructed(GeometryFeatureGraph),
     Derived(DerivedGeometryDefinition),
     Generated(GeneratedGeometryDefinition),
+    /// A 2D board cross-section, meshed and solved by the transmission-line solver; no
+    /// geometry kernel materializes it.
+    CrossSection(super::CrossSectionDefinition),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -367,6 +370,7 @@ impl GeometryDefinition {
                     .validate(Some(&source.source.geometry_id), &parameters)?;
             }
             GeometryDefinitionSource::Generated(source) => source.validate(&parameters)?,
+            GeometryDefinitionSource::CrossSection(section) => section.validate()?,
         }
         let mut regions = std::collections::BTreeSet::new();
         for region in &self.regions {
