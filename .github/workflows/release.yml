@@ -94,6 +94,7 @@ jobs:
     name: Build ${{ matrix.platform.release_for }}
     env:
       RUNMAT_TELEMETRY_KEY: ${{ secrets.TELEMETRY_INGESTION_KEY }}
+      CARGO_BUILD_JOBS: ${{ matrix.platform.target == 'x86_64-unknown-linux-gnu' && '8' || '1' }}
       # The archive packer is a dev-profile host tool even for release products.
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: '0'
@@ -168,7 +169,7 @@ jobs:
       - name: Restore native artifact build cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: native-artifact-v1-${{ matrix.platform.target }}
+          shared-key: native-artifact-0.7-v2-${{ matrix.platform.target }}
           # The prefix is also part of restore keys: never reuse pre-policy
           # Darwin C/CMake objects whose build scripts do not track this env.
           prefix-key: ${{ runner.os == 'macOS' && 'v1-rust-macos-min11-cmake11' || 'v0-rust' }}

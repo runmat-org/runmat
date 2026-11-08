@@ -53,15 +53,20 @@ class ScientificRoutingTests(unittest.TestCase):
         # A package without a selected target must keep contributing features.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "Cargo.toml").write_text('[workspace]\nmembers=["a", "b"]\nresolver="2"\n')
+            (root / "Cargo.toml").write_text('[workspace]\nmembers=["a", "b", "shared"]\nresolver="2"\n')
+            (root / "shared/src").mkdir(parents=True)
+            (root / "shared/Cargo.toml").write_text('[package]\nname="shared"\nversion="0.1.0"\nedition="2021"\n[features]\nfrom_b=[]\n')
+            (root / "shared/src/lib.rs").write_text('pub fn value() -> u8 { if cfg!(feature="from_b") { 42 } else { 0 } }\n')
             for name in ("a", "b"):
                 member = root / name
                 (member / "src").mkdir(parents=True)
-                (member / "Cargo.toml").write_text(f'[package]\nname="{name}"\nversion="0.1.0"\nedition="2021"\n')
+                features = ', features=["from_b"]' if name == "b" else ''
+                dependency_kind = "dev-dependencies" if name == "b" else "dependencies"
+                (member / "Cargo.toml").write_text(f'[package]\nname="{name}"\nversion="0.1.0"\nedition="2021"\n[{dependency_kind}]\nshared={{path="../shared"{features}}}\n')
                 (member / "src/lib.rs").write_text('pub fn value() -> u8 { 42 }\n')
             (root / "a/tests").mkdir()
             (root / "a/src/main.rs").write_text('fn main() { println!("42"); }\n')
-            (root / "a/tests/only_a.rs").write_text('#[test] fn smoke() { assert_eq!(a::value(), 42); }\n')
+            (root / "a/tests/only_a.rs").write_text('#[test] fn smoke() { assert_eq!(a::value(), 42); assert_eq!(shared::value(), 42); }\n')
             target = root / "target"
             with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target), "CARGO_NET_OFFLINE": "true"}):
                 result = runner.run_batch(["cargo", "test", "-p", "a", "-p", "b", "--test", "only_a"],

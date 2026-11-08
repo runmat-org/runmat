@@ -16,7 +16,8 @@ workspace package. Long scientific cohorts use the filters declared in
 
 The Rust test driver links integration targets in batches of four, executes
 each batch, and releases its completed test executables in the exclusive CI
-target directory. Dependency libraries remain available to later batches.
+target directory. Dependency libraries remain available to later batches and
+are cached per platform/lane at a stable path for subsequent CI runs.
 Each Linux group owns a mode-0700 runtime directory for its process tree;
 the directory stays live through all batches and cold-reopen tests.
 Standalone benchmark programs run when the driver receives `--benchmark-smokes`.

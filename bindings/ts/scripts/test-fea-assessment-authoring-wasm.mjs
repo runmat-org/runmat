@@ -39,7 +39,7 @@ async function qualify(filesystem, providerName) {
     await filesystem.writeFile("/runmat.toml", encoder.encode('[package]\nname = "browser-assessment-qualification"\n[sources]\nroots = ["."]\n'));
     await filesystem.writeFile("/study.fea", encoder.encode(source));
     await filesystem.writeFile("/verify.m", encoder.encode(functionSource));
-    const session = await initRunMat({ enableGpu: false, enableJit: false, telemetryConsent: false, fsProvider: filesystem, wasmModule });
+    const session = await initRunMat({ applicationSettings: "isolatedMemory", enableGpu: false, enableJit: false, telemetryConsent: false, fsProvider: filesystem, wasmModule });
     const cache = await createIndexedDbPackageCache({ dbName: `assessment-functions-${crypto.randomUUID()}` });
     const project = await createBrowserProjectSession({ session, filesystem, packageCache: cache.provider, gitGateway: { baseUrl: "http://127.0.0.1:9" } });
     try {

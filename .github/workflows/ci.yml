@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -44,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -146,18 +146,21 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
       # Bound concurrent compiler/linker working sets on the smaller Windows
       # runner. Linux's 16-core lane has more memory for parallel compilation.
-      CARGO_BUILD_JOBS: ${{ startsWith(matrix.name, 'windows-') && '2' || startsWith(matrix.name, 'macos-') && '4' || '8' }}
+      # All-target quality checks can type-check several large roots together.
+      CARGO_BUILD_JOBS: ${{ matrix.task == 'quality' && '2' || startsWith(matrix.name, 'windows-') && '2' || startsWith(matrix.name, 'macos-') && '4' || '8' }}
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: ${{ matrix.task == 'quality' && '0' || '1' }}
 
       - name: Isolate Cargo build artifacts
         shell: bash
         run: |
           set -euo pipefail
-          target_dir="${RUNNER_TEMP}/runmat-ci-${GITHUB_RUN_ID}-${MATRIX_NAME}"
+          # Every matrix job owns its runner and checkout. Use the cache
+          # action's default workspace target path for its retained libraries.
+          target_dir="${GITHUB_WORKSPACE}/target"
           echo "CARGO_TARGET_DIR=${target_dir}" >> "${GITHUB_ENV}"
 
       - uses: dtolnay/rust-toolchain@1.90.0
@@ -174,10 +177,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # The full all-feature target tree is larger than a practical CI
-          # cache. Cache registries and git dependencies while keeping build
-          # artifacts local to each quality/test lane.
-          cache-targets: false
+          # Completed root test binaries are reclaimed after each batch.
+          # Keep the remaining libraries at a stable, lane-specific path.
+          shared-key: ordinary-0.7-v1-${{ matrix.name }}
+          cache-workspace-crates: true
+          cache-on-failure: true
 
       - name: Install Linux native dependencies
         if: runner.os == 'Linux'
@@ -239,6 +243,17 @@ jobs:
         if: runner.os == 'Windows' && matrix.needs_occt
         shell: pwsh
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target x86_64-pc-windows-msvc
+
+      - name: Select native Perl for Windows quality builds
+        if: matrix.name == 'windows-quality'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (-not (Test-Path -LiteralPath $perl)) { throw 'Strawberry Perl was not installed' }
+          & $perl -MLocale::Maketext::Simple -MIPC::Cmd -e 1
+          if ($LASTEXITCODE -ne 0) { throw 'Native Perl lacks the OpenSSL build modules' }
+          "OPENSSL_SRC_PERL=$perl" >> $env:GITHUB_ENV
 
       - name: Format
         if: matrix.task == 'quality' && runner.os != 'Windows'
@@ -446,11 +461,11 @@ jobs:
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
           - release_for: macos-x86_64
-            os: warp-macos-26-arm64-6x
+            os: warp-macos-26-arm64-12x
             target: x86_64-apple-darwin
             bin: runmat
           - release_for: macos-aarch64
-            os: warp-macos-26-arm64-6x
+            os: warp-macos-26-arm64-12x
             target: aarch64-apple-darwin
             bin: runmat
           - release_for: linux-x86_64
@@ -471,7 +486,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Resolve branch artifact identity
         if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
@@ -497,6 +512,12 @@ jobs:
         if: runner.os == 'macOS'
         run: bash scripts/ci-install-macos-cross-dependencies.sh "${{ matrix.platform.target }}"
 
+      - name: Set macOS product cache deployment policy
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          printf '%s\n' 'MACOSX_DEPLOYMENT_TARGET=11.0' 'CMAKE_OSX_DEPLOYMENT_TARGET=11.0' >> "$GITHUB_ENV"
+
       - name: Restore Windows native dependency cache
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         uses: actions/cache@v5
@@ -516,7 +537,9 @@ jobs:
       - name: Restore native artifact build cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: native-artifact-v1-${{ matrix.platform.target }}
+          shared-key: native-artifact-0.7-v2-${{ matrix.platform.target }}
+          prefix-key: ${{ runner.os == 'macOS' && 'v1-rust-macos-min11-cmake11' || 'v0-rust' }}
+          env-vars: MACOSX_DEPLOYMENT_TARGET CMAKE_OSX_DEPLOYMENT_TARGET
           cache-workspace-crates: true
           cache-on-failure: true
 
