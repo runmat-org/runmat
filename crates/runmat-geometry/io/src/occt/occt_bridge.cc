@@ -30,6 +30,9 @@
 #include <Poly_Triangulation.hxx>
 #include <Quantity_Color.hxx>
 #include <ShapeAnalysis_Edge.hxx>
+#include <ShapeFix_Edge.hxx>
+#include <BRep_TEdge.hxx>
+#include <BRep_TVertex.hxx>
 #include <TopoDS_Compound.hxx>
 #include <StepShape_AdvancedFace.hxx>
 #include <StepShape_EdgeCurve.hxx>
@@ -1280,19 +1283,78 @@ static void strip_free_wireframe(CadDocument& document) {
 
 // Edge tolerances written by CAD exporters bound the gap between an edge's 3D curve and its
 // pcurves only at the writer's control points (OCCT checks 23), and exports often understate it.
-// RunMat's curve, surface and validation stages rely on the edge tolerance continuously, so each
-// understated tolerance is raised to the gap measured at dense control points plus a 5% margin,
-// as OCCT's own shape healing does. A gap is admitted when it is at most ten times the written
-// tolerance or at most kAdmissibleEdgeGapM (1 um), whichever is larger. The absolute bound keeps
-// the rule meaningful for writers that stamp a nominal tolerance near the kernel's confusion
-// distance: an exported EV battery pack writes 0.9 nm on every edge while its B-spline pcurves
-// sit 8-13 nm off their 3D curves, ordinary for real CAD. Larger gaps are real defects and are
-// left for validation to report.
+// RunMat's curve, surface, validation and Tet10 stages hold every pcurve image to its edge's
+// tolerance, so import measures each edge's gap at dense control points and settles it here:
+//
+// 1. An edge whose measured gap exceeds its written tolerance has its pcurves rebuilt against
+//    the 3D curve (the SameParameter repair of OCCT shape healing), and the gap is measured again.
+//    The repair keeps the 3D curve and adopts rebuilt pcurves only when they lie closer.
+// 2. A remaining gap within the request's geometric tolerance (`admissible_edge_gap_m`, the
+//    requested deviation of the import) is admitted: the edge's tolerance, and its vertices', are
+//    raised to the measured gap plus a 5% margin. Every later stage reads that one admitted edge
+//    tolerance.
+// 3. A gap larger than the request's tolerance is a defect. The edge keeps its written tolerance
+//    and the record says so, so the stage that evaluates the edge rejects it.
+//
+// Each settled edge is recorded with its gap before and after the repair and the admitted
+// tolerance, in the import's edge tolerance admissions.
 
-static void admit_measured_edge_tolerances(const TopoDS_Shape& shape, const OcctImportOptions& options) {
+namespace {
+
+struct EdgeToleranceAdmission {
+  gp_Pnt start;
+  gp_Pnt middle;
+  gp_Pnt end;
+  double written = 0.0;
+  double gap_before = 0.0;
+  double gap_after = 0.0;
+  double admitted = 0.0;
+  bool repaired = false;
+  bool within_bound = false;
+};
+
+double measured_edge_gap(const TopoDS_Edge& edge) {
+  ShapeAnalysis_Edge analysis;
+  Standard_Real deviation = 0.0;
+  analysis.CheckSameParameter(edge, deviation, 101);
+  return deviation;
+}
+
+void set_edge_tolerance(const TopoDS_Edge& edge, double tolerance) {
+  Handle(BRep_TEdge) tedge = Handle(BRep_TEdge)::DownCast(edge.TShape());
+  tedge->Tolerance(tolerance);
+  edge.TShape()->Modified(Standard_True);
+}
+
+void set_vertex_tolerance(const TopoDS_Vertex& vertex, double tolerance) {
+  Handle(BRep_TVertex) tvertex = Handle(BRep_TVertex)::DownCast(vertex.TShape());
+  tvertex->Tolerance(tolerance);
+  vertex.TShape()->Modified(Standard_True);
+}
+
+std::vector<TopoDS_Vertex> edge_vertices(const TopoDS_Edge& edge) {
+  std::vector<TopoDS_Vertex> vertices;
+  for (TopoDS_Iterator iterator(edge, Standard_False, Standard_False); iterator.More();
+       iterator.Next()) {
+    if (iterator.Value().ShapeType() == TopAbs_VERTEX) {
+      vertices.push_back(TopoDS::Vertex(iterator.Value()));
+    }
+  }
+  return vertices;
+}
+
+} // namespace
+
+static std::vector<EdgeToleranceAdmission> admit_measured_edge_tolerances(
+    const TopoDS_Shape& shape,
+    const OcctImportOptions& options) {
+  if (!std::isfinite(options.admissible_edge_gap_m) || options.admissible_edge_gap_m < 0.0) {
+    throw std::runtime_error("OCCT admissible edge gap must be finite and non-negative");
+  }
+  const double bound = options.admissible_edge_gap_m / options.step_coordinate_unit_m;
+  std::vector<EdgeToleranceAdmission> admissions;
   TopTools_IndexedMapOfShape edges;
   TopExp::MapShapes(shape, TopAbs_EDGE, edges);
-  ShapeAnalysis_Edge analysis;
   BRep_Builder builder;
   for (Standard_Integer index = 1; index <= edges.Extent(); ++index) {
     if ((index & 63) == 0) {
@@ -1302,24 +1364,50 @@ static void admit_measured_edge_tolerances(const TopoDS_Shape& shape, const Occt
     if (BRep_Tool::Degenerated(edge)) {
       continue;
     }
-    Standard_Real deviation = 0.0;
-    analysis.CheckSameParameter(edge, deviation, 101);
     const double written = BRep_Tool::Tolerance(edge);
-    const double required = deviation * 1.05;
-    const double admissible =
-        std::max(10.0 * written, kAdmissibleEdgeGapM / options.step_coordinate_unit_m);
-    if (!std::isfinite(required) || required <= written || deviation > admissible) {
+    const double before = measured_edge_gap(edge);
+    if (!std::isfinite(before) || before * 1.05 <= written) {
       continue;
     }
-    builder.UpdateEdge(edge, required);
-    for (TopoDS_Iterator vertices(edge, Standard_False, Standard_False); vertices.More();
-         vertices.Next()) {
-      if (vertices.Value().ShapeType() == TopAbs_VERTEX &&
-          BRep_Tool::Tolerance(TopoDS::Vertex(vertices.Value())) < required) {
-        builder.UpdateVertex(TopoDS::Vertex(vertices.Value()), required);
+    EdgeToleranceAdmission admission;
+    admission.written = written;
+    admission.gap_before = before;
+
+    // Rebuild the pcurves against the 3D curve. The repair may raise edge and vertex tolerances
+    // itself; they are reset below so that only the admission rule sets them.
+    const std::vector<TopoDS_Vertex> vertices = edge_vertices(edge);
+    std::vector<double> vertex_tolerances;
+    for (const TopoDS_Vertex& vertex : vertices) {
+      vertex_tolerances.push_back(BRep_Tool::Tolerance(vertex));
+    }
+    builder.SameParameter(edge, Standard_False);
+    Handle(ShapeFix_Edge) repair = new ShapeFix_Edge;
+    repair->FixSameParameter(edge, written);
+    builder.SameParameter(edge, Standard_True);
+    const double after = measured_edge_gap(edge);
+    admission.gap_after = std::isfinite(after) ? after : before;
+    admission.repaired = admission.gap_after < before;
+    for (std::size_t vertex = 0; vertex < vertices.size(); ++vertex) {
+      set_vertex_tolerance(vertices[vertex], vertex_tolerances[vertex]);
+    }
+
+    const double required = admission.gap_after * 1.05;
+    admission.within_bound = admission.gap_after <= bound;
+    admission.admitted = admission.within_bound ? std::max(written, required) : written;
+    set_edge_tolerance(edge, admission.admitted);
+    for (const TopoDS_Vertex& vertex : vertices) {
+      if (BRep_Tool::Tolerance(vertex) < admission.admitted) {
+        builder.UpdateVertex(vertex, admission.admitted);
       }
     }
+
+    BRepAdaptor_Curve curve(edge);
+    admission.middle = curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
+    admission.start = curve.Value(curve.FirstParameter());
+    admission.end = curve.Value(curve.LastParameter());
+    admissions.push_back(admission);
   }
+  return admissions;
 }
 
 OcctExactShapePayload import_exact_cad_bytes(
@@ -1340,7 +1428,8 @@ OcctExactShapePayload import_exact_cad_bytes(
   BRepTools::Clean(document.shape);
   check_cancelled(options);
   strip_free_wireframe(document);
-  admit_measured_edge_tolerances(document.shape, options);
+  const std::vector<EdgeToleranceAdmission> edge_admissions =
+      admit_measured_edge_tolerances(document.shape, options);
   check_cancelled(options);
 
   std::array<std::uint8_t, 32> original_geometry_digest{};
@@ -1514,6 +1603,25 @@ OcctExactShapePayload import_exact_cad_bytes(
   result.displacement_proposed_x = displacement_proposed[0];
   result.displacement_proposed_y = displacement_proposed[1];
   result.displacement_proposed_z = displacement_proposed[2];
+  for (const EdgeToleranceAdmission& admission : edge_admissions) {
+    OcctEdgeToleranceAdmissionPayload payload;
+    payload.start_x = admission.start.X();
+    payload.start_y = admission.start.Y();
+    payload.start_z = admission.start.Z();
+    payload.middle_x = admission.middle.X();
+    payload.middle_y = admission.middle.Y();
+    payload.middle_z = admission.middle.Z();
+    payload.end_x = admission.end.X();
+    payload.end_y = admission.end.Y();
+    payload.end_z = admission.end.Z();
+    payload.written_tolerance = admission.written;
+    payload.gap_before = admission.gap_before;
+    payload.gap_after = admission.gap_after;
+    payload.admitted_tolerance = admission.admitted;
+    payload.repaired = admission.repaired;
+    payload.within_bound = admission.within_bound;
+    result.edge_tolerance_admissions.push_back(payload);
+  }
   for (const ExactHealingMutation::Relation& relation : healing_relations) {
     OcctHealingRelationPayload payload;
     switch (relation.kind) {

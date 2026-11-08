@@ -56,6 +56,11 @@ mod evaluator_trim;
     any(not(target_arch = "wasm32"), target_os = "emscripten"),
     feature = "occt-native"
 ))]
+mod edge_tolerance_admission;
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod exact_healing_projection;
 #[cfg(all(
     any(not(target_arch = "wasm32"), target_os = "emscripten"),
