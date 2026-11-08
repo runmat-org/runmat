@@ -21,14 +21,14 @@ impl ObservationPublicationCatalog {
             // They are structural estimates; no numerical field payload is reconstructed.
             // Request identity validation rederives one expected plan while this plan and
             // every source selection remain live. Charge both owners explicitly.
-            let plan_bytes = profile_serialized(&plan, LIMITS)
+            let plan_bytes = profile_serialized(&plan, PROFILE_LIMITS)
                 .map_err(invalid)?
                 .materialization_resident_bytes_estimate;
             let mut bytes = add(plan_bytes, plan_bytes)?;
             for profile in [
-                profile_serialized(source, LIMITS),
-                profile_serialized(field, LIMITS),
-                profile_serialized(evidence, LIMITS),
+                profile_serialized(source, PROFILE_LIMITS),
+                profile_serialized(field, PROFILE_LIMITS),
+                profile_serialized(evidence, PROFILE_LIMITS),
             ] {
                 bytes = add(
                     bytes,
