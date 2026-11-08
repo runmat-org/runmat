@@ -531,16 +531,31 @@ fn atan2_wgpu_matches_cpu_elementwise() {
     match cpu {
         Value::Tensor(ct) => {
             assert_eq!(ct.shape(), gathered.shape());
-            let tol = match provider.precision() {
-                runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-                runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
-            };
-            for (actual, expect) in gathered
+            let precision = provider.precision();
+            for (index, (actual, expect)) in gathered
                 .materialize_f64()
                 .iter()
                 .zip(ct.materialize_f64().iter())
+                .enumerate()
             {
-                assert!((actual - expect).abs() < tol, "{actual} vs {expect}");
+                let tol = match precision {
+                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                    runmat_accelerate_api::ProviderPrecision::F32 if *expect == 0.0 => 0.0,
+                    runmat_accelerate_api::ProviderPrecision::F32 => {
+                        // WGSL permits 4096 ULP for normal, finite atan2 inputs.
+                        // These nonzero fixtures are in that domain. Include one
+                        // reference-rounding ULP when comparing against f64.
+                        // https://www.w3.org/TR/WGSL/#floating-point-accuracy
+                        let reference = (*expect as f32).abs();
+                        let ulp = f64::from(f32::from_bits(reference.to_bits() + 1))
+                            - f64::from(reference);
+                        4097.0 * ulp
+                    }
+                };
+                assert!(
+                    (actual - expect).abs() <= tol,
+                    "index {index}: GPU {actual} vs CPU {expect}, precision {precision:?}, tolerance {tol}"
+                );
             }
             let values = gathered.materialize_f64();
             assert_eq!(values[0].to_bits(), 0.0f64.to_bits());

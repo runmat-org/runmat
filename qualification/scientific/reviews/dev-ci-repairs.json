@@ -7,7 +7,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "14c90edfac4c0499a6894495923fadf278a7e41d59d9d3ceb2d694fd65b22ea7",
+    "sha256": "e957f24453e8fe06321ff6a18fef59b2ec6a0aea7ded1c9f206f724db3e8212d",
     "files": 24831,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -17,6 +17,20 @@
     "driver-recovery-physics"
   ],
   "changed_inputs": [
+    {
+      "path": "crates/runmat-runtime/src/builtins/math/trigonometry/atan2/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "cbe406879d17d0b3f52c9a798bfdc39f62ff08e3"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "38c43c012d6afce17988abd8575ddea6b1597431"
+      ],
+      "reason": "Only the cfg(test) atan2 GPU witness changes. Windows run 42483299272/job 128740898953 reports GPU 0.7854096293449402 versus CPU 0.7853981633974483, exceeding the old absolute 1e-5 bound. The F32 shader delegates nonzero inputs to WGSL atan2, whose specified accuracy is 4096 ULP for the normal finite fixture inputs. The revised comparison uses that bound plus one reference-rounding ULP; F64 remains 1e-12, zero outputs are exact, and signed-zero bits and shape checks remain. Failures include index, precision and tolerance. The test module is excluded from both measured scientific harnesses; runtime/shader implementation, scientific thresholds and original artifact identities are unchanged. Revised GPU-witness execution is pending."
+    },
     {
       "path": "crates/runmat-runtime/src/builtins/array/creation/logspace.rs",
       "before": [
