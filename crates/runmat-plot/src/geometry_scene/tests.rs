@@ -645,6 +645,57 @@ fn presentation_region_annotations_emit_typed_marker_and_symbol_nodes() {
 }
 
 #[test]
+fn a_hidden_region_draws_no_annotations() {
+    let chunk = GeometrySceneChunk::indexed_triangles(
+        "face_chunk",
+        vec![
+            vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+        ],
+        vec![0, 1, 2],
+        cad_default_material(),
+    )
+    .with_regions(vec![GeometrySceneRegion::new(
+        "loaded_face",
+        Some("Loaded face".to_string()),
+        Some("cad-face".to_string()),
+        vec![GeometrySceneTriangleRange::new(0, 1)],
+    )]);
+    let scene = GeometryScene::new("scene", 1, vec![chunk]);
+    let presentation = |hidden: Vec<String>| GeometryScenePresentation {
+        region_annotations: vec![
+            GeometrySceneRegionAnnotation {
+                region_id: "loaded_face".to_string(),
+                color: None,
+                kind: GeometrySceneAnnotationKind::InitialCondition,
+                label: Some("initial".to_string()),
+                direction: None,
+                size: Some(18.0),
+            },
+            GeometrySceneRegionAnnotation {
+                region_id: "loaded_face".to_string(),
+                color: None,
+                kind: GeometrySceneAnnotationKind::Label,
+                label: Some("feature.face".to_string()),
+                direction: None,
+                size: None,
+            },
+        ],
+        hidden_region_ids: hidden,
+        ..Default::default()
+    };
+    let markers = |p: &GeometryScenePresentation| {
+        scene.nodes_with_presentation(p).iter().any(|node| node.name == "FEA region markers")
+    };
+    let shown = presentation(Vec::new());
+    assert!(markers(&shown) && shown.shows_region("loaded_face"));
+    let hidden = presentation(vec!["loaded_face".to_string()]);
+    assert!(!markers(&hidden), "a hidden region keeps its marker");
+    assert!(!hidden.shows_region("loaded_face"), "a hidden region keeps its label");
+}
+
+#[test]
 fn face_annotations_use_one_support_and_a_distributed_load_group() {
     let chunk = GeometrySceneChunk::indexed_triangles(
         "rectangular_face",

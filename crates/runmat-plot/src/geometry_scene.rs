@@ -330,6 +330,12 @@ impl GeometryScenePresentation {
             || self.active_section().is_some()
     }
 
+    /// Whether a region's annotations (labels, markers, load arrows) are drawn: a hidden
+    /// region takes its annotations with it.
+    pub(crate) fn shows_region(&self, region_id: &str) -> bool {
+        !self.hidden_region_ids.iter().any(|id| id == region_id)
+    }
+
     pub(crate) fn resolves_owner_visibility(&self) -> bool {
         self.hidden_owner_node_ids.is_some() || self.isolated_owner_node_ids.is_some()
     }

@@ -114,7 +114,9 @@ impl GeometryScene {
         let mut stroke_vertices = Vec::new();
         let arrow_length = annotation_arrow_length(self.bounds);
         for annotation in &presentation.region_annotations {
-            if annotation.kind == GeometrySceneAnnotationKind::Label {
+            if annotation.kind == GeometrySceneAnnotationKind::Label
+                || !presentation.shows_region(&annotation.region_id)
+            {
                 continue;
             }
             for chunk in &self.chunks {

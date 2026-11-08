@@ -75,6 +75,7 @@ impl PlotRenderer {
         self.geometry_presentation
             .region_annotations
             .iter()
+            .filter(|annotation| self.geometry_presentation.shows_region(&annotation.region_id))
             .filter_map(|annotation| {
                 let label = annotation.label.as_deref().unwrap_or("").trim();
                 if label.is_empty() && annotation.direction.is_none() {
