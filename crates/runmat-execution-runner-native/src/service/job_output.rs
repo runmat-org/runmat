@@ -228,7 +228,16 @@ impl DurableCallerOutput {
         }
         if !progress {
             let lookup = bridge.raw_output_attempt(handle.clone(), self.ordinal)?;
+            // The producer retires the attempt's output before the attempt turns terminal, but
+            // the page above was read before this lookup. Read it again: a retirement that
+            // preceded the terminal state is visible now, and the next pump consumes it.
             if lookup.state.is_terminal() && !page.retired {
+                let retired_since = bridge
+                    .raw_output_page(handle.clone(), active.attempt_id, self.cursor)?
+                    .is_some_and(|page| page.retired);
+                if retired_since {
+                    return Ok(true);
+                }
                 return Err(ExecutionServiceError::WorkerLost(
                     "durable output has no verified process retirement".into(),
                 ));
