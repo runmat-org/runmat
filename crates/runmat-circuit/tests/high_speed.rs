@@ -248,3 +248,23 @@ fn a_signal_through_a_series_resistor_counts_both_sides_and_the_parts_delay() {
     assert!((sig.timing.length - (t[&dq].length + t[&dqr].length)).abs() < 1.0);
     assert!((sig.timing.delay - (t[&dq].delay + t[&dqr].delay + 8.0)).abs() < 1e-9);
 }
+
+/// PCB-42: the board study's `pcb` source carries each controlled line's cross-section, with
+/// its stack between the planes and the closed form to compare a field solve with.
+#[test]
+fn the_pcb_source_carries_each_controlled_lines_cross_section() {
+    let mut b = board();
+    let rf = b.add_net("RF", Some("rf"));
+    class(&mut b, "rf", vec![(props::IMPEDANCE, RuleValue::Int(50))]);
+    let (r, _) = checked(&b, &[]);
+    let w = r.width_on(&b, Some(rf), 1, 0);
+    b.add_track(Some(rf), 1, w, Point::mm(5.0, 10.0), Point::mm(25.0, 10.0));
+    let src = runmat_circuit::fea::pcb_source(&b, None, None, &Default::default());
+    assert_eq!(src.lines.len(), 1, "{:#?}", src.lines);
+    let line = &src.lines[0];
+    assert_eq!((line.region.as_str(), line.kind), ("pcb/hs/line/RF/In1.Cu", "stripline"));
+    assert_eq!((line.plane_above.as_deref(), line.plane_below.as_deref()), (Some("F.Cu"), Some("In2.Cu")));
+    assert_eq!(line.stack.first().unwrap().kind, "copper");
+    assert_eq!(line.stack.last().unwrap().kind, "copper");
+    assert!((line.z0 - 50.0).abs() < 0.5 && line.gap.is_none() && (line.length - 0.02).abs() < 1e-9, "{line:?}");
+}

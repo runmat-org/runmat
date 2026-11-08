@@ -136,6 +136,9 @@ pub struct PcbFeaSource {
     pub components: Vec<ComponentRegion>,
     /// Region name → dissipated power, W (components with known power only).
     pub power_map: BTreeMap<String, f64>,
+    /// Controlled-impedance lines' cross-sections, for a field-solved impedance study
+    /// ([`crate::high_speed::cross_section`]).
+    pub lines: Vec<crate::high_speed::cross_section::CrossSection>,
 }
 
 /// Builds the FEA source. `op_point` gives per-designator dissipation from a SPICE operating
@@ -147,6 +150,15 @@ pub fn pcb_source(
     op_point: &BTreeMap<String, f64>,
 ) -> PcbFeaSource {
     let base = format!("pcb/{}", segment(&board.name));
+    // Declared pairs, as board nets.
+    let pairs: Vec<(crate::layout::NetId, crate::layout::NetId)> = nl
+        .map(|nl| {
+            nl.diff_pairs
+                .iter()
+                .filter_map(|d| Some((board.net(&nl.nets.get(d.p)?.name)?, board.net(&nl.nets.get(d.n)?.name)?)))
+                .collect()
+        })
+        .unwrap_or_default();
     let reg = |p: &str| format!("{base}/{p}");
     let n = board.copper_count();
     let board_area = board.outline.area().max(1.0);
@@ -325,5 +337,6 @@ pub fn pcb_source(
         vias: vias.into_values().collect(),
         components,
         power_map,
+        lines: crate::high_speed::cross_section::cross_sections(board, &pairs),
     }
 }

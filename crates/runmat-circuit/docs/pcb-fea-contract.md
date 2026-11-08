@@ -25,6 +25,19 @@ Implementation: `runmat-circuit::fea` (`pcb_source`, `PcbFeaSource`) on `cad/fou
   - power in watts, and where that number came from;
   - θJC, θJB and Tj,max from the part library.
 - **Power map**: region name → watts, for components whose power is known.
+- **Lines** (field-solved impedance, PCB-42): one cross-section per controlled-impedance line
+  (a net, or a declared pair, whose net class has an `impedance` or `diff_impedance` target)
+  per copper layer and width it is routed at. Each carries:
+  - its region `pcb/<board>/line/<net>/<layer>` (a pair: `<p>+<n>`) and canonical ID;
+  - the nets, the class, the signal layer and its kind (`microstrip`, `stripline`);
+  - the conductor's bottom width, a pair's edge-to-edge gap, the copper thickness and the
+    class's `etch_factor` (absent: rectangular);
+  - the reference planes above and below (copper layer names; none on a microstrip's open
+    side);
+  - the stack rows from the plane above (or the solder mask over an outer layer) to the plane
+    below: kind, `z_top`, thickness, Dk and Df;
+  - the closed-form Z0, Zdiff and delay (ps/mm), for the study to report beside its solve;
+  - the routed length on that layer at that width.
 
 ## Region naming
 
@@ -83,6 +96,9 @@ ECO rename changes the region name. A study that refers to the old name gets a
   - warpage.
 - "Not yet in current release" flags until those families ship.
 - A `.fea` form: `source pcb "board.circuit"`, with regions referenced by the names above.
+- A 2D electrostatic study on a line's cross-section (C, and C0 with every dielectric at
+  vacuum) giving Z0, Zdiff and Zcommon, delay and per-length L and C. Design shows the solved
+  value beside the closed form in the layer-stack view once the study returns it.
 
 ## Open points for FEA
 

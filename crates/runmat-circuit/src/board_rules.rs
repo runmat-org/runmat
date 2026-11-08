@@ -118,6 +118,9 @@ pub mod props {
     pub const THROUGH_PARTS: &str = "through_parts";
     /// A series part's own delay, counted in the signal through it.
     pub const THROUGH_DELAY: &str = "through_delay";
+    /// A net class's copper etch factor (thickness over a side's undercut), for the
+    /// field-solved cross-section ([`crate::high_speed::cross_section`]).
+    pub const ETCH_FACTOR: &str = "etch_factor";
     pub const IMPEDANCE: &str = "impedance";
     /// A pair's differential impedance target, Ω (see [`crate::high_speed::controlled`]).
     pub const DIFF_IMPEDANCE: &str = "diff_impedance";
@@ -722,6 +725,7 @@ impl BoardRules {
         single.register_property(props::MATCH_TOLERANCE, false, None);
         single.register_property(props::THROUGH_PARTS, false, None);
         single.register_property(props::THROUGH_DELAY, false, None);
+        single.register_property(props::ETCH_FACTOR, false, None);
         single.register_property(props::IMPEDANCE, false, None);
         single.register_property(props::DIFF_IMPEDANCE, false, None);
         single.register_property(props::THERMAL_GAP, true, None);
