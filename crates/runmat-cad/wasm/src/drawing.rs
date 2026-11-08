@@ -259,7 +259,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                         models.boms.insert(file.clone(), bom);
                     }
                     models.names.insert(file.clone(), BTreeSet::new());
-                    displays.insert(file.clone(), json!({ "kind": "assembly", "data": display }));
+                    displays.insert(file.clone(), tagged("assembly", display));
                 }
                 Err(_) => problems.push(warn(format!(
                     "{file} doesn't compile, so its views are empty"
@@ -326,12 +326,16 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     // The models as the output carries them (in the browser host, mesh arrays as references to
     // the bytes beside the JSON); the drawing measures and projects their numbers.
     let models_out = displays;
-    let displays: serde_json::Map<String, Value> = models_out.iter().map(|(k, v)| (k.clone(), runmat_cad::display::wire::inlined(v))).collect();
+    // Outside that framed call the models already hold their numbers, and the drawing reads them
+    // in place: a second copy of an assembly's display as JSON values takes tens of megabytes.
+    let inlined: Option<serde_json::Map<String, Value>> =
+        models_out.iter().map(|(k, v)| Some((k.clone(), runmat_cad::display::wire::inlined(v)?))).collect();
+    let displays = inlined.as_ref().unwrap_or(&models_out);
     let index = build_drawing_index(
         &document,
         &models,
         &values::Values {
-            displays: &displays,
+            displays,
             documents: &documents,
         },
     );
@@ -571,19 +575,58 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         o.insert("radii".into(), Value::Object(radii));
         o.insert("normals".into(), Value::Object(normals));
         o.insert("cylinders".into(), Value::Object(cylinders));
-        o.insert("hole_tables".into(), holes::hole_tables(&document, &exact, &displays));
+        o.insert("hole_tables".into(), holes::hole_tables(&document, &exact, displays));
     }
     // The sheets laid out once, here: the Desktop's sheet and every export draw this layout.
-    let layouts = layout::layouts(&data, &displays);
+    let layouts = layout::layouts(&data, displays);
     if let Value::Object(o) = &mut data {
         o.insert("layouts".into(), layouts);
     }
-    json!({
-        "projection": { "kind": "drawing", "data": data },
-        "models": models_out,
-        "diagnostics": problems,
-    })
-    .to_string()
+    // The models' numbers as JSON values and the regenerated parts are done with: free them
+    // before the answer is written, the step that holds the most at once.
+    drop(inlined);
+    drop(exact);
+    drop(documents);
+    let mut answer = serde_json::Map::new();
+    answer.insert("projection".into(), tagged("drawing", data));
+    answer.insert("models".into(), Value::Object(models_out));
+    answer.insert("diagnostics".into(), serde_json::to_value(&problems).unwrap_or(Value::Null));
+    json_text(&Value::Object(answer))
+}
+
+/// `{ "kind": kind, "data": data }`, holding `data` as it is: `json!` would serialize a copy of
+/// it, and a drawing's data and an assembly's display run to hundreds of thousands of values.
+fn tagged(kind: &str, data: Value) -> Value {
+    let mut out = serde_json::Map::new();
+    out.insert("kind".into(), Value::from(kind));
+    out.insert("data".into(), data);
+    Value::Object(out)
+}
+
+/// `value` as compact JSON text, written once into a buffer of its exact size. Growing the
+/// buffer by doubling holds the old and the new buffer while it copies, up to three times the
+/// text (an assembly drawing's text runs to tens of megabytes). One byte more is left for the
+/// NUL the host adds when it hands the text out as a C string.
+fn json_text(value: &Value) -> String {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    if serde_json::to_writer(&mut count, value).is_err() {
+        return value.to_string();
+    }
+    let mut out = Vec::with_capacity(count.0 + 1);
+    match serde_json::to_writer(&mut out, value).map(|()| String::from_utf8(out)) {
+        Ok(Ok(text)) => text,
+        _ => value.to_string(),
+    }
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {

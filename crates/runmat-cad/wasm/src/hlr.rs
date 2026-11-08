@@ -197,8 +197,8 @@ fn boundary(face: &Face) -> BTreeMap<EdgeKey, (P3, P3)> {
 fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64]) {
     for body in bodies.as_array().into_iter().flatten() {
         let base = model.faces.len();
-        let faces = body["faces"].as_array().cloned().unwrap_or_default();
-        for f in &faces {
+        let faces: &[Value] = body["faces"].as_array().map(Vec::as_slice).unwrap_or_default();
+        for f in faces {
             let pos = floats(&f["positions"]);
             let at = |i: usize| -> P3 {
                 transform(t, [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]]).map(|x| x * 1000.0)
@@ -394,7 +394,7 @@ fn model_of(display: &Value) -> Model {
     };
     let data = &display["data"];
     if display["kind"] == "assembly" {
-        let prototypes = data["prototypes"].as_array().cloned().unwrap_or_default();
+        let prototypes: &[Value] = data["prototypes"].as_array().map(Vec::as_slice).unwrap_or_default();
         for occ in data["occurrences"].as_array().into_iter().flatten() {
             let t = floats(&occ["transform"]);
             let Some(proto) = occ["prototype"]

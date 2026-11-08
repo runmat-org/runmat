@@ -130,12 +130,14 @@ pub fn collect<T>(run: impl FnOnce() -> T) -> (T, Vec<u8>) {
 
 /// `value` with each mesh reference written into the active buffer read back as its array of
 /// numbers. Code that reads a display it serialized while [`collect`] runs (a drawing measuring
-/// its models' faces) reads it through this; outside [`collect`] `value` comes back as it is.
-pub fn inlined(value: &serde_json::Value) -> serde_json::Value {
+/// its models' faces) reads it through this. Outside [`collect`] the arrays are already inline,
+/// so there is nothing to read back: `None`, and the caller reads `value` in place rather than
+/// holding a second copy of a large display.
+pub fn inlined(value: &serde_json::Value) -> Option<serde_json::Value> {
     use serde_json::Value;
     SINK.with(|s| {
         let sink = s.borrow();
-        let Some(bytes) = sink.as_ref() else { return value.clone() };
+        let bytes = sink.as_ref()?;
         fn walk(v: &Value, bytes: &[u8]) -> Value {
             match v {
                 Value::Object(o) if o.len() == 1 => {
@@ -159,7 +161,7 @@ pub fn inlined(value: &serde_json::Value) -> serde_json::Value {
                 other => other.clone(),
             }
         }
-        walk(value, bytes)
+        Some(walk(value, bytes))
     })
 }
 

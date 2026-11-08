@@ -50,7 +50,7 @@ pub fn picks(display: &Value, axes: &Axes) -> Value {
     let mut out = Vec::new();
     let mut part = |bodies: &Value, t: Option<&[f64]>, occurrence: Option<&str>| {
         for body in bodies.as_array().into_iter().flatten() {
-            let faces = body["faces"].as_array().cloned().unwrap_or_default();
+            let faces: &[Value] = body["faces"].as_array().map(Vec::as_slice).unwrap_or_default();
             for e in body["edges"].as_array().into_iter().flatten() {
                 let pts = floats(&e["points"]);
                 let points: Vec<f64> = pts
@@ -87,7 +87,7 @@ pub fn picks(display: &Value, axes: &Axes) -> Value {
     };
     let data = &display["data"];
     if display["kind"] == "assembly" {
-        let prototypes = data["prototypes"].as_array().cloned().unwrap_or_default();
+        let prototypes: &[Value] = data["prototypes"].as_array().map(Vec::as_slice).unwrap_or_default();
         for occ in data["occurrences"].as_array().into_iter().flatten() {
             let t = floats(&occ["transform"]);
             let Some(proto) = occ["prototype"].as_u64().and_then(|i| prototypes.get(i as usize)) else { continue };
