@@ -153,11 +153,12 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
             "convert-sheet",
             P,
         )
-        .desc("Make a solid sheet metal from a fixed face and bend edges.")
-        .kw(&["sheet metal", "rip"])
+        .desc("Turn a thin solid into sheet metal: the walls on the fixed face's edges become bends.")
+        .kw(&["sheet metal", "rip", "shell"])
         .inputs(vec![
             pick("fixed", "Fixed face", &[K::Face]),
-            picks("bends", "Bend edges", &[K::Edge]),
+            // Left empty, every edge of the fixed face with a wall on it bends.
+            picks("bends", "Bend edges", &[K::Edge]).optional(),
             length("thickness", "Thickness", 1.5),
             bend_radius(),
         ])

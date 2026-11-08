@@ -158,6 +158,7 @@ impl<'a, 'b> Run<'a, 'b> {
             rules,
             section: Some(sec),
             depth,
+            ..
         }) = self.st.records.get(maker).cloned()
         else {
             return Err(self.not_lowered(id, "partial unfolds and folds of this sheet"));

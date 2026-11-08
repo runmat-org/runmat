@@ -325,15 +325,13 @@ pub enum SheetMetalFeature {
         facets: u32,
         rules: SheetMetalRules,
     },
-    /// A thin solid recognised as sheet metal: the fixed face stays, bend edges become bends,
-    /// rip edges become gaps.
+    /// A thin solid made sheet metal: the fixed face's plate stays, the wall on each bend edge
+    /// of the fixed face becomes a bend and a flat (every walled edge when none are picked),
+    /// and two walls meeting at a corner part there with a square relief.
     ConvertToSheetMetal {
-        body: Reference,
         fixed_face: Reference,
         #[serde(default)]
         bend_edges: Vec<Reference>,
-        #[serde(default)]
-        rip_edges: Vec<Reference>,
         rules: SheetMetalRules,
     },
     /// Extends the flats of the flanges whose faces are picked, and of the flange each one
@@ -505,16 +503,12 @@ impl Params for SheetMetalFeature {
                 rules.visit(v);
             }
             S::ConvertToSheetMetal {
-                body,
                 fixed_face,
                 bend_edges,
-                rip_edges,
                 rules,
             } => {
-                v.reference("body", body);
                 v.reference("fixed_face", fixed_face);
                 v.references("bend_edges", bend_edges);
-                v.references("rip_edges", rip_edges);
                 rules.visit(v);
             }
             S::ClosedCorner { faces, gap, .. } => {

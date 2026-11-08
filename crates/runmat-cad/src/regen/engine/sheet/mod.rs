@@ -26,6 +26,7 @@
 //! curve `j` takes `16 j + 8` plus the bend's own numbers (0 inner and 1 outer face, 2 to 5
 //! its ends). A mitre cut adds 6 (at the chain's earlier corner) or 7 (at the later one).
 
+mod convert;
 mod corners;
 mod forms;
 mod lofted;

@@ -124,13 +124,9 @@ impl<'a, 'b> Run<'a, 'b> {
             }
         };
         // The plate: the base flange's profile, between z = 0 and z = t of its frame.
-        let profile_ref = match self.doc.feature(&maker).map(|f| &f.kind) {
-            Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
-                profile.clone()
-            }
-            _ => return Err(self.not_lowered(id, "bends of this sheet")),
+        let Some(base_plate) = self.plate_profile(i, id, "face", &maker)? else {
+            return Err(self.not_lowered(id, "bends of this sheet"));
         };
-        let base_plate = self.profile(i, id, "face", &profile_ref)?;
         let plate = match &parent {
             Some((_, flat, _)) => flat.clone(),
             None => base_plate.clone(),

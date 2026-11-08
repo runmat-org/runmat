@@ -77,6 +77,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     rules,
                     section,
                     depth,
+                    ..
                 }) => Some((n.maker().clone(), rules.clone(), section.clone(), *depth)),
                 _ => None,
             })
@@ -98,6 +99,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 rules,
                 section,
                 depth,
+                ..
             }) = self.st.records.get(n.maker())
             {
                 return Some((n.maker().clone(), rules.clone(), section.clone(), *depth));
@@ -142,6 +144,7 @@ impl<'a, 'b> Run<'a, 'b> {
                             rules,
                             section: None,
                             depth: 0.0,
+                            plate: None,
                         },
                     );
                     return Ok(op(
@@ -228,6 +231,7 @@ impl<'a, 'b> Run<'a, 'b> {
                         rules,
                         section: Some(sec),
                         depth,
+                        plate: None,
                     },
                 );
                 Ok(op(
@@ -556,9 +560,11 @@ impl<'a, 'b> Run<'a, 'b> {
                 facets,
                 rules,
             } => self.lofted_bend(i, id, profiles, *facets, rules, &simple),
-            SheetMetalFeature::ConvertToSheetMetal { .. } => {
-                Err(self.not_lowered(id, "convert to sheet metal"))
-            }
+            SheetMetalFeature::ConvertToSheetMetal {
+                fixed_face,
+                bend_edges,
+                rules,
+            } => self.convert_to_sheet(i, id, fixed_face, bend_edges, rules, &simple),
             SheetMetalFeature::ClosedCorner {
                 faces,
                 gap,

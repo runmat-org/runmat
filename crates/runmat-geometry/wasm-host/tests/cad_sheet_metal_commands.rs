@@ -246,3 +246,65 @@ fn tabs_reach_through_slots_in_the_other_sheet() {
     // The tabs reach to the wall's far face, 2 mm past the plate's end.
     near(extents(&text)[0], 82.0, 1e-3, "x");
 }
+
+
+/// An 80 x 50 x 25 mm box shelled 1.5 mm thick with its top open: four walls on a floor.
+const SHELLED: &str = "runmat 0.7\nstd 1\n\npart sheet {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])\n        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])\n        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 25 mm)\n    feature hollow = shell(body = feature.body.body, open_faces = [feature.body.face.end], thickness = 1.5 mm)\n}\n";
+
+/// Converting the shelled box about its outer floor: each wall becomes a bend of 1 mm inner
+/// radius and a flat, with the outer faces where they were (the box keeps its 80 x 50 x 25 mm
+/// extents), and at each corner the two walls part with a square relief as wide as a bend's
+/// setback (r + t = 2.5 mm) that also takes the floor's corner. Unfolded, the floor and the four
+/// strips lie flat with four bend lines; folded, the box stands again.
+#[test]
+fn convert_a_shelled_box_to_sheet_metal_and_unfold_it() {
+    let (t, r, k, h) = (1.5, 1.0, 0.44, 25.0);
+    let setback = r + t;
+    let flat = h - setback;
+    // The walls between the corner reliefs.
+    let spans = 2.0 * (80.0 - 2.0 * setback) + 2.0 * (50.0 - 2.0 * setback);
+    let text = edit(SHELLED, "sheet-metal.convert", json!({ "fixed": ["feature.body.face.start"], "bends": [], "thickness": t, "radius": r }));
+    assert!(text.contains("sheet_metal.convert_to_sheet_metal("), "{text}");
+    let e = extents(&text);
+    near(e[0], 80.0, 1e-3, "x");
+    near(e[1], 50.0, 1e-3, "y");
+    near(e[2], 25.0, 1e-3, "z");
+    // The floor stops a setback short of each edge between the reliefs and loses a setback
+    // square at each corner; each bend is a quarter annulus and each flat a 22.5 mm wall.
+    let corners = 4.0 * setback * setback;
+    let floor = t * (80.0 * 50.0 - setback * spans - corners);
+    let bend = std::f64::consts::FRAC_PI_4 * ((r + t) * (r + t) - r * r);
+    near(volume(&text), floor + spans * (bend + t * flat), 0.5, "converted");
+    // Unfolded about the floor's inner face: each strip develops from the edge line, back by the
+    // setback, through the bend allowance and the flat.
+    let fixed = face_names(&text).into_iter().find(|n| n.contains("sheet(plate, ordinal = 1)")).expect("the floor's inner face");
+    let unfolded = edit(&text, "sheet-metal.unfold", json!({ "fixed": [fixed] }));
+    let allowance = std::f64::consts::FRAC_PI_2 * (r + k * t);
+    near(volume(&unfolded), t * (80.0 * 50.0 - corners + spans * (allowance - setback + flat)), 0.5, "the blank");
+    let thin = extents(&unfolded).iter().cloned().fold(f64::INFINITY, f64::min);
+    near(thin, t, 1e-3, "flat");
+    let folded = edit(&unfolded, "sheet-metal.fold", json!({}));
+    let again = extents(&folded);
+    for (k, want) in [80.0, 50.0, 25.0].into_iter().enumerate() {
+        near(again[k], want, 1e-3, "folded back");
+    }
+    let flat_pattern = edit(&text, "sheet-metal.flat-pattern", json!({}));
+    let bodies = compile(&flat_pattern)["display"]["data"]["bodies"].as_array().cloned().unwrap_or_default();
+    // One bend line per wall on each face of the blank, six display numbers each.
+    let numbers: usize = bodies.iter().map(|b| b["bend_lines"].as_array().map_or(0, Vec::len)).sum();
+    assert_eq!(numbers, 4 * 2 * 6, "a bend line for each wall on both faces");
+}
+
+/// A bend edge that has no wall on it is refused by name.
+#[test]
+fn converting_at_an_edge_with_no_wall_is_refused() {
+    let plate = plate();
+    let fixed = face_names(&plate).into_iter().find(|n| n.contains("sheet(plate, ordinal = 1)")).expect("the plate's top face");
+    let request = json!({ "command": "sheet-metal.convert", "values": { "fixed": [fixed], "bends": [], "thickness": 1.5, "radius": 1 } }).to_string();
+    let out = call("edit", &["/p/sheet.part", &plate, "{}", &request]);
+    let text = out["files"][0]["text"].as_str().unwrap_or_default().to_owned();
+    let compiled = call("compile", &["/p/sheet.part", &text, "{}", "{}"]);
+    let messages: Vec<String> = compiled["diagnostics"].as_array().into_iter().flatten().filter_map(|d| d["message"].as_str().map(str::to_owned)).collect();
+    assert!(messages.iter().any(|m| m.contains("nothing bends")), "{messages:?}");
+}
+

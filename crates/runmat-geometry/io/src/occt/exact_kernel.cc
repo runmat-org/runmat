@@ -615,7 +615,16 @@ KBody body_payload(const Tracked& t, const TopoDS_Shape& piece, bool sheet) {
   for (const TopoDS_Face& f : body->faces) {
     KFace kf = face_payload_memo(f);
     const Origins& o = origins_of(t.faces, f);
-    if (o.empty()) incomplete("an output face has no recorded origin");
+    if (o.empty()) {
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(f, props);
+      const gp_Pnt c = props.CentreOfMass();
+      BRepAdaptor_Surface s(f, Standard_False);
+      std::ostringstream m;
+      m << "an output face has no recorded origin (surface type " << int(s.GetType()) << ", centroid "
+        << c.X() << ", " << c.Y() << ", " << c.Z() << ")";
+      incomplete(m.str());
+    }
     push_origins(kf.origins, o);
     kf.kept = t.kept.Contains(f) && o.size() == 1;
     k.faces.push_back(std::move(kf));

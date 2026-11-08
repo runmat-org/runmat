@@ -70,24 +70,59 @@ impl<'a, 'b> Run<'a, 'b> {
             .flatten()
             .map(|n| n.maker())
             .collect();
-        self.doc
-            .features
-            .iter()
-            .filter(|f| {
-                matches!(
-                    self.st.records.get(&f.id),
-                    Some(FeatureRecord::PlateFlange { base, .. }) if base == maker
-                ) && makers.contains(&&f.id)
-            })
-            .map(|f| f.id.clone())
+        let own = matches!(
+            self.st.records.get(maker),
+            Some(FeatureRecord::Sheet { plate: Some(_), .. })
+        )
+        .then(|| maker.clone());
+        own.into_iter()
+            .chain(
+                self.doc
+                    .features
+                    .iter()
+                    .filter(|f| {
+                        matches!(
+                            self.st.records.get(&f.id),
+                            Some(FeatureRecord::PlateFlange { base, .. }) if base == maker
+                        ) && makers.contains(&&f.id)
+                    })
+                    .map(|f| f.id.clone()),
+            )
             .collect()
     }
 
-    fn flange_edges(&self, flanges: &[FeatureId]) -> Vec<PlateFlangeEdge> {
+    /// The outline of plate `maker`: its base flange's profile, or the outline a conversion
+    /// recorded; `None` for another sheet.
+    pub(in crate::regen::engine) fn plate_profile(
+        &mut self,
+        i: usize,
+        id: &FeatureId,
+        param: &str,
+        maker: &FeatureId,
+    ) -> Result<Option<CanonicalProfile>, Halt> {
+        if let Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) =
+            self.doc.feature(maker).map(|f| &f.kind)
+        {
+            let profile = profile.clone();
+            return self.profile(i, id, param, &profile).map(Some);
+        }
+        Ok(match self.st.records.get(maker) {
+            Some(FeatureRecord::Sheet {
+                plate: Some(p), ..
+            }) => Some(p.outline.clone()),
+            _ => None,
+        })
+    }
+
+    /// The developed strips of `flanges`: each flange's edges, and a converted plate's walls.
+    pub(super) fn flange_edges(&self, flanges: &[FeatureId]) -> Vec<PlateFlangeEdge> {
         flanges
             .iter()
             .filter_map(|f| match self.st.records.get(f) {
                 Some(FeatureRecord::PlateFlange { edges, .. }) => Some(edges.clone()),
+                Some(FeatureRecord::Sheet {
+                    plate: Some(p), ..
+                }) => Some(p.edges.clone()),
                 _ => None,
             })
             .flatten()
@@ -170,13 +205,33 @@ impl<'a, 'b> Run<'a, 'b> {
         rules: &SheetRules,
         edges: Vec<FlangeEdgeIn>,
     ) -> Result<(), Halt> {
-        let profile_ref = match self.doc.feature(maker).map(|f| &f.kind) {
-            Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
-                profile.clone()
-            }
-            _ => return Ok(()),
+        let Some(plate) = self.plate_profile(i, id, "edges", maker)? else {
+            return Ok(());
         };
-        let plate = self.profile(i, id, "edges", &profile_ref)?;
+        let out = self.developed_flange_edges(i, id, body, maker, &plate, rules, edges)?;
+        self.st.records.insert(
+            id.clone(),
+            FeatureRecord::PlateFlange {
+                base: maker.clone(),
+                edges: out,
+            },
+        );
+        Ok(())
+    }
+
+    /// Where each of `edges` (on plate `maker`, outline `plate`, on `body`) develops on the
+    /// plate: its strip, its bend line and its flat's motion.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::regen::engine) fn developed_flange_edges(
+        &mut self,
+        _i: usize,
+        id: &FeatureId,
+        body: usize,
+        maker: &FeatureId,
+        plate: &CanonicalProfile,
+        rules: &SheetRules,
+        edges: Vec<FlangeEdgeIn>,
+    ) -> Result<Vec<PlateFlangeEdge>, Halt> {
         let pf = plate.frame;
         let t = rules.thickness;
         let (bends, flanges, _) = self.plate_bends_and_others(body, maker);
@@ -300,14 +355,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 mitre: None,
             });
         }
-        self.st.records.insert(
-            id.clone(),
-            FeatureRecord::PlateFlange {
-                base: maker.clone(),
-                edges: out,
-            },
-        );
-        Ok(())
+        Ok(out)
     }
 
     /// The developed outline of plate `plate` with the strips of `flanges` spliced in along

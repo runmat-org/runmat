@@ -46,6 +46,10 @@ pub enum FeatureRecord {
         rules: SheetRules,
         section: Option<Section>,
         depth: f64,
+        /// A plate converted from a solid: its outline and its bent walls (a base flange's
+        /// plate takes its outline from its profile, and its flanges record their own).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plate: Option<Box<ConvertedPlate>>,
     },
     /// A flat pattern: the layout (outline and bend lines, for drawings and cutting) and, for
     /// a bent section, its development along the strip.
@@ -139,6 +143,14 @@ pub struct PlateFlangeEdge {
     /// A miter flange's mitred ends; square ends without.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mitre: Option<MitreEnds>,
+}
+
+/// A solid converted to a sheet plate: the plate's outline (in its frame, the plate between
+/// z = 0 and the thickness) and each bent wall as the strip it develops to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConvertedPlate {
+    pub outline: runmat_geometry_kernel::op::CanonicalProfile,
+    pub edges: Vec<PlateFlangeEdge>,
 }
 
 /// Where a mitred flange strip's ends lie on the developed plate: at each station (a distance

@@ -10,6 +10,9 @@
 //!   folded back (all, when none are picked);
 //! - `sheet-metal.lofted-bend` → `sheet_metal.lofted_bend(profiles, facets, rules)`: a sheet of
 //!   the form's thickness between two open profiles, each arc formed in `bends` bends;
+//! - `sheet-metal.convert` → `sheet_metal.convert_to_sheet_metal(fixed_face, bend_edges, rules)`:
+//!   a thin solid made sheet metal about its fixed face, its walls bent at the picked edges (every
+//!   walled edge when none are picked);
 //! - `sheet-metal.tab-and-slot` → `sheet_metal.tab_and_slot(edge, slot_face, count, length,
 //!   clearance)`: tabs on one sheet's edge and matching slots in the face of the sheet they
 //!   reach into.
@@ -93,6 +96,17 @@ pub fn sheet_metal_kind(command: &str, values: &Values, picks: &Picks) -> Result
                 "rule": { "rule": "k_factor", "k": { "form": "number", "value": 0.44 } },
             });
             ("loft", k)
+        }
+        "sheet-metal.convert" => {
+            let mut k = sm("convert_to_sheet_metal");
+            k["fixed_face"] = picks.reference(&some(values, "fixed", "the face that stays fixed")?[0])?;
+            k["bend_edges"] = json!(picks.references(&picks_of(values, "bends"))?);
+            k["rules"] = json!({
+                "thickness": value(values, "thickness", "mm")?,
+                "bend_radius": value(values, "radius", "mm")?,
+                "rule": { "rule": "k_factor", "k": { "form": "number", "value": 0.44 } },
+            });
+            ("sheet", k)
         }
         "sheet-metal.tab-and-slot" => {
             let mut k = sm("tab_and_slot");

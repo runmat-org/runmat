@@ -83,7 +83,22 @@ part vent_cover {
 - **`corner_relief`** cuts a relief where two flanges meet, so the corner folds without tearing.
 - **`form_tool`** presses a louver or a dimple into a face at a point.
 
-Other operations add hems, jogs, miter flanges, sketched and lofted bends, tabs and slots, and closed or broken corners; `convert_to_sheet_metal` turns a shelled solid into sheet metal. See [Features](/docs/mcad/part/features#sheet-metal-weldments-and-molds).
+Other operations add hems, jogs, miter flanges, sketched and lofted bends, tabs and slots, and closed or broken corners. See [Features](/docs/mcad/part/features#sheet-metal-weldments-and-molds).
+
+`convert_to_sheet_metal` turns a thin solid, such as a shelled box, into sheet metal:
+
+```
+feature sheet = sheet_metal.convert_to_sheet_metal(
+    fixed_face = feature.body.face.start,
+    bend_edges = [],
+    rules = { thickness = 1.5 mm, bend_radius = 1 mm, rule = { rule = k_factor, k = 0.44 } }
+)
+```
+
+- The **fixed face** is a flat face with straight edges and a face one sheet thickness behind it. Its outline becomes the plate.
+- At each **bend edge** of the fixed face, the wall standing on that edge becomes a bend of the sheet's radius and a flat. The face the wall stood on stays where it was: pick the outer floor and the outer wall faces stay put; pick the inner floor and the inner faces stay put. With `bend_edges = []`, every edge with a wall bends. Walls on edges left out of a non-empty list are removed.
+- Where two bent walls meet at a corner, each stops short of the corner by the other's bend setback, and the plate's corner inside both setbacks is cut away. The square relief appears in the folded part and in its flat pattern. For 90° walls the setback is the bend radius when the inner floor is fixed, and the bend radius plus the thickness when the outer floor is fixed.
+- The converted plate unfolds, folds and has a flat pattern like a plate with edge flanges.
 
 ## 3. The flat pattern
 

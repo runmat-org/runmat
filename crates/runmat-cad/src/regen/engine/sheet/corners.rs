@@ -211,23 +211,13 @@ impl<'a, 'b> Run<'a, 'b> {
                 "corners of flanges on a bent base flange (flange a flat plate)",
             ));
         }
-        let profile_ref = match self.doc.feature(&maker).map(|f| &f.kind) {
-            Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
-                profile.clone()
-            }
-            _ => return Err(self.not_lowered(id, "corners of this sheet")),
+        let Some(frame) = self.plate_profile(i, id, param, &maker)? else {
+            return Err(self.not_lowered(id, "corners of this sheet"));
         };
-        let frame = self.profile(i, id, param, &profile_ref)?.frame;
+        let frame = frame.frame;
         let (bends, flanges, _) = self.plate_bends_and_others(body, &maker);
         let regions = self.plate_regions(&bends, &flanges);
-        let edges: Vec<PlateFlangeEdge> = flanges
-            .iter()
-            .filter_map(|f| match self.st.records.get(f) {
-                Some(FeatureRecord::PlateFlange { edges, .. }) => Some(edges.clone()),
-                _ => None,
-            })
-            .flatten()
-            .collect();
+        let edges: Vec<PlateFlangeEdge> = self.flange_edges(&flanges);
         let tol = 1e-7;
         let mut corners = Vec::new();
         for (x, e) in edges.iter().enumerate() {

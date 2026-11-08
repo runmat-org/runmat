@@ -395,6 +395,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     rules,
                     section,
                     depth,
+                    ..
                 }) => Some((base, rules.clone(), section.clone(), *depth)),
                 _ => None,
             }
@@ -576,13 +577,9 @@ impl<'a, 'b> Run<'a, 'b> {
         };
         // Cuts and holes other features made in the flats develop onto the flat pattern.
         let (bends, flanges, others) = self.plate_bends_and_others(body, maker);
-        let profile_ref = match self.doc.feature(maker).map(|f| &f.kind) {
-            Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
-                profile.clone()
-            }
-            _ => return Err(self.not_lowered(id, "flat patterns of this sheet")),
+        let Some(sketched) = self.plate_profile(i, id, "fixed_face", maker)? else {
+            return Err(self.not_lowered(id, "flat patterns of this sheet"));
         };
-        let sketched = self.profile(i, id, "fixed_face", &profile_ref)?;
         // Edge flanges develop as strips spliced into the outline along their edges.
         let plate = self.developed_plate(id, maker, &sketched, &flanges)?;
         let t = rules.thickness;

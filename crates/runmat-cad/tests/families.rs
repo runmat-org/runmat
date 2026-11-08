@@ -2313,22 +2313,23 @@ fn threads_embosses_ribs_curves_connectors_and_library_features() {
     assert!(approx(low, -0.008));
 }
 
+/// A flat of a bent sheet has a bend, thickness faces and the section's end caps at its edges,
+/// and no wall as thick as the sheet: converting it says nothing bends, and the sheet stays.
 #[test]
-fn not_lowered_cases_fail_with_the_named_case() {
+fn converting_a_face_with_no_wall_on_its_edges_says_nothing_bends() {
     let env = Env::new();
     let mut d = sheet_doc(&[(0.0, 30.0), (0.0, 0.0), (50.0, 0.0)], &["up", "base"]);
     d.features.push(Feature::new(
-        "relief",
+        "convert",
         FeatureKind::SheetMetal(SheetMetalFeature::ConvertToSheetMetal {
-            body: sheet_face("base", 0),
             fixed_face: sheet_face("base", 0),
             bend_edges: Vec::new(),
-            rip_edges: Vec::new(),
             rules: rules(),
         }),
     ));
     let r = env.regen(&d);
-    assert!(has(&r, DiagCode::KernelNotSupported));
+    assert!(has(&r, DiagCode::RegenInvalid), "{:?}", r.diagnostics);
+    assert!(r.diagnostics.diagnostics.iter().any(|x| x.message.contains("nothing bends")), "{:?}", r.diagnostics);
     assert!(r.status("base").unwrap().ran());
 }
 

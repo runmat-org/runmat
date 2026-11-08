@@ -113,13 +113,10 @@ impl<'a, 'b> Run<'a, 'b> {
         let p = sub(p, scale(n, dot(sub(p, geom.centroid), n)));
         let turn = self.value(id, "rotation", rotation, Dimension::ANGLE)?;
         // The face frame's x: the plate's x carried with the flat the face lies on.
-        let profile_ref = match self.doc.feature(&maker).map(|f| &f.kind) {
-            Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
-                profile.clone()
-            }
-            _ => return Err(self.not_lowered(id, "form tools on this sheet")),
+        let Some(pf) = self.plate_profile(i, id, "face", &maker)? else {
+            return Err(self.not_lowered(id, "form tools on this sheet"));
         };
-        let pf = self.profile(i, id, "face", &profile_ref)?.frame;
+        let pf = pf.frame;
         let t = rules.thickness;
         let (bends, flanges, _) = self.plate_bends_and_others(body, &maker);
         let regions = self.plate_regions(&bends, &flanges);
