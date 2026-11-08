@@ -338,14 +338,14 @@ fn check_part(path: &str, text: &str, out: &mut CheckOutput) {
 }
 
 fn check_assembly(path: &str, text: &str, files: &Files, out: &mut CheckOutput) {
-    match runmat_cad_wasm::runtime::compile_assembly(path, text, files) {
+    match runmat_cad_wasm::runtime::assembly_index(path, text, files) {
         Err(diagnostics) => {
             out.diagnostics = diagnostics
                 .iter()
                 .map(|d| runtime_diagnostic(d, files, text))
                 .collect();
         }
-        Ok((index, _display, problems)) => {
+        Ok((index, problems)) => {
             let scope = runmat_cad_wasm::runtime::module_scope(path, text, files);
             let parsed = runmat_cad::syntax::parse_assembly_in(path, text, &scope);
             let mut report = runmat_cad::diagnostics::DiagnosticReport {

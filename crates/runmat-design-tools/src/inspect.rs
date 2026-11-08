@@ -350,7 +350,7 @@ fn part(s: &mut Sections, path: &str, text: &str) -> Result<(), ToolError> {
 }
 
 fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(), ToolError> {
-    let (index, _display, problems) = runmat_cad_wasm::runtime::compile_assembly(path, text, files)
+    let (index, problems) = runmat_cad_wasm::runtime::assembly_index(path, text, files)
         .map_err(|d| {
             ToolError::new(
                 "not_compiled",

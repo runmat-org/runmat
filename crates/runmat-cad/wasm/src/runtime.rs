@@ -673,6 +673,18 @@ pub fn compile_assembly_known(
     Ok((index, display, problems))
 }
 
+/// [`compile_assembly`]'s index and diagnostics without its display: for readers of the
+/// assembly's structure (the design tools' check, inspect and change diff). A product's display
+/// as JSON is the largest thing a compile makes, and the browser host's heap is bounded.
+pub fn assembly_index(path: &str, text: &str, files: &Files) -> Result<(Value, Vec<Diagnostic>), Vec<Diagnostic>> {
+    let AssemblyResolution { source, resolved, problems, .. } = resolve_assembly(path, text, files)?;
+    let mut index = serde_json::to_value(build_assembly_index(&resolved, Some(&source))).unwrap_or(Value::Null);
+    if let Some(row) = index.as_object_mut() {
+        row.insert("exploded".into(), crate::exploded::exploded_views(&resolved, &source));
+    }
+    Ok((index, problems))
+}
+
 /// `compile` as JSON.
 pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
     compile_json_in(path, text, files, None)

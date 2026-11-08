@@ -376,9 +376,9 @@ fn diff_keys(at: &str, a: &Value, b: &Value, out: &mut Vec<String>) {
 fn assembly_diff(before: &Files, after: &Files, path: &str) -> ChangeDiff {
     let index = |files: &Files| -> Option<Value> {
         let t = files.get(path)?;
-        runmat_cad_wasm::runtime::compile_assembly(path, t, files)
+        runmat_cad_wasm::runtime::assembly_index(path, t, files)
             .ok()
-            .map(|(i, _, _)| i)
+            .map(|(i, _)| i)
     };
     // A new assembly (nothing before) adds every occurrence and mate.
     let a = if before.contains_key(path) {

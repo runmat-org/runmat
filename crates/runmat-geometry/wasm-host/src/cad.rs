@@ -156,6 +156,12 @@ pub fn call(request: &str) -> String {
             // answer as the editor and the server do. Arguments: the tool's name, its input and
             // the files (JSON); the answer is `{ data }` or `{ error: { code, message } }`.
             let (name, input, files) = (arg(a, 0), arg(a, 1), arg(a, 2));
+            // An overview reads the linked parts, assemblies and drawings without regenerating
+            // each one: in the browser this host has one bounded heap, shared with the editor's
+            // compiles, and a product's links (the drone's 20-odd parts and sub-assemblies)
+            // regenerated one after another exhausted it. Their status says they're checked when
+            // they open in the editor; the file itself is still checked.
+            runmat_design_tools::overview::check_linked_models(false);
             if let Ok(parsed) = runtime::parse_files(files) {
                 set_imports(&parsed);
             }
