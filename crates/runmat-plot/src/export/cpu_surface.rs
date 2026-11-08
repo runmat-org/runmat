@@ -1587,7 +1587,7 @@ fn draw_3d_orientation_gizmo(canvas: &mut Canvas, axes: &AxesView) {
         [vx, vy],
         [vx + vw, vy + vh],
         (30.0 * scale).round(),
-        axis_len + 16.0 * scale,
+        axis_len + 24.0 * scale,
         &dirs,
     );
     let origin = Vec2::new(ox.round(), oy.round());

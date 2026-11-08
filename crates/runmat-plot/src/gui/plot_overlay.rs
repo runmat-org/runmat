@@ -2670,8 +2670,8 @@ impl PlotOverlay {
         let head_len = (8.0 * scale).min(axis_len * 0.35);
         let head_w = 5.0 * scale;
         let font = FontId::proportional(11.0 * scale);
-        // Inset the origin so every arm and its label stays whole (the label sits 10 px past the
-        // tip and is about 8 px across).
+        // Inset the origin so every arm and its label stays whole, with a margin: the label
+        // sits 10 px past the tip, is about 11 px tall, and keeps 8 px clear of the edge.
         let dirs: Vec<[f32; 2]> = axes
             .iter()
             .filter_map(|a| {
@@ -2684,7 +2684,7 @@ impl PlotOverlay {
             [plot_rect.min.x, plot_rect.min.y],
             [plot_rect.max.x, plot_rect.max.y],
             (30.0 * scale).round(),
-            axis_len + 16.0 * scale,
+            axis_len + 24.0 * scale,
             &dirs,
         );
         let origin = Pos2::new(ox, oy);
