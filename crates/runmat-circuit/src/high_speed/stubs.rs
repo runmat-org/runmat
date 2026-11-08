@@ -1,7 +1,8 @@
 //! Via stubs and back-drill.
 //!
 //! A via is plated through every copper layer it is drilled through (`from..=to`), but its net
-//! only connects on some of them: the layers where its tracks or pads touch the barrel. The
+//! only connects on some of them: the layers where its tracks or pads touch the barrel or its
+//! pours cover it. The
 //! plated barrel past the outermost connected layer is a stub. An open stub much shorter than a
 //! quarter wave loads the line like a shunt capacitance `C = t_stub / Z`, which delays an edge on
 //! a `Z` line by `Z · C / 2`, so a stub adds half its own propagation delay to its net
@@ -90,7 +91,8 @@ pub struct ViaStub {
     pub delay: f64,
 }
 
-/// The copper layers in `v`'s span where its net's tracks or pads touch the barrel.
+/// The copper layers in `v`'s span where its net's tracks or pads touch the barrel, or its pours
+/// cover it.
 pub fn connected_layers(board: &Board, v: &Via) -> Vec<CopperIndex> {
     let Some(net) = v.net else { return vec![] };
     let barrel = Prim::circle(v.at, v.diameter / 2);
@@ -98,6 +100,12 @@ pub fn connected_layers(board: &Board, v: &Via) -> Vec<CopperIndex> {
     for t in board.tracks.values() {
         if t.net == Some(net) && (v.from..=v.to).contains(&t.layer) && t.prims().iter().any(|p| barrel.gap(p) <= 0.0) {
             on.insert(t.layer);
+        }
+    }
+    // A pour of the net over the via joins it there, solid or through thermal spokes.
+    for z in board.zones.values() {
+        if z.net == Some(net) && z.outline.contains(v.at).unwrap_or(true) {
+            on.extend(z.layers.iter().copied().filter(|l| (v.from..=v.to).contains(l)));
         }
     }
     let n = board.stackup.copper_count();

@@ -374,3 +374,22 @@ fn a_buried_stub_cannot_be_back_drilled() {
     assert_eq!(found.len(), 1);
     assert!(found[0].message.contains("inside the board"), "{}", found[0].message);
 }
+
+/// A stitching via joining an F.Cu track to a B.Cu pour of its net has no stub: the pour
+/// connects it at the bottom.
+#[test]
+fn a_pour_of_the_net_connects_its_via() {
+    use runmat_circuit::geom::poly::Polygon;
+    use runmat_circuit::high_speed::stubs::{connected_layers, via_stubs};
+    let mut b = board();
+    let gnd = b.add_net("GND", None);
+    let at = Point::mm(20.0, 10.0);
+    b.add_track(Some(gnd), 0, mm(0.3), Point::mm(5.0, 10.0), at);
+    let v = b.add_via(Some(gnd), at, mm(0.6), mm(0.3));
+    let id = b.alloc();
+    let square = vec![Point::mm(10.0, 0.0), Point::mm(30.0, 0.0), Point::mm(30.0, 20.0), Point::mm(10.0, 20.0)];
+    b.zones.insert(id, Zone::new(id, "gnd", Some(gnd), vec![3], Polygon { outer: square, holes: vec![] }));
+    assert_eq!(connected_layers(&b, &b.vias[&v]), vec![0, 3]);
+    let (r, _) = checked(&b, &[]);
+    assert!(via_stubs(&b, &r, &BoardGraph::new(&b, &[])).is_empty());
+}
