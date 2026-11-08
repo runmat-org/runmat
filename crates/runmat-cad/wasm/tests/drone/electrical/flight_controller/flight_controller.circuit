@@ -229,7 +229,8 @@ circuit flight_controller {
         // GPS and compass, pins named from the board's side: supply, TX, RX, SCL, SDA, GND. The
         // MCU's TX on pin 2 goes to the module's RX and the module's TX comes back on pin 3. The
         // compass shares the barometer's I2C bus and its pull-ups. GPS_VCC is the module's own
-        // supply, separate from +3V3 so the receiver's current and noise stay off the MCU rail.
+        // supply, separate from +3V3 so the receiver's current and noise stay off the MCU rail:
+        // 3.3 V at up to 50 mA (a GNSS module with a compass draws 30-50 mA while tracking).
         connect = [net.GPS_VCC, "J5.1"]
         connect = [net.GPS_TX, port.GPS_TX, "J5.2"]
         connect = [net.GPS_RX, port.GPS_RX, "J5.3"]
