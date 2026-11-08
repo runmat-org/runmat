@@ -7,7 +7,6 @@ use super::{
     check_drawing, AnnotationKind, ArcCondition, DimensionStyle, DrawingDocument, ModelRef, ModelReferences,
 };
 use crate::diagnostics::Diagnostic;
-use crate::ids::PropertyName;
 use crate::refs::name::EntityName;
 use crate::refs::reference::Reference;
 use serde::{Deserialize, Serialize};
@@ -137,7 +136,7 @@ pub fn build_drawing_index(
                     .unwrap_or_else(|| "Surface finish".into()),
                 AnnotationKind::Weld { symbol, .. } => format!("Weld {symbol}"),
                 AnnotationKind::Note { text, .. } => {
-                    fill_fields(text, |field| model.property(at, &PropertyName::new(field)))
+                    fill_fields(text, |field| super::note_field(model, at, &doc.tables, field))
                 }
                 AnnotationKind::Balloon { .. } => match report.balloons.get(&a.id) {
                     Some(number) => format!("Balloon {number}"),

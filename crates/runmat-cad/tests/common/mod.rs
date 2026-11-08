@@ -354,7 +354,11 @@ pub fn total_faces(r: &RegenResult) -> usize {
 /// each design the model `json` names by file (occurrence definitions, interface frames,
 /// drawing models), plus the document `doc` itself.
 #[allow(dead_code)]
-pub fn stub_scope(doc: &str, text: &str, json: &serde_json::Value) -> runmat_cad::modules::ModuleScope {
+pub fn stub_scope(
+    doc: &str,
+    text: &str,
+    json: &serde_json::Value,
+) -> runmat_cad::modules::ModuleScope {
     use runmat_cad::modules::{kind_of_file, stem_name, ModuleScope};
     use std::collections::{BTreeMap, BTreeSet};
     fn walk(v: &serde_json::Value, out: &mut BTreeMap<String, BTreeSet<String>>) {

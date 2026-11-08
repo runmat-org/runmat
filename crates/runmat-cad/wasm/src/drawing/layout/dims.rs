@@ -13,7 +13,8 @@
 
 use super::marks::{line, mark, text};
 use super::views::{Side, ViewPlan};
-use super::{Ctx, PlacedDimension, Shape, Std, Xy};
+use super::solver::{text_box, BoxR};
+use super::{Ctx, PlacedDimension, Prim, Shape, Std, Xy};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -78,10 +79,11 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
     for a in data["document"]["annotations"].as_array().into_iter().flatten() {
         let kind = &a["kind"];
         let style = kind["style"].as_str().unwrap_or("");
-        if kind["annotation"] != "dimension" || !matches!(style, "linear" | "ordinate" | "baseline" | "chain") {
+        let id = a["id"].as_str().unwrap_or("").to_owned();
+        let side_on = style == "diameter" && views.iter().find(|v| a["view"].as_str() == Some(v.name.as_str())).is_some_and(|v| side_on_diameter(data, &id, v).is_some());
+        if kind["annotation"] != "dimension" || !(side_on || matches!(style, "linear" | "ordinate" | "baseline" | "chain")) {
             continue;
         }
-        let id = a["id"].as_str().unwrap_or("").to_owned();
         let model = all_views.iter().find(|v| v["name"] == a["view"]).map(|v| v["model"]["file"].to_string()).unwrap_or_default();
         let Some(vi) = views.iter().position(|v| a["view"].as_str() == Some(v.name.as_str())) else {
             // On another sheet: still claims what it measures.
@@ -94,11 +96,17 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
             "linear" | "ordinate" if n == 2 => vec![(0, 1)],
             "baseline" => (1..n).map(|k| (0, k)).collect(),
             "chain" => (1..n).map(|k| (k - 1, k)).collect(),
+            "diameter" if side_on => vec![(0, 1)],
             _ => Vec::new(),
         };
         let anchors = &data["anchors"][&id];
-        let points: Vec<Option<Xy>> = (0..n).map(|i| model_point(&anchors[i]).map(|c| v.model_local(c))).collect();
-        let corners: Vec<Option<Vec<Xy>>> = (0..n).map(|i| corners_of(&data["extents"][&id][i], v)).collect();
+        let (mut points, mut corners): (Vec<Option<Xy>>, Vec<Option<Vec<Xy>>>) = match side_on_diameter(data, &id, v) {
+            Some(across) => (vec![Some(across[0][0]), Some(across[1][0])], vec![Some(across[0].to_vec()), Some(across[1].to_vec())]),
+            None => ((0..n).map(|i| model_point(&anchors[i]).map(|c| v.model_local(c))).collect(), (0..n).map(|i| corners_of(&data["extents"][&id][i], v)).collect()),
+        };
+        if v.kind == "detail" {
+            within_detail(v.w / 2.0, &mut points, &mut corners);
+        }
         let texts: Vec<String> = ctx.text_of(&id).split(" · ").map(str::to_owned).collect();
         let at = super::placed_at(a);
         for (k, (i, j)) in pairs.into_iter().enumerate() {
@@ -109,7 +117,7 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
             let pair = [corners[i].clone(), corners[j].clone()];
             let axis = measured_axis(&pair, p, q);
             let measurement = (q[axis] - p[axis]).abs() / v.scale;
-            let mut key_refs = [refs[i].to_string(), refs[j].to_string()];
+            let mut key_refs = [refs[i.min(n - 1)].to_string(), refs[j.min(n - 1)].to_string()];
             key_refs.sort();
             let key = format!("{model}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement);
             let label = texts.get(k).or(texts.first()).cloned().unwrap_or_else(|| id.clone());
@@ -186,6 +194,52 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
     Plans { dims, rooms, offsets }
 }
 
+/// A detail shows only what is inside its circle (radius `r`, centred on the view): each face
+/// box is cut to the circle's square, and a reference point outside the circle moves to the
+/// point of its face nearest a reference inside, so the extension lines start in the detail.
+fn within_detail(r: f64, points: &mut [Option<Xy>], corners: &mut [Option<Vec<Xy>>]) {
+    let inside = |p: &Xy| p[0].hypot(p[1]) <= r + 1e-6;
+    let target = points.iter().flatten().find(|p| inside(p)).copied().unwrap_or([0.0, 0.0]);
+    for (p, c) in points.iter_mut().zip(corners.iter_mut()) {
+        let Some(c) = c.as_mut() else { continue };
+        for q in c.iter_mut() {
+            *q = [q[0].clamp(-r, r), q[1].clamp(-r, r)];
+        }
+        if p.is_some_and(|p| !inside(&p)) {
+            let (x0, x1) = (c.iter().map(|q| q[0]).fold(f64::MAX, f64::min), c.iter().map(|q| q[0]).fold(f64::MIN, f64::max));
+            let (y0, y1) = (c.iter().map(|q| q[1]).fold(f64::MAX, f64::min), c.iter().map(|q| q[1]).fold(f64::MIN, f64::max));
+            *p = Some([target[0].clamp(x0, x1), target[1].clamp(y0, y1)]);
+        }
+    }
+}
+
+/// A diameter dimension whose cylinder the view shows side-on (its axis in the sheet's plane)
+/// is drawn as a linear dimension across the cylinder's two outline lines (ISO 129-1 and ASME
+/// Y14.5, a diameter seen side-on). Returns each outline line as (its point across from the
+/// anchor, then its two ends), relative to the view's centre in sheet mm.
+pub fn side_on_diameter(data: &Value, id: &str, v: &ViewPlan) -> Option<[[Xy; 3]; 2]> {
+    let c = &data["cylinders"][id];
+    let (axis, r, span) = (model_point(&c["axis"])?, c["radius"].as_f64()?, super::floats(&c["span"]));
+    let at = model_point(&data["anchors"][id][0])?;
+    if span.len() != 2 || span[1] - span[0] < 1e-6 {
+        return None;
+    }
+    let o = v.model_local(at);
+    let tip = v.model_local([at[0] + axis[0], at[1] + axis[1], at[2] + axis[2]]);
+    let d = [(tip[0] - o[0]) / v.scale, (tip[1] - o[1]) / v.scale];
+    // The axis must lie (nearly) in the sheet: seen end-on the cylinder is a circle.
+    if d[0].hypot(d[1]) < 0.99 {
+        return None;
+    }
+    let n = [-d[1], d[0]];
+    let line = |s: f64| -> [Xy; 3] {
+        let p = [o[0] + n[0] * r * s * v.scale, o[1] + n[1] * r * s * v.scale];
+        let end = |t: f64| [p[0] + d[0] * t * v.scale, p[1] + d[1] * t * v.scale];
+        [p, end(span[0]), end(span[1])]
+    };
+    Some([line(-1.0), line(1.0)])
+}
+
 fn model_point(v: &Value) -> Option<[f64; 3]> {
     let f = super::floats(v);
     (f.len() == 3).then(|| [f[0], f[1], f[2]])
@@ -243,6 +297,7 @@ fn foot(point: Xy, corners: &Option<Vec<Xy>>, side: Side) -> Xy {
 pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
     let st = ctx.std.clone();
     let mut zeros_drawn: Vec<String> = Vec::new();
+    let mut figures: Vec<(String, BoxR)> = Vec::new();
     for d in &plans.dims {
         let v = &views[d.view];
         let o = v.origin;
@@ -289,7 +344,11 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
                     let x = at + out_sign * 1.0;
                     text(x, e[1] - st.text / 2.0, &t, st.text, if out_sign < 0.0 { "end" } else { "start" })
                 };
-                prims.push(mark(&id, "dimtext", shape));
+                let figure = mark(&id, "dimtext", shape);
+                if let Some(b) = text_box(&figure) {
+                    figures.push((id.clone(), b));
+                }
+                prims.push(figure);
             }
             ctx.occ.add_prims(&prims, &id);
             ctx.push(prims);
@@ -317,4 +376,64 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
             measurement: d.measurement,
         });
     }
+    break_lines_at_figures(&mut ctx.out.primitives, &figures);
+}
+
+/// Every other dimension's straight line that runs through an ordinate figure is broken around
+/// it (ISO 129-1 and ASME Y14.5 both keep a dimension's figure clear of other lines).
+fn break_lines_at_figures(prims: &mut Vec<Prim>, figures: &[(String, BoxR)]) {
+    if figures.is_empty() {
+        return;
+    }
+    let mut out = Vec::with_capacity(prims.len());
+    for p in prims.drain(..) {
+        let Shape::Polyline { points, closed: false } = &p.shape else {
+            out.push(p);
+            continue;
+        };
+        if p.kind != "annotation" || p.style != "dimink" || points.len() != 4 {
+            out.push(p);
+            continue;
+        }
+        let (a, b) = ([points[0], points[1]], [points[2], points[3]]);
+        // A run along the line from t0 to t1 (0..1), cut by each figure box it crosses.
+        let mut runs: Vec<(f64, f64)> = vec![(0.0, 1.0)];
+        for (owner, f) in figures {
+            if *owner == p.id {
+                continue;
+            }
+            let g = BoxR::new(f.x0 - 0.5, f.y0 - 0.5, f.x1 + 0.5, f.y1 + 0.5);
+            let Some((s, e)) = clip_segment(a, b, &g) else { continue };
+            runs = runs.into_iter().flat_map(|(r0, r1)| [(r0, r1.min(s)), (r0.max(e), r1)]).filter(|(r0, r1)| r1 - r0 > 1e-6).collect();
+        }
+        if runs == [(0.0, 1.0)] {
+            out.push(p);
+            continue;
+        }
+        let at = |t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        for (r0, r1) in runs {
+            let (s, e) = (at(r0), at(r1));
+            if ((e[0] - s[0]).powi(2) + (e[1] - s[1]).powi(2)).sqrt() > 0.3 {
+                out.push(Prim { shape: line(vec![s[0], s[1], e[0], e[1]]), ..p.clone() });
+            }
+        }
+    }
+    *prims = out;
+}
+
+/// Where segment a→b runs inside box `g`, as (t_in, t_out) along it; `None` when it misses.
+fn clip_segment(a: Xy, b: Xy, g: &BoxR) -> Option<(f64, f64)> {
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    for (p, d, lo, hi) in [(a[0], b[0] - a[0], g.x0, g.x1), (a[1], b[1] - a[1], g.y0, g.y1)] {
+        if d.abs() < 1e-12 {
+            if p < lo || p > hi {
+                return None;
+            }
+        } else {
+            let (u, v) = ((lo - p) / d, (hi - p) / d);
+            t0 = t0.max(u.min(v));
+            t1 = t1.min(u.max(v));
+        }
+    }
+    (t1 - t0 > 1e-9).then_some((t0, t1))
 }

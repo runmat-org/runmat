@@ -388,6 +388,29 @@ fn hole_feature_callout(document: &PartDocument, hole: &Reference) -> Option<Str
     };
     size.push(' ');
     size.push_str(&end);
+    // The form after the hole (ASME Y14.5 symbols): counterbore ⌴⌀ ↧, countersink ⌵⌀ × angle.
+    let mm = |v: &Option<runmat_cad::value::ValueExpr>| v.as_ref().and_then(length_mm).map(number);
+    match &h.form {
+        HoleForm::Counterbore { diameter, depth } => {
+            if let Some(d) = mm(diameter) {
+                size.push_str(&format!(" ⌴⌀{d}"));
+                if let Some(t) = mm(depth) {
+                    size.push_str(&format!(" ↧{t}"));
+                }
+            }
+        }
+        HoleForm::Countersink { diameter, angle } => {
+            if let Some(d) = mm(diameter) {
+                size.push_str(&format!(" ⌵⌀{d}"));
+                if let Some(runmat_cad::value::ValueExpr::Quantity { value, unit }) = angle {
+                    if unit == "deg" {
+                        size.push_str(&format!(" × {}°", number(*value)));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
     Some(if count > 1 { format!("{count}× {size}") } else { size })
 }
 

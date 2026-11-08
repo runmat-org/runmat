@@ -522,7 +522,7 @@ pub trait ModelReferences {
     fn property(&self, model: &ModelRef, name: &PropertyName) -> Option<String>;
     /// Whether an occurrence exists in the model (assembly views).
     fn occurrence(&self, model: &ModelRef, path: &RelPath) -> bool;
-    /// PMI names the model declares: (tolerances, sizes, datums).
+    /// PMI names the model declares: (tolerances, sizes and locations, datums).
     fn pmi(&self, model: &ModelRef) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
     /// The geometric characteristic of the model's PMI tolerance `name`, where the model
     /// knows it (for the drawing standard's check of the frames a sheet may show).
@@ -924,7 +924,7 @@ pub fn check_drawing_with(
                 }
                 if let Some(p) = pmi {
                     if !sizes.contains(p) {
-                        err(&mut rep, DiagCode::DrawingReference, s("pmi"), format!("dimension `{}` inherits size tolerance `{}`, which the model does not declare", a.id, p));
+                        err(&mut rep, DiagCode::DrawingReference, s("pmi"), format!("dimension `{}` inherits tolerance `{}`, a size or location the model does not declare", a.id, p));
                     }
                 }
                 refs.extend(references.iter().map(|r| ("references", r)));
@@ -975,10 +975,7 @@ pub fn check_drawing_with(
                 while let Some(i) = rest.find('{') {
                     let Some(j) = rest[i..].find('}') else { break };
                     let field = &rest[i + 1..i + j];
-                    if model
-                        .property(&v.model, &PropertyName::new(field))
-                        .is_none()
-                    {
+                    if note_field(model, &v.model, &doc.tables, field).is_none() {
                         rep.diagnostics.push(
                             DiagCode::DrawingReference,
                             Severity::Warning,
@@ -1101,4 +1098,12 @@ pub fn check_drawing_with(
         rep.title_blocks.insert(sh.name.clone(), rows);
     }
     rep
+}
+
+/// A note's `{field}`: the drawn model's property, and for `{revision}` with none the drawing's
+/// latest revision (as the title block's revision field reads it).
+pub(crate) fn note_field(model: &dyn ModelReferences, at: &ModelRef, tables: &[DrawingTable], field: &str) -> Option<String> {
+    model
+        .property(at, &PropertyName::new(field))
+        .or_else(|| (field == "revision").then(|| revision_table::latest(tables).map(str::to_owned)).flatten())
 }

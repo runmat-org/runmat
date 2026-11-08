@@ -22,6 +22,7 @@
 //! same projection lays out the same way.
 
 mod border;
+mod angular;
 mod callouts;
 mod dims;
 pub(crate) mod marks;

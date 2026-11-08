@@ -38,7 +38,7 @@ use runmat_cad::syntax::parse_drawing_in;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// A part's PMI names: tolerances, sizes and datums.
+/// A part's PMI names: tolerances, sizes and locations (what a dimension's `pmi` may name), and datums.
 type PmiNames = (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
 
 /// What the drawn models are, as checking reads them.
@@ -50,7 +50,7 @@ pub struct CompiledModels {
     properties: BTreeMap<String, BTreeMap<String, String>>,
     /// File → occurrence paths (assemblies).
     occurrences: BTreeMap<String, BTreeSet<String>>,
-    /// File → (tolerances, sizes, datums) the part's PMI declares.
+    /// File → (tolerances, sizes and locations, datums) the part's PMI declares.
     pmi: BTreeMap<String, PmiNames>,
     /// File → each PMI tolerance's geometric characteristic, by name.
     characteristics: BTreeMap<String, BTreeMap<String, runmat_cad::pmi::Characteristic>>,
@@ -287,7 +287,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                     file.clone(),
                     (
                         pmi.tolerances.iter().map(|t| t.name.clone()).collect(),
-                        pmi.sizes.iter().map(|t| t.name.clone()).collect(),
+                        pmi.sizes.iter().map(|t| t.name.clone()).chain(pmi.locations.iter().map(|t| t.name.clone())).collect(),
                         pmi.datums.iter().map(|d| d.label.clone()).collect(),
                     ),
                 );
@@ -369,18 +369,35 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             let kind = &view["kind"];
             let parent = kind["from"].as_str().unwrap_or("");
             let parent_axes = crate::hlr::axes(crate::hlr::orientation(&views, parent, 0));
+            // The projection each view's lines are drawn in, so the sheet places dimensions and
+            // callouts in the same frame (a section's and an auxiliary view's differ from their
+            // parent's orientation).
+            let mut drawn_in: Option<crate::hlr::Axes> = Some(parent_axes);
             let entry = match kind["view"].as_str() {
                 // A section through the plane the view names, seen across the parent's cutting
                 // line: the parent's right stays right and its depth becomes up.
                 Some("section") => {
+                    drawn_in = Some(section_axes(&parent_axes));
                     section_entry(display, &document, name, &parent_axes, &views, parent)
                 }
                 // A detail: the parent's lines, clipped by the sheet to the circle around the
                 // centre the view names.
+                // A detail of a section shows the cut (its hatch and the faces beyond it), seen
+                // as the section sees it.
                 Some("detail") => {
-                    let axes = parent_axes;
-                    let mut lines =
-                        serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null);
+                    let parent_kind = views.as_array().and_then(|vs| vs.iter().find(|v| v["name"] == parent)).map(|v| &v["kind"]);
+                    let (axes, mut lines) = match parent_kind {
+                        Some(pk) if pk["view"] == "section" => {
+                            let from = pk["from"].as_str().unwrap_or("");
+                            let from_axes = crate::hlr::axes(crate::hlr::orientation(&views, from, 0));
+                            let mut cut = section_entry(display, &document, parent, &from_axes, &views, from);
+                            if let Value::Object(o) = &mut cut {
+                                o.remove("cut");
+                            }
+                            (section_axes(&from_axes), cut)
+                        }
+                        _ => (parent_axes, serde_json::to_value(lines_of(file, display, &parent_axes)).unwrap_or(Value::Null)),
+                    };
                     let center = document
                         .views
                         .iter()
@@ -394,6 +411,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                         .and_then(|(center, radius)| {
                             Some((point_of(display, center)?, radius_mm(radius)?))
                         });
+                    drawn_in = Some(axes);
                     if let (Some((c, r)), Value::Object(o)) = (center, &mut lines) {
                         o.insert(
                             "detail".into(),
@@ -413,6 +431,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                         let layout = models.flat_layout(&v.model, feature)?;
                         runmat_cad::drawing::flat_pattern::view_sheet(&v.kind, &layout)
                     });
+                    drawn_in = None;
                     json!({ "visible": [], "hidden": [], "flat": sheet })
                 }
                 // An auxiliary view: square to the face its edge shows edge-on in the parent.
@@ -427,6 +446,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                         })
                         .and_then(|r| view_picks::auxiliary_axes(display, &parent_axes, &r))
                         .unwrap_or(parent_axes);
+                    drawn_in = Some(axes);
                     let mut lines = serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null);
                     if let Value::Object(o) = &mut lines {
                         o.insert("picks".into(), view_picks::picks(display, &axes));
@@ -452,6 +472,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                 }
                 _ => {
                     let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
+                    drawn_in = Some(axes);
                     let mut lines = serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null);
                     // What a click on each line means (the face it shows edge-on, or the edge).
                     if let Value::Object(o) = &mut lines {
@@ -460,6 +481,10 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                     lines
                 }
             };
+            let mut entry = entry;
+            if let (Some(a), Value::Object(o)) = (drawn_in, &mut entry) {
+                o.insert("axes".into(), json!({ "u": a.u, "v": a.v, "depth": a.depth }));
+            }
             hlr.insert(name.to_owned(), entry);
         }
     }
@@ -470,6 +495,13 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     // lines leave the anchor (a hole's centre line).
     let mut extents = serde_json::Map::new();
     let mut radii = serde_json::Map::new();
+    // An angular dimension's two planar faces' normals, so the sheet draws its arc between the
+    // lines the faces show edge-on.
+    let mut normals = serde_json::Map::new();
+    // A diameter or radius dimension's cylinder: its axis, radius and the span of its face along
+    // the axis (mm, from the anchor), so a view that shows the cylinder side-on dimensions it
+    // across its two outline lines.
+    let mut cylinders = serde_json::Map::new();
     for a in &document.annotations {
         let Some(view) = document.views.iter().find(|v| v.name == a.view) else {
             continue;
@@ -501,6 +533,17 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             anchors.insert(a.id.clone(), json!(points));
             let boxes: Vec<Value> = references.iter().map(|r| extent_of(display, r)).collect();
             extents.insert(a.id.clone(), Value::Array(boxes));
+            if let (runmat_cad::drawing::AnnotationKind::Dimension { style: runmat_cad::drawing::DimensionStyle::Diameter | runmat_cad::drawing::DimensionStyle::Radius, .. }, [r], [p]) =
+                (&a.kind, references.as_slice(), points.as_slice())
+            {
+                if let Some(c) = cylinder_of(display, r, *p) {
+                    cylinders.insert(a.id.clone(), c);
+                }
+            }
+            if matches!(&a.kind, runmat_cad::drawing::AnnotationKind::Dimension { style: runmat_cad::drawing::DimensionStyle::Angular, .. }) {
+                let ns: Vec<Value> = references.iter().map(|r| normal_of(display, r)).collect();
+                normals.insert(a.id.clone(), Value::Array(ns));
+            }
         }
     }
     let titles = title::title_layouts(path, &document, &index.title_blocks, files, &mut problems);
@@ -522,6 +565,8 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         o.insert("anchors".into(), Value::Object(anchors));
         o.insert("extents".into(), Value::Object(extents));
         o.insert("radii".into(), Value::Object(radii));
+        o.insert("normals".into(), Value::Object(normals));
+        o.insert("cylinders".into(), Value::Object(cylinders));
         o.insert("hole_tables".into(), holes::hole_tables(&document, &exact, &displays));
     }
     // The sheets laid out once, here: the Desktop's sheet and every export draw this layout.
@@ -552,6 +597,26 @@ fn radius_mm(v: &runmat_cad::value::ValueExpr) -> Option<f64> {
 /// A model point (mm) a reference names: a cylindrical face's axis at its middle, a face's
 /// centre, or where two faces meet (`edges_between`, also after a blend rounded it away).
 /// A planar reference's box `[min, max]` (mm), or null for cylinders and edges.
+/// A planar face's normal, or null for any other reference.
+fn normal_of(display: &Value, reference: &runmat_cad::refs::reference::Reference) -> Value {
+    runmat_cad::syntax::refs::print_reference(reference)
+        .and_then(|text| values::face(display, &text).map(|(_, surface)| surface["normal"].clone()))
+        .filter(Value::is_array)
+        .unwrap_or(Value::Null)
+}
+
+/// A cylindrical reference's axis, radius and the span of its face along the axis from `at`
+/// (mm): `{ axis, radius, span: [from, to] }`.
+fn cylinder_of(display: &Value, reference: &runmat_cad::refs::reference::Reference, at: [f64; 3]) -> Option<Value> {
+    let text = runmat_cad::syntax::refs::print_reference(reference)?;
+    let (pts, surface) = values::face(display, &text)?;
+    let (_, d, r) = values::cylinder(surface)?;
+    let along = |p: &[f64; 3]| (0..3).map(|i| (p[i] - at[i]) * d[i]).sum::<f64>();
+    let lo = pts.iter().map(along).fold(f64::MAX, f64::min);
+    let hi = pts.iter().map(along).fold(f64::MIN, f64::max);
+    (lo <= hi).then(|| json!({ "axis": d, "radius": r, "span": [lo, hi] }))
+}
+
 fn extent_of(display: &Value, reference: &runmat_cad::refs::reference::Reference) -> Value {
     let Some(text) = runmat_cad::syntax::refs::print_reference(reference) else {
         return Value::Null;
@@ -602,6 +667,12 @@ fn point_of(
 
 /// A section view's lines and hatch, and its cutting line on the parent view (at `v` in the
 /// parent's view millimetres, with the label and the direction the arrows point).
+/// A section's axes, seen across its parent's cutting line: the parent's right stays right and
+/// its depth becomes up.
+fn section_axes(parent: &crate::hlr::Axes) -> crate::hlr::Axes {
+    crate::hlr::Axes { u: parent.u, v: parent.depth.map(|x| -x), depth: parent.v }
+}
+
 fn section_entry(
     display: &Value,
     document: &runmat_cad::drawing::DrawingDocument,
@@ -628,11 +699,7 @@ fn section_entry(
     let Some(p0) = point_of(display, plane) else {
         return Value::Null;
     };
-    let axes = crate::hlr::Axes {
-        u: parent.u,
-        v: parent.depth.map(|x| -x),
-        depth: parent.v,
-    };
+    let axes = section_axes(parent);
     let mut lines =
         serde_json::to_value(crate::hlr::section_lines(display, &axes, p0)).unwrap_or(Value::Null);
     if let Value::Object(o) = &mut lines {

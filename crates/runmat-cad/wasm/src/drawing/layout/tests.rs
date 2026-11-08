@@ -189,3 +189,116 @@ fn a_tight_dimension_puts_its_arrows_outside_and_its_figure_past_the_end() {
     assert_eq!(line_of(&wide)[..1], [0.0]);
     assert!(line_of(&tight)[0] < 0.0 && line_of(&tight)[2] > 4.0);
 }
+
+const SHOWCASE_DRAWING: &str = include_str!("../../../../tests/fixtures/showcase/angle_bracket.drawing");
+const SHOWCASE_PART: &str = include_str!("../../../../tests/fixtures/showcase/angle_bracket.part");
+
+#[test]
+fn the_showcase_bracket_lays_out_on_a3_with_nothing_over_anything_else() {
+    // The angle bracket's production drawing: three views, a section, a detail and an isometric,
+    // dimensioned and toleranced, with GD&T, finishes, notes, the title block and revisions.
+    if let Err(d) = crate::runtime::compile_part("/p/angle_bracket.part", SHOWCASE_PART) {
+        panic!("the part doesn't compile: {d:#?}");
+    }
+    let files: Files = [("/p/angle_bracket.part".to_owned(), SHOWCASE_PART.to_owned())].into();
+    let out: Value = serde_json::from_str(&crate::drawing::compile_json("/p/angle_bracket.drawing", SHOWCASE_DRAWING, &files)).unwrap();
+    let layout = sheet(&out, "1");
+    // With `RUNMAT_SHOWCASE_OUT` set to a file, the whole compile is written there (for review).
+    if let Ok(path) = std::env::var("RUNMAT_SHOWCASE_OUT") {
+        std::fs::write(path, out.to_string()).unwrap();
+    }
+    assert_eq!(out["diagnostics"].as_array().map(|d| d.iter().filter(|d| d["severity"] == "error").count()), Some(0), "{}", out["diagnostics"]);
+    let errors: Vec<&Value> = out["projection"]["data"]["diagnostics"].as_array().into_iter().flatten().collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert_eq!(layout["findings"].as_array().map(Vec::len), Some(0), "{}", layout["findings"]);
+    let p = prims(&layout);
+    let doc = &out["projection"]["data"]["document"];
+    for ann in doc["annotations"].as_array().unwrap() {
+        let id = format!("annotation:{}", ann["id"].as_str().unwrap());
+        assert!(p.iter().any(|q| q.id == id), "{id} isn't drawn");
+    }
+    let ls = labels(&p);
+    for (i, (a, ta, ba)) in ls.iter().enumerate() {
+        for (b, tb, bb) in &ls[i + 1..] {
+            assert!(a == b || !ba.hits(bb), "{a} {ta:?} {ba:?} overlaps {b} {tb:?} {bb:?}");
+        }
+    }
+    let views = view_boxes(&p);
+    assert_eq!(views.len(), 6, "{views:?}");
+    for (id, t, b) in &ls {
+        for (view, vb) in &views {
+            assert!(!b.hits(vb), "{id} {t:?} {b:?} sits on {view} {vb:?}");
+        }
+    }
+    for (i, (a, ba)) in views.iter().enumerate() {
+        for (b, bb) in &views[i + 1..] {
+            assert!(!ba.hits(bb), "{a} {ba:?} overlaps {b} {bb:?}");
+        }
+    }
+    let frame = BoxR::new(10.0, 10.0, 410.0, 287.0);
+    for (id, t, b) in &ls {
+        assert!(b.inside(&frame), "{id} {t:?} {b:?} runs past the frame");
+    }
+    let all = texts(&p);
+    for want in ["SECTION A-A", "DETAIL B", "SCALE 3:1", "REVISIONS", "AB-6061-100", "Angle bracket"] {
+        assert!(all.iter().any(|t| t.contains(want)), "no {want:?} in {all:?}");
+    }
+}
+
+#[test]
+fn no_other_dimension_line_runs_through_an_ordinate_figure() {
+    let p = prims(&sheet(&compiled(), "1"));
+    let ords: Vec<String> = compiled()["projection"]["data"]["document"]["annotations"].as_array().unwrap().iter().filter(|a| a["kind"]["style"] == "ordinate").map(|a| format!("annotation:{}", a["id"].as_str().unwrap())).collect();
+    assert!(!ords.is_empty());
+    let figures: Vec<(&str, BoxR)> = p.iter().filter(|q| ords.contains(&q.id) && q.style == "dimtext").filter_map(|q| Some((q.id.as_str(), text_box(q)?))).collect();
+    assert!(!figures.is_empty());
+    for q in p.iter().filter(|q| q.style == "dimink" && q.kind == "annotation") {
+        let Shape::Polyline { points, .. } = &q.shape else { continue };
+        for (owner, f) in &figures {
+            if *owner == q.id {
+                continue;
+            }
+            for c in points.chunks_exact(2).collect::<Vec<_>>().windows(2) {
+                let (a, b) = (c[0], c[1]);
+                let mid = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+                let inside = |x: &[f64]| f.hits(&BoxR::new(x[0], x[1], x[0], x[1]));
+                assert!(!(inside(a) || inside(b) || inside(&mid)), "{} runs through {owner}'s figure {f:?}: {a:?}-{b:?}", q.id);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_sheet_too_full_for_its_views_suggests_a_larger_sheet_or_a_second_one() {
+    let layout = sheet(&compiled(), "1");
+    let full: Vec<&str> = layout["findings"].as_array().unwrap().iter().filter(|f| f["code"] == "sheet_full").filter_map(|f| f["message"].as_str()).collect();
+    assert_eq!(full.len(), 1, "{layout:#}");
+    assert!(full[0].contains("larger sheet (A2)") && full[0].contains("second sheet"), "{}", full[0]);
+    assert_eq!(super::views::larger_sheet([431.8, 279.4]), Some("C"));
+    assert_eq!(super::views::larger_sheet([1189.0, 841.0]), None);
+}
+
+#[test]
+fn an_angular_dimension_draws_as_an_arc_between_its_faces_lines() {
+    let p = prims(&sheet(&compiled(), "1"));
+    let arc = p.iter().filter(|q| q.id == "annotation:angle" && q.style == "dimink").find_map(|q| match &q.shape {
+        Shape::Polyline { points, .. } if points.len() >= 10 => Some(points.clone()),
+        _ => None,
+    });
+    let arc = arc.expect("an arc");
+    // Every point of the arc sits the same distance from one centre: fit it from three points.
+    let pt = |i: usize| [arc[2 * i], arc[2 * i + 1]];
+    let n = arc.len() / 2;
+    let (a, b, c) = (pt(0), pt(n / 2), pt(n - 1));
+    let d = 2.0 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+    let sq = |p: [f64; 2]| p[0] * p[0] + p[1] * p[1];
+    let ctr = [(sq(a) * (b[1] - c[1]) + sq(b) * (c[1] - a[1]) + sq(c) * (a[1] - b[1])) / d, (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d];
+    let r = ((a[0] - ctr[0]).powi(2) + (a[1] - ctr[1]).powi(2)).sqrt();
+    for i in 0..n {
+        let q = pt(i);
+        assert!((((q[0] - ctr[0]).powi(2) + (q[1] - ctr[1]).powi(2)).sqrt() - r).abs() < 1e-6);
+    }
+    // Two arrowheads and the figure.
+    assert_eq!(p.iter().filter(|q| q.id == "annotation:angle" && q.style == "arrow").count(), 2);
+    assert!(p.iter().any(|q| q.id == "annotation:angle" && matches!(&q.shape, Shape::Text { text, .. } if text.contains('°'))));
+}

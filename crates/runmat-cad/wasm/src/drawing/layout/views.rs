@@ -129,6 +129,14 @@ impl ViewPlan {
     }
 }
 
+fn drawn_axes(seam: &Value) -> Option<crate::hlr::Axes> {
+    let v3 = |k: &str| -> Option<[f64; 3]> {
+        let f = floats(&seam["axes"][k]);
+        (f.len() == 3).then(|| [f[0], f[1], f[2]])
+    };
+    Some(crate::hlr::Axes { u: v3("u")?, v: v3("v")?, depth: v3("depth")? })
+}
+
 fn kind_of(view: &Value) -> String {
     view["kind"]["view"].as_str().unwrap_or("standard").to_owned()
 }
@@ -213,7 +221,9 @@ pub fn measure(ctx: &mut Ctx<'_>) -> Vec<ViewPlan> {
         let display = view["display"].as_str();
         out.push(ViewPlan {
             id: format!("view:{name}"),
-            axes: crate::hlr::axes(crate::hlr::orientation(views_json, &name, 0)),
+            // The projection the view's lines were drawn in; a view whose model isn't open has
+            // none, and takes its orientation's.
+            axes: drawn_axes(&seam).unwrap_or_else(|| crate::hlr::axes(crate::hlr::orientation(views_json, &name, 0))),
             name,
             kind,
             parent,
@@ -253,6 +263,8 @@ pub fn place(ctx: &mut Ctx<'_>, plans: &mut [ViewPlan], rooms: &std::collections
     let f = ctx.frame;
     let step = (ctx.size[0].max(ctx.size[1]) / 160.0).max(2.0);
     let mut placed: Vec<usize> = Vec::new();
+    // Views that found no room where they belong: the sheet is too full for them.
+    let mut short: Vec<String> = Vec::new();
     // Roots first; then projected views, which only slide along their projection line, before
     // the views that may take any free spot.
     let mut order: Vec<usize> = (0..plans.len()).filter(|&i| plans[i].parent.is_none()).collect();
@@ -314,6 +326,7 @@ pub fn place(ctx: &mut Ctx<'_>, plans: &mut [ViewPlan], rooms: &std::collections
             }
             preferred = along(d0);
             if spot.is_none() {
+                short.push(v.name.clone());
                 ctx.finding("view_not_aligned", &v.name, format!("{} has no room in line with the {}; it sits in the nearest free space", v.title(), lower_first(&pv.title())));
             }
         } else {
@@ -341,6 +354,7 @@ pub fn place(ctx: &mut Ctx<'_>, plans: &mut [ViewPlan], rooms: &std::collections
                 let hit = nearest_free(&ctx.occ, &v.id, tight.w(), tight.h(), [preferred[0] + c[0], preferred[1] + c[1]], step, 0.0, &|_| true);
                 spot = hit.map(|h| [h.center()[0] - c[0], h.center()[1] - c[1]]);
                 if spot.is_some() {
+                    short.push(v.name.clone());
                     ctx.finding("view_crowded", &v.name, format!("{} sits closer than the standard gap to the views beside it: the sheet is full", v.title()));
                 }
             }
@@ -351,6 +365,7 @@ pub fn place(ctx: &mut Ctx<'_>, plans: &mut [ViewPlan], rooms: &std::collections
         let o = match spot {
             Some(o) => o,
             None => {
+                short.push(name.clone());
                 ctx.finding("view_no_room", &name, format!("{title} doesn't fit beside the other views; use a larger sheet or a smaller scale"));
                 preferred
             }
@@ -367,6 +382,25 @@ pub fn place(ctx: &mut Ctx<'_>, plans: &mut [ViewPlan], rooms: &std::collections
         ctx.occ.add(reserved, &id, Class::View);
         placed.push(i);
     }
+    short.dedup();
+    if !short.is_empty() {
+        let larger = larger_sheet(ctx.size).map(|n| format!(" ({n})")).unwrap_or_default();
+        let views = short.join(", ");
+        ctx.finding("sheet_full", &ctx.sheet.clone(), format!("Sheet {} is too full for its views: use a larger sheet{larger}, or move {views} to a second sheet", ctx.sheet));
+    }
+}
+
+/// The next sheet size up in the same series (ISO A4 to A0, ANSI A to E), by the sheet's size.
+pub fn larger_sheet(size: Xy) -> Option<&'static str> {
+    const ISO: [(&str, [f64; 2]); 5] = [("A4", [297.0, 210.0]), ("A3", [420.0, 297.0]), ("A2", [594.0, 420.0]), ("A1", [841.0, 594.0]), ("A0", [1189.0, 841.0])];
+    const ANSI: [(&str, [f64; 2]); 5] = [("A", [279.4, 215.9]), ("B", [431.8, 279.4]), ("C", [558.8, 431.8]), ("D", [863.6, 558.8]), ("E", [1117.6, 863.6])];
+    let (long, short) = (size[0].max(size[1]), size[0].min(size[1]));
+    for series in [&ISO, &ANSI] {
+        if let Some(i) = series.iter().position(|(_, s)| (s[0] - long).abs() < 1.0 && (s[1] - short).abs() < 1.0) {
+            return series.get(i + 1).map(|(n, _)| *n);
+        }
+    }
+    None
 }
 
 /// Draws each view's lines, center marks, hatching, bend lines, label, and its marks on its
@@ -402,7 +436,20 @@ pub fn draw(ctx: &mut Ctx<'_>, plans: &[ViewPlan]) {
         }
         let rings: Vec<Vec<f64>> = v.seam["hatch"].as_array().into_iter().flatten().map(|r| place(&floats(r))).collect();
         if !rings.is_empty() {
-            out.extend(ctx.std.hatch(&v.id, &rings, 2.0));
+            let hatch = ctx.std.hatch(&v.id, &rings, 2.0);
+            match detail {
+                // A detail of a section hatches only inside its circle.
+                Some((c, r)) => {
+                    let (c, r) = (v.to_sheet(c), r * v.scale);
+                    for h in hatch {
+                        let Shape::Polyline { points, .. } = &h.shape else { continue };
+                        for run in clip_to_circle(std::slice::from_ref(points), c, r) {
+                            out.push(Prim { shape: line(run), ..h.clone() });
+                        }
+                    }
+                }
+                None => out.extend(hatch),
+            }
         }
         if v.seam["flat"].is_object() {
             out.extend(bend_lines(&v.id, &v.seam["flat"], &|p| v.to_sheet(p)));

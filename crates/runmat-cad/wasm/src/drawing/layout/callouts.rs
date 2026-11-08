@@ -68,15 +68,21 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
     let mut frames: Vec<Frame> = Vec::new();
     // Frames first, so a datum symbol on the same feature hangs on its frame.
     let (gdt, rest): (Vec<&Value>, Vec<&Value>) = annotations.iter().partition(|a| a["kind"]["annotation"] == "gdt");
+    // A frame on the hole a hole callout in the same view points at sits under the callout's
+    // text (ASME Y14.5 and ISO 1101 both stack them so), on the callout's leader.
+    let under = frames_under_callouts(ctx, &annotations);
     for a in gdt.into_iter().chain(rest) {
+        if under.values().flatten().any(|g| a["id"].as_str() == Some(g.as_str())) {
+            continue;
+        }
         let Some(v) = views.iter().find(|v| a["view"].as_str() == Some(v.name.as_str())) else { continue };
         let kind = &a["kind"];
         let style = kind["style"].as_str().unwrap_or("");
         let what = kind["annotation"].as_str().unwrap_or("");
-        if what == "dimension" && matches!(style, "linear" | "ordinate" | "baseline" | "chain") {
+        let aid = a["id"].as_str().unwrap_or("").to_owned();
+        if what == "dimension" && (matches!(style, "linear" | "ordinate" | "baseline" | "chain") || style == "diameter" && super::dims::side_on_diameter(ctx.data, &aid, v).is_some()) {
             continue;
         }
-        let aid = a["id"].as_str().unwrap_or("").to_owned();
         let id = format!("annotation:{aid}");
         let t = ctx.text_of(&aid);
         let anchors: Vec<Xy> = ctx.data["anchors"][&aid].as_array().into_iter().flatten().filter_map(|c| {
@@ -117,8 +123,26 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 let on_frame = frames.iter().find(|f| f.view == v.name && super::marks::len(f.anchor, anchor) < 0.05).map(|f| f.frame);
                 let mut chosen = None;
                 let g = v.geom_box();
+                // The surface seen edge-on runs from `ends.0` to `ends.1` (sheet mm): the symbol may
+                // also stand on its extension line beyond the outline (ASME Y14.5 6.3.2, ISO 5459).
+                let ends = edge_on_ends(ctx, v, &aid);
+                let extension: Vec<(Xy, Xy)> = ends
+                    .map(|(lo, hi)| {
+                        let along = unit(lo, hi);
+                        let n = [-along[1], along[0]];
+                        let mut c = Vec::new();
+                        for d in [6.0, 9.0, 12.0, 16.0, 20.0, 26.0] {
+                            for (end, dir) in [(hi, along), (lo, [-along[0], -along[1]])] {
+                                for away in [[-n[0], -n[1]], n] {
+                                    c.push(([end[0] + dir[0] * d, end[1] + dir[1] * d], away));
+                                }
+                            }
+                        }
+                        c
+                    })
+                    .unwrap_or_default();
                 let candidates: Vec<(Xy, Xy)> = match on_frame {
-                    Some(fr) => vec![([fr.x0 + st.text, fr.y0], [0.0, -1.0]), ([fr.x0 + st.text, fr.y1], [0.0, 1.0])],
+                    Some(fr) => [([fr.x0 + st.text, fr.y0], [0.0, -1.0]), ([fr.x0 + st.text, fr.y1], [0.0, 1.0])].into_iter().chain(extension.iter().copied()).collect(),
                     None => {
                         let mut sides = vec![
                             (anchor[1] - g.y0, [0.0, -1.0]),
@@ -134,11 +158,20 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                                 c.push((on, away));
                             }
                         }
+                        // After the surface's own side, before the other sides of the outline.
+                        let first_side = c.len().min(9);
+                        c.splice(first_side..first_side, extension.iter().copied());
                         c
                     }
                 };
                 for (on, away) in &candidates {
-                    let (prims, b) = st.datum_symbol(&id, *on, *away, &letter);
+                    let (mut prims, b) = st.datum_symbol(&id, *on, *away, &letter);
+                    // On an extension line: the line from the outline (a visible gap) to the symbol.
+                    if let Some((lo, hi)) = ends.filter(|(lo, hi)| super::marks::len(*on, *lo).min(super::marks::len(*on, *hi)) > 2.0 && !on_segment(*on, *lo, *hi)) {
+                        let end = if super::marks::len(*on, hi) < super::marks::len(*on, lo) { hi } else { lo };
+                        let u = unit(end, *on);
+                        prims.push(mark(&id, "dimink", line(vec![end[0] + u[0] * 1.0, end[1] + u[1] * 1.0, on[0] + u[0] * 2.5, on[1] + u[1] * 2.5])));
+                    }
                     let sq = b;
                     let probe = if away[1] < 0.0 { BoxR::new(sq.x0, sq.y0, sq.x1, on[1] - 2.0) } else if away[1] > 0.0 { BoxR::new(sq.x0, on[1] + 2.0, sq.x1, sq.y1) } else if away[0] < 0.0 { BoxR::new(sq.x0, sq.y0, on[0] - 2.0, sq.y1) } else { BoxR::new(on[0] + 2.0, sq.y0, sq.x1, sq.y1) };
                     if ctx.occ.free(&probe, &id, 0.5, &[]) {
@@ -203,6 +236,11 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 register(ctx, &id, &prims, spot.label);
                 ctx.push(prims);
             }
+            "dimension" if style == "angular" && manual.is_none() && super::angular::arc(ctx, v, &id, &aid, &t).is_some() => {
+                let (prims, b) = super::angular::arc(ctx, v, &id, &aid, &t).expect("an arc");
+                register(ctx, &id, &prims, b);
+                ctx.push(prims);
+            }
             _ => {
                 // Hole callouts, diameter and radius dimensions, angular dimensions, weld
                 // symbols, datum targets and leadered notes read on a leader.
@@ -231,7 +269,22 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                     Some(c) => {
                         let rim = if matches!(what, "hole_callout") || matches!(style, "diameter" | "radius") { hole_radius_at(v, c).max(if radius > 0.0 { radius } else { 0.0 }) } else { 0.0 };
                         let tip_of = on_rim(c, rim);
-                        let label = |e: Xy, right: bool| st.leader_box(e, right, &label_text);
+                        let stacked: Vec<(String, Vec<String>)> = under.get(&aid).into_iter().flatten().map(|g| (g.clone(), ctx.text_of(g).split('|').map(str::to_owned).collect())).collect();
+                        let stack = |e: Xy, right: bool| -> Vec<BoxR> {
+                            let tw = Std::text_width(&label_text, st.text);
+                            let mut y = e[1] - st.text * 0.75 - 0.5;
+                            stacked
+                                .iter()
+                                .map(|(_, cells)| {
+                                    let cells: Vec<&str> = cells.iter().map(String::as_str).collect();
+                                    let [w, h] = frame_size(&st, &cells);
+                                    let x0 = if right { e[0] + 4.0 } else { e[0] - 4.0 - w.max(tw) };
+                                    y -= h;
+                                    BoxR::new(x0, y, x0 + w, y + h)
+                                })
+                                .collect()
+                        };
+                        let label = |e: Xy, right: bool| stack(e, right).iter().fold(st.leader_box(e, right, &label_text), |b, f| b.union(f));
                         let spot = match manual {
                             Some(at) => Some(Spot { elbow: at, right: at[0] >= c[0], label: st.leader_box(at, at[0] >= c[0], &label_text) }),
                             None => solve(ctx, v, &id, c, &label, &tip_of),
@@ -241,12 +294,77 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                         let prims = st.leader(&id, tip_of(spot.elbow), spot.elbow, spot.right, &label_text);
                         register(ctx, &id, &prims, spot.label);
                         ctx.push(prims);
+                        for ((g, cells), b) in stacked.iter().zip(stack(spot.elbow, spot.right)) {
+                            let gid = format!("annotation:{g}");
+                            let cells: Vec<&str> = cells.iter().map(String::as_str).collect();
+                            let prims = st.control_frame(&gid, [b.x0, b.y0], &cells);
+                            ctx.out.placed.insert(gid.clone(), [b.x0, b.y0]);
+                            register(ctx, &gid, &prims, b);
+                            ctx.push(prims);
+                            frames.push(Frame { view: v.name.clone(), anchor: c, frame: b });
+                        }
                     }
                     None => free_note(ctx, v, &id, &t),
                 }
             }
         }
     }
+}
+
+/// The two ends (sheet mm) of an annotation's planar reference where the view shows it edge-on,
+/// from its extent; `None` when it shows as an area or has no extent.
+fn edge_on_ends(ctx: &Ctx<'_>, v: &ViewPlan, aid: &str) -> Option<(Xy, Xy)> {
+    let e = &ctx.data["extents"][aid][0];
+    let (lo, hi) = (floats(&e[0]), floats(&e[1]));
+    if lo.len() != 3 || hi.len() != 3 {
+        return None;
+    }
+    let mut pts = Vec::new();
+    for x in [lo[0], hi[0]] {
+        for y in [lo[1], hi[1]] {
+            for z in [lo[2], hi[2]] {
+                pts.push(v.model_to_sheet([x, y, z]));
+            }
+        }
+    }
+    let (x0, x1) = (pts.iter().map(|p| p[0]).fold(f64::MAX, f64::min), pts.iter().map(|p| p[0]).fold(f64::MIN, f64::max));
+    let (y0, y1) = (pts.iter().map(|p| p[1]).fold(f64::MAX, f64::min), pts.iter().map(|p| p[1]).fold(f64::MIN, f64::max));
+    if y1 - y0 < 1e-6 && x1 - x0 > 1e-6 {
+        Some(([x0, y0], [x1, y0]))
+    } else if x1 - x0 < 1e-6 && y1 - y0 > 1e-6 {
+        Some(([x0, y0], [x0, y1]))
+    } else {
+        None
+    }
+}
+
+/// Whether `p` lies on the segment `a`–`b` (within 0.05 mm).
+fn on_segment(p: Xy, a: Xy, b: Xy) -> bool {
+    let (ab, ap) = ([b[0] - a[0], b[1] - a[1]], [p[0] - a[0], p[1] - a[1]]);
+    let l2 = ab[0] * ab[0] + ab[1] * ab[1];
+    if l2 < 1e-12 {
+        return super::marks::len(p, a) < 0.05;
+    }
+    let t = (ap[0] * ab[0] + ap[1] * ab[1]) / l2;
+    (-1e-6..=1.0 + 1e-6).contains(&t) && (ap[0] * ab[1] - ap[1] * ab[0]).abs() / l2.sqrt() < 0.05
+}
+
+/// Hole callout id → the frames (gdt ids, in drawing order) that sit under it: each frame the
+/// layout places (none placed by hand) whose first reference is the callout's hole, in the
+/// callout's view.
+fn frames_under_callouts(ctx: &Ctx<'_>, annotations: &[Value]) -> std::collections::BTreeMap<String, Vec<String>> {
+    let first = |a: &Value| -> Option<Vec<f64>> { ctx.data["anchors"][a["id"].as_str()?].as_array()?.first().map(floats) };
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for g in annotations.iter().filter(|a| a["kind"]["annotation"] == "gdt" && placed_at(a).is_none()) {
+        let Some(pg) = first(g) else { continue };
+        let hole = annotations.iter().find(|h| {
+            h["kind"]["annotation"] == "hole_callout" && h["view"] == g["view"] && first(h).is_some_and(|ph| ph.len() == 3 && pg.len() == 3 && (0..3).all(|k| (ph[k] - pg[k]).abs() < 0.05))
+        });
+        if let (Some(h), Some(gid)) = (hole.and_then(|h| h["id"].as_str()), g["id"].as_str()) {
+            out.entry(h.to_owned()).or_default().push(gid.to_owned());
+        }
+    }
+    out
 }
 
 /// A leader from a frame or label at `elbow` to `tip`, with its arrowhead.
