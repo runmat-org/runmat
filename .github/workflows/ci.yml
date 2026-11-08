@@ -269,6 +269,8 @@ jobs:
       - name: Install pinned shader compiler beside Windows test executables
         if: runner.os == 'Windows' && matrix.task == 'test' && matrix.test_group != 'language'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $dxc = & ./scripts/distribution/prepare-windows-dxc-runtime.ps1 -Target x86_64-pc-windows-msvc -Destination "$env:RUNNER_TEMP/runmat-test-dxc"
@@ -666,6 +668,8 @@ jobs:
       - name: Stage and accept distributed product (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $root = "artifacts/release-product/${{ matrix.platform.release_for }}"

@@ -212,6 +212,8 @@ jobs:
       - name: Prepare pinned Windows shader compiler
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           ./scripts/distribution/prepare-windows-dxc-runtime.ps1 `
             -Target "${{ matrix.platform.target }}" `
@@ -263,6 +265,8 @@ jobs:
       - name: Stage and accept distributed product (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $root = "artifacts/release-product/${{ matrix.platform.release_for }}"

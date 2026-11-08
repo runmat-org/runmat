@@ -12,6 +12,11 @@ verifies those source-controlled identities on initial preparation and cache
 reuse. It refuses damaged or unexpected cache files rather than overwriting
 them or selecting another shader compiler.
 
+If the publisher's release-download route fails, the preparer can use Node.js
+and GitHub CLI to fetch the same archive through the GitHub asset API. CI
+supplies a read-only workflow token. Both routes verify the pinned SHA512
+before extracting the archive and checking individual files.
+
 On a configured Windows build host:
 
 ```powershell

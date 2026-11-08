@@ -48,7 +48,20 @@ if (!(Test-Path -LiteralPath $destinationPath)) {
     New-Item -ItemType Directory -Path $scratch | Out-Null
     try {
         $archive = Join-Path $scratch 'publisher.zip'
-        Invoke-WebRequest -Uri $descriptor.url -OutFile $archive
+        try {
+            Invoke-WebRequest -Uri $descriptor.url -OutFile $archive
+        } catch {
+            $node = Get-Command node -ErrorAction SilentlyContinue
+            $gh = Get-Command gh -ErrorAction SilentlyContinue
+            if (!$node -or !$gh) { throw }
+            # Retain the pinned archive identity when the release download route
+            # is unavailable. The shared provider verifies SHA512 before staging.
+            Write-Host 'DXC release download failed; trying the GitHub asset API'
+            Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+            $provider = Join-Path $PSScriptRoot '../../infra/scripts/github-release-asset-cache.mjs'
+            & $node.Source $provider $descriptor.url $descriptor.archive_sha512 $archive $gh.Source
+            if ($LASTEXITCODE -ne 0) { throw "DXC asset API download failed with exit code $LASTEXITCODE" }
+        }
         if ((Get-FileHash -LiteralPath $archive -Algorithm SHA512).Hash.ToLowerInvariant() -ne $descriptor.archive_sha512) { throw 'DXC publisher archive checksum mismatch' }
         $unpacked = Join-Path $scratch 'unpacked'
         Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
