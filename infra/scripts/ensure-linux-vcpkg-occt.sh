@@ -63,6 +63,12 @@ PREFIX="${VCPKG_ROOT}/installed/${VCPKG_TRIPLET}"
 INCLUDE_DIR="${PREFIX}/include/opencascade"
 LIB_DIR="${PREFIX}/lib"
 
+if [[ -z "${X_VCPKG_ASSET_SOURCES:-}" ]] && command -v node >/dev/null && command -v gh >/dev/null; then
+  asset_source="$(node "${REPOSITORY_ROOT}/infra/scripts/github-release-asset-cache.mjs" --config)"
+  export X_VCPKG_ASSET_SOURCES="${asset_source}"
+  export VCPKG_KEEP_ENV_VARS="${VCPKG_KEEP_ENV_VARS:+${VCPKG_KEEP_ENV_VARS};}GH_TOKEN"
+fi
+
 has_occt() {
   [[ -d "${INCLUDE_DIR}" ]] &&
     [[ -e "${LIB_DIR}/libTKBRep.so" ]] &&

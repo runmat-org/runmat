@@ -89,6 +89,13 @@ Remove-Item Env:F77 -ErrorAction SilentlyContinue
 Remove-Item Env:F90 -ErrorAction SilentlyContinue
 $env:Path = [string]::Join(';', $keptPath)
 
+if (-not $env:X_VCPKG_ASSET_SOURCES -and (Get-Command node -ErrorAction SilentlyContinue) -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+    $assetSource = & node (Join-Path $PSScriptRoot 'github-release-asset-cache.mjs') --config
+    if ($LASTEXITCODE -ne 0) { throw 'Could not configure the GitHub release-asset source' }
+    $env:X_VCPKG_ASSET_SOURCES = $assetSource
+    $env:VCPKG_KEEP_ENV_VARS = (@($env:VCPKG_KEEP_ENV_VARS, 'GH_TOKEN') | Where-Object { $_ }) -join ';'
+}
+
 $env:VCPKG_ROOT = $VcpkgRoot
 $env:VCPKG_DEFAULT_TRIPLET = $triplet
 & (Join-Path $PSScriptRoot 'ensure-windows-vcpkg-dependencies.ps1') `

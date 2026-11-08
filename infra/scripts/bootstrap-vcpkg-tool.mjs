@@ -2,8 +2,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { spawnSync, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { downloadAsset } from './github-release-asset-cache.mjs';
 
 const release = '2026-05-27';
 const tools = {
@@ -26,17 +27,7 @@ export function verifyPayload(bytes, sha256) {
 }
 
 function downloadWithGh(asset, destination) {
-  const fd = fs.openSync(destination, 'wx', 0o700);
-  try {
-    const result = spawnSync('gh', [
-      'api', '-H', 'Accept: application/octet-stream',
-      `repos/microsoft/vcpkg-tool/releases/assets/${asset}`,
-    ], { stdio: ['ignore', fd, 'inherit'], timeout: 120_000, windowsHide: true });
-    if (result.error) throw result.error;
-    if (result.status !== 0) throw new Error(`GitHub vcpkg asset download failed: ${result.status}`);
-  } finally {
-    fs.closeSync(fd);
-  }
+  downloadAsset('microsoft', 'vcpkg-tool', asset, destination);
 }
 
 export function stagePinnedTool(root, {
