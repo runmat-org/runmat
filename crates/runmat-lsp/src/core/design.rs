@@ -70,6 +70,12 @@ pub fn design_dependencies(dialect: Dialect, path: &str, text: &str) -> Vec<Stri
         // The folders it names designs through (`<folder>/`, listed by the host) and the
         // design files it names by path.
         Dialect::Assembly | Dialect::Drawing => runmat_cad::modules::dependencies(path, text),
+        // The folders its values' `.m` functions can be in, as the Desktop's compile lists them:
+        // without them the browser server has no `.m` file to resolve a call to.
+        Dialect::Part => runmat_cad::syntax::parse_part(path, text)
+            .document
+            .map(|doc| runmat_cad::value::m_functions::call_folders(path, text, &doc))
+            .unwrap_or_default(),
         _ => Vec::new(),
     }
 }

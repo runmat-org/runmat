@@ -381,6 +381,29 @@ fn a_value_from_an_m_function_names_its_function_in_the_hover_and_reports_no_pro
     assert!(hover.contains("**Value:** 4 mm"), "{hover}");
 }
 
+/// The host supplies only the files the server lists as dependencies, so a part's `.m`
+/// functions resolve only when their folders are listed: the part's own folder (at the
+/// workspace root too) and its `private/` folder. The files read from those listings give the
+/// hover its function and file.
+#[test]
+fn a_parts_dependencies_list_the_folders_its_m_functions_can_be_in() {
+    let part = "runmat 0.7\nstd 1\n\npart boss {\n    input lift : length = 8 mm\n    let base = baseRadius(lift = input.lift) as m\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = base)\n    }\n    feature disc = extrude(profile = sketch.s, distance = 5 mm)\n}\n";
+    let function = "function rb = baseRadius(lift)\nrb = 2 * lift;\nend\n";
+    for (path, folder) in [("/boss.part", "/"), ("/parts/boss.part", "/parts/")] {
+        let listed = design_dependencies(Dialect::Part, path, part);
+        assert!(listed.iter().any(|d| d == folder), "{path}: {listed:?}");
+        // The host reads the listed folders' files, as the Desktop's supplyDesignFiles does.
+        let m = format!("{folder}baseRadius.m");
+        let files = DesignFiles::from([(m.clone(), function.to_string())]);
+        let analysis = analyze(path, part, &files);
+        assert!(analysis.problems.is_empty(), "{path}: {:?}", analysis.problems.iter().map(|p| &p.message).collect::<Vec<_>>());
+        let hover = hover_text(&analysis, at(part, "let base", 0, 5));
+        assert!(hover.contains(&format!("**Computed by** `baseRadius` in `{}`", m.trim_start_matches('/'))), "{hover}");
+    }
+    let plain = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = 4 mm)\n    }\n    feature disc = extrude(profile = sketch.s, distance = 5 mm)\n}\n";
+    assert!(design_dependencies(Dialect::Part, "/plate.part", plain).is_empty());
+}
+
 /// Once the host has run a part's `.m` calls and supplied their results, the hover shows the
 /// computed value with the function and its file, as Properties does; a value that depends on
 /// it evaluates too.
