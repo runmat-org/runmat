@@ -4,14 +4,17 @@
 //! - A track: `length · √εeff / c`, with `εeff` from [`TraceGeometry::effective_dk`] at the
 //!   track's width (a stripline's dielectric Dk; a microstrip's Hammerstad–Jensen value, part
 //!   air and part dielectric). A layer with no reference plane uses the stack's mean Dk.
-//! - A via: its span (centre to centre of the copper it joins) at the thickness-weighted mean
-//!   Dk of the dielectric it crosses.
+//! - A via: the span between the outermost layers its net connects on (centre to centre) at the
+//!   thickness-weighted mean Dk of the dielectric it crosses, plus half the delay of any stub
+//!   past them ([`super::stubs`]). A via connected on fewer than two layers counts its drilled
+//!   span.
 //!
 //! Delays are in picoseconds, lengths in nanometres.
 
 use crate::geom::Coord;
 use crate::impedance::{TraceGeometry, SPEED_OF_LIGHT};
 use crate::layer_set::CopperIndex;
+use crate::board_rules::{BoardGraph, BoardRules};
 use crate::layout::{Board, NetId, StackKind, Stackup};
 use std::collections::BTreeMap;
 
@@ -95,8 +98,9 @@ impl DelayModel {
     }
 }
 
-/// Every routed net's length and delay: its tracks and its vias' spans.
-pub fn net_timing(board: &Board) -> BTreeMap<NetId, Timing> {
+/// Every routed net's length and delay: its tracks, its vias' connected spans and their stubs.
+pub fn net_timing(board: &Board, rules: &BoardRules, g: &BoardGraph) -> BTreeMap<NetId, Timing> {
+    let stubs: BTreeMap<_, _> = super::stubs::via_stubs(board, rules, g).into_iter().map(|s| (s.via, s)).collect();
     let model = DelayModel::new(&board.stackup);
     let mut out: BTreeMap<NetId, Timing> = BTreeMap::new();
     for t in board.tracks.values() {
@@ -106,7 +110,15 @@ pub fn net_timing(board: &Board) -> BTreeMap<NetId, Timing> {
     }
     for v in board.vias.values() {
         let Some(n) = v.net else { continue };
-        *out.entry(n).or_default() += model.via(v.from, v.to);
+        let on = super::stubs::connected_layers(board, v);
+        let mut t = match (on.first(), on.last()) {
+            (Some(&a), Some(&b)) if a != b => model.via(a, b),
+            _ => model.via(v.from, v.to),
+        };
+        if let Some(s) = stubs.get(&v.id) {
+            t.delay += s.delay;
+        }
+        *out.entry(n).or_default() += t;
     }
     out
 }

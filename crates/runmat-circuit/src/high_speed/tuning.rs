@@ -36,7 +36,7 @@ pub fn tune_net(board: &mut Board, net: NetId, target: Target, tolerance: f64, p
         let (mut rules, _) = BoardRules::for_board(board);
         let g = BoardGraph::new(board, pairs);
         rules.rebuild(&g);
-        let t = net_timing(board);
+        let t = net_timing(board, &rules, &g);
         (signal_of(board, &rules, &g, net, &t), t.get(&net).copied().unwrap_or_default())
     };
     let (sig, own) = signal(board);
@@ -72,7 +72,7 @@ pub fn tune_group(board: &mut Board, group: &str, pattern: Pattern, pairs: &[(Ne
     let found = {
         let g = BoardGraph::new(board, pairs);
         rules.rebuild(&g);
-        groups(board, &rules, &g, &net_timing(board))
+        groups(board, &rules, &g, &net_timing(board, &rules, &g))
     };
     let names: Vec<String> = found.iter().map(|g| g.name.clone()).collect();
     let grp = found

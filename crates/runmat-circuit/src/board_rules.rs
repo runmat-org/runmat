@@ -121,6 +121,14 @@ pub mod props {
     /// A net class's copper etch factor (thickness over a side's undercut), for the
     /// field-solved cross-section ([`crate::high_speed::cross_section`]).
     pub const ETCH_FACTOR: &str = "etch_factor";
+    /// The longest via stub allowed on a net (see [`crate::high_speed::stubs`]).
+    pub const STUB_MAX: &str = "stub_max";
+    /// Whether a net's via stubs are back-drilled from the board surface.
+    pub const BACKDRILL: &str = "backdrill";
+    /// The barrel a back-drill leaves past its must-not-cut layer.
+    pub const BACKDRILL_STUB: &str = "backdrill_stub";
+    /// How much wider a back-drill is than the via's drill.
+    pub const BACKDRILL_OVERSIZE: &str = "backdrill_oversize";
     pub const IMPEDANCE: &str = "impedance";
     /// A pair's differential impedance target, Ω (see [`crate::high_speed::controlled`]).
     pub const DIFF_IMPEDANCE: &str = "diff_impedance";
@@ -726,6 +734,10 @@ impl BoardRules {
         single.register_property(props::THROUGH_PARTS, false, None);
         single.register_property(props::THROUGH_DELAY, false, None);
         single.register_property(props::ETCH_FACTOR, false, None);
+        single.register_property(props::STUB_MAX, false, None);
+        single.register_property(props::BACKDRILL, false, None);
+        single.register_property(props::BACKDRILL_STUB, false, None);
+        single.register_property(props::BACKDRILL_OVERSIZE, false, None);
         single.register_property(props::IMPEDANCE, false, None);
         single.register_property(props::DIFF_IMPEDANCE, false, None);
         single.register_property(props::THERMAL_GAP, true, None);

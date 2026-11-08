@@ -32,6 +32,14 @@ fn checked(b: &Board, pairs: &[(NetId, NetId)]) -> (BoardRules, Drc) {
     (r, drc)
 }
 
+/// Each net's length and delay under the board's own rules.
+fn timing(b: &Board) -> std::collections::BTreeMap<NetId, high_speed::delay::Timing> {
+    let (mut r, _) = BoardRules::for_board(b);
+    let g = BoardGraph::new(b, &[]);
+    r.rebuild(&g);
+    net_timing(b, &r, &g)
+}
+
 fn codes<'a>(drc: &'a Drc, code: &str) -> Vec<&'a runmat_circuit::drc::DrcFinding> {
     drc.findings().into_iter().filter(|f| f.code == code).collect()
 }
@@ -148,8 +156,8 @@ fn a_delay_group_compares_members_in_picoseconds_and_tuning_brings_them_in() {
     b.add_track(Some(nets[2]), 0, w, Point::mm(5.0, 30.0), Point::mm(35.0, 30.0));
     let (r, drc) = checked(&b, &[]);
     let g = BoardGraph::new(&b, &[]);
-    let timing = net_timing(&b);
-    let gs = groups::groups(&b, &r, &g, &timing);
+    let tm = timing(&b);
+    let gs = groups::groups(&b, &r, &g, &tm);
     assert_eq!(gs.len(), 1);
     let grp = &gs[0];
     assert_eq!(grp.basis, groups::Basis::Delay);
@@ -167,7 +175,7 @@ fn a_delay_group_compares_members_in_picoseconds_and_tuning_brings_them_in() {
     let model = runmat_circuit::high_speed::delay::DelayModel::new(&b.stackup);
     for (net, pattern) in [(nets[0], Pattern::Accordion), (nets[2], Pattern::Sawtooth)] {
         let per_mm = model.ps_per_mm(0, w);
-        let now = net_timing(&b)[&net];
+        let now = timing(&b)[&net];
         let target_mm = now.length * 1e-6 + (grp.target - now.delay) / per_mm;
         let t = pair::tune(&mut b, net, target_mm, 1.0 / per_mm, &[], pattern, 0.0).unwrap();
         assert!(t.after > t.before, "{t:?}");
@@ -193,7 +201,7 @@ fn a_length_group_reads_its_written_target_and_tolerance() {
     b.add_track(Some(a), 0, mm(0.2), Point::mm(5.0, 5.0), Point::mm(35.0, 5.0));
     b.add_track(Some(c), 0, mm(0.2), Point::mm(5.0, 20.0), Point::mm(40.0, 20.0));
     let (r, drc) = checked(&b, &[]);
-    let gs = groups::groups(&b, &r, &BoardGraph::new(&b, &[]), &net_timing(&b));
+    let gs = groups::groups(&b, &r, &BoardGraph::new(&b, &[]), &timing(&b));
     let m = &gs[0].members;
     assert_eq!((gs[0].basis, gs[0].written, gs[0].target), (groups::Basis::Length, true, 30.0));
     assert_eq!((m[0].status, m[1].status), (groups::Status::Matched, groups::Status::Long));
@@ -245,7 +253,7 @@ fn a_signal_through_a_series_resistor_counts_both_sides_and_the_parts_delay() {
     b.rules.push(RuleSpec::single("rs", "footprint#R21").set(props::THROUGH_DELAY, RuleValue::Time(8.0)));
     let (r, _) = checked(&b, &[]);
     let g = BoardGraph::new(&b, &[]);
-    let t = net_timing(&b);
+    let t = timing(&b);
     let sig = high_speed::signals::signal_of(&b, &r, &g, dq, &t);
     assert_eq!(sig.nets, vec![dq, dqr]);
     assert_eq!(sig.parts, vec!["R21".to_string()]);
@@ -271,4 +279,80 @@ fn the_pcb_source_carries_each_controlled_lines_cross_section() {
     assert_eq!(line.stack.first().unwrap().kind, "copper");
     assert_eq!(line.stack.last().unwrap().kind, "copper");
     assert!((line.z0 - 50.0).abs() < 0.5 && line.gap.is_none() && (line.length - 0.02).abs() < 1e-9, "{line:?}");
+}
+
+/// A through via joining F.Cu to In1.Cu: the barrel past In1.Cu down to the bottom copper is a
+/// stub. `stub_max` flags it; `backdrill` removes it from the bottom face, down to In1.Cu,
+/// leaving `backdrill_stub`; the stub's delay leaves the net with it, its length never counted.
+#[test]
+fn a_via_stub_past_its_connected_layer_is_checked_and_back_drilled() {
+    use runmat_circuit::high_speed::stubs::{via_stubs, Face};
+    let mut b = board();
+    let sig = b.add_net("SIG", None);
+    let at = Point::mm(20.0, 10.0);
+    b.add_track(Some(sig), 0, mm(0.2), Point::mm(5.0, 10.0), at);
+    b.add_track(Some(sig), 1, mm(0.2), at, Point::mm(40.0, 10.0));
+    let v = b.add_via(Some(sig), at, mm(0.6), mm(0.3));
+    b.rules.push(RuleSpec::single("sig", ":net(SIG)").set(props::STUB_MAX, RuleValue::Len(mm(0.3))));
+    let s = b.stackup.clone();
+    // From In1.Cu's centre to the bottom copper's outer face (the board less the bottom mask).
+    let expected = s.thickness() - mm(0.02) - s.copper_z(1).unwrap();
+    let (r, drc) = checked(&b, &[]);
+    let g = BoardGraph::new(&b, &[]);
+    let st = via_stubs(&b, &r, &g);
+    assert_eq!(st.len(), 1);
+    assert_eq!((st[0].via, st[0].connected, st[0].stubs.len()), (v, (0, 1), 1));
+    let stub = &st[0].stubs[0];
+    assert_eq!((stub.face, stub.drilled, stub.length, stub.open_to_surface), (Face::Bottom, expected, expected, true));
+    assert!(stub.drilled > mm(1.0), "{stub:?}");
+    let found = codes(&drc, "via-stub");
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(found[0].at, at);
+    assert!(found[0].message.contains("past In1.Cu") && found[0].message.contains("back-drill it"), "{}", found[0].message);
+    let before = timing(&b)[&sig];
+    // The signal runs 15 + 20 mm of track and the via's F.Cu–In1.Cu span; the stub is no length.
+    assert!((before.length - (mm(35.0) + s.span_length(0, 1)) as f64).abs() < 1.0, "{before:?}");
+
+    // Back-drilled from the bottom, stopping 0.2 mm past In1.Cu, 0.2 mm over the drill.
+    b.rules.push(RuleSpec::single("bd", ":net(SIG)").set(props::BACKDRILL, RuleValue::Bool(true)));
+    let (r, drc) = checked(&b, &[]);
+    let g = BoardGraph::new(&b, &[]);
+    let st = via_stubs(&b, &r, &g);
+    let bd = st[0].stubs[0].backdrill.clone().expect("back-drilled");
+    assert_eq!((bd.face, bd.must_not_cut, bd.diameter, bd.residual, bd.depth), (Face::Bottom, 1, mm(0.5), mm(0.2), expected - mm(0.2)));
+    assert_eq!(st[0].length, mm(0.2));
+    assert!(codes(&drc, "via-stub").is_empty(), "{:#?}", codes(&drc, "via-stub"));
+    let after = timing(&b)[&sig];
+    assert_eq!(after.length, before.length);
+    // About 1.0 mm of stub at ~6.9 ps/mm, half of it seen: ~3.5 ps, down to ~0.7 ps at 0.2 mm.
+    assert!((2.4..3.2).contains(&(before.delay - after.delay)), "{before:?} {after:?}");
+}
+
+/// A buried via's stub is inside the board: back-drill can't reach it, and DRC says so.
+#[test]
+fn a_buried_stub_cannot_be_back_drilled() {
+    use runmat_circuit::high_speed::stubs::via_stubs;
+    let outline = rect_outline(Rect::new(Point::ORIGIN, Point::mm(60.0, 40.0)));
+    let mut b = Board::new("hs6", outline, Stackup::standard(6, mm(1.6), 1.0, 0.5));
+    let sig = b.add_net("SIG", None);
+    let at = Point::mm(20.0, 10.0);
+    b.add_track(Some(sig), 1, mm(0.2), Point::mm(5.0, 10.0), at);
+    b.add_track(Some(sig), 2, mm(0.2), at, Point::mm(40.0, 10.0));
+    let v = b.add_via(Some(sig), at, mm(0.6), mm(0.3));
+    {
+        let via = b.vias.get_mut(&v).unwrap();
+        (via.from, via.to) = (1, 4);
+    }
+    b.rules.push(
+        RuleSpec::single("sig", ":net(SIG)")
+            .set(props::STUB_MAX, RuleValue::Len(mm(0.3)))
+            .set(props::BACKDRILL, RuleValue::Bool(true)),
+    );
+    let (r, drc) = checked(&b, &[]);
+    let st = via_stubs(&b, &r, &BoardGraph::new(&b, &[]));
+    assert_eq!(st[0].connected, (1, 2));
+    assert!(!st[0].stubs[0].open_to_surface && st[0].stubs[0].backdrill.is_none(), "{st:?}");
+    let found = codes(&drc, "via-stub");
+    assert_eq!(found.len(), 1);
+    assert!(found[0].message.contains("inside the board"), "{}", found[0].message);
 }

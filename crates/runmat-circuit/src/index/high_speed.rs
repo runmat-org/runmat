@@ -98,7 +98,7 @@ pub struct LengthMemberRow {
 
 /// The board's matched-length groups.
 pub fn group_rows(board: &Board, rules: &BoardRules, g: &BoardGraph) -> Vec<LengthGroupRow> {
-    let timing = crate::high_speed::delay::net_timing(board);
+    let timing = crate::high_speed::delay::net_timing(board, rules, g);
     groups::groups(board, rules, g, &timing)
         .into_iter()
         .map(|grp| LengthGroupRow {

@@ -18,17 +18,10 @@ impl Drc {
         nets: &BTreeSet<NetId>,
     ) {
         let nodes = net_nodes(board);
-        let mut lengths: BTreeMap<NetId, f64> = BTreeMap::new();
-        for t in board.tracks.values() {
-            if let Some(n) = t.net {
-                *lengths.entry(n).or_default() += t.length();
-            }
-        }
-        for v in board.vias.values() {
-            if let Some(n) = v.net {
-                *lengths.entry(n).or_default() += board.stackup.span_length(v.from, v.to) as f64;
-            }
-        }
+        // Each net's routed length: its tracks and its vias' connected spans (stubs aren't on the
+        // signal's path; they count in its delay).
+        let timing = crate::high_speed::delay::net_timing(board, rules, g);
+        let lengths: BTreeMap<NetId, f64> = timing.iter().map(|(&n, t)| (n, t.length)).collect();
         for &n in nets {
             let net_item = BItem::Net(n.0);
             if let Some(ns) = nodes.get(&n) {
@@ -143,7 +136,6 @@ impl Drc {
         }
         // Groups with a target or tolerance: each member against the target, in length or
         // delay, through series parts where its rules say so.
-        let timing = crate::high_speed::delay::net_timing(board);
         for group in crate::high_speed::groups::groups(board, rules, g, &timing) {
             let checked = group.members.iter().any(|m| nets.contains(&m.net))
                 && group.members.iter().any(|m| {
@@ -182,6 +174,41 @@ impl Drc {
                     ),
                 });
             }
+        }
+        // Via stubs past the connected layers, after any back-drill.
+        for st in crate::high_speed::stubs::via_stubs(board, rules, g) {
+            let Some(max) = st.max else { continue };
+            if !nets.contains(&st.net) || st.length <= max {
+                continue;
+            }
+            let Some(v) = board.vias.get(&st.via) else { continue };
+            let it = BItem::Via(st.via);
+            let (rule, source) = rules.single_origin(g, it, props::STUB_MAX);
+            let fix = if st.stubs.iter().any(|s| s.length > max && s.open_to_surface && s.backdrill.is_none()) {
+                "; back-drill it (`backdrill = true`) or connect nearer the via's end"
+            } else if st.stubs.iter().any(|s| s.length > max && s.backdrill.is_some()) {
+                "; the back-drill's residual stub (`backdrill_stub`) is longer than the limit"
+            } else {
+                "; the stub is inside the board, so only a shorter via span removes it"
+            };
+            self.put(DrcFinding {
+                code: "via-stub".into(),
+                severity: Severity::Error,
+                items: key_items(vec![it, BItem::Net(st.net.0)]),
+                layer: None,
+                at: v.at,
+                actual: Some(st.length as f64),
+                required: Some(max as f64),
+                rule,
+                source,
+                message: format!(
+                    "via on `{}` has a {:.3} mm stub past {}, limit {:.3} mm{fix}",
+                    board.net_name(st.net),
+                    st.length as f64 * 1e-6,
+                    board.stackup.copper_names().get(if st.stubs.iter().any(|s| s.face == crate::high_speed::stubs::Face::Bottom && s.length == st.length) { st.connected.1 } else { st.connected.0 } as usize).cloned().unwrap_or_default(),
+                    max as f64 * 1e-6
+                ),
+            });
         }
         // Differential pairs.
         for &(p, nn) in &self.diff_pairs.clone() {
@@ -347,7 +374,7 @@ impl Drc {
         }
         if let Some(max_ps) = rules.value(g, pi, props::SKEW_MAX).and_then(|v| v.as_time()) {
             // In-pair skew as a delay: each net's delay from its layers' propagation velocity.
-            let t = crate::high_speed::delay::net_timing(board);
+            let t = crate::high_speed::delay::net_timing(board, rules, g);
             let d = |x: NetId| t.get(&x).map_or(0.0, |t| t.delay);
             let skew = (d(p) - d(n)).abs();
             if skew > max_ps {
