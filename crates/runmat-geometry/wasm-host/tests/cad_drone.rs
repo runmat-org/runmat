@@ -90,7 +90,12 @@ fn the_drone_compiles_part_by_part_and_as_one_assembly() {
             let skeleton = path.ends_with("skeleton.part");
             // Each drone part is one solid: a second body is a feature left out of the union
             // (STEP then carries overlapping solids, which the FEA rejects as interpenetrating).
-            if problems > 0 || (bodies != 1 && !skeleton) || !failed.is_empty() {
+            // A weldment is the exception: each structural member stays its own body, as the
+            // cut list, the drawing's member balloons and the fabricator's saw list need it;
+            // the welds join them in the shop. Its bodies are exactly its members.
+            let members = weldment_members(&v["projection"]["data"]["document"]);
+            let expected = if members > 0 { members } else { 1 };
+            if problems > 0 || (bodies != expected && !skeleton) || !failed.is_empty() {
                 failures.push(format!("{path}: {bodies} bodies, problems {:?}, features {failed:?}", data["problems"]));
             }
         }
@@ -121,6 +126,21 @@ fn the_drone_compiles_part_by_part_and_as_one_assembly() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The structural members a part's weldment features place: one per sketch segment of each
+/// member group.
+fn weldment_members(document: &Value) -> usize {
+    match document {
+        Value::Object(o) => {
+            if o.get("weldment").and_then(Value::as_str) == Some("structural_member") {
+                return o["groups"].as_array().into_iter().flatten().map(|g| g["segments"].as_array().map_or(0, |s| s.len())).sum();
+            }
+            o.values().map(weldment_members).sum()
+        }
+        Value::Array(items) => items.iter().map(weldment_members).sum(),
+        _ => 0,
+    }
 }
 
 /// The arm's production drawing reads the part: dimensions between planes and between hole
