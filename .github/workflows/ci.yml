@@ -422,6 +422,31 @@ jobs:
           set -o pipefail
           python3 scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" --reclaim-completed-test-binaries 2>&1 | tee test.log
 
+      - name: Isolate GPU sequence regression before Windows Runtime tests
+        if: matrix.name == 'windows-tests-runtime'
+        shell: python
+        env:
+          RUST_BACKTRACE: 1
+          RUST_TEST_THREADS: 1
+        run: |
+          from pathlib import Path
+          import runpy
+
+          driver = runpy.run_path('scripts/development/run-workspace-test-group.py')
+          root = Path.cwd()
+          metadata = driver['workspace_metadata'](root)
+          command = driver['test_commands']('runtime', False, metadata)[0]
+          assert '--lib' in command
+          separator = command.index('--') if '--' in command else len(command)
+          command.insert(separator, 'builtins::array::creation::logspace::tests::logspace_wgpu_matches_cpu')
+          if '--' not in command:
+              command.append('--')
+          command.extend(['--exact', '--nocapture'])
+          # Preserve the normal package/feature union and retain these binaries
+          # for the full cohort. This adds no second compiler configuration.
+          with driver['test_runtime_environment']() as environment:
+              raise SystemExit(driver['run_batch'](command, root, Path(metadata['target_directory']), False, environment))
+
       - name: Test (Windows)
         if: matrix.task == 'test' && runner.os == 'Windows'
         shell: pwsh
