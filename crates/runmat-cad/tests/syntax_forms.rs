@@ -996,3 +996,14 @@ fn pattern_and_mirror_images_of_made_names_have_a_text_form() {
         assert!(!parse_part("p.part", &wrong).diagnostics.is_empty(), "{bad}");
     }
 }
+
+#[test]
+fn a_word_the_language_also_uses_names_a_sketch() {
+    // `section` is also a keyword of the language; as a sketch's name it reads like any other.
+    let text = "runmat 0.7\nstd 1\n\npart rail {\n    sketch section on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = 3 mm)\n    }\n    feature body = extrude(profile = sketch.section, distance = 180 mm)\n}\n";
+    let parsed = parse_part("rail.part", text);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let document = parsed.document.expect("the part");
+    let ids: Vec<&str> = document.features.iter().map(|f| f.id.0.as_str()).collect();
+    assert_eq!(ids, ["section", "body"]);
+}

@@ -229,7 +229,8 @@ impl FeaParser {
             self.required_name(&significant, 1, "a declaration requires a name");
             position = 2;
         } else if significant.get(1).is_some_and(|index| {
-            self.at(*index, FeaTokenKind::Identifier) || self.at(*index, FeaTokenKind::String)
+            // A word the language also uses as a keyword names a block too (`sketch section on …`).
+            is_name_token_at(self, *index) || self.at(*index, FeaTokenKind::String)
         }) && !CLAUSE_WORDS.contains(&self.lexeme(significant[1]))
         {
             self.tree
