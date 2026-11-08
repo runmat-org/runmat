@@ -15,12 +15,13 @@ pub mod run_set;
 // Nested here while lib.rs holds another lane's work in progress.
 #[cfg(feature = "m-values")]
 pub mod m_values;
+mod frame;
 mod surface;
 pub use surface::Ray;
 
 /// What to read. Parts: `faces`, `regions`, `published`, `inputs`, `features`, `bodies`,
-/// `mass`, `surface` (named, with `ray`). Assemblies: `occurrences`, `mates`, `bom`, `mass`,
-/// `interference` and `surface` (named; `changed` and `ray`). Circuits: `components`, `nets`,
+/// `mass`, `surface` (named, with `rays`). Assemblies: `occurrences`, `mates`, `bom`, `mass`,
+/// `interference` and `surface` (named; `changed` and `rays`). Circuits: `components`, `nets`,
 /// `net_classes`, `bom`, `sheets`, `erc_power`, and with a board `rooms`, `footprints`, `layers`,
 /// `unplaced` and `eco`. Drawings: `sheets`, `views`, `annotations`, `models` (the inputs of
 /// the parts the views show).
@@ -55,10 +56,10 @@ pub struct InspectInput {
     /// between other parts.
     #[serde(default)]
     pub changed: Option<Vec<String>>,
-    /// The `surface` section's ray: where a line from a point along a direction meets the
-    /// bodies, with the face and its normal there.
+    /// The `surface` section's rays: where each line from a point along a direction meets the
+    /// bodies, with the face and its normal there. Give every ray a seating needs in one call.
     #[serde(default)]
-    pub ray: Option<Ray>,
+    pub rays: Option<Vec<Ray>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -349,7 +350,16 @@ fn part(s: &mut Sections, path: &str, text: &str) -> Result<(), ToolError> {
                 .kernel
                 .analyze(&AnalysisRequest::MassProperties { density: 1.0 }, &handles)
             {
-                Ok(AnalysisResult::MassProperties(m)) => mass_value(&m, density),
+                Ok(AnalysisResult::MassProperties(m)) => {
+                    let mut value = mass_value(&m, density);
+                    // The body's own frame: its principal axes (the first is a long body's long
+                    // axis) and its extent, both in the part's coordinates.
+                    value["principal_axes"] = frame::principal_axes(m.inertia, density * 1e6);
+                    value["extent_mm"] = frame::extent_mm(
+                        part.display.bodies.iter().filter(|b| !b.flat_pattern).flat_map(|b| b.faces.iter().map(|f| f.positions.as_slice())),
+                    );
+                    value
+                }
                 Ok(_) => Value::Null,
                 Err(e) => {
                     s.out.notes.push(format!("mass properties: {e:?}"));
@@ -360,7 +370,7 @@ fn part(s: &mut Sections, path: &str, text: &str) -> Result<(), ToolError> {
         s.value("mass", mass);
     }
     if s.named("surface") {
-        let value = surface::surface(s.input.ray.as_ref(), path, text, &Files::new(), None)?;
+        let value = surface::surface(s.input.rays.as_deref(), path, text, &Files::new(), None)?;
         s.value("surface", value);
     }
     Ok(())
@@ -424,7 +434,7 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
         s.value("interference", value);
     }
     if s.named("surface") {
-        let value = surface::surface(s.input.ray.as_ref(), path, text, files, Some(&occurrence_paths))?;
+        let value = surface::surface(s.input.rays.as_deref(), path, text, files, Some(&occurrence_paths))?;
         s.value("surface", value);
     }
     if s.wants("mass") && s.input.density.is_none() {
@@ -555,7 +565,7 @@ fn drawing(s: &mut Sections, path: &str, text: &str, files: &Files) {
                 set: None,
                 limit: None,
                 changed: None,
-                ray: None,
+                rays: None,
             };
             if let Ok(out) = inspect(&input, files) {
                 models.push(json!({ "path": model, "inputs": out.sections.get("inputs").cloned().unwrap_or(Value::Null) }));

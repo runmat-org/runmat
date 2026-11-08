@@ -161,6 +161,9 @@ fn connector(document: &mut AssemblyDocument, pick: &Resolved, flip: bool) -> St
         anchor,
         offset: None,
         flip,
+        at: None,
+        z: None,
+        x: None,
     });
     name
 }

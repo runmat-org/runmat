@@ -122,6 +122,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else {
             self.anchor_frame(host, &c.anchor, &env)?
         };
+        if let Some(o) = c.at_offset() {
+            f = f.compose(&self.offset(&o, &env)?);
+        }
         if let Some(o) = &c.offset {
             f = f.compose(&self.offset(o, &env)?);
         }

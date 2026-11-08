@@ -233,6 +233,9 @@ fn bracket_project() -> MemorySource {
         anchor: AnchorRef::Published { name: "top".into() },
         offset: None,
         flip: false,
+        at: None,
+        z: None,
+        x: None,
     });
     src.add_assembly(top);
     src
@@ -531,6 +534,9 @@ fn a05_the_validator_finds_overlaps_gaps_and_dangling_mates_with_witnesses() {
         anchor: AnchorRef::Origin,
         offset: None,
         flip: false,
+        at: None,
+        z: None,
+        x: None,
     });
     top.connectors.push(MateConnector {
         name: "pylon_c".into(),
@@ -538,6 +544,9 @@ fn a05_the_validator_finds_overlaps_gaps_and_dangling_mates_with_witnesses() {
         anchor: AnchorRef::Origin,
         offset: None,
         flip: false,
+        at: None,
+        z: None,
+        x: None,
     });
     top.mates.push(MateDef {
         name: "door_to_pylon".into(),
@@ -760,6 +769,9 @@ fn hinge_project(limit: Option<(f64, f64)>, drive: Option<f64>) -> MemorySource 
             anchor: AnchorRef::Published { name: a.into() },
             offset: None,
             flip: false,
+            at: None,
+            z: None,
+            x: None,
         });
     }
     let angle = match (limit, drive) {
@@ -842,6 +854,9 @@ fn mechanism(parts: &[(&str, Vec<(&str, Frame)>)], mates: Vec<(&str, MateKind, &
                 anchor: AnchorRef::Published { name: (*f).into() },
                 offset: None,
                 flip: false,
+                at: None,
+                z: None,
+                x: None,
             });
         }
     }
@@ -1064,6 +1079,9 @@ fn a10_flexible_sub_assemblies_join_the_parent_solve() {
         anchor: AnchorRef::Published { name: "eye".into() },
         offset: None,
         flip: false,
+        at: None,
+        z: None,
+        x: None,
     });
     arm.publishes.push(AssemblyPublish {
         name: "eye".into(),
@@ -1088,6 +1106,9 @@ fn a10_flexible_sub_assemblies_join_the_parent_solve() {
         anchor: AnchorRef::Published { name: "pin".into() },
         offset: None,
         flip: false,
+        at: None,
+        z: None,
+        x: None,
     });
     // A connector through the flexible sub-assembly's published connector.
     top.connectors.push(MateConnector {
@@ -1096,6 +1117,9 @@ fn a10_flexible_sub_assemblies_join_the_parent_solve() {
         anchor: AnchorRef::Published { name: "eye".into() },
         offset: None,
         flip: false,
+        at: None,
+        z: None,
+        x: None,
     });
     top.mates.push(MateDef {
         name: "hinge".into(),

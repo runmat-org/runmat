@@ -588,10 +588,14 @@ fn the_surface_section_finds_the_face_and_normal_under_a_point() {
     let plate = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = l1.end, end = [80 mm, 50 mm])\n        l3 = line(start = l2.end, end = [0 mm, 50 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature body = extrude(profile = sketch.s, distance = 10 mm)\n    output plate = { body = feature.body.body }\n}\n";
     let lifted = "runmat 0.7\nstd 1\n\nassembly lifted {\n    use part plate as base {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 100 mm] } }\n    }\n}\n";
     let files: Files = [("/p/plate.part", plate), ("/p/lifted.assembly", lifted)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
-    // From below, looking up: the plate's underside at z = 100 mm, facing down.
+    // From below, looking up: the plate's underside at z = 100 mm, facing down. Two rays in
+    // one call, each answered on its own: the second misses the plate.
     let out = ok("design.inspect", json!({ "path": "/p/lifted.assembly", "sections": ["surface"],
-        "ray": { "from": [40.0, 25.0, 0.0], "direction": [0.0, 0.0, 1.0] } }), &files);
-    let hits = out["sections"]["surface"]["hits"].as_array().unwrap();
+        "rays": [{ "from": [40.0, 25.0, 0.0], "direction": [0.0, 0.0, 1.0] }, { "from": [200.0, 25.0, 0.0], "direction": [0.0, 0.0, 1.0] }] }), &files);
+    let rays = out["sections"]["surface"]["rays"].as_array().unwrap();
+    assert_eq!(rays.len(), 2, "{out:#}");
+    assert_eq!(rays[0]["from_mm"], json!([40.0, 25.0, 0.0]), "{out:#}");
+    let hits = rays[0]["hits"].as_array().unwrap();
     assert_eq!(hits.len(), 2, "{out:#}");
     assert_eq!(hits[0]["occurrence"], "base", "{out:#}");
     assert_eq!(hits[0]["point_mm"], json!([40.0, 25.0, 100.0]), "{out:#}");
@@ -600,11 +604,34 @@ fn the_surface_section_finds_the_face_and_normal_under_a_point() {
     assert_eq!(hits[0]["entering"], true, "{out:#}");
     assert_eq!(hits[1]["point_mm"], json!([40.0, 25.0, 110.0]), "{out:#}");
     assert_eq!(hits[1]["entering"], false, "{out:#}");
+    assert!(rays[1]["hits"].as_array().unwrap().is_empty(), "{out:#}");
     // On the part itself, and a ray that misses.
     let out = ok("design.inspect", json!({ "path": "/p/plate.part", "sections": ["surface"],
-        "ray": { "from": [40.0, 25.0, 50.0], "direction": [0.0, 0.0, -1.0] } }), &files);
-    assert_eq!(out["sections"]["surface"]["hits"][0]["point_mm"], json!([40.0, 25.0, 10.0]), "{out:#}");
-    let out = ok("design.inspect", json!({ "path": "/p/plate.part", "sections": ["surface"],
-        "ray": { "from": [200.0, 25.0, 50.0], "direction": [0.0, 0.0, -1.0] } }), &files);
-    assert!(out["sections"]["surface"]["hits"].as_array().unwrap().is_empty(), "{out:#}");
+        "rays": [{ "from": [40.0, 25.0, 50.0], "direction": [0.0, 0.0, -1.0] }, { "from": [200.0, 25.0, 50.0], "direction": [0.0, 0.0, -1.0] }] }), &files);
+    assert_eq!(out["sections"]["surface"]["rays"][0]["hits"][0]["point_mm"], json!([40.0, 25.0, 10.0]), "{out:#}");
+    assert!(out["sections"]["surface"]["rays"][1]["hits"].as_array().unwrap().is_empty(), "{out:#}");
+    // The body's own frame: its extent, and its principal axes with the long one (x) first.
+    let out = ok("design.inspect", json!({ "path": "/p/plate.part", "sections": ["mass"] }), &files);
+    let mass = &out["sections"]["mass"];
+    assert_eq!(mass["extent_mm"], json!({ "min": [0.0, 0.0, 0.0], "max": [80.0, 50.0, 10.0] }), "{out:#}");
+    assert_eq!(mass["principal_axes"][0]["axis"], json!([1.0, 0.0, 0.0]), "{out:#}");
+    assert_eq!(mass["principal_axes"][2]["axis"], json!([0.0, 0.0, 1.0]), "{out:#}");
+}
+
+/// A connector written flat (`at`, `z`, `x` on the connector) places a fastened part: the foot's
+/// origin lands on the point, its X toward the given axis (a quarter turn about Z from its start).
+#[test]
+fn a_flat_connector_seats_a_fastened_part_at_a_point_and_axis() {
+    let plate = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = l1.end, end = [80 mm, 50 mm])\n        l3 = line(start = l2.end, end = [0 mm, 50 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature body = extrude(profile = sketch.s, distance = 10 mm)\n    output plate = { body = feature.body.body }\n}\n";
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as base\n    use part plate as foot {\n        fixed = false\n    }\n    connector mount = { occurrence = [{ name = base }], at = [40 mm, 25 mm, 0 mm], z = [0, 0, 1], x = [0, 1, 0] }\n    connector top = { occurrence = [{ name = foot }] }\n    mate seat = { kind = { mate = fasten }, a = mount, b = top }\n}\n";
+    let files: Files = [("/p/plate.part", plate), ("/p/rig.assembly", rig)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
+    let out = ok("design.inspect", json!({ "path": "/p/rig.assembly", "sections": ["occurrences"] }), &files);
+    let foot = out["sections"]["occurrences"].as_array().unwrap().iter().find(|o| o["name"] == "foot").cloned().unwrap();
+    let world = &foot["world"];
+    let t: Vec<f64> = world["translation"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!((t[0] - 0.040).abs() < 1e-9 && (t[1] - 0.025).abs() < 1e-9 && t[2].abs() < 1e-9, "{foot:#}");
+    // Columns are the foot's axes in the world: X toward +y, Z up.
+    let r = |i: usize, j: usize| world["rotation"][i][j].as_f64().unwrap();
+    assert!((r(1, 0) - 1.0).abs() < 1e-6 && (r(2, 2) - 1.0).abs() < 1e-6, "{foot:#}");
+    assert_eq!(foot["state"], "fully_defined", "{foot:#}");
 }

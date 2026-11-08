@@ -14,7 +14,7 @@ use runmat_cad::assembly::model::DefinitionKind;
 use runmat_cad::display::{part_display, PartDisplay};
 use runmat_cad::regen::kernel::{TessellationOptions, Transform};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::rc::Rc;
 
 /// Where the ray meets a body.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -139,65 +139,131 @@ fn hits_on(display: &PartDisplay, world: &Transform, occurrence: &str, from: V3,
     }
 }
 
-/// Where the ray from `from` (m, world) along `direction` meets the part or assembly `path`,
-/// nearest first. For an assembly, `only` limits the bodies to those occurrences (paths; a
-/// sub-assembly's path takes in its parts). Coincident hits on shared triangle edges are kept once.
-pub fn probe(
-    path: &str,
-    text: &str,
-    files: &Files,
-    from: V3,
-    direction: V3,
-    only: Option<&[String]>,
-) -> Result<Vec<Hit>, String> {
-    let dir = unit(direction).ok_or("the direction has no length")?;
-    let mut hits = Vec::new();
+/// A ray: its start (m, world), its direction (any length) and, for an assembly, the
+/// occurrences it is limited to (paths; a sub-assembly's path takes in its parts).
+pub struct Ray<'a> {
+    pub from: V3,
+    pub direction: V3,
+    pub only: Option<&'a [String]>,
+}
+
+/// Where each ray meets the part or assembly `path`, nearest first, one list per ray. The
+/// assembly is resolved once for all the rays, and each body's display is regenerated once and
+/// kept by content ([`displays`]), so a ray on an unchanged body costs only its triangle tests.
+/// Coincident hits on shared triangle edges are kept once.
+pub fn probe(path: &str, text: &str, files: &Files, rays: &[Ray]) -> Result<Vec<Vec<Hit>>, String> {
+    let dirs = rays
+        .iter()
+        .map(|r| unit(r.direction).ok_or("a ray's direction has no length"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut out: Vec<Vec<Hit>> = vec![Vec::new(); rays.len()];
     if !path.ends_with(".assembly") {
-        let part = regenerate_part_in(path, text, None, &TessellationOptions::default())
-            .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
-        let display = part_display(&part.result, part.kernel.as_ref(), &TessellationOptions::default());
-        hits_on(&display, &Transform::IDENTITY, "", from, dir, &mut hits);
+        let mut part_files = files.clone();
+        part_files.insert(path.to_owned(), text.to_owned());
+        let key = crate::evaluate::content_key(path, "", &part_files);
+        let display = displays::get_or(key, || {
+            let part = regenerate_part_in(path, text, None, &TessellationOptions::default())
+                .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
+            Ok::<_, String>(part_display(&part.result, part.kernel.as_ref(), &TessellationOptions::default()))
+        })?;
+        for ((ray, dir), hits) in rays.iter().zip(&dirs).zip(out.iter_mut()) {
+            hits_on(&display, &Transform::IDENTITY, "", ray.from, *dir, hits);
+        }
     } else {
         let resolution = resolve_assembly_in(path, text, files, None)
             .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
         let resolved = &resolution.resolved;
-        let wanted = |p: &str| only.is_none_or(|o| o.iter().any(|n| p == n || p.starts_with(&format!("{n}/"))));
-        let mut displays: BTreeMap<(String, String), Option<PartDisplay>> = BTreeMap::new();
-        let mut matched = false;
+        let wanted = |only: Option<&[String]>, p: &str| {
+            only.is_none_or(|o| o.iter().any(|n| p == n || p.starts_with(&format!("{n}/"))))
+        };
+        let mut matched = vec![false; rays.len()];
         for (id, node) in resolved.nodes.iter().enumerate() {
             if node.parent.is_none() || node.failed || node.represented_by_ancestor || node.definition.kind != DefinitionKind::Part {
                 continue;
             }
             let occurrence = resolved.path(id as u32);
-            if !wanted(&occurrence) {
-                continue;
-            }
-            matched = true;
             let file = node.definition.file.0.clone();
             let key = crate::evaluate::content_key(&file, &node.configuration.digest(), files);
             // The world box, when an interference check already knows it, skips a body the ray misses.
-            if let Some(bbox) = key.and_then(crate::evaluate::cached_bbox) {
-                let world = bbox.transformed(&node.world);
-                if !passes(from, dir, world.min, world.max) {
+            let world_box = key.and_then(crate::evaluate::cached_bbox).map(|b| b.transformed(&node.world));
+            let mut display: Option<Rc<PartDisplay>> = None;
+            for (i, (ray, dir)) in rays.iter().zip(&dirs).enumerate() {
+                if !wanted(ray.only, &occurrence) {
                     continue;
                 }
-            }
-            let display = displays.entry((file.clone(), node.configuration.digest())).or_insert_with(|| {
-                let document = resolution.documents.get(&file)?;
-                let (result, kernel) = regenerate_configured(document, &node.configuration);
-                Some(part_display(&result, kernel.as_ref(), &TessellationOptions::default()))
-            });
-            if let Some(display) = display {
-                hits_on(display, &node.world, &occurrence, from, dir, &mut hits);
+                matched[i] = true;
+                if world_box.as_ref().is_some_and(|w| !passes(ray.from, *dir, w.min, w.max)) {
+                    continue;
+                }
+                if display.is_none() {
+                    let Some(document) = resolution.documents.get(&file) else { break };
+                    display = Some(displays::get_or(key, || {
+                        let (result, kernel) = regenerate_configured(document, &node.configuration);
+                        Ok::<_, String>(part_display(&result, kernel.as_ref(), &TessellationOptions::default()))
+                    })?);
+                }
+                if let Some(display) = &display {
+                    hits_on(display, &node.world, &occurrence, ray.from, *dir, &mut out[i]);
+                }
             }
         }
-        if let (Some(names), false) = (only, matched) {
-            return Err(format!("no part occurrence of the assembly is at {}", names.join(", ")));
+        for (ray, found) in rays.iter().zip(&matched) {
+            if let (Some(names), false) = (ray.only, found) {
+                return Err(format!("no part occurrence of the assembly is at {}", names.join(", ")));
+            }
         }
     }
-    hits.sort_by(|a, b| a.distance.total_cmp(&b.distance));
-    hits.dedup_by(|b, a| a.occurrence == b.occurrence && (a.distance - b.distance).abs() < 1e-9);
-    Ok(hits)
+    for hits in &mut out {
+        hits.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+        hits.dedup_by(|b, a| a.occurrence == b.occurrence && (a.distance - b.distance).abs() < 1e-9);
+    }
+    Ok(out)
+}
+
+/// The probe's displays (the default tessellation, finer than the assembly view's), kept by
+/// content ([`crate::evaluate::content_key`]: the part's text, the files it reads and its
+/// configuration), so the rays of one seating, cast over several calls, regenerate a curved
+/// body once. A display is several megabytes, so only the last few are kept.
+mod displays {
+    use super::PartDisplay;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Displays kept: the bodies one seating rays (a shell, perhaps its mate).
+    const KEPT: usize = 4;
+
+    thread_local! {
+        static KEPT_DISPLAYS: RefCell<Vec<(u64, Rc<PartDisplay>)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// The display with content `key`, made by `make` when it isn't kept (or has no key).
+    pub fn get_or<E>(key: Option<u64>, make: impl FnOnce() -> Result<PartDisplay, E>) -> Result<Rc<PartDisplay>, E> {
+        let Some(key) = key else { return make().map(Rc::new) };
+        if let Some(found) = KEPT_DISPLAYS.with(|k| {
+            let mut k = k.borrow_mut();
+            let at = k.iter().position(|(x, _)| *x == key)?;
+            let entry = k.remove(at);
+            let display = entry.1.clone();
+            k.push(entry);
+            Some(display)
+        }) {
+            return Ok(found);
+        }
+        let display = Rc::new(make()?);
+        KEPT_DISPLAYS.with(|k| {
+            let mut k = k.borrow_mut();
+            if k.len() >= KEPT {
+                k.remove(0);
+            }
+            k.push((key, display.clone()));
+        });
+        Ok(display)
+    }
+
+    #[cfg(test)]
+    pub fn len() -> usize {
+        KEPT_DISPLAYS.with(|k| k.borrow().len())
+    }
 }
 
 #[cfg(test)]
@@ -213,5 +279,26 @@ mod tests {
         assert!(meets([2.0, 2.0, 1.0], [0.0, 0.0, -1.0], a, b, c).is_none());
         assert!(passes([0.5, 0.5, 5.0], [0.0, 0.0, -1.0], [0.0; 3], [1.0; 3]));
         assert!(!passes([1.5, 0.5, 5.0], [0.0, 0.0, -1.0], [0.0; 3], [1.0; 3]));
+    }
+
+    /// Several rays in one call each get their own hits, and a second call on the same text
+    /// reuses the kept display instead of regenerating the body.
+    #[test]
+    fn rays_in_one_call_share_one_display() {
+        let block = "runmat 0.7\nstd 1\n\npart block {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [20 mm, 0 mm])\n        l2 = line(start = l1.end, end = [20 mm, 10 mm])\n        l3 = line(start = l2.end, end = [0 mm, 10 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature box = extrude(profile = sketch.s, distance = 5 mm)\n}\n";
+        let rays = [
+            Ray { from: [0.005, 0.005, -0.01], direction: [0.0, 0.0, 1.0], only: None },
+            Ray { from: [0.015, 0.005, 0.02], direction: [0.0, 0.0, -1.0], only: None },
+            Ray { from: [0.05, 0.005, -0.01], direction: [0.0, 0.0, 1.0], only: None },
+        ];
+        let first = probe("/p/block.part", block, &Files::new(), &rays).unwrap();
+        assert_eq!(first.len(), 3);
+        assert!(first[0][0].entering && (first[0][0].point[2]).abs() < 1e-9, "{:?}", first[0]);
+        assert!(first[1][0].entering && (first[1][0].point[2] - 0.005).abs() < 1e-9, "{:?}", first[1]);
+        assert!(first[2].is_empty(), "{:?}", first[2]);
+        let kept = displays::len();
+        let again = probe("/p/block.part", block, &Files::new(), &rays[..1]).unwrap();
+        assert_eq!(again[0], first[0]);
+        assert_eq!(displays::len(), kept, "the second call reuses the display");
     }
 }

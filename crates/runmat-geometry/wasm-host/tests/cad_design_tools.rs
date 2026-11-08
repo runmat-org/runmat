@@ -134,8 +134,8 @@ fn on_the_drone_a_change_checks_only_its_pairs_and_a_ray_finds_the_lower_shell()
     // Straight up from under the belly, limited to the lower shell: the first hit enters it,
     // with an outward normal that faces down.
     let out = tool("design.inspect", json!({ "path": "/p/drone/drone.assembly", "sections": ["surface"],
-        "ray": { "from": [0.0, 20.0, -200.0], "direction": [0.0, 0.0, 1.0], "occurrences": ["body_bottom"] } }), &files);
-    let hits = out["data"]["sections"]["surface"]["hits"].as_array().cloned().unwrap_or_else(|| panic!("hits, not {out:#}"));
+        "rays": [{ "from": [0.0, 20.0, -200.0], "direction": [0.0, 0.0, 1.0], "occurrences": ["body_bottom"] }] }), &files);
+    let hits = out["data"]["sections"]["surface"]["rays"][0]["hits"].as_array().cloned().unwrap_or_else(|| panic!("hits, not {out:#}"));
     assert!(!hits.is_empty(), "{out:#}");
     assert_eq!(hits[0]["occurrence"], "body_bottom", "{out:#}");
     assert_eq!(hits[0]["entering"], true, "{out:#}");

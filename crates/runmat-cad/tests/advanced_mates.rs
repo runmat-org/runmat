@@ -75,6 +75,9 @@ fn mechanism_with(parts: &[(&str, Vec<(&str, Frame)>)], mates: Vec<(&str, MateKi
                 anchor: AnchorRef::Published { name: (*f).into() },
                 offset: None,
                 flip: false,
+                at: None,
+                z: None,
+                x: None,
             });
         }
     }

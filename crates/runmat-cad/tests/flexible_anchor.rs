@@ -45,6 +45,9 @@ fn connector(name: &str, path: &[&str], anchor: &str) -> MateConnector {
         },
         offset: None,
         flip: false,
+        at: None,
+        z: None,
+        x: None,
     }
 }
 

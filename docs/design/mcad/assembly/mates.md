@@ -55,8 +55,8 @@ assembly hinge {
         placement = { placement = offset, offset = { translation = [40 mm, 25 mm, 10 mm] } }
     }
 
-    connector pivot = { occurrence = [{ name = base }], anchor = { anchor = explicit, offset = { translation = [40 mm, 25 mm, 10 mm] } } }
-    connector eye = { occurrence = [{ name = arm }], anchor = { anchor = origin } }
+    connector pivot = { occurrence = [{ name = base }], at = [40 mm, 25 mm, 10 mm] }
+    connector eye = { occurrence = [{ name = arm }] }
 
     mate hinge = { kind = { mate = revolute, angle = { target = exact, value = input.opening } }, a = pivot, b = eye }
 }
@@ -86,22 +86,34 @@ A connector is a frame on an occurrence (or on the assembly itself) that mates j
 | Field | Meaning |
 |---|---|
 | `occurrence` | The occurrence path: `[{ name = base }]`; empty for the assembly's own frame. |
-| `anchor` | `{ anchor = origin }` (the design's origin), `{ anchor = published, name = <frame> }` (a frame the design publishes, such as a `mate_connector` feature), or `{ anchor = explicit, offset = { translation = …, rotation = … } }`. |
-| `offset` | A further offset in the anchor's axes. |
+| `anchor` | `{ anchor = origin }` (the design's origin, and the default), `{ anchor = published, name = <frame> }` (a frame the design publishes, such as a `mate_connector` feature), or `{ anchor = explicit, offset = { translation = …, rotation = … } }`. |
+| `at` | The connector's origin in the anchor's coordinates: `at = [40 mm, 25 mm, 10 mm]`. |
+| `z` | The connector's Z axis, such as a surface normal: `z = [0, 0, -1]`. The anchor's Z when left out. |
+| `x` | The direction the connector's X axis leans toward (made square to `z`), such as a straight member's axis. The anchor's X when left out. |
+| `offset` | A further offset in the anchor's axes, after `at`, `z` and `x`. |
 | `flip` | Turns the frame half a turn about its X axis, so two faces meet face to face. |
+
+`at`, `z` and `x` sit on the connector itself, so a connector at a point and normal is one line: `connector mount = { occurrence = [{ name = body_bottom }], at = [-40 mm, 30 mm, 8.2 mm], z = [0, 0.11, -0.99], x = [1, 0, 0] }`.
 
 Publishing frames from the parts (`mate_connector` features) keeps an assembly's connectors on the geometry as the parts change.
 
 ### Seating a part on a curved body
 
-A part that mounts to a curved surface, such as a clamp foot on a lofted lower shell, needs a connector at a point on that surface with its Z axis along the surface normal. `design.inspect` with the `surface` section finds both: give it a ray, a start point outside the body and a direction, and it returns where the ray meets each body, nearest first, with the face, the point in millimetres and the outward normal there.
+A part that mounts to a curved surface, such as a clamp foot on a lofted lower shell, needs a connector at a point on that surface. Work in three steps.
 
-```json
-{ "path": "/drone.assembly", "sections": ["surface"],
-  "ray": { "from": [-40, 30, -60], "direction": [0, 0, 1], "occurrences": ["body_bottom"] } }
-```
+1. **Find the body's own frame.** `design.inspect` on the body's part with the `mass` section returns its `extent_mm` (the box around it) and its `principal_axes`, smallest moment first. For a long body the first principal axis is its long axis, so a member that runs along the body is parallel to it.
+2. **Cast every ray in one call.** The `surface` section takes `rays`, a list; each ray has a start point outside the body, a direction and optionally the occurrences it is limited to. The answer lists each ray's hits, nearest first, with the face, the point in millimetres and the outward normal there.
 
-The first hit with `"entering": true` is the underside under that point. Put the body's connector at `point_mm`, turned so its Z axis runs along `normal` (for a normal of `[0, 0, -1]`, `{ rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg }`), and fasten the foot's connector to it. A flat foot touches a curved surface along a line only, so leave a standoff of about 0.5 mm between the foot and the surface, or follow the surface: trim the foot's top with a `loft` in `mode = cut` through the same section sketches the body's loft uses, so the foot takes the body's shape. Query each mounting station on its own; the normal changes along a loft.
+   ```json
+   { "path": "/drone.assembly", "sections": ["surface"],
+     "rays": [{ "from": [-40, 30, -60], "direction": [0, 0, 1], "occurrences": ["body_bottom"] },
+              { "from": [40, 30, -60], "direction": [0, 0, 1], "occurrences": ["body_bottom"] }] }
+   ```
+
+   The first hit with `"entering": true` is the underside above that point. A flat foot touches a curved surface first at its lowest point, so cast a ray at each corner of each foot and take the lowest hit.
+3. **Write the connectors.** Put the body's connector at the point with `at`, and fasten the foot's connector to it. Leave a standoff of about 0.5 mm below the lowest hit, or follow the surface: trim the foot's top with a `loft` in `mode = cut` through the same section sketches the body's loft uses, so the foot takes the body's shape.
+
+A part seated on its own, such as a bracket, takes the surface's normal as its `z`. A straight member held at several stations, such as a tube in two clamps, stays straight: leave out `z` (or give every station the same `z`) and give every station the member's axis as `x`, so all its clamps share one orientation and take only their height from the rays. Fasten the member to one clamp only and each clamp to the body; a second fasten between the member and another clamp over-constrains it, and the mates don't converge.
 
 After the change, check interference only for the new and moved occurrences with `changed` (see [Interference and clearance](/docs/mcad/evaluate#interference-and-clearance)).
 

@@ -53,50 +53,67 @@ fn round(v: f64, places: i32) -> f64 {
     (v * k).round() / k
 }
 
-/// The `surface` section: the hits nearest first (at most 8), points and distances in mm.
+/// The `surface` section: for each ray, its hits nearest first (at most 8), points and
+/// distances in mm. The rays are answered together: the assembly resolves once and each body
+/// regenerates once.
 pub(super) fn surface(
-    ray: Option<&Ray>,
+    rays: Option<&[Ray]>,
     path: &str,
     text: &str,
     files: &Files,
     occurrence_paths: Option<&[String]>,
 ) -> Result<Value, ToolError> {
-    let ray = ray.ok_or_else(|| ToolError::invalid("the surface section needs a `ray`: `from` (mm) and `direction`"))?;
-    let only = match (&ray.occurrences, occurrence_paths) {
-        (Some(names), Some(paths)) => Some(occurrences_named(names, paths)?),
-        _ => None,
-    };
-    let from = ray.from.map(|v| v / 1000.0);
-    let hits = runmat_cad_wasm::probe::probe(path, text, files, from, ray.direction, only.as_deref())
-        .map_err(|e| ToolError::new("not_compiled", e))?;
-    let rows: Vec<Value> = hits
+    let rays = rays.filter(|r| !r.is_empty()).ok_or_else(|| {
+        ToolError::invalid("the surface section needs `rays`: a list of rays, each with `from` (mm) and `direction`")
+    })?;
+    let mut only = Vec::new();
+    for ray in rays {
+        only.push(match (&ray.occurrences, occurrence_paths) {
+            (Some(names), Some(paths)) => Some(occurrences_named(names, paths)?),
+            _ => None,
+        });
+    }
+    let probes: Vec<runmat_cad_wasm::probe::Ray> = rays
         .iter()
-        .take(8)
-        .map(|h| {
-            let mut row = json!({
-                "point_mm": h.point.map(|v| round(v * 1000.0, 2)),
-                "normal": h.normal.map(|v| round(v, 4)),
-                "distance_mm": round(h.distance * 1000.0, 2),
-                "entering": h.entering,
-            });
-            if !h.occurrence.is_empty() {
-                row["occurrence"] = json!(h.occurrence);
-            }
-            if let Some(face) = &h.face {
-                row["face"] = json!(face);
-            }
-            if let Some(reference) = &h.reference {
-                row["reference"] = json!(reference);
-            }
-            row
+        .zip(&only)
+        .map(|(ray, only)| runmat_cad_wasm::probe::Ray {
+            from: ray.from.map(|v| v / 1000.0),
+            direction: ray.direction,
+            only: only.as_deref(),
+        })
+        .collect();
+    let found = runmat_cad_wasm::probe::probe(path, text, files, &probes).map_err(|e| ToolError::new("not_compiled", e))?;
+    let rows: Vec<Value> = rays
+        .iter()
+        .zip(&found)
+        .map(|(ray, hits)| {
+            let hits: Vec<Value> = hits
+                .iter()
+                .take(8)
+                .map(|h| {
+                    let mut row = json!({
+                        "point_mm": h.point.map(|v| round(v * 1000.0, 2)),
+                        "normal": h.normal.map(|v| round(v, 4)),
+                        "distance_mm": round(h.distance * 1000.0, 2),
+                        "entering": h.entering,
+                    });
+                    if !h.occurrence.is_empty() {
+                        row["occurrence"] = json!(h.occurrence);
+                    }
+                    if let Some(face) = &h.face {
+                        row["face"] = json!(face);
+                    }
+                    if let Some(reference) = &h.reference {
+                        row["reference"] = json!(reference);
+                    }
+                    row
+                })
+                .collect();
+            json!({ "from_mm": ray.from, "direction": ray.direction, "hits": hits })
         })
         .collect();
     Ok(json!({
-        "hits": rows,
-        "note": if rows.is_empty() {
-            "the ray meets no body"
-        } else {
-            "the first hit is the surface the ray reaches first; points lie on the display tessellation, within its chordal tolerance of the exact surface"
-        },
+        "rays": rows,
+        "note": "each ray's first hit is the surface it reaches first (none: it meets no body); points lie on the display tessellation, within 0.1 mm of the exact surface",
     }))
 }

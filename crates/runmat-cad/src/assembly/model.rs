@@ -172,10 +172,11 @@ impl OffsetExpr {
 /// A frame inside a definition (a mate connector's anchor).
 // Authored data, built once per edit; variant sizes do not matter here.
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "anchor")]
 pub enum AnchorRef {
     /// The definition's origin frame.
+    #[default]
     Origin,
     /// A frame, plane, axis or point the definition publishes (its interface).
     Published { name: PublishName },
@@ -460,12 +461,52 @@ pub struct MateConnector {
     /// The occurrence the connector is fixed in, relative to this assembly (through rigid or
     /// flexible sub-assemblies). Empty: the assembly's own frame (ground).
     pub occurrence: RelPath,
+    /// The frame the connector starts from; the occurrence's origin when left out.
+    #[serde(default)]
     pub anchor: AnchorRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<OffsetExpr>,
     /// Turn half a turn about the anchor's X axis (reverses Z).
     #[serde(default)]
     pub flip: bool,
+    /// The connector's origin in the anchor's coordinates, written flat on the connector
+    /// (`at = [x, y, z]`), as a point a surface query returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<[ValueExpr; 3]>,
+    /// The connector's Z axis in the anchor's coordinates (a surface's normal, a joint's axis);
+    /// the anchor's Z when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z: Option<[f64; 3]>,
+    /// The direction its X axis leans toward (made square to Z): a straight member's axis, so
+    /// every station along it shares one orientation. The anchor's X when left out (its Y when
+    /// Z runs along that X).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<[f64; 3]>,
+}
+
+impl MateConnector {
+    /// The offset `at`, `z` and `x` write, applied after the anchor and before `offset`.
+    pub fn at_offset(&self) -> Option<OffsetExpr> {
+        if self.at.is_none() && self.z.is_none() && self.x.is_none() {
+            return None;
+        }
+        let rotation = match (self.z, self.x) {
+            (None, None) => RotationExpr::Identity,
+            (z, x) => {
+                let z = z.unwrap_or([0.0, 0.0, 1.0]);
+                let along_x = |v: [f64; 3]| {
+                    let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                    n > 0.0 && v[0].abs() / n > 0.999
+                };
+                let x = x.unwrap_or(if along_x(z) { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] });
+                RotationExpr::Basis { x, z }
+            }
+        };
+        Some(OffsetExpr {
+            translation: self.at.clone().unwrap_or_else(no_translation),
+            rotation,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

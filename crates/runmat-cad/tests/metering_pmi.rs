@@ -238,6 +238,9 @@ fn u03_mate_solves_are_metered_per_scope_and_pass() {
             },
             offset: None,
             flip: false,
+            at: None,
+            z: None,
+            x: None,
         });
     }
     top.mates.push(MateDef {

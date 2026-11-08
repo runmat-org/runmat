@@ -271,6 +271,9 @@ fn add_frame_mates(source: &mut runmat_cad::assembly::source::MemorySource) {
         anchor: AnchorRef::Origin,
         offset: None,
         flip: false,
+        at: None,
+        z: None,
+        x: None,
     };
     frame.connectors.push(connector("web_root", "web"));
     frame.connectors.push(connector("clip_seat", "clip"));
