@@ -15,9 +15,12 @@ pub mod run_set;
 // Nested here while lib.rs holds another lane's work in progress.
 #[cfg(feature = "m-values")]
 pub mod m_values;
+mod surface;
+pub use surface::Ray;
 
 /// What to read. Parts: `faces`, `regions`, `published`, `inputs`, `features`, `bodies`,
-/// `mass`. Assemblies: `occurrences`, `mates`, `bom`, `mass`. Circuits: `components`, `nets`,
+/// `mass`, `surface` (named, with `ray`). Assemblies: `occurrences`, `mates`, `bom`, `mass`,
+/// `interference` and `surface` (named; `changed` and `ray`). Circuits: `components`, `nets`,
 /// `net_classes`, `bom`, `sheets`, `erc_power`, and with a board `rooms`, `footprints`, `layers`,
 /// `unplaced` and `eco`. Drawings: `sheets`, `views`, `annotations`, `models` (the inputs of
 /// the parts the views show).
@@ -46,6 +49,16 @@ pub struct InspectInput {
     /// At most this many rows per section (default 200).
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Assemblies, with the `interference` section: the occurrences a change added or moved
+    /// (names or paths; `*` globs). Only the pairs one of them is in are checked, so the answer
+    /// lists the overlaps the change brings and leaves out those the assembly already had
+    /// between other parts.
+    #[serde(default)]
+    pub changed: Option<Vec<String>>,
+    /// The `surface` section's ray: where a line from a point along a direction meets the
+    /// bodies, with the face and its normal there.
+    #[serde(default)]
+    pub ray: Option<Ray>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -346,6 +359,10 @@ fn part(s: &mut Sections, path: &str, text: &str) -> Result<(), ToolError> {
         };
         s.value("mass", mass);
     }
+    if s.named("surface") {
+        let value = surface::surface(s.input.ray.as_ref(), path, text, &Files::new(), None)?;
+        s.value("surface", value);
+    }
     Ok(())
 }
 
@@ -382,15 +399,33 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
         &["item", "file", "part_number", "description"],
     );
     s.add("fasteners", rows(&index["fasteners"]), &["name"]);
+    let occurrence_paths: Vec<String> = rows(&index["occurrences"])
+        .iter()
+        .filter_map(|o| o["path"].as_str().map(str::to_owned))
+        .collect();
     // Interference: occurrences whose exact bodies share material, the Evaluate tab's check.
-    // Only when asked for by name: it intersects every pair of bodies.
+    // Only when asked for by name: it intersects every pair of bodies (or a change's pairs).
     if s.named("interference") {
-        let mut value = evaluated(path, text, files, "evaluate.interference").unwrap_or_else(|e| {
+        let mut values = serde_json::Map::new();
+        if let Some(changed) = &s.input.changed {
+            let paths = surface::occurrences_named(changed, &occurrence_paths)?;
+            values.insert("changed".into(), json!(paths));
+            s.out.notes.push(format!(
+                "interference: only the pairs {} {} in were checked; overlaps the assembly already had between other parts aren't listed",
+                paths.join(", "),
+                if paths.len() == 1 { "is" } else { "are" }
+            ));
+        }
+        let mut value = evaluated_with(path, text, files, "evaluate.interference", values).unwrap_or_else(|e| {
             s.out.notes.push(format!("interference: {e}"));
             Value::Null
         });
         overlap_volumes_in_mm3(&mut value);
         s.value("interference", value);
+    }
+    if s.named("surface") {
+        let value = surface::surface(s.input.ray.as_ref(), path, text, files, Some(&occurrence_paths))?;
+        s.value("surface", value);
     }
     if s.wants("mass") && s.input.density.is_none() {
         // Each part's own material (or density property), as the Evaluate tab's mass properties.
@@ -474,9 +509,19 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
 /// An Evaluate command's result on an assembly: its one-line summary, the typed result and what
 /// it couldn't evaluate.
 fn evaluated(path: &str, text: &str, files: &Files, command: &str) -> Result<Value, String> {
+    evaluated_with(path, text, files, command, Default::default())
+}
+
+fn evaluated_with(
+    path: &str,
+    text: &str,
+    files: &Files,
+    command: &str,
+    values: serde_json::Map<String, Value>,
+) -> Result<Value, String> {
     let request = runmat_cad_wasm::analyze::AnalyzeRequest {
         command: command.to_owned(),
-        values: Default::default(),
+        values,
     };
     let a = runmat_cad_wasm::analyze::analyze(path, text, files, &request)?;
     Ok(json!({ "summary": a.summary, "result": a.data, "problems": a.problems }))
@@ -509,6 +554,8 @@ fn drawing(s: &mut Sections, path: &str, text: &str, files: &Files) {
                 density: None,
                 set: None,
                 limit: None,
+                changed: None,
+                ray: None,
             };
             if let Ok(out) = inspect(&input, files) {
                 models.push(json!({ "path": model, "inputs": out.sections.get("inputs").cloned().unwrap_or(Value::Null) }));

@@ -92,6 +92,19 @@ A connector is a frame on an occurrence (or on the assembly itself) that mates j
 
 Publishing frames from the parts (`mate_connector` features) keeps an assembly's connectors on the geometry as the parts change.
 
+### Seating a part on a curved body
+
+A part that mounts to a curved surface, such as a clamp foot on a lofted lower shell, needs a connector at a point on that surface with its Z axis along the surface normal. `design.inspect` with the `surface` section finds both: give it a ray, a start point outside the body and a direction, and it returns where the ray meets each body, nearest first, with the face, the point in millimetres and the outward normal there.
+
+```json
+{ "path": "/drone.assembly", "sections": ["surface"],
+  "ray": { "from": [-40, 30, -60], "direction": [0, 0, 1], "occurrences": ["body_bottom"] } }
+```
+
+The first hit with `"entering": true` is the underside under that point. Put the body's connector at `point_mm`, turned so its Z axis runs along `normal` (for a normal of `[0, 0, -1]`, `{ rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg }`), and fasten the foot's connector to it. A flat foot touches a curved surface along a line only, so leave a standoff of about 0.5 mm between the foot and the surface, or follow the surface: trim the foot's top with a `loft` in `mode = cut` through the same section sketches the body's loft uses, so the foot takes the body's shape. Query each mounting station on its own; the normal changes along a loft.
+
+After the change, check interference only for the new and moved occurrences with `changed` (see [Interference and clearance](/docs/mcad/evaluate#interference-and-clearance)).
+
 ## Mates
 
 `mate <name> = { kind = { mate = <kind>, … }, a = <connector>, b = <connector> }` joins two connectors. Joint mates take an optional drive (`{ target = exact, value = 30 deg }`) or a range of motion (`{ target = range, min = 0 deg, max = 90 deg }`).

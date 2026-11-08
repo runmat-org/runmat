@@ -49,6 +49,7 @@ pub mod hlr;
 pub mod kernel;
 pub mod mass;
 pub mod picks;
+pub mod probe;
 mod repairs;
 mod xref_repairs;
 pub mod runtime;

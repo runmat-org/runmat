@@ -44,6 +44,12 @@ The canvas colors each face by its band, with a legend of the face counts, and t
 
 Interference finds pairs of occurrences whose solids share volume. Clearance finds pairs whose surfaces come closer than a gap, such as 0.5 mm between moving parts. Each pair names both occurrences by path (`arm_front_left/motor`), so a pick in the result selects them in the canvas.
 
+A check after a change can be limited to the occurrences the change added or moved: `design.inspect` with the `interference` section and `changed` (occurrence names or paths, `*` globs) checks only the pairs those occurrences are in. The answer lists the overlaps the change brings and leaves out overlaps the assembly already had between other parts, such as a screw modelled at its nominal size in a tapped hole. Bodies and pair results are kept between checks, so a second check after a small fix regenerates only the parts the fix changed.
+
+```json
+{ "path": "/drone.assembly", "sections": ["interference"], "changed": ["skid_*", "tube_*"] }
+```
+
 ## Study checks
 
 A study that names a part or an assembly checks the design before it meshes, and the Desktop runs the same checks on demand:

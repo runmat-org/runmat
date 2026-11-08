@@ -260,6 +260,8 @@ fn board(path: &str, files: &Files, out: &mut Vec<Fact>, ran: &mut Ran) -> bool 
         density: None,
         set: None,
         limit: Some(0),
+        changed: None,
+        ray: None,
     };
     let Ok(seen) = inspect(&input, files) else {
         return false;

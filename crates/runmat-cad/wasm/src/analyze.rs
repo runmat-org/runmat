@@ -7,7 +7,8 @@
 //!   per part occurrence.
 //! - `evaluate.interference`, `evaluate.clearance` (`values.minimum`, mm): part occurrences that
 //!   share material, and those closer than the clearance, on their exact bodies
-//!   ([`crate::evaluate::assembly_clearance`]).
+//!   ([`crate::evaluate::assembly_clearance`]); `values.changed` (occurrence paths) limits them
+//!   to the pairs those occurrences are in.
 //!
 //! - `weldment.cut-list`: a weldment part's members grouped by profile, length and end angles.
 //! - `evaluate.draft`: each face's draft against a pull direction (`values.direction`, a pick;
@@ -275,8 +276,18 @@ pub fn analyze(
             } else {
                 0.0
             };
-            let found =
-                crate::evaluate::assembly_clearance(path, text, files, configuration, clearance)?;
+            // `values.changed`: the occurrence paths a change added or moved; only their pairs.
+            let changed: Option<Vec<String>> = request.values.get("changed").and_then(Value::as_array).map(|names| {
+                names.iter().filter_map(Value::as_str).map(str::to_owned).collect()
+            });
+            let found = crate::evaluate::assembly_clearance_of(
+                path,
+                text,
+                files,
+                configuration,
+                clearance,
+                changed.as_deref(),
+            )?;
             let mut rows: Vec<Row> = found
                 .overlaps
                 .iter()

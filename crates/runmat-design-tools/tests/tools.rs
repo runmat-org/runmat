@@ -559,3 +559,52 @@ fn an_assembly_reports_interference_by_name_and_mass_from_its_materials() {
     let all = ok("design.inspect", json!({ "path": "/p/pair.assembly" }), &files);
     assert!(all["sections"].get("interference").is_none(), "{all:#}");
 }
+
+#[test]
+fn an_interference_check_limited_to_a_change_checks_only_its_pairs() {
+    let plate = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = l1.end, end = [80 mm, 50 mm])\n        l3 = line(start = l2.end, end = [0 mm, 50 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature body = extrude(profile = sketch.s, distance = 10 mm)\n    output plate = { body = feature.body.body, material = \"material.aluminum_6061\" }\n}\n";
+    // lower and upper already overlap; the change adds `skid`, 500 mm away from both.
+    let trio = "runmat 0.7\nstd 1\n\nassembly trio {\n    use part plate as lower\n    use part plate as upper {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 5 mm] } }\n    }\n    use part plate as skid {\n        placement = { placement = offset, offset = { translation = [500 mm, 0 mm, 0 mm] } }\n    }\n}\n";
+    let files: Files = [("/p/plate.part", plate), ("/p/trio.assembly", trio)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
+    // The change's part touches nothing: no pair is checked and the existing overlap isn't listed.
+    let out = ok("design.inspect", json!({ "path": "/p/trio.assembly", "sections": ["interference"], "changed": ["skid"] }), &files);
+    let interference = &out["sections"]["interference"];
+    assert_eq!(interference["result"]["parts"], 3, "{out:#}");
+    assert_eq!(interference["result"]["candidates"], 0, "{out:#}");
+    assert_eq!(interference["result"]["changed"], json!(["skid"]), "{out:#}");
+    assert!(interference["problems"].as_array().unwrap().is_empty(), "{out:#}");
+    assert!(out["notes"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("only the pairs skid is in were checked")), "{out:#}");
+    // Naming `upper` checks its pair with `lower` (the grid kernel says it can't measure it).
+    let out = ok("design.inspect", json!({ "path": "/p/trio.assembly", "sections": ["interference"], "changed": ["upper"] }), &files);
+    assert_eq!(out["sections"]["interference"]["result"]["candidates"], 1, "{out:#}");
+    assert!(out["sections"]["interference"]["problems"][0].as_str().unwrap().contains("lower / upper"), "{out:#}");
+    // A name that matches no occurrence is an error that lists them.
+    let err = runmat_design_tools::call("design.inspect", json!({ "path": "/p/trio.assembly", "sections": ["interference"], "changed": ["tube"] }), &files).unwrap_err();
+    assert!(err.message.contains("lower, upper, skid"), "{}", err.message);
+}
+
+#[test]
+fn the_surface_section_finds_the_face_and_normal_under_a_point() {
+    let plate = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = l1.end, end = [80 mm, 50 mm])\n        l3 = line(start = l2.end, end = [0 mm, 50 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature body = extrude(profile = sketch.s, distance = 10 mm)\n    output plate = { body = feature.body.body }\n}\n";
+    let lifted = "runmat 0.7\nstd 1\n\nassembly lifted {\n    use part plate as base {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 100 mm] } }\n    }\n}\n";
+    let files: Files = [("/p/plate.part", plate), ("/p/lifted.assembly", lifted)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
+    // From below, looking up: the plate's underside at z = 100 mm, facing down.
+    let out = ok("design.inspect", json!({ "path": "/p/lifted.assembly", "sections": ["surface"],
+        "ray": { "from": [40.0, 25.0, 0.0], "direction": [0.0, 0.0, 1.0] } }), &files);
+    let hits = out["sections"]["surface"]["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 2, "{out:#}");
+    assert_eq!(hits[0]["occurrence"], "base", "{out:#}");
+    assert_eq!(hits[0]["point_mm"], json!([40.0, 25.0, 100.0]), "{out:#}");
+    assert_eq!(hits[0]["normal"], json!([0.0, 0.0, -1.0]), "{out:#}");
+    assert_eq!(hits[0]["distance_mm"], 100.0, "{out:#}");
+    assert_eq!(hits[0]["entering"], true, "{out:#}");
+    assert_eq!(hits[1]["point_mm"], json!([40.0, 25.0, 110.0]), "{out:#}");
+    assert_eq!(hits[1]["entering"], false, "{out:#}");
+    // On the part itself, and a ray that misses.
+    let out = ok("design.inspect", json!({ "path": "/p/plate.part", "sections": ["surface"],
+        "ray": { "from": [40.0, 25.0, 50.0], "direction": [0.0, 0.0, -1.0] } }), &files);
+    assert_eq!(out["sections"]["surface"]["hits"][0]["point_mm"], json!([40.0, 25.0, 10.0]), "{out:#}");
+    let out = ok("design.inspect", json!({ "path": "/p/plate.part", "sections": ["surface"],
+        "ray": { "from": [200.0, 25.0, 50.0], "direction": [0.0, 0.0, -1.0] } }), &files);
+    assert!(out["sections"]["surface"]["hits"].as_array().unwrap().is_empty(), "{out:#}");
+}
