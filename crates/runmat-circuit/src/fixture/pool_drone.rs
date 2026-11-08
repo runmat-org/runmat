@@ -1,6 +1,6 @@
 //! Parts of the quadcopter showcase's two boards (`runmat-cad/wasm/tests/drone`): the flight
 //! controller (a Cortex-M4-class MCU in LQFP-48, a six-axis IMU, a barometer, a 36 V buck to
-//! 5 V and a 3.3 V LDO, USB-C and JST-SH connectors) and the 4-in-1 ESC (per channel a small
+//! 5 V and a 3.3 V LDO, USB-C and 4-, 6- and 8-pin JST-SH connectors) and the 4-in-1 ESC (per channel a small
 //! MCU, a three-phase gate driver, six 40 V N-channel MOSFETs and a current shunt per phase; wire pads for
 //! the battery and the motor phases). Every part is a generic type with its own footprint; no
 //! part names a vendor.
@@ -228,8 +228,9 @@ pub(super) fn add(p: &mut Pool) {
     );
     describe(p, up, "USB Type-C receptacle, USB 2.0, mid-mount");
 
-    // JST-SH 1.0 mm connectors: four pins (receiver, telemetry) and eight (the ESC harness).
-    for n in [4u32, 8] {
+    // JST-SH 1.0 mm connectors: four pins (receiver, telemetry), six (the GPS and compass port)
+    // and eight (the ESC harness).
+    for n in [4u32, 6, 8] {
         let names: Vec<String> = (1..=n).map(|k| k.to_string()).collect();
         let defs: Vec<(&str, PinType)> = names.iter().map(|s| (s.as_str(), Passive)).collect();
         let e = make::simple_entity(p, &format!("conn-{n}"), "J", &defs);

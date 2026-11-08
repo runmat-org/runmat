@@ -2,6 +2,9 @@ entry dfa6c71e-f772-8160-a6d7-36d950874922 net /+3V3
 entry 64cbcf8c-26f1-80ca-bb7b-0dbe512ec7c4 net /+5V
 entry 71f86306-16e5-85a4-8f37-12d3e1f711cb net /CURR
 entry 4b439ec7-20c4-837a-a84f-83a9233472f9 net /GND
+entry 19cb3968-23fa-8991-9eed-11fe0bd0fbd7 net /GPS_RX
+entry 2a83e2a8-1b72-80a9-b57b-baa708a22961 net /GPS_TX
+entry cc9578b4-5ef0-8870-b0cc-16fa83597701 net /GPS_VCC
 entry a7857f5b-0d80-85f0-9880-08d1ddbc30d6 net /I2C_SCL
 entry 6dc4dc63-7838-8d40-8e0d-1b7e60a74939 net /I2C_SDA
 entry 13c6ff91-a4b4-845b-a6c7-779702f31e6f net /IMU_CS
@@ -34,6 +37,7 @@ entry f4249c8f-9455-8e54-8328-5dad1c59cc64 component /conn/J1 designator=J1
 entry 524868a8-45da-8d55-9a53-a24a23ed46bb component /conn/J2 designator=J2
 entry 4545051e-ee85-877d-b4b1-3971225bbc65 component /conn/J3 designator=J3
 entry c2045e61-2112-8bc0-9e82-6cf4545f84e0 component /conn/J4 designator=J4
+entry c9a16a4f-003a-826f-bc59-8675bdb27be1 component /conn/J5 designator=J5
 entry 6dbbc19b-1c95-8ffa-b2ce-b8a41c6fd631 component /conn/R2 designator=R2
 entry 2b695442-d674-801b-af90-afeef09f844e component /conn/R3 designator=R3
 entry 8544a78c-cc4d-8dee-a894-f5903221e379 net /conn/VBUS
@@ -99,9 +103,12 @@ entry a5349962-ccd7-8b87-a132-e221e460a364 component /sens/U5 designator=U5
 fp /+3V3 /mcu/C3.1,/mcu/C4.1,/mcu/C5.1,/mcu/C6.1,/mcu/C7.1,/mcu/C8.1,/mcu/C9.1,/mcu/R13.2,/mcu/U1.VDD,/mcu/U1.VDDA,/pwr/C19.1,/pwr/U3.VOUT,/sens/C21.1,/sens/C22.1,/sens/C23.1,/sens/R11.1,/sens/R12.1,/sens/U4.VDD,/sens/U4.VDDIO,/sens/U5.CSB,/sens/U5.VDD,/sens/U5.VDDIO
 fp /+5V /conn/D3.K,/conn/J2.1,/conn/J4.1,/pwr/C15.1,/pwr/C16.1,/pwr/C17.1,/pwr/C18.1,/pwr/L1.2,/pwr/R6.1,/pwr/U3.EN,/pwr/U3.VIN
 fp /CURR /conn/J3.3,/mcu/U1.PB1
-fp /GND /conn/J1.GND,/conn/J1.SHIELD,/conn/J2.2,/conn/J3.2,/conn/J4.2,/conn/R2.2,/conn/R3.2,/mcu/C1.2,/mcu/C10.2,/mcu/C11.2,/mcu/C2.2,/mcu/C3.2,/mcu/C4.2,/mcu/C5.2,/mcu/C6.2,/mcu/C7.2,/mcu/C8.2,/mcu/C9.2,/mcu/D1.K,/mcu/D2.K,/mcu/R1.2,/mcu/U1.VSS,/mcu/U1.VSSA,/pwr/C12.2,/pwr/C13.2,/pwr/C15.2,/pwr/C16.2,/pwr/C18.2,/pwr/C19.2,/pwr/C20.2,/pwr/R10.2,/pwr/R7.2,/pwr/U2.GND,/pwr/U3.GND,/sens/C21.2,/sens/C22.2,/sens/C23.2,/sens/U4.GND,/sens/U5.GND,/sens/U5.SDO
-fp /I2C_SCL /mcu/U1.PB8,/sens/R11.2,/sens/U5.SCL
-fp /I2C_SDA /mcu/U1.PB9,/sens/R12.2,/sens/U5.SDA
+fp /GND /conn/J1.GND,/conn/J1.SHIELD,/conn/J2.2,/conn/J3.2,/conn/J4.2,/conn/J5.6,/conn/R2.2,/conn/R3.2,/mcu/C1.2,/mcu/C10.2,/mcu/C11.2,/mcu/C2.2,/mcu/C3.2,/mcu/C4.2,/mcu/C5.2,/mcu/C6.2,/mcu/C7.2,/mcu/C8.2,/mcu/C9.2,/mcu/D1.K,/mcu/D2.K,/mcu/R1.2,/mcu/U1.VSS,/mcu/U1.VSSA,/pwr/C12.2,/pwr/C13.2,/pwr/C15.2,/pwr/C16.2,/pwr/C18.2,/pwr/C19.2,/pwr/C20.2,/pwr/R10.2,/pwr/R7.2,/pwr/U2.GND,/pwr/U3.GND,/sens/C21.2,/sens/C22.2,/sens/C23.2,/sens/U4.GND,/sens/U5.GND,/sens/U5.SDO
+fp /GPS_RX /conn/J5.3,/mcu/U1.PB13
+fp /GPS_TX /conn/J5.2,/mcu/U1.PB12
+fp /GPS_VCC /conn/J5.1
+fp /I2C_SCL /conn/J5.4,/mcu/U1.PB8,/sens/R11.2,/sens/U5.SCL
+fp /I2C_SDA /conn/J5.5,/mcu/U1.PB9,/sens/R12.2,/sens/U5.SDA
 fp /IMU_CS /mcu/U1.PA4,/sens/U4.CS
 fp /IMU_INT /mcu/U1.PA1,/sens/U4.INT1
 fp /M1 /conn/J3.5,/mcu/U1.PB6
@@ -132,6 +139,7 @@ fp /conn/J1 1701c1b9-5140-84ac-b448-1c8c57db5f3f|/conn/CC1,/conn/CC2,/conn/VBUS,
 fp /conn/J2 4f4faabc-3a4d-89e5-b2ea-1658a08fb24d|+5V,GND,RC_RX,RC_TX
 fp /conn/J3 718714a5-4e06-8e0c-be1d-b7b2c2c3423b|CURR,GND,M1,M2,M3,M4,TLM,VBAT
 fp /conn/J4 4f4faabc-3a4d-89e5-b2ea-1658a08fb24d|+5V,GND,VTX_RX,VTX_TX
+fp /conn/J5 b3d1aac8-96d5-87f6-8a97-9ec392921312|GND,GPS_RX,GPS_TX,GPS_VCC,I2C_SCL,I2C_SDA
 fp /conn/R2 f9f3252b-5119-8001-9d17-ab24998ffbb4|/conn/CC1,GND
 fp /conn/R3 f9f3252b-5119-8001-9d17-ab24998ffbb4|/conn/CC2,GND
 fp /conn/VBUS /conn/D3.A,/conn/J1.VBUS
@@ -161,7 +169,7 @@ fp /mcu/R1 f0b7343f-4c49-88f7-8a3b-7c46bf087762|/mcu/BOOT0,GND
 fp /mcu/R13 f0b7343f-4c49-88f7-8a3b-7c46bf087762|+3V3,/mcu/NRST
 fp /mcu/R4 5cad3456-7f51-8bcd-9bf4-5cf482812887|/mcu/LED1,/mcu/LED1_K
 fp /mcu/R5 5cad3456-7f51-8bcd-9bf4-5cf482812887|/mcu/LED2,/mcu/LED2_K
-fp /mcu/U1 8a5fb81d-61d0-86be-936c-76caa4bd5a2c|+3V3,/mcu/BOOT0,/mcu/LED1,/mcu/LED2,/mcu/NRST,/mcu/OSC_IN,/mcu/OSC_OUT,/mcu/VCAP,CURR,GND,I2C_SCL,I2C_SDA,IMU_CS,IMU_INT,M1,M2,M3,M4,RC_RX,RC_TX,SPI_MISO,SPI_MOSI,SPI_SCK,TLM,USB_DN,USB_DP,VBAT_SENSE,VTX_RX,VTX_TX
+fp /mcu/U1 8a5fb81d-61d0-86be-936c-76caa4bd5a2c|+3V3,/mcu/BOOT0,/mcu/LED1,/mcu/LED2,/mcu/NRST,/mcu/OSC_IN,/mcu/OSC_OUT,/mcu/VCAP,CURR,GND,GPS_RX,GPS_TX,I2C_SCL,I2C_SDA,IMU_CS,IMU_INT,M1,M2,M3,M4,RC_RX,RC_TX,SPI_MISO,SPI_MOSI,SPI_SCK,TLM,USB_DN,USB_DP,VBAT_SENSE,VTX_RX,VTX_TX
 fp /mcu/VCAP /mcu/C10.1,/mcu/U1.VCAP
 fp /mcu/Y1 354e5a70-798a-8d7c-8d48-bf24989866c3|/mcu/OSC_IN,/mcu/OSC_OUT
 fp /pwr power
@@ -203,6 +211,7 @@ place connectors/J1 104.14 83.82 0 mirror
 place connectors/J2 226.06 74.93 0
 place connectors/J3 181.61 77.47 0
 place connectors/J4 67.31 135.89 0
+place connectors/J5 232.41 93.98 0
 place connectors/R2 52.07 85.09 270
 place connectors/R3 64.77 87.63 270
 place main/conn 106.68 52.07 0

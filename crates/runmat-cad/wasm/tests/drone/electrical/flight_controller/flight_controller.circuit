@@ -2,8 +2,8 @@ runmat 0.7
 std 1
 
 // The flight controller: a Cortex-M4-class MCU reads a six-axis IMU over SPI and a barometer over
-// I2C, takes the receiver on UART2 and the video transmitter on UART1, and drives the four motor
-// signals to the 4-in-1 ESC through its 8-pin harness. A 36 V buck makes 5 V from the 6S battery
+// I2C, takes the receiver on UART2, the video transmitter on UART1 and the GPS on UART3, and
+// drives the four motor signals to the 4-in-1 ESC through its 8-pin harness. A 36 V buck makes 5 V from the 6S battery
 // and an LDO makes 3.3 V. The board is 36 x 36 mm on the 30.5 mm stack pattern.
 circuit flight_controller {
     root = main
@@ -98,6 +98,8 @@ circuit flight_controller {
         port M4 : out
         port VTX_TX : out
         port VTX_RX : in
+        port GPS_TX : out
+        port GPS_RX : in
         component U1 = { part = "MCU-M4-LQFP48" }
         component Y1 = { part = "XTAL-3225" }
         component C1 = { part = "C0402-12P" }
@@ -143,6 +145,9 @@ circuit flight_controller {
         connect = [net.M4, port.M4, U1.PB5]
         connect = [net.VTX_TX, port.VTX_TX, U1.PA9]
         connect = [net.VTX_RX, port.VTX_RX, U1.PA10]
+        // GPS on UART3: PB12 transmits, PB13 receives.
+        connect = [net.GPS_TX, port.GPS_TX, U1.PB12]
+        connect = [net.GPS_RX, port.GPS_RX, U1.PB13]
         connect = ["net.+3V3", U1.VDD, U1.VDDA, "R13.2", "C3.1", "C4.1", "C5.1", "C6.1", "C7.1", "C8.1", "C9.1"]
         connect = [net.GND, U1.VSS, U1.VSSA, "C3.2", "C4.2", "C5.2", "C6.2", "C7.2", "C8.2", "C9.2", "C10.2", "C11.2", "C1.2", "C2.2", "R1.2"]
         connect = [net.VCAP, U1.VCAP, "C10.1"]
@@ -156,11 +161,11 @@ circuit flight_controller {
         connect = [net.LED2, U1.PC14, "R5.1"]
         connect = [net.LED2_K, "R5.2", D2.A]
         connect = [net.GND, D1.K, D2.K]
-        no_erc = [U1.PC15, U1.PA8, U1.PA13, U1.PA14, U1.PA15, U1.PB0, U1.PB2, U1.PB3, U1.PB12, U1.PB13, U1.PB14, U1.PB15]
+        no_erc = [U1.PC15, U1.PA8, U1.PA13, U1.PA14, U1.PA15, U1.PB0, U1.PB2, U1.PB3, U1.PB14, U1.PB15]
     }
 
-    // The board's connectors: USB-C, the receiver, the 4-in-1 ESC harness and the video
-    // transmitter, with the stack's four mounting holes.
+    // The board's connectors: USB-C, the receiver, the 4-in-1 ESC harness, the video
+    // transmitter and the GPS and compass, with the stack's four mounting holes.
     sheet connectors {
         port USB_DP : inout
         port USB_DN : inout
@@ -174,6 +179,10 @@ circuit flight_controller {
         port M4 : in
         port VTX_TX : in
         port VTX_RX : out
+        port GPS_TX : in
+        port GPS_RX : out
+        port SCL : in
+        port SDA : inout
         component J1 = { part = "USBC-RCPT-16P" }
         component D3 = { part = "D-SCHOTTKY-1A" }
         component R2 = { part = "R0402-5K1" }
@@ -181,6 +190,7 @@ circuit flight_controller {
         component J2 = { part = "CONN-SH-4P" }
         component J3 = { part = "CONN-SH-8P" }
         component J4 = { part = "CONN-SH-4P" }
+        component J5 = { part = "CONN-SH-6P" }
         component H1 = { part = "MH-M3-GROMMET" }
         component H2 = { part = "MH-M3-GROMMET" }
         component H3 = { part = "MH-M3-GROMMET" }
@@ -188,6 +198,7 @@ circuit flight_controller {
         net GND = { class = supply, global = true }
         net VBAT = { class = power, global = true }
         net "+5V" = { class = power, global = true }
+        net GPS_VCC = { class = supply, global = true }
         // USB-C: device, powered from VBUS through the Schottky when the battery is off.
         connect = [net.VBUS, J1.VBUS, D3.A]
         connect = ["net.+5V", D3.K]
@@ -215,8 +226,20 @@ circuit flight_controller {
         connect = [net.GND, "J4.2"]
         connect = [net.VTX_TX, port.VTX_TX, "J4.3"]
         connect = [net.VTX_RX, port.VTX_RX, "J4.4"]
+        // GPS and compass, pins named from the board's side: supply, TX, RX, SCL, SDA, GND. The
+        // MCU's TX on pin 2 goes to the module's RX and the module's TX comes back on pin 3. The
+        // compass shares the barometer's I2C bus and its pull-ups. GPS_VCC is the module's own
+        // supply, separate from +3V3 so the receiver's current and noise stay off the MCU rail.
+        connect = [net.GPS_VCC, "J5.1"]
+        connect = [net.GPS_TX, port.GPS_TX, "J5.2"]
+        connect = [net.GPS_RX, port.GPS_RX, "J5.3"]
+        connect = [net.SCL, port.SCL, "J5.4"]
+        connect = [net.SDA, port.SDA, "J5.5"]
+        connect = [net.GND, "J5.6"]
         no_erc = [J1.SBU1, J1.SBU2]
         no_erc = ["H1.1", "H2.1", "H3.1", "H4.1"]
+        // GPS_VCC has no regulator yet, so J5.1 is its only pin until one is added.
+        no_erc = ["J5.1"]
     }
 
     // The top sheet: the power, MCU, sensor and connector sheets, wired by their ports.
@@ -226,9 +249,9 @@ circuit flight_controller {
         net "+5V" = { class = power, global = true, power_flag = true }
         net "+3V3" = { class = supply, global = true, power_flag = true }
         instance pwr = { sheet = power, bind = { VBAT_SENSE = net.VBAT_SENSE } }
-        instance mcu = { sheet = mcu, bind = { SPI_SCK = net.SPI_SCK, SPI_MISO = net.SPI_MISO, SPI_MOSI = net.SPI_MOSI, IMU_CS = net.IMU_CS, IMU_INT = net.IMU_INT, I2C_SCL = net.I2C_SCL, I2C_SDA = net.I2C_SDA, VBAT_SENSE = net.VBAT_SENSE, USB_DP = net.USB_DP, USB_DN = net.USB_DN, RC_RX = net.RC_RX, RC_TX = net.RC_TX, CURR = net.CURR, TLM = net.TLM, M1 = net.M1, M2 = net.M2, M3 = net.M3, M4 = net.M4, VTX_TX = net.VTX_TX, VTX_RX = net.VTX_RX } }
+        instance mcu = { sheet = mcu, bind = { SPI_SCK = net.SPI_SCK, SPI_MISO = net.SPI_MISO, SPI_MOSI = net.SPI_MOSI, IMU_CS = net.IMU_CS, IMU_INT = net.IMU_INT, I2C_SCL = net.I2C_SCL, I2C_SDA = net.I2C_SDA, VBAT_SENSE = net.VBAT_SENSE, USB_DP = net.USB_DP, USB_DN = net.USB_DN, RC_RX = net.RC_RX, RC_TX = net.RC_TX, CURR = net.CURR, TLM = net.TLM, M1 = net.M1, M2 = net.M2, M3 = net.M3, M4 = net.M4, VTX_TX = net.VTX_TX, VTX_RX = net.VTX_RX, GPS_TX = net.GPS_TX, GPS_RX = net.GPS_RX } }
         instance sens = { sheet = sensors, bind = { SCK = net.SPI_SCK, MISO = net.SPI_MISO, MOSI = net.SPI_MOSI, CS = net.IMU_CS, INT = net.IMU_INT, SCL = net.I2C_SCL, SDA = net.I2C_SDA } }
-        instance conn = { sheet = connectors, bind = { USB_DP = net.USB_DP, USB_DN = net.USB_DN, RC_RX = net.RC_RX, RC_TX = net.RC_TX, CURR = net.CURR, TLM = net.TLM, M1 = net.M1, M2 = net.M2, M3 = net.M3, M4 = net.M4, VTX_TX = net.VTX_TX, VTX_RX = net.VTX_RX } }
+        instance conn = { sheet = connectors, bind = { USB_DP = net.USB_DP, USB_DN = net.USB_DN, RC_RX = net.RC_RX, RC_TX = net.RC_TX, CURR = net.CURR, TLM = net.TLM, M1 = net.M1, M2 = net.M2, M3 = net.M3, M4 = net.M4, VTX_TX = net.VTX_TX, VTX_RX = net.VTX_RX, GPS_TX = net.GPS_TX, GPS_RX = net.GPS_RX, SCL = net.I2C_SCL, SDA = net.I2C_SDA } }
     }
 
     // The 5 V buck's start-up from a 6S battery into a 1.5 A load: the soft-start ramp, the

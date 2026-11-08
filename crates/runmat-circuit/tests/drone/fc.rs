@@ -1,6 +1,7 @@
 //! The flight controller: 36 x 36 mm, four layers (signal, ground, power, signal), the MCU in
 //! the middle, the buck and LDO in the lower-left quadrant, the IMU beside the MCU on the
-//! board's center line, the barometer away from the regulators, and the connectors at the edges.
+//! board's center line, the barometer away from the regulators, and the connectors at the edges
+//! (the GPS port on the right edge under the video transmitter's).
 
 use super::build::Build;
 use std::path::Path;
@@ -25,7 +26,7 @@ const PLACE: &[(&str, f64, f64, f64)] = &[
     ("J1", 4.0, -13.5, 0.0),
     ("R2", -1.8, -8.8, 90.0),
     ("R3", 10.0, -9.0, 90.0),
-    ("D3", 13.6, -8.0, 90.0),
+    ("D3", 13.6, -8.6, 90.0),
     ("D1", 7.0, 10.8, 0.0),
     ("R4", 7.0, 12.6, 0.0),
     ("D2", 10.6, 10.8, 0.0),
@@ -33,6 +34,8 @@ const PLACE: &[(&str, f64, f64, f64)] = &[
     ("J2", -14.8, 6.5, 270.0),
     ("J3", 0.0, 14.8, 180.0),
     ("J4", 14.8, 8.0, 90.0),
+    // GPS and compass on the right edge, under the video transmitter.
+    ("J5", 14.8, -1.0, 90.0),
     ("H1", -15.25, -15.25, 0.0),
     ("H2", 15.25, -15.25, 0.0),
     ("H3", 15.25, 15.25, 0.0),
@@ -60,7 +63,7 @@ const PLACE: &[(&str, f64, f64, f64)] = &[
     ("/sens/C21", 10.0, 7.0, 0.0),
     ("/sens/C22", 10.0, 2.2, 0.0),
     ("/sens/U5", 10.4, -2.4, 0.0),
-    ("/sens/C23", 13.0, -2.4, 90.0),
+    ("/sens/C23", 8.2, -4.3, 90.0),
     ("/sens/R11", 8.6, -5.6, 0.0),
     ("/sens/R12", 10.4, -5.6, 0.0),
 ];
@@ -68,6 +71,10 @@ const PLACE: &[(&str, f64, f64, f64)] = &[
 pub fn build(dir: &Path) -> Build {
     let start = &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/drone/flight_controller.start.circuit.layout")).unwrap();
     let mut b = Build::new(dir, "flight_controller", start);
+    // The checked-in lock keeps each component's identity and schematic place.
+    if let Ok(lock) = std::fs::read_to_string(dir.join("flight_controller.circuit.lock")) {
+        b.files.insert("/p/flight_controller.circuit.lock".into(), lock);
+    }
     b.start(Some(4));
     for (path, x, y, r) in PLACE {
         b.place(path, *x, *y, *r);
@@ -84,6 +91,11 @@ pub fn build(dir: &Path) -> Build {
     b.run("board.place-via", serde_json::json!({ "points": [[-4.6, 0.75]], "net": "net:+3V3", "size": "0.2/0.45" }), &[]);
     // The USB pair first, while the way to the MCU's USB pins is open.
     b.run("board.autoroute", serde_json::json!({ "nets": ["net:USB_DP", "net:USB_DN"] }), &[]);
+    // The ESC telemetry line runs from the top edge to the MCU's lower right, past the GPS port,
+    // and the I2C clock from the MCU's top side to the barometer and the port: each gets its way
+    // before the rest fills the right side.
+    b.run("board.autoroute", serde_json::json!({ "nets": ["net:TLM"] }), &[]);
+    b.run("board.autoroute", serde_json::json!({ "nets": ["net:I2C_SCL"] }), &[]);
     b.finish(&[]);
     b
 }

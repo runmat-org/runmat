@@ -30,6 +30,10 @@ fn rebuild_when_asked() {
     let Ok(which) = std::env::var("RUNMAT_DRONE_BUILD") else { return };
     if which.contains("fc") || which == "1" {
         let b = drone::fc::build(&here("flight_controller"));
+        // `fc-courtyards` also prints each footprint's courtyard, for checking a placement.
+        if which.contains("courtyards") {
+            b.courtyards();
+        }
         b.report();
         b.write(&out_dir("flight_controller"), "flight_controller");
     }
