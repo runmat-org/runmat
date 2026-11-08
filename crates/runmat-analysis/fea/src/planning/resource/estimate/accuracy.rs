@@ -6,14 +6,26 @@ pub(super) fn build_accuracy_plan(
     input: FeaResourcePlanningInput,
     demand: &AccuracyEvaluationResourceDemand,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    if demand.criterion_count.0 == 0
-        || demand.evaluator_workspace_bytes_upper_bound.0 == 0
-        || !input.worker.accelerators.is_empty()
-        || demand.inputs.transport_closure_bytes < demand.inputs.encoded_payload_bytes
-    {
-        return Err(ResourcePlanningError::Invalid(
-            "accuracy requires criteria, evaluator workspace and host-only input storage".into(),
-        ));
+    // The transport closure counts each shared object once, so inputs that share the mesh or
+    // workload have a closure below their summed encoded payloads; only an empty closure is
+    // invalid.
+    for (refused, reason) in [
+        (demand.criterion_count.0 == 0, "no criteria"),
+        (
+            demand.evaluator_workspace_bytes_upper_bound.0 == 0,
+            "no evaluator workspace",
+        ),
+        (!input.worker.accelerators.is_empty(), "an accelerator worker"),
+        (
+            demand.inputs.transport_closure_bytes.0 == 0,
+            "no input transport closure",
+        ),
+    ] {
+        if refused {
+            return Err(ResourcePlanningError::Invalid(format!(
+                "accuracy requires host-only inputs, criteria and evaluator workspace: {reason}"
+            )));
+        }
     }
     let retained_transport = ByteCount(add(
         demand.inputs.transport_closure_bytes.0,

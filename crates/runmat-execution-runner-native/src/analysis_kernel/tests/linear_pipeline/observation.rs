@@ -159,7 +159,10 @@ pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) ->
         let input_facts = prepared_input_resource_facts(&inputs).unwrap();
         let payload_ceiling =
             runmat_analysis_fea::planning::resource::observation_partition_payload_bytes_upper_bound(
-                &input_facts,
+                &source_request,
+                &partition_request,
+                &partition_plan,
+                partition,
                 &source_fields,
                 false,
             )
@@ -176,6 +179,8 @@ pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) ->
                     .unwrap(),
                 output_set: runmat_analysis_execution::projected_output_set_resource_facts(),
                 accelerator: None,
+                source_workspace:
+                    runmat_analysis_fea::planning::resource::ObservationPartitionSourceWorkspace::InputEnvelope,
             })
             .unwrap();
         inputs.push(resource_plan_objects(&resource_plan));

@@ -39,6 +39,13 @@ pub(crate) async fn execute_governed_analysis_task(
     let plan = task
         .resource_plan
         .ok_or_else(|| protocol("governed analysis task requires an admitted resource plan"))?;
+    tracing::info!(
+        work = ?task.host.workload.kind,
+        memory_bytes = plan.request.memory_bytes,
+        cpu_millicores = plan.request.cpu_millicores,
+        breakdown = ?plan.breakdown,
+        "governed analysis phase requested"
+    );
     let [executed] = execute_analysis_task_batch(pool, vec![task], policy)
         .await?
         .try_into()

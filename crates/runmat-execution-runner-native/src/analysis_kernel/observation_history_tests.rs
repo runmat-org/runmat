@@ -220,13 +220,9 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
          sample: &ObservationResult,
          mut inputs: Vec<PreparedAnalysisObjects>| {
             let input_facts = prepared_input_resource_facts(&inputs).unwrap();
-            let payload_ceiling = observation_history_checkpoint_payload_bytes_upper_bound(
-                request,
-                previous,
-                sample,
-                &input_facts,
-            )
-            .unwrap();
+            let payload_ceiling =
+                observation_history_checkpoint_payload_bytes_upper_bound(request, previous, sample)
+                    .unwrap();
             let plan = build_observation_history_checkpoint_resource_plan(
                 request,
                 previous,

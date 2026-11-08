@@ -18,6 +18,11 @@ mod validation;
 
 const PREFIX: &[u8] = b"runmat-observation-publication-catalog/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64);
+/// Memory profiles of a catalog the run's budget already admitted: bytes and collections are
+/// bounded by the platform, so a catalog of any admitted size can be sized. String and nesting
+/// rules still refuse malformed content.
+const PROFILE_LIMITS: CanonicalLimits =
+    CanonicalLimits::platform_content(LIMITS.maximum_string_bytes, LIMITS.maximum_nesting_depth);
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(format!("observation publication: {error}"))
 }
