@@ -78,7 +78,7 @@ export type FeaAcceleratorAdmissionPolicy = "fallback_to_cpu" | "required";
 
 export type FeaElementOrder = "tet4" | "tet10";
 
-export type FeaAnalysisProcedure = "static" | "modal_extraction" | "prestressed_modal_extraction" | "eigenvalue_buckling" | "transient_response" | "harmonic_response" | "prestressed_harmonic_response" | "modal_response_spectrum" | "random_response" | "nonlinear" | "adaptive";
+export type FeaAnalysisProcedure = "static" | "modal_extraction" | "prestressed_modal_extraction" | "eigenvalue_buckling" | "transient_response" | "harmonic_response" | "prestressed_harmonic_response" | "modal_response_spectrum" | "random_response" | "nonlinear" | "adaptive" | "line_parameters";
 
 export type FeaStructuralTimeStepPolicy = { fixed: { interval_count: number } };
 export interface FeaModalTruncationPolicy { requested_mode_count: number; eigenspace_relative_tolerance: number; }
@@ -127,7 +127,8 @@ export type FeaFieldLocationContract = "node" | "point" | "cell" | "element" | "
 export type FeaObservationValueShape = "scalar" | "vector3" | "symmetric_tensor3" | { tensor: { extents: number[] } };
 export type FeaComplexRepresentation = "real" | "imaginary" | "magnitude" | "phase_radians" | "complex" | "sound_pressure_level";
 export type FeaFieldOrdinal = { kind: "single" } | { kind: "step"; index: number } | { kind: "mode"; index: number };
-export interface FeaFieldLayout { quantity: FeaObservationQuantity; location: FeaFieldLocationContract; value_shape: FeaObservationValueShape; representation?: FeaComplexRepresentation; ordinal: FeaFieldOrdinal; }
+export type FeaFieldStatistic = "component_magnitude_envelope" | "root_mean_square" | "variance";
+export interface FeaFieldLayout { quantity: FeaObservationQuantity; location: FeaFieldLocationContract; value_shape: FeaObservationValueShape; representation?: FeaComplexRepresentation; ordinal: FeaFieldOrdinal; statistic?: FeaFieldStatistic; }
 export type FeaObservationTarget = { spatial: FeaExcitationTarget } | { point: { position: FeaPosition } } | { path: { positions: FeaPosition[] } } | { connector: { connector_id: string } } | { constraint: { constraint_id: string } } | "whole_model";
 export interface FeaReductionPolicy { spatial: "none" | "integral" | "average" | "root_mean_square" | "euclidean_norm" | "minimum" | "maximum" | "resultant" | "moment"; series: "none" | "minimum" | "maximum" | "absolute_maximum" | "root_mean_square" | "mean" | "variance" | "envelope"; extrema_ties: "first_canonical" | "all_locations"; }
 export interface FeaObservationStoragePolicy { precision: FeaSignalPrecision; compression: "lossless" | { error_bounded: { maximum_relative_error: number } } | "none"; retention: FeaRetentionPolicy; partial_access: "manifest_and_chunks" | "whole_artifact"; }
@@ -314,7 +315,7 @@ export interface FeaFieldDescriptor {
   numeric_representation?: "real" | "complex_interleaved";
   family: string;
   layout: FeaFieldLayout;
-  statistic?: "component_magnitude_envelope" | "root_mean_square" | "variance";
+  statistic?: FeaFieldStatistic;
   topology_id: string | null;
   element_kind: string | null;
   class_name: string;

@@ -366,6 +366,10 @@
       "path": "docs/simulation/language/reference/declarations.md"
     },
     {
+      "id": "doc:fea/language/reference/fluid-materials",
+      "path": "docs/simulation/language/reference/fluid-materials.md"
+    },
+    {
       "id": "doc:fea/language/reference/procedures",
       "path": "docs/simulation/language/reference/procedures.md"
     },
