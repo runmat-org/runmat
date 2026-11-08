@@ -123,13 +123,33 @@ impl GeometryScenePickIndex {
     }
 
     /// Follows the view's hidden regions and owner nodes, so picks pass through what isn't drawn.
+    /// Instanced placements follow it too: a hidden placement region or owner node is skipped.
     pub fn set_hidden(&mut self, presentation: &GeometryScenePresentation) {
-        self.hidden_regions = presentation.hidden_region_ids.iter().cloned().collect();
-        let owners: BTreeSet<String> = self.triangles.iter().flat_map(|t| t.owner_node_ids.iter().cloned()).collect();
-        self.hidden_owners = presentation
+        let regions: HashSet<String> = presentation.hidden_region_ids.iter().cloned().collect();
+        let owners: BTreeSet<String> = self
+            .owner_ids()
+            .chain(super::pick_instances::owner_ids(&self.instanced))
+            .cloned()
+            .collect();
+        let owners: HashSet<String> = presentation
             .resolved_hidden_owner_node_ids(owners.iter().map(String::as_str), &BTreeSet::new())
             .into_iter()
             .collect();
+        super::pick_instances::set_hidden(&mut self.instanced, &regions, &owners);
+        self.set_hidden_sets(regions, owners);
+    }
+
+    pub(super) fn set_hidden_sets(&mut self, regions: HashSet<String>, owners: HashSet<String>) {
+        self.hidden_regions = regions;
+        self.hidden_owners = owners;
+    }
+
+    pub(super) fn region_hidden(&self, region_id: &str) -> bool {
+        self.hidden_regions.contains(region_id)
+    }
+
+    pub(super) fn owner_ids(&self) -> impl Iterator<Item = &String> {
+        self.triangles.iter().flat_map(|t| t.owner_node_ids.iter())
     }
 
     fn hidden(&self, triangle: &IndexedTriangle) -> bool {

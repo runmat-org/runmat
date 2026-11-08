@@ -73,12 +73,28 @@ pub(super) fn build(scene: &GeometryScene) -> Vec<InstancedPick> {
         .collect()
 }
 
+/// The owner nodes the sets' prototype triangles name.
+pub(super) fn owner_ids(sets: &[InstancedPick]) -> impl Iterator<Item = &String> {
+    sets.iter().flat_map(|set| set.local.owner_ids())
+}
+
+/// The view's hidden regions and owner nodes: a placement whose region is hidden, or a
+/// prototype triangle whose region or owner node is hidden, is passed through.
+pub(super) fn set_hidden(sets: &mut [InstancedPick], regions: &HashSet<String>, owners: &HashSet<String>) {
+    for set in sets {
+        set.local.set_hidden_sets(regions.clone(), owners.clone());
+    }
+}
+
 /// The nearest placement the ray hits closer than `nearer_than`, as a pick result.
 pub(super) fn pick(sets: &[InstancedPick], ray: &PickRay, nearer_than: f32) -> Option<GeometryScenePickResult> {
     let mut best: Option<(&InstancedPick, &Placement, usize, f32, PickRay)> = None;
     let mut limit = nearer_than;
     for set in sets {
         for placement in &set.placements {
+            if set.local.region_hidden(&placement.region_id) {
+                continue;
+            }
             let Some(enter) = ray_intersects_bounds(ray, placement.bounds) else {
                 continue;
             };
@@ -138,5 +154,39 @@ mod tests {
         assert!((hit.position[0] - 10.5).abs() < 1e-5 && (hit.distance - 5.0).abs() < 1e-5, "{hit:?}");
         let miss = PickRay { origin: Vec3::new(5.0, 0.5, 5.0), direction: Vec3::NEG_Z };
         assert!(pick(&index.instanced_sets(), &miss, f32::INFINITY).is_none());
+    }
+
+    /// A hidden placement, or a hidden owner node of the prototype, lets the click through.
+    #[test]
+    fn a_pick_passes_through_hidden_placements_and_owners() {
+        let vertices = vec![
+            vertex([0.0, 0.0, 0.0], [0.5; 4], [0.0, 0.0, 1.0]),
+            vertex([1.0, 0.0, 0.0], [0.5; 4], [0.0, 0.0, 1.0]),
+            vertex([1.0, 1.0, 0.0], [0.5; 4], [0.0, 0.0, 1.0]),
+            vertex([0.0, 1.0, 0.0], [0.5; 4], [0.0, 0.0, 1.0]),
+        ];
+        // Two squares stacked along z under the ray: occ:0 at z = 1 (nearer), occ:1 at z = 0.
+        let placed = |z: f32, id: &str| GeometrySceneInstance {
+            transform: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, z],
+            region_id: id.into(),
+            label: Some(id.into()),
+            tag: Some("occurrence".into()),
+        };
+        let mut chunk = GeometrySceneChunk::indexed_triangles("square", vertices, vec![0, 1, 2, 0, 2, 3], cad_default_material())
+            .with_instances(vec![placed(1.0, "occ:0"), placed(0.0, "occ:1")], None);
+        chunk.owner_node_ids = vec!["part:square".into()];
+        let scene = GeometryScene::new("s", 1, vec![chunk]);
+        let mut index = GeometryScenePickIndex::build(&scene);
+        let ray = PickRay { origin: Vec3::new(0.5, 0.5, 5.0), direction: Vec3::NEG_Z };
+        assert_eq!(pick(index.instanced_sets(), &ray, f32::INFINITY).and_then(|h| h.region_id).as_deref(), Some("occ:0"));
+
+        index.set_hidden(&GeometryScenePresentation { hidden_region_ids: vec!["occ:0".into()], ..Default::default() });
+        assert_eq!(pick(index.instanced_sets(), &ray, f32::INFINITY).and_then(|h| h.region_id).as_deref(), Some("occ:1"));
+
+        index.set_hidden(&GeometryScenePresentation { hidden_owner_node_ids: Some(vec!["part:square".into()]), ..Default::default() });
+        assert!(pick(index.instanced_sets(), &ray, f32::INFINITY).is_none());
+
+        index.set_hidden(&GeometryScenePresentation::default());
+        assert_eq!(pick(index.instanced_sets(), &ray, f32::INFINITY).and_then(|h| h.region_id).as_deref(), Some("occ:0"));
     }
 }
