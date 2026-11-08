@@ -73,6 +73,12 @@ fn the_standard_drawing_measures_the_bracket_on_occt() {
     }
     assert_eq!(data["text"]["width"], "80", "{}", data["text"]);
     assert_eq!(data["text"]["thickness"], "10", "{}", data["text"]);
+    // Seen from the front, the 4 mm hole at x = 60 draws both its outlines dashed, x = 58 and
+    // 62; OCCT puts the hole's seam at x = 62, where the hidden-line algorithm draws no outline.
+    let hidden: Vec<Vec<f64>> = data["hlr"]["front"]["hidden"].as_array().unwrap().iter().map(|l| l.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()).collect();
+    for x in [20.0, 40.0, 58.0, 62.0] {
+        assert!(hidden.iter().any(|l| l.chunks(2).all(|p| (p[0] - x).abs() < 1e-3)), "no hidden line at x = {x}: {hidden:?}");
+    }
     // The browser's framed call writes the models' meshes as bytes beside the JSON; the drawing
     // still measures their faces (it once read 0 for every face of 16 or more mesh values).
     let (framed, bytes) = runmat_geometry_wasm_host::cad::call_framed(&request.to_string());
