@@ -120,6 +120,9 @@ pub struct FeatureRow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_key: Option<CacheKey>,
     pub references: Vec<ReferenceRow>,
+    /// The bends a sheet-metal unfold flattened or a fold bent again ([`sheet_bends`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bends: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -206,6 +209,41 @@ fn item_entities(o: Option<&ItemOutcome>) -> (Vec<Vec<EntityName>>, bool) {
     }
 }
 
+/// How many bends each sheet-metal unfold and fold covers: the bends it picks, else for an
+/// unfold every bend line of its flat, and for a fold the bends of the unfold it folds again.
+fn sheet_bends(doc: &PartDocument, result: &RegenResult) -> BTreeMap<FeatureId, usize> {
+    use crate::model::{FeatureKind, SheetMetalFeature};
+    use crate::regen::records::FeatureRecord;
+    let mut out = BTreeMap::new();
+    let mut unfolded: Option<usize> = None;
+    for f in &doc.features {
+        match &f.kind {
+            FeatureKind::SheetMetal(SheetMetalFeature::Unfold { bends, .. }) => {
+                let n = if bends.is_empty() {
+                    match result.state.records.get(&f.id) {
+                        Some(FeatureRecord::FlatPattern { layout, .. }) => Some(layout.bend_lines.len()),
+                        _ => None,
+                    }
+                } else {
+                    Some(bends.len())
+                };
+                if let Some(n) = n {
+                    out.insert(f.id.clone(), n);
+                }
+                unfolded = n;
+            }
+            FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends }) => {
+                let n = if bends.is_empty() { unfolded } else { Some(bends.len()) };
+                if let Some(n) = n {
+                    out.insert(f.id.clone(), n);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 pub fn build_index(
     doc: &PartDocument,
     result: &RegenResult,
@@ -247,6 +285,7 @@ pub fn build_index(
             }
         })
         .collect();
+    let bends = sheet_bends(doc, result);
     let features = result
         .features
         .iter()
@@ -257,6 +296,7 @@ pub fn build_index(
             uuid: uuid(ItemPath::feature(&doc.path, &f.id)),
             cache_key: f.cache_key.clone(),
             references: reference_rows(&f.references),
+            bends: bends.get(&f.id).copied(),
         })
         .collect();
     let bodies = result

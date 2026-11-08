@@ -284,6 +284,11 @@ fn convert_a_shelled_box_to_sheet_metal_and_unfold_it() {
     let thin = extents(&unfolded).iter().cloned().fold(f64::INFINITY, f64::min);
     near(thin, t, 1e-3, "flat");
     let folded = edit(&unfolded, "sheet-metal.fold", json!({}));
+    // The feature rows count the bends: four flattened, four bent again.
+    let rows = compile(&folded)["projection"]["data"]["index"]["features"].as_array().cloned().unwrap_or_default();
+    let bends = |kind: &str| rows.iter().find(|r| r["kind"] == kind).map(|r| r["bends"].clone());
+    assert_eq!(bends("sheet_metal.unfold"), Some(json!(4)), "{rows:?}");
+    assert_eq!(bends("sheet_metal.fold"), Some(json!(4)), "{rows:?}");
     let again = extents(&folded);
     for (k, want) in [80.0, 50.0, 25.0].into_iter().enumerate() {
         near(again[k], want, 1e-3, "folded back");
