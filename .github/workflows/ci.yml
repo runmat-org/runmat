@@ -57,6 +57,7 @@ jobs:
           scripts/development/check-reviewed-architecture.test.mjs
           scripts/development/verify-fea-lint-debt.test.mjs
           infra/scripts/bootstrap-vcpkg-tool.test.mjs
+          infra/scripts/native-build-cache-key.test.mjs
 
       - name: Verify ordinary test routing and shard coverage
         run: python3 -m unittest discover -s scripts/development -p 'test_run_workspace_test_group.py'
@@ -540,6 +541,9 @@ jobs:
     # Build all release targets so failures are caught before tagging
     if: ${{ !inputs.release_validation && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)) }}
     name: Cross build ${{ matrix.platform.release_for }}
+    # Cold archive, host-packager and final-CLI compilation exceeded six hours
+    # on the self-hosted Mac runners while still making compiler progress.
+    timeout-minutes: 480
     strategy:
       fail-fast: false
       max-parallel: 12
@@ -643,6 +647,28 @@ jobs:
           env-vars: MACOSX_DEPLOYMENT_TARGET CMAKE_OSX_DEPLOYMENT_TARGET
           cache-workspace-crates: true
           cache-on-failure: true
+          save-if: false
+
+      - name: Resolve native checkpoint compatibility
+        id: native-checkpoint-key
+        shell: bash
+        env:
+          RUNMAT_CACHE_TARGET: ${{ matrix.platform.target }}
+          RUNMAT_CACHE_INPUTS: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', '.cargo/config.toml', 'rust-toolchain.toml', '.github/workflows/ci.yml', '.github/workflows/release.yml', 'scripts/build-runmat-with-aot-runtime.*', 'scripts/ci-install-macos-cross-dependencies.sh', 'infra/scripts/native-build-cache-key.mjs', 'infra/scripts/native-build-cache-source.mjs', 'infra/scripts/*windows*.ps1', 'infra/vcpkg-ports/**') }}
+        run: node infra/scripts/native-build-cache-key.mjs >> "$GITHUB_OUTPUT"
+
+      - name: Restore rolling native checkpoint
+        uses: actions/cache/restore@v5
+        with:
+          path: target
+          key: ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-
+            ${{ steps.native-checkpoint-key.outputs.key }}-
+
+      - name: Restore byte-verified same-commit source timestamps
+        shell: bash
+        run: node infra/scripts/native-build-cache-source.mjs restore target/.runmat-source-inputs.json
 
       - name: Build branch CLI with embedded AOT runtime (Unix)
         if: runner.os != 'Windows'
@@ -820,6 +846,19 @@ jobs:
             runtime-artifact-provenance.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Save rolling native checkpoint
+        id: native-checkpoint-source
+        if: always() && steps.native-checkpoint-key.outputs.key != ''
+        shell: bash
+        run: node infra/scripts/native-build-cache-source.mjs capture target/.runmat-source-inputs.json
+
+      - name: Upload rolling native checkpoint
+        if: always() && steps.native-checkpoint-source.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: target
+          key: ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   runtime-artifacts-ready:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
