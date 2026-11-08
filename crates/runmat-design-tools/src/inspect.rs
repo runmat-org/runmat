@@ -385,10 +385,11 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
     // Interference: occurrences whose exact bodies share material, the Evaluate tab's check.
     // Only when asked for by name: it intersects every pair of bodies.
     if s.named("interference") {
-        let value = evaluated(path, text, files, "evaluate.interference").unwrap_or_else(|e| {
+        let mut value = evaluated(path, text, files, "evaluate.interference").unwrap_or_else(|e| {
             s.out.notes.push(format!("interference: {e}"));
             Value::Null
         });
+        overlap_volumes_in_mm3(&mut value);
         s.value("interference", value);
     }
     if s.wants("mass") && s.input.density.is_none() {
@@ -615,5 +616,29 @@ mod erased {
                 .filter_map(|r| serde_json::to_value(r).ok())
                 .collect()
         }
+    }
+}
+
+/// The interference check measures each overlap in m³; the tool states it in mm³
+/// (`volume_mm3`, to 0.1 mm³), the unit the parts are drawn in.
+fn overlap_volumes_in_mm3(value: &mut Value) {
+    let at = if value.pointer("/result/overlaps").is_some() { "/result/overlaps" } else { "/overlaps" };
+    let Some(Value::Array(overlaps)) = value.pointer_mut(at) else { return };
+    for overlap in overlaps {
+        let Some(row) = overlap.as_object_mut() else { continue };
+        if let Some(m3) = row.remove("volume").and_then(|v| v.as_f64()) {
+            row.insert("volume_mm3".into(), serde_json::json!((m3 * 1e10).round() / 10.0));
+        }
+    }
+}
+
+#[cfg(test)]
+mod overlap_unit_tests {
+    use super::*;
+    #[test]
+    fn overlap_volumes_read_in_cubic_millimetres() {
+        let mut value = serde_json::json!({ "result": { "overlaps": [{ "a": "body", "b": "clamp", "volume": 1.6925e-7 }] } });
+        overlap_volumes_in_mm3(&mut value);
+        assert_eq!(value["result"]["overlaps"][0], serde_json::json!({ "a": "body", "b": "clamp", "volume_mm3": 169.3 }));
     }
 }
