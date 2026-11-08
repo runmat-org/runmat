@@ -227,26 +227,14 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                         constraint_index as u32,
                         protected_splits,
                     );
-                    let refined_edges = working
-                        .segments
-                        .iter()
-                        .flat_map(|segment| segment.nodes.windows(2))
-                        .map(|pair| {
-                            let mut edge = [pair[0].identity, pair[1].identity];
-                            edge.sort_unstable();
-                            edge
-                        })
-                        .collect::<std::collections::BTreeSet<_>>();
-                    pending.push_front(pending_triangle);
-                    insert_segment_split_nodes(
+                    requeue_after_segment_split(
                         &working,
                         &mut pending,
-                        &protected_edges,
-                        &refined_edges,
+                        pending_triangle,
+                        &mut protected_edges,
                         options.maximum_pending_support_triangles,
                         constraint_index as u32,
                     )?;
-                    protected_edges = refined_edges.into_iter().collect();
                     continue;
                 }
             }
@@ -322,6 +310,31 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                 if let Some(insertions) = cavity_insertions {
                     steiner_insertions.extend(insertions);
                 } else {
+                    if let Some(protected_splits) = split_segment_encroached_by_apex(
+                        &mut working,
+                        &pending_triangle,
+                        &protection.triangles,
+                        &protected_edges,
+                        constraint_index as u32,
+                        &mut work,
+                    )? {
+                        apply_splits_with_current(
+                            &mut protection,
+                            &mut facets,
+                            &mut support,
+                            constraint_index as u32,
+                            protected_splits,
+                        );
+                        requeue_after_segment_split(
+                            &working,
+                            &mut pending,
+                            pending_triangle,
+                            &mut protected_edges,
+                            options.maximum_pending_support_triangles,
+                            constraint_index as u32,
+                        )?;
+                        continue;
+                    }
                     let recovery_rejection = work.last_rejection().map(str::to_owned);
                     let interior_suspended = match interior_support_node(
                         working.topology(),
@@ -453,26 +466,14 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                                 constraint_index as u32,
                                 protected_splits,
                             );
-                            let refined_edges = working
-                                .segments
-                                .iter()
-                                .flat_map(|segment| segment.nodes.windows(2))
-                                .map(|pair| {
-                                    let mut edge = [pair[0].identity, pair[1].identity];
-                                    edge.sort_unstable();
-                                    edge
-                                })
-                                .collect::<std::collections::BTreeSet<_>>();
-                            pending.push_front(pending_triangle);
-                            insert_segment_split_nodes(
+                            requeue_after_segment_split(
                                 &working,
                                 &mut pending,
-                                &protected_edges,
-                                &refined_edges,
+                                pending_triangle,
+                                &mut protected_edges,
                                 options.maximum_pending_support_triangles,
                                 constraint_index as u32,
                             )?;
-                            protected_edges = refined_edges.into_iter().collect();
                             continue;
                         }
                         SupportTriangleEdgeState::Ready | SupportTriangleEdgeState::Unavailable => {
@@ -610,6 +611,40 @@ fn push_vanished(
             lineage_support: triangle.node_identities,
         });
     }
+}
+
+/// Returns `pending_triangle` to the queue after a recovered segment edge was split, places the
+/// split nodes on the unrecovered support and makes the refined segment intervals the protected
+/// edges.
+fn requeue_after_segment_split(
+    working: &FacetRecoveryWorking,
+    pending: &mut VecDeque<PendingSupportTriangle>,
+    pending_triangle: PendingSupportTriangle,
+    protected_edges: &mut Vec<[StableDigest; 2]>,
+    maximum_pending: u64,
+    constraint_index: u32,
+) -> Result<(), DelaunayFacetRecoveryError> {
+    let refined_edges = working
+        .segments
+        .iter()
+        .flat_map(|segment| segment.nodes.windows(2))
+        .map(|pair| {
+            let mut edge = [pair[0].identity, pair[1].identity];
+            edge.sort_unstable();
+            edge
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    pending.push_front(pending_triangle);
+    insert_segment_split_nodes(
+        working,
+        pending,
+        protected_edges,
+        &refined_edges,
+        maximum_pending,
+        constraint_index,
+    )?;
+    *protected_edges = refined_edges.into_iter().collect();
+    Ok(())
 }
 
 /// Places the nodes that a segment split added on the current facet's unrecovered support: a
