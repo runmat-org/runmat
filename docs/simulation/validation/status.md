@@ -14,7 +14,7 @@ Reference checks for RunMat 0.7.0, by physics family. Each family page lists its
 | --- | --- | ---: | --- |
 | [Structural mechanics](./structural.md) | Static, Modal, Harmonic, Transient, Buckling, Response spectrum, Nonlinear (plasticity) | 13 | 2026-11-08 |
 | [Heat transfer](./thermal.md) | Steady, Transient | 7 | 2026-11-08 |
-| [Electromagnetics](./electromagnetic.md) | Electrostatics and steady current, Magnetostatics, Harmonic | 8 | 2026-11-08 |
+| [Electromagnetics](./electromagnetic.md) | Electrostatics and steady current, Magnetostatics, Harmonic, Transmission-line parameters | 12 | 2026-11-08 |
 | [Acoustics](./acoustic.md) | Modal, Harmonic | 13 | 2026-11-08 |
 | [Fluid flow](./fluid.md) | Steady, Transient | 7 | 2026-11-08 |
 | [Thermomechanical](./thermomechanical.md) | Static | 2 | 2026-11-08 |

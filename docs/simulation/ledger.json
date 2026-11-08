@@ -545,6 +545,246 @@
       ]
     },
     {
+      "id": "electromagnetic.line_parameters",
+      "title": "Transmission-line parameters of a board cross-section (quasi-static TEM)",
+      "kind": "procedure",
+      "area": "electromagnetic",
+      "identity": {
+        "family": "electromagnetic",
+        "procedure": "line_parameters",
+        "solution_space": "direct"
+      },
+      "status": "pending",
+      "acceptance": "`runmat check` and `runmat run` admit `electromagnetic line_parameters {}` on a `cross_section` geometry; the solver (two 2D electrostatic solves, with dielectrics and in vacuum) runs on the admitted CPU plan and the trace-impedance example runs to completion with receipts against Hammerstad–Jensen.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001",
+        "FEA-PUBLIC-STUDIES-001"
+      ],
+      "docs": [
+        "language/reference/procedures.md",
+        "physics/electromagnetic.md",
+        "physics/index.md",
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.cross_section_geometry",
+      "title": "Board cross-section geometry from a stackup",
+      "kind": "geometry",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "A `geometry { cross_section { … } }` block takes stackup layers inline or from a `.circuit.layout` stackup, traces with width, etch angle and role, and builds the meshed section; `mesh { triangles { … } }` sets the edge size, growth and largest element.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.impedance",
+      "title": "Characteristic impedance Z0 per signal conductor",
+      "kind": "output",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `impedance`, Ω, one value per signal conductor.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.effective_permittivity",
+      "title": "Effective permittivity εeff per signal conductor",
+      "kind": "output",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `effective_permittivity`.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.delay",
+      "title": "Propagation delay per length",
+      "kind": "output",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `delay`, s/m.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.capacitance",
+      "title": "Per-length capacitance matrix C (and C0)",
+      "kind": "output",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `capacitance` and `vacuum_capacitance`, F/m.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.inductance",
+      "title": "Per-length inductance matrix L",
+      "kind": "output",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `inductance`, H/m.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.differential_pair",
+      "title": "Pair impedances: Zdiff, Zcommon, odd and even mode",
+      "kind": "output",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `differential_impedance`, `common_mode_impedance`, `odd_mode_impedance`, `even_mode_impedance` and the modal `effective_permittivity` and `delay`.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.coupling",
+      "title": "Near- and far-end coupling coefficients of a pair",
+      "kind": "output",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `near_end_coupling` and `far_end_coupling`.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.loss",
+      "title": "Conductor and dielectric loss per length (R and G)",
+      "kind": "output",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "R per length from the skin-depth conductor loss and G per length from the loss tangent publish with the lossless parameters, with attenuation in dB per length checked against a published lossy-microstrip reference.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "a lossy-microstrip reference check"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
+      "id": "electromagnetic.line_parameters.broadside",
+      "title": "Broadside-coupled lines on two signal layers",
+      "kind": "geometry",
+      "area": "electromagnetic",
+      "status": "pending",
+      "acceptance": "Conductors on two copper layers of one section mesh conformally and solve as one multiconductor line; a broadside pair matches a published broadside-coupled stripline reference.",
+      "owner": "q-trace-impedance",
+      "gaps": [
+        "PCB-42"
+      ],
+      "witness": [
+        "a broadside-coupled stripline reference check"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "docs": [
+        "physics/trace-impedance.md"
+      ]
+    },
+    {
       "id": "acoustic.harmonic",
       "title": "Acoustic harmonic",
       "kind": "procedure",
@@ -2282,15 +2522,15 @@
       "title": "Acoustic transmission loss output (`transmission_loss`) between inlet and outlet ports",
       "kind": "output",
       "area": "acoustic",
-      "status": "pending",
-      "acceptance": "`transmission_loss` is a cataloged output operation; the muffler study checks and runs with a receipt against a plane-wave reference.",
+      "status": "release",
+      "acceptance": "`transmission_loss` is a cataloged output operation; the two-fluid interface example runs with `runmat run` and publishes it, and the layer test matches the closed-form plane-wave transmission loss.",
       "owner": "q-fluid",
       "gaps": [
         "REG-ACOUSTIC"
       ],
       "witness": [
-        "evidence: runmat-build-mac:~/logs/q-site-examples/check/acoustics_muffler.fea.log",
-        "runmat check and runmat run on the page study (acoustics_muffler.fea.log)"
+        "cargo test -p runmat-analysis-fea --lib transmission_loss_of_a_layer_matches_the_plane_wave_reference (passed 2026-11-08, runmat-build-mac:~/logs/q-trace-impedance-2/fea_tl.log)",
+        "evidence: runmat-build-mac:~/logs/q-trace-impedance-2/tl_plain.log (runmat run docs/simulation/examples/acoustic-interface-transmission-loss.fea completed, 2026-11-08)"
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
@@ -3010,6 +3250,53 @@
       "reference": "DC resistance $L/(\\sigma W t)$ and the low-frequency gap inductance.",
       "quantity": "Real and imaginary parts of the terminal impedance.",
       "tolerance": "Resistance within relative 1e-6; reactance within relative 2e-2."
+    },
+    {
+      "id": "microstrip-hammerstad-jensen",
+      "area": "electromagnetic",
+      "analysis": "Transmission-line parameters",
+      "capability": "electromagnetic.line_parameters",
+      "title": "Microstrip impedance against Hammerstad–Jensen",
+      "problem": "A zero-thickness surface microstrip on a 0.2 mm substrate over a reference plane, open above, with w/h = 0.5, 1 and 2 on εr = 4.4, w/h = 4 on εr = 2.2 and w/h = 1 on εr = 9.8, on the default graded mesh.",
+      "reference": "Hammerstad and Jensen's closed forms for Z0 and εeff of a zero-thickness microstrip; the authors state Z0 in air within 0.01 % (w/h ≤ 1) and 0.03 % (w/h ≤ 1000) and εeff within 0.2 % (εr ≤ 128, 0.01 ≤ w/h ≤ 100) of exact quasi-static values.",
+      "citation": "E. Hammerstad and Ø. Jensen, \"Accurate models for microstrip computer-aided design,\" IEEE MTT-S International Microwave Symposium Digest, 1980, pp. 407–409.",
+      "quantity": "Z0, εeff and delay per length of the line.",
+      "tolerance": "0.5 % on Z0 and εeff; the delay follows from εeff."
+    },
+    {
+      "id": "stripline-cohn",
+      "area": "electromagnetic",
+      "analysis": "Transmission-line parameters",
+      "capability": "electromagnetic.line_parameters",
+      "title": "Stripline and coupled stripline against Cohn's exact forms",
+      "problem": "Zero-thickness strips centred between planes 0.5 mm apart in εr = 3.0: single strips with w/b = 0.2, 0.5 and 1.0, and edge-coupled pairs with (w/b, s/b) = (0.5, 0.2), (0.5, 0.5) and (0.3, 1.0).",
+      "reference": "Cohn's conformal-mapping solutions, exact for zero-thickness strips between infinite planes: Z0 = (30π/√εr) K(k)/K(k′) with k = sech(πw/2b), and the even- and odd-mode impedances with k_e = tanh(πw/2b) tanh(π(w+s)/2b), k_o = tanh(πw/2b) coth(π(w+s)/2b).",
+      "citation": "S. B. Cohn, \"Characteristic impedance of the shielded-strip transmission line,\" IRE Trans. Microwave Theory Tech., vol. MTT-2, pp. 52–57, 1954; S. B. Cohn, \"Shielded coupled-strip transmission line,\" IRE Trans. Microwave Theory Tech., vol. MTT-3, pp. 29–38, 1955.",
+      "quantity": "Z0 of single strips; even- and odd-mode impedances of pairs, with Zdiff = 2 Zodd, Zcommon = Zeven / 2, εeff = εr and zero far-end coupling in the homogeneous dielectric.",
+      "tolerance": "0.3 % on each impedance; the identities hold to 1e-9."
+    },
+    {
+      "id": "trace-impedance-ipc-2141a",
+      "area": "electromagnetic",
+      "analysis": "Transmission-line parameters",
+      "capability": "electromagnetic.line_parameters",
+      "title": "Microstrip and stripline against IPC-2141A",
+      "problem": "35 µm copper. Surface microstrips (w, h, εr) = (0.35 mm, 0.2 mm, 4.1), (0.2 mm, 0.15 mm, 4.3) and (0.15 mm, 0.25 mm, 3.5); centred striplines (w, b, εr) = (0.15 mm, 0.6 mm, 4.2), (0.1 mm, 0.5 mm, 3.6) and (0.2 mm, 0.8 mm, 4.4). Every case is inside the forms' stated ranges.",
+      "reference": "IPC-2141A surface microstrip Z0 = 87/√(εr + 1.41) · ln(5.98h/(0.8w + t)) for 0.1 < w/h < 2.0 and 1 < εr < 15, and symmetric stripline Z0 = 60/√εr · ln(1.9b/(0.8w + t)) for w/b < 0.35 and t/b < 0.25.",
+      "citation": "IPC-2141A, Design Guide for High-Speed Controlled Impedance Circuit Boards, IPC, 2004.",
+      "quantity": "Z0 of each line.",
+      "tolerance": "5 %: the IPC-2141A forms are empirical fits, so this check bounds agreement with the board-industry forms; Hammerstad–Jensen and Cohn are the tight references."
+    },
+    {
+      "id": "trace-impedance-mesh-convergence",
+      "area": "electromagnetic",
+      "analysis": "Transmission-line parameters",
+      "capability": "electromagnetic.line_parameters",
+      "title": "Mesh and enclosure convergence of Z0",
+      "problem": "A 0.35 mm, 35 µm-thick surface microstrip on 0.2 mm of εr = 4.1, meshed with edge sizes of 7, 3.5, 1.75 and 0.875 µm, then with the default mesh in an enclosure twice the default width and height.",
+      "reference": "Self-convergence: the change in Z0 between successive refinements, and the change from doubling the enclosure.",
+      "quantity": "Z0.",
+      "tolerance": "Successive changes decrease and the last is below 0.1 %; the enclosure changes Z0 by under 0.05 %."
     },
     {
       "id": "rigid-cavity-modes",
@@ -5388,6 +5675,12 @@
       "source": "sister-comms/2026-11-05-fea-to-private-simulation-pages-plan.md:30",
       "capability": "Thermal stress over a time history (thermomechanical transient, e.g. one braking stop)",
       "maps": "FEA-COUPLING-THERMOELASTIC-002/*"
+    },
+    {
+      "id": "PCB-42",
+      "source": "oct-13-2026/distilled/14-claim-dependencies/cad-and-pcb.md:102",
+      "capability": "Trace impedance field-solved on the board cross-section, with solder mask and etch shape",
+      "maps": "FEA-EM-LINE-001/line_parameters|FEA-EM-LINE-001/pair_parameters|FEA-EM-LINE-001/mesh_convergence|FEA-EM-LINE-001/cross_section_inputs|FEA-EM-LINE-001/public_study"
     }
   ],
   "requirements": [
@@ -20436,6 +20729,111 @@
                 "tet4",
                 "tet10",
                 "edge_elements"
+              ],
+              "executions": [
+                "public_study"
+              ]
+            }
+          ]
+        }
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "FEA-EM-LINE-001",
+      "title": "Trace impedance from board cross-sections",
+      "stages": [
+        "electromagnetics"
+      ],
+      "acceptance": "A board cross-section built from a stackup (layer thicknesses and Dk, copper thickness, trace width and etch angle, conformal solder mask, reference planes and coplanar ground) solves two 2D electrostatic problems, with the dielectrics and in vacuum, and publishes per-length C and L matrices, Z0, εeff and delay per signal conductor and, for a pair, Zdiff, Zcommon, odd- and even-mode impedance and εeff, and near- and far-end coupling coefficients. Each value agrees with its published reference within the stated tolerance and converges under mesh refinement. Lossless; R and G per length are a separate requirement.",
+      "owners": [
+        "crates/runmat-analysis/fea/src/physics/electrical/cross_section/mod.rs",
+        "crates/runmat-analysis/language/src/compiler.rs"
+      ],
+      "obligations": [
+        {
+          "id": "line_parameters",
+          "criterion": "Single lines: Z0, εeff, delay, C and L of surface microstrip and stripline agree with Hammerstad–Jensen (zero-thickness microstrip, within 0.5 %), Cohn's exact stripline form (within 0.3 %) and the IPC-2141A microstrip and stripline forms inside their stated ranges (within 5 %). A homogeneous dielectric gives εeff = εr exactly.",
+          "evidence_kind": "independent_reference",
+          "envelopes": [
+            {
+              "formulations": [
+                "quasi_static_tem"
+              ],
+              "meshes": [
+                "tri3"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "pair_parameters",
+          "criterion": "Pairs: the 2×2 per-length C and L matrices are symmetric; odd- and even-mode impedances of edge-coupled stripline agree with Cohn's exact coupled-strip forms within 0.3 %; Zdiff = 2 Zodd and Zcommon = Zeven / 2 for a symmetric pair; a homogeneous dielectric gives zero far-end coupling; a microstrip pair has distinct modal εeff and negative far-end coupling.",
+          "evidence_kind": "independent_reference",
+          "envelopes": [
+            {
+              "formulations": [
+                "quasi_static_tem"
+              ],
+              "meshes": [
+                "tri3"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "mesh_convergence",
+          "criterion": "Halving the edge element size three times changes Z0 of a thick-copper microstrip by successively smaller amounts, the last below 0.1 %; doubling the open-region enclosure changes Z0 by under 0.05 %.",
+          "evidence_kind": "spatial_convergence",
+          "envelopes": [
+            {
+              "formulations": [
+                "quasi_static_tem"
+              ],
+              "meshes": [
+                "tri3"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cross_section_inputs",
+          "criterion": "The stackup inputs act physically: conformal solder mask and coplanar ground lower Z0, a sloped etch sidewall raises it; malformed sections (overlapping traces, no return conductor, an etch angle with no far face, a missing or non-signal layer, εr below 1, a growth ratio outside (1, 2]) are rejected with the reason.",
+          "evidence_kind": "semantic_realization",
+          "envelopes": [
+            {
+              "formulations": [
+                "quasi_static_tem"
+              ],
+              "meshes": [
+                "tri3"
+              ],
+              "executions": [
+                "numerical_kernel"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "public_study",
+          "criterion": "A `.fea` study with a `cross_section` geometry, a triangle mesh and an `electromagnetic line_parameters` analysis checks and runs through `runmat check` and `runmat run`, takes its stackup inline or from a `.circuit.layout`, and publishes every output of this requirement; the 50 Ω microstrip and 100 Ω pair example runs with receipts.",
+          "evidence_kind": "public_run",
+          "envelopes": [
+            {
+              "formulations": [
+                "quasi_static_tem"
+              ],
+              "meshes": [
+                "tri3"
               ],
               "executions": [
                 "public_study"

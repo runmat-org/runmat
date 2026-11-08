@@ -592,6 +592,12 @@ fn generic_procedure(
             },
             StateKind::AcousticModes,
         ),
+        // The ledger identity row owns its status; admission reports it while it is pending.
+        "line_parameters" if family == PhysicsFamily::Electromagnetic => (
+            AnalysisProcedure::LineParameters,
+            IndependentDomain::Static,
+            static_state(family),
+        ),
         "nonlinear" => (
             AnalysisProcedure::Nonlinear,
             requirements::load_factor(declaration, header, statements, diagnostics)?,

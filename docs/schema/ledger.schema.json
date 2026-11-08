@@ -50,7 +50,7 @@
             "required": ["family", "procedure", "solution_space"],
             "properties": {
               "family": { "enum": ["structural", "thermal", "electromagnetic", "acoustic", "fluid", "thermomechanical", "electrothermal", "conjugate_heat_transfer", "fluid_structure_interaction"] },
-              "procedure": { "enum": ["static", "modal", "prestressed_modal", "buckling", "transient", "harmonic", "prestressed_harmonic", "response_spectrum", "random_response", "nonlinear", "adaptive"] },
+              "procedure": { "enum": ["static", "modal", "prestressed_modal", "buckling", "transient", "harmonic", "prestressed_harmonic", "response_spectrum", "random_response", "nonlinear", "adaptive", "line_parameters"] },
               "solution_space": { "enum": ["direct", "modal_reduced"] }
             }
           },

@@ -163,7 +163,9 @@ fn validate_solution_space(step: &ProcedureStep) -> Result<(), AnalysisValidatio
 
 fn validate_independent_domain(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
     let domain_matches = match step.procedure {
-        AnalysisProcedure::Static => matches!(step.independent_domain, IndependentDomain::Static),
+        AnalysisProcedure::Static | AnalysisProcedure::LineParameters => {
+            matches!(step.independent_domain, IndependentDomain::Static)
+        }
         AnalysisProcedure::ModalExtraction
         | AnalysisProcedure::PrestressedModalExtraction
         | AnalysisProcedure::EigenvalueBuckling => {

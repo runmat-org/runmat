@@ -17,7 +17,7 @@ const COMMAND = "node scripts/docs/generate-pages.mjs";
 const FAMILY_AREA = { conjugate_heat_transfer: "conjugate-heat-transfer", fluid_structure_interaction: "fluid-structure-interaction" };
 const PROCEDURE = {
     static: "static", modal: "modal", prestressed_modal: "prestressed modal", buckling: "buckling", transient: "transient", harmonic: "harmonic",
-    prestressed_harmonic: "prestressed harmonic", response_spectrum: "response spectrum", random_response: "random response", nonlinear: "nonlinear", adaptive: "adaptive",
+    prestressed_harmonic: "prestressed harmonic", response_spectrum: "response spectrum", random_response: "random response", nonlinear: "nonlinear", adaptive: "adaptive", line_parameters: "line parameters",
 };
 const HEADER = (description, keywords, docType, title) => [
     "---", `description: ${description}`, `keywords: [${keywords.join(", ")}]`, `doc_type: ${docType}`, `generated: ${COMMAND}`, "---",

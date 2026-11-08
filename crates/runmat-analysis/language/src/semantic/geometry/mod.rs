@@ -83,6 +83,18 @@ fn definition(
     let construct = named_block(&declaration.statements, "construct");
     let derive = named_block(&declaration.statements, "derive");
     let generated = generated::block(&declaration.statements);
+    if named_block(&declaration.statements, "cross_section").is_some() {
+        error(
+            declaration,
+            declaration.span,
+            format!(
+                "`cross_section` geometry is not yet in the current release{}",
+                super::pending::marker(super::pending::CROSS_SECTION_GEOMETRY)
+            ),
+            diagnostics,
+        );
+        return None;
+    }
     let source_count = usize::from(imported)
         + usize::from(construct.is_some())
         + usize::from(derive.is_some())

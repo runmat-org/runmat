@@ -1,0 +1,49 @@
+// Trace impedance on a four-layer board: a 50 Ω single-ended microstrip and a 100 Ω
+// edge-coupled differential pair on the top layer, over the ground plane on In1.Cu.
+// The layers match the board stackup; `stackup = "./board.circuit.layout"` reads them from
+// the layout file instead.
+
+geometry single_ended {
+    cross_section {
+        layer "F.Mask" : solder_mask { thickness = 20 um; permittivity = 3.8 }
+        layer "F.Cu" : signal { thickness = 35 um }
+        layer "dielectric 1" : dielectric { thickness = 0.2 mm; permittivity = 4.1 }
+        layer "In1.Cu" : plane { thickness = 35 um }
+        trace line : signal { layer = "F.Cu"; width = 0.36 mm; etch_angle = 60 deg }
+    }
+}
+
+geometry pair {
+    cross_section {
+        layer "F.Mask" : solder_mask { thickness = 20 um; permittivity = 3.8 }
+        layer "F.Cu" : signal { thickness = 35 um }
+        layer "dielectric 1" : dielectric { thickness = 0.2 mm; permittivity = 4.1 }
+        layer "In1.Cu" : plane { thickness = 35 um }
+        trace p : signal { layer = "F.Cu"; center = -0.2 mm; width = 0.23 mm; etch_angle = 60 deg }
+        trace n : signal { layer = "F.Cu"; center = 0.2 mm; width = 0.23 mm; etch_angle = 60 deg }
+    }
+}
+
+mesh single_ended on geometry.single_ended { triangles {} }
+mesh pair on geometry.pair { triangles {} }
+
+study microstrip {
+    geometry = geometry.single_ended
+    mesh = mesh.single_ended
+    analysis line { electromagnetic line_parameters {} }
+    output z0 = analysis.line.impedance.line
+    output eps_eff = analysis.line.effective_permittivity.line
+    output delay = analysis.line.delay.line
+}
+
+study differential_pair {
+    geometry = geometry.pair
+    mesh = mesh.pair
+    analysis lines { electromagnetic line_parameters {} }
+    output z_diff = analysis.lines.differential_impedance
+    output z_common = analysis.lines.common_mode_impedance
+    output next = analysis.lines.near_end_coupling
+    output fext = analysis.lines.far_end_coupling
+    output c = analysis.lines.capacitance
+    output l = analysis.lines.inductance
+}

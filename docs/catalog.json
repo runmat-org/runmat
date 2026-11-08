@@ -182,6 +182,10 @@
       "path": "docs/simulation/physics/electromagnetic.md"
     },
     {
+      "id": "doc:fea/physics/trace-impedance",
+      "path": "docs/simulation/physics/trace-impedance.md"
+    },
+    {
       "id": "doc:fea/physics/acoustic",
       "path": "docs/simulation/physics/acoustic.md"
     },
