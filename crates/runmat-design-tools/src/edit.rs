@@ -62,11 +62,46 @@ fn replaced(text: &str, replace: &[Replacement]) -> Result<String, ToolError> {
     for (n, r) in replace.iter().enumerate() {
         match out.matches(r.old.as_str()).count() {
             1 => out = out.replacen(r.old.as_str(), &r.new, 1),
-            0 => return Err(ToolError::invalid(format!("replacement {} doesn't match the file's current text; read the file and copy `old` exactly", n + 1))),
+            0 => {
+                let hint = match nearest_lines(&out, &r.old) {
+                    Some((first, last, lines)) => format!("; lines {first}-{last} are nearest and read exactly:\n{lines}\ncopy `old` from them"),
+                    None => "; read the file and copy `old` exactly".to_owned(),
+                };
+                return Err(ToolError::invalid(format!("replacement {} doesn't match the file's current text{hint}", n + 1)));
+            }
             c => return Err(ToolError::invalid(format!("replacement {} matches {c} places; add surrounding lines to `old` so it matches once", n + 1))),
         }
     }
     Ok(out)
+}
+
+/// The file's lines nearest `old`, so a refused replacement can show what the file holds
+/// there: a run of as many lines as `old` has, scored by the words each line shares with
+/// `old`'s line at the same place. Returns the first and last line numbers (from 1) and the
+/// lines as written, or `None` when no line shares a word.
+fn nearest_lines(text: &str, old: &str) -> Option<(usize, usize, String)> {
+    fn words(line: &str) -> std::collections::BTreeSet<&str> {
+        line.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.')).filter(|w| !w.is_empty()).collect()
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let wanted: Vec<std::collections::BTreeSet<&str>> = old.trim_matches('\n').lines().map(words).collect();
+    if lines.is_empty() || wanted.is_empty() {
+        return None;
+    }
+    let k = wanted.len().min(lines.len());
+    let score = |at: usize| -> f64 {
+        wanted
+            .iter()
+            .zip(&lines[at..at + k])
+            .map(|(w, line)| {
+                let have = words(line);
+                let union = w.union(&have).count();
+                if union == 0 { 0.0 } else { w.intersection(&have).count() as f64 / union as f64 }
+            })
+            .sum()
+    };
+    let (best, s) = (0..=lines.len() - k).map(|at| (at, score(at))).fold((0, 0.0), |b, c| if c.1 > b.1 { c } else { b });
+    (s > 0.0).then(|| (best + 1, best + k, lines[best..best + k].join("\n")))
 }
 
 /// A text edit of the old text, in UTF-16 offsets.
@@ -664,6 +699,19 @@ mod tests {
         assert_eq!(replaced("a\nb\nc\n", &[r("b\n", "b\nx\n")]).unwrap(), "a\nb\nx\nc\n");
         assert!(replaced("a\na\n", &[r("a", "b")]).unwrap_err().message.contains("matches 2 places"));
         assert!(replaced("a\n", &[r("z", "b")]).unwrap_err().message.contains("doesn't match"));
+    }
+
+    /// A replacement whose `old` was misremembered is refused with the file's nearest lines as
+    /// they read now, so the model can copy them.
+    #[test]
+    fn a_mismatched_replacement_returns_the_nearest_current_lines() {
+        let r = |old: &str, new: &str| Replacement { old: old.into(), new: new.into() };
+        let file = "circuit fc {\n    sheet pwr {\n        component U3 = { part = \"LDO-3V3-SOT23\" }\n        component C18 = { part = \"C0402-1U\" }\n        component C19 = { part = \"C0402-1U\" }\n    }\n}\n";
+        let old = "        component U3 = { part = \"LDO-3V3\" }\n        component C18 = { part = \"C0402-1UF\" }\n";
+        let message = replaced(file, &[r(old, "x")]).unwrap_err().message;
+        assert!(message.contains("lines 3-4 are nearest and read exactly:\n        component U3 = { part = \"LDO-3V3-SOT23\" }\n        component C18 = { part = \"C0402-1U\" }\ncopy `old` from them"), "{message}");
+        // Nothing in common: the plain advice.
+        assert!(replaced("a\n", &[r("zzz", "b")]).unwrap_err().message.ends_with("read the file and copy `old` exactly"));
     }
 
     #[test]
