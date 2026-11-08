@@ -290,6 +290,7 @@ pub fn regenerate_part_in(
     values_host::resolve_let_files(path, &mut index.lets);
     let mut display = part_display(&result, kernel.as_ref(), tessellation);
     display.sketches = sketch_display(&document, &result);
+    display.references = runmat_cad::display::references::reference_display(&document, &result, display.bounds.as_ref());
     // The part draws in its first output's color, else that output's material appearance, the
     // CAD grey without either.
     let output = document.parts.first();
@@ -482,6 +483,11 @@ pub fn resolve_assembly_in(
                         };
                         let mut summary = DefinitionSummary::new(def.clone());
                         summary.digest = format!("text:{}", text.len());
+                        // The parts list names the board by its layout's part number and
+                        // laminate.
+                        let part = crate::board::board_part(&file, files);
+                        summary.part_number = part.part_number;
+                        summary.material = part.material.map(|m| runmat_cad::ids::MaterialRef::new(m));
                         source.add_part(summary, configured);
                         displays.insert(key.clone(), display);
                         if let Some(d) = crate::board::board_digest(&file, files) {

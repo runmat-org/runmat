@@ -213,9 +213,9 @@ fn board_display_of(inputs: &BoardInputs) -> Result<PartDisplay, String> {
     })
 }
 
-/// How a parts list describes a circuit board: its outline size, thickness, copper layer
-/// count and the components on it, e.g. `Circuit board daq, 90 x 60 x 1.6 mm, 6 copper layers,
-/// 38 components`.
+/// How a parts list describes a circuit board: its name as words, then its outline size,
+/// thickness, copper layer count and the components on it, e.g. `Circuit board, DAQ, 90 x 60 x
+/// 1.6 mm, 6 copper layers, 38 components` or `Circuit board, flight controller, …`.
 pub fn board_description(file: &str, files: &Files) -> Result<String, String> {
     let session = compiled_board(file, files)?;
     let index = session.index().ok_or("no board index")?;
@@ -230,13 +230,40 @@ pub fn board_description(file: &str, files: &Files) -> Result<String, String> {
         t.strip_suffix(".0").map(str::to_owned).unwrap_or(t)
     };
     Ok(format!(
-        "Circuit board {}, {} x {} x {} mm, {copper} copper layers, {} components",
-        board.name,
+        "Circuit board, {}, {} x {} x {} mm, {copper} copper layers, {} components",
+        runmat_cad::drawing::bom_table::identifier_words(&board.name, false),
         trim(width),
         trim(depth),
         trim(thickness),
         board.footprints.len()
     ))
+}
+
+/// What an assembly's parts list takes from a board's layout: the part number its
+/// `fabrication` settings give (`part_number = "CD-310"`) and its laminate, the material of
+/// the stackup's first core (else its first dielectric), e.g. `FR-4`. The layout is parsed,
+/// not compiled.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BoardPart {
+    pub part_number: Option<String>,
+    pub material: Option<String>,
+}
+
+pub fn board_part(file: &str, files: &Files) -> BoardPart {
+    use runmat_circuit::layout::StackKind;
+    let layout = layout_path(file);
+    let Some(board) = files.get(&layout).and_then(|text| runmat_circuit::syntax::board::parse_board(&layout, text).board) else {
+        return BoardPart::default();
+    };
+    let layers = &board.stackup.layers;
+    let core = layers
+        .iter()
+        .find(|l| matches!(l.kind, StackKind::Dielectric { core: true }))
+        .or_else(|| layers.iter().find(|l| matches!(l.kind, StackKind::Dielectric { .. })));
+    BoardPart {
+        part_number: board.fabrication.and_then(|f| f.part_number).filter(|p| !p.trim().is_empty()),
+        material: core.map(|l| l.material.name.clone()).filter(|m| !m.trim().is_empty()),
+    }
 }
 
 #[cfg(test)]
@@ -329,8 +356,29 @@ mod tests {
     #[test]
     fn a_parts_list_describes_a_board_by_size_layers_and_components() {
         let d = board_description("/p/daq.circuit", &daq_files()).expect("the daq board");
-        assert!(d.starts_with("Circuit board daq, 90 x 60 x "), "{d}");
+        assert!(d.starts_with("Circuit board, DAQ, 90 x 60 x "), "{d}");
         assert!(d.contains(" copper layers, ") && d.ends_with(" components"), "{d}");
+    }
+
+    /// A parts list takes a board's part number from its layout's fabrication settings and
+    /// its material from the stackup's core.
+    #[test]
+    fn a_board_takes_its_part_number_and_laminate_from_its_layout() {
+        let mut files = daq_files();
+        assert_eq!(board_part("/p/daq.circuit", &files), BoardPart { part_number: None, material: Some("FR-4".into()) });
+        let layout = files.get_mut("/p/daq.circuit.layout").unwrap();
+        *layout = layout.replacen("    outline = ", "    fabrication = { part_number = \"DQ-100\", revision = \"B\" }\n    outline = ", 1);
+        assert_eq!(board_part("/p/daq.circuit", &files).part_number.as_deref(), Some("DQ-100"));
+        // The assembly's parts list reads them.
+        let text = "runmat 0.7\nstd 1\n\nassembly box {\n    use circuit daq as board\n}\n";
+        files.insert("/p/box.assembly".into(), text.into());
+        let drawing = "runmat 0.7\nstd 1\n\ndrawing box {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = box }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0])\n}\n";
+        let out: serde_json::Value = serde_json::from_str(&crate::drawing::compile_json("/p/box.drawing", drawing, &files)).unwrap();
+        let table = &out["projection"]["data"]["bom_tables"]["parts"];
+        let cells = &table["lines"][0]["cells"];
+        assert_eq!(cells[1], "DQ-100", "{table}");
+        assert!(cells[2].as_str().is_some_and(|d| d.starts_with("Circuit board, DAQ, ")), "{table}");
+        assert_eq!(cells[3], "FR-4", "{table}");
     }
 
     #[test]

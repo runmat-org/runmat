@@ -110,5 +110,5 @@ part battery {
         n4 = line(start = [-20.55 mm, 8.05 mm], end = [-20.55 mm, -8.05 mm])
     }
     feature rear_right_notch = extrude(profile = sketch.rear_right_notch_s, distance = 21.2 mm, mode = cut)
-    output battery = { body = feature.case.body, part_number = "CD-PW-6S2000", material = "polycarbonate", color = "#BCC1C8", properties = [{ name = density, value = { type = quantity, value = 2110 kg/m^3 } }] }
+    output battery = { body = feature.case.body, part_number = "CD-PW-6S2000", material = "lipo_pack", color = "#BCC1C8", properties = [{ name = density, value = { type = quantity, value = 2110 kg/m^3 } }] }
 }

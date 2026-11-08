@@ -4,7 +4,7 @@
 //! board.
 use crate::runtime::{resolve_path, Files};
 use runmat_cad::assembly::bom::Bom;
-use runmat_cad::drawing::bom_table::material_name;
+use runmat_cad::drawing::bom_table::{identifier_words, material_name};
 use runmat_cad::ids::ConfigurationName;
 use runmat_cad::model::PartDocument;
 use runmat_cad::syntax::parse_part;
@@ -99,7 +99,7 @@ pub fn item_properties(assembly: &str, bom: &Bom, files: &Files) -> BTreeMap<Str
 
 /// What a parts list's Description column reads for a part: its `description` property, else
 /// its output's label (`label = "Cold plate"`) or `title` property, else its output's name as
-/// words (`body_top` → "Body top").
+/// words (`body_top` → "Body top", `esc_heatsink` → "ESC heatsink").
 pub fn description_of(document: &PartDocument, props: &BTreeMap<String, String>) -> Option<String> {
     let given = |k: &str| props.get(k).filter(|v| !v.trim().is_empty()).cloned();
     if let Some(d) = given("description") {
@@ -112,10 +112,22 @@ pub fn description_of(document: &PartDocument, props: &BTreeMap<String, String>)
     given("title").or_else(|| words(output.name.as_str()))
 }
 
-/// An identifier as words: `body_top` → "Body top".
+/// An identifier as words, acronyms upper case: `body_top` → "Body top", `esc_heatsink` →
+/// "ESC heatsink".
 fn words(name: &str) -> Option<String> {
-    let spaced = name.split('_').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
-    let mut chars = spaced.chars();
-    let first = chars.next()?;
-    Some(first.to_uppercase().chain(chars).collect())
+    let words = identifier_words(name, true);
+    (!words.is_empty()).then_some(words)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A part with no description or label reads its output's name, acronyms upper case.
+    #[test]
+    fn an_undescribed_part_reads_its_name_with_acronyms_upper_case() {
+        let source = "runmat 0.7\nstd 1\n\npart esc_heatsink {\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = 5 mm)\n    }\n    feature base = extrude(profile = sketch.s, distance = 2 mm)\n    output esc_heatsink = { body = feature.base.body }\n}\n";
+        let document = parse_part("/p/esc_heatsink.part", source).document.expect("parses");
+        assert_eq!(description_of(&document, &BTreeMap::new()).as_deref(), Some("ESC heatsink"));
+    }
 }

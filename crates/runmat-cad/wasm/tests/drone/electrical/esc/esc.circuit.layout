@@ -22,6 +22,7 @@ layout esc {
     }
     outline = [[-24, -26], [24, -26], [26, -24], [26, 24], [24, 26], [-24, 26], [-26, 24], [-26, -24]]
     limits = { clearance = 0.15, track = 0.15, via_diameter = 0.45, drill = 0.2, annular = 0.1, hole_to_hole = 0.25, copper_to_edge = 0.3, silk_to_pad = 0.1, microvia_drill = 0.1 }
+    fabrication = { preset = fab_house, part_number = "CD-EL-720", zip = true }
     net_class gate = { track_width = 0.25 mm, clearance = 0.15 mm }
     net_class logic_supply = { track_width = 0.3 mm, clearance = 0.15 mm }
     net_class phase = { track_width = 0.3 mm, clearance = 0.2 mm }

@@ -332,6 +332,7 @@ fn the_layout_keeps_its_fabrication_settings() {
     settings.folder = Some("fab/fc-A".into());
     settings.include_through_hole = true;
     settings.revision = Some("B".into());
+    settings.part_number = Some("FC-210".into());
     settings.gerber = runmat_circuit::fab::GerberFormat { units: runmat_circuit::fab::LengthUnit::Inch, decimals: 5 };
     settings.pick_place.sides = runmat_circuit::fab::assembly::PlaceSides::Separate;
     settings.bom.columns = vec![runmat_circuit::fab::assembly::BomColumn::Designators, runmat_circuit::fab::assembly::BomColumn::Mpn];

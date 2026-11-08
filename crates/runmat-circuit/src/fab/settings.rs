@@ -143,6 +143,8 @@ pub struct FabSettings {
     /// The board revision: in the Gerber and job files' project attribute and the default
     /// folder (`fab/<board>-<revision>`).
     pub revision: Option<String>,
+    /// The board's part number: an assembly's parts list names the board by it.
+    pub part_number: Option<String>,
 }
 
 impl Default for FabSettings {
@@ -159,6 +161,7 @@ impl Default for FabSettings {
             pick_place: PickPlaceFormat::default(),
             bom: BomFormat::default(),
             revision: None,
+            part_number: None,
         }
     }
 }

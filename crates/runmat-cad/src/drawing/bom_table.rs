@@ -178,14 +178,21 @@ pub trait BomProperties {
 /// library scope and the identifier's underscores dropped). Materials known by a trade or
 /// standard designation print as written in industry: `fr4` → `FR-4`, `abs` → `ABS`.
 pub fn material_name(id: &str) -> String {
-    let id = id.strip_prefix("material.").unwrap_or(id);
+    identifier_words(id.strip_prefix("material.").unwrap_or(id), true)
+}
+
+/// An identifier as parts-list words: underscores become spaces, and designations and
+/// acronyms print as written in industry (`esc_heatsink` → `ESC heatsink`, `fr4` → `FR-4`).
+/// `capital` capitalizes the first word, for text that starts a cell; without it the words
+/// stay lower case (`flight_controller` → `flight controller`), for text after a comma.
+pub fn identifier_words(id: &str, capital: bool) -> String {
     let words: Vec<String> = id
         .split('_')
         .filter(|w| !w.is_empty())
         .enumerate()
         .map(|(k, word)| match DESIGNATIONS.iter().find(|(key, _)| key.eq_ignore_ascii_case(word)) {
             Some((_, shown)) => (*shown).to_owned(),
-            None if k == 0 => {
+            None if k == 0 && capital => {
                 let mut chars = word.chars();
                 chars
                     .next()
@@ -198,7 +205,8 @@ pub fn material_name(id: &str) -> String {
     words.join(" ")
 }
 
-/// Material words a parts list prints as their designation.
+/// Words a parts list prints as their designation: materials known by a trade or standard
+/// name, and the electronics and system acronyms part names use.
 const DESIGNATIONS: &[(&str, &str)] = &[
     ("fr4", "FR-4"),
     ("abs", "ABS"),
@@ -212,6 +220,29 @@ const DESIGNATIONS: &[(&str, &str)] = &[
     ("hdpe", "HDPE"),
     ("cfrp", "CFRP"),
     ("gfrp", "GFRP"),
+    ("lipo", "LiPo"),
+    ("esc", "ESC"),
+    ("gps", "GPS"),
+    ("gnss", "GNSS"),
+    ("imu", "IMU"),
+    ("mcu", "MCU"),
+    ("cpu", "CPU"),
+    ("gpu", "GPU"),
+    ("pcb", "PCB"),
+    ("pcba", "PCBA"),
+    ("led", "LED"),
+    ("lcd", "LCD"),
+    ("usb", "USB"),
+    ("ldo", "LDO"),
+    ("fpv", "FPV"),
+    ("vtx", "VTX"),
+    ("rf", "RF"),
+    ("adc", "ADC"),
+    ("dac", "DAC"),
+    ("bms", "BMS"),
+    ("emi", "EMI"),
+    ("ic", "IC"),
+    ("daq", "DAQ"),
 ];
 
 /// No properties: property columns are empty (and reported).
@@ -648,7 +679,17 @@ pub fn render_bom_table(
 
 #[cfg(test)]
 mod material_name_tests {
-    use super::material_name;
+    use super::{identifier_words, material_name};
+
+    #[test]
+    fn identifiers_print_acronyms_upper_case_and_underscores_as_spaces() {
+        assert_eq!(identifier_words("esc_heatsink", true), "ESC heatsink");
+        assert_eq!(identifier_words("esc", false), "ESC");
+        assert_eq!(identifier_words("flight_controller", false), "flight controller");
+        assert_eq!(identifier_words("gps_mount", true), "GPS mount");
+        assert_eq!(identifier_words("body_top", true), "Body top");
+        assert_eq!(material_name("lipo_pack"), "LiPo pack");
+    }
 
     #[test]
     fn materials_print_by_name_and_designation() {

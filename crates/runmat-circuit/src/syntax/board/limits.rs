@@ -186,7 +186,7 @@ pub(super) fn read_rule(id: &str, v: &Val) -> Read<RuleSpec> {
     Ok(spec)
 }
 
-/// `fabrication = { preset = fab_house, outputs = [gerber, drill], layers = ["F.Cu"], variants = [""], folder = "fab/x", zip = true, through_hole = false }`.
+/// `fabrication = { preset = fab_house, outputs = [gerber, drill], layers = ["F.Cu"], variants = [""], folder = "fab/x", revision = "A", part_number = "CD-310", zip = true, through_hole = false }`.
 pub(super) fn read_fabrication(v: &Val) -> Read<crate::fab::settings::FabSettings> {
     use crate::fab::assembly::{BomColumn, PlaceSides};
     use crate::fab::settings::{FabOutput, FabPreset, FabSettings};
@@ -214,6 +214,7 @@ pub(super) fn read_fabrication(v: &Val) -> Read<crate::fab::settings::FabSetting
     }
     out.folder = f.opt("folder", text)?;
     out.revision = f.opt("revision", text)?;
+    out.part_number = f.opt("part_number", text)?;
     out.zip = f.or("zip", false, boolean)?;
     out.include_through_hole = f.or("through_hole", false, boolean)?;
     if let Some(g) = f.get("gerber") {
@@ -282,6 +283,9 @@ pub(super) fn fabrication_text(s: &crate::fab::settings::FabSettings) -> String 
     }
     if let Some(rev) = &s.revision {
         r.put("revision", quote(rev));
+    }
+    if let Some(pn) = &s.part_number {
+        r.put("part_number", quote(pn));
     }
     if let Some(folder) = &s.folder {
         r.put("folder", quote(folder));
