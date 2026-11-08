@@ -1,6 +1,6 @@
 ---
-description: Reference for RunMat assemblies. Place parts and sub-assemblies as occurrences, set their configurations and placements, and join them with connectors and mates, including revolute, slider, gear, rack-and-pinion, screw, pin-slot and cam mates.
-keywords: [assembly, occurrences, mates, mate connectors, revolute, slider, cylindrical, planar, ball, gear mate, rack and pinion, screw mate, pin slot, cam mate, kinematics, degrees of freedom]
+description: Reference for RunMat assemblies. Place parts and sub-assemblies as occurrences, set their configurations and placements, and join them with connectors and mates, including revolute, slider, gear, rack-and-pinion, screw, pin-slot, cam, width, symmetric, path, linear coupler, hinge and universal joint mates.
+keywords: [assembly, occurrences, mates, mate connectors, revolute, slider, cylindrical, planar, ball, gear mate, rack and pinion, screw mate, pin slot, cam mate, width mate, symmetric mate, path mate, linear coupler, hinge, universal joint, kinematics, degrees of freedom]
 ---
 # Occurrences and mates
 
@@ -126,8 +126,20 @@ After the change, check interference only for the new and moved occurrences with
 | `gear` | `b` turns −1/`ratio` of `a`'s turn about its own axis | `ratio` (`b`'s teeth over `a`'s) |
 | `rack_pinion` | a rack (`b`, along its X) moves `travel` per turn of the pinion (`a`) | `travel` (π × the pitch diameter) |
 | `cam` | a follower point (`b`) stays on a cam's published profile (`a`, the closed path seen along its Z) as the cam turns; the follower may sit anywhere along the cam's Z | `profile` |
+| `width` | a tab centred in a groove: the mid-plane of `b` and `b2` (the tab's faces) lies on the mid-plane of `a` and `a2` (the groove's faces); the tab still slides and turns in that plane | `a2`, `b2` |
+| `symmetric` | `a`'s and `b`'s origins mirror each other in `plane`'s XY plane | `plane` |
+| `path` | `b`'s origin rides along a path that `a`'s part publishes; an open path runs on straight past its ends | `path` |
+| `linear_coupler` | `b` moves along its Z by `ratio` times `a`'s travel along its Z | `ratio` |
+| `hinge` | rotation about Z: the Z axes coincide (concentric) and `b`'s origin lies on `a`'s XY plane (coincident) | `angle` |
+| `universal_joint` | `b`'s shaft (its Z) follows `a`'s turn through a cross whose arms run along each connector's X; with `joint_point = true` the two origins also meet at the joint's centre | `joint_point` |
 
-Gear and rack-and-pinion mates couple motion measured from the pose where the solve starts, so the authored placements set the phase.
+Gear, rack-and-pinion and linear coupler mates couple motion measured from the pose where the solve starts, so the authored placements set the phase.
+
+Width's connectors come in pairs, each pair on one component. A pair's mid-plane sits half way between its two connector origins, square to the first connector's Z. Symmetric's plane may be on a third component, and its two mirrored connectors may share one.
+
+A universal joint without its joint point couples only the turns, so give each shaft its own bearing (a `revolute` or `hinge`) with the two axes meeting at the joint. The output shaft then turns by the joint's law: for an input turned θ and shafts at angle β, the output turns φ with tan φ = tan θ / cos β. Start the two arms (the connectors' X axes) square to each other.
+
+A path mate and a cam read a path the part publishes: an edge region or a set of edges, such as `publish rail = region(region = rail)`. In a part, the Publish command's Path target publishes picked edges this way. The edges join end to end into one path; a cam's profile goes once round the cam's axis.
 
 ```assembly fragment
 mate drive = { kind = { mate = revolute, angle = { target = exact, value = 90 deg } }, a = base_pin, b = pinion_eye }
@@ -141,6 +153,12 @@ mate gap = { kind = { mate = distance, measure = plane_point, target = { target 
 
 ```assembly fragment
 mate lift = { kind = { mate = cam, profile = lobe }, a = cam_frame, b = follower_tip }
+mate centre = { kind = { mate = width, a2 = groove_far, b2 = tab_far }, a = groove_near, b = tab_near }
+mate mirror = { kind = { mate = symmetric, plane = mid_plane }, a = left_pad, b = right_pad }
+mate ride = { kind = { mate = path, path = rail }, a = track_frame, b = car_pin }
+mate couple = { kind = { mate = linear_coupler, ratio = 2 }, a = drive_rail, b = output_rail }
+mate lid = { kind = { mate = hinge, angle = { target = range, min = 0 deg, max = 110 deg } }, a = box_hinge, b = lid_hinge }
+mate cross = { kind = { mate = universal_joint }, a = input_yoke, b = output_yoke }
 ```
 
 ## What the solve reports
