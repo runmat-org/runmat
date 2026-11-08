@@ -111,7 +111,8 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 let Some(spot) = spot else { continue };
                 let tip = on_rim(anchor, radius)(spot.elbow);
                 let mut prims = st.control_frame(&id, [spot.label.x0, spot.label.y0], &cells);
-                prims.extend(leader_line(&st, &id, tip, spot.elbow));
+                // The leader starts where it leaves the frame, so it never runs inside or along it.
+                prims.extend(leader_line(&st, &id, tip, leave_box(&spot.label, spot.elbow, tip)));
                 ctx.out.placed.insert(id.clone(), [spot.label.x0, spot.label.y0]);
                 register(ctx, &id, &prims, spot.label);
                 ctx.push(prims);
@@ -164,10 +165,13 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                         c
                     }
                 };
-                for (on, away) in &candidates {
+                for (i, (on, away)) in candidates.iter().enumerate() {
                     let (mut prims, b) = st.datum_symbol(&id, *on, *away, &letter);
+                    // A symbol on its feature's frame needs no line: the frame's leader goes to
+                    // the surface (the first two candidates are the frame's edges).
+                    let hung = on_frame.is_some() && i < 2;
                     // On an extension line: the line from the outline (a visible gap) to the symbol.
-                    if let Some((lo, hi)) = ends.filter(|(lo, hi)| super::marks::len(*on, *lo).min(super::marks::len(*on, *hi)) > 2.0 && !on_segment(*on, *lo, *hi)) {
+                    if let Some((lo, hi)) = ends.filter(|(lo, hi)| !hung && super::marks::len(*on, *lo).min(super::marks::len(*on, *hi)) > 2.0 && !on_segment(*on, *lo, *hi)) {
                         let end = if super::marks::len(*on, hi) < super::marks::len(*on, lo) { hi } else { lo };
                         let u = unit(end, *on);
                         prims.push(mark(&id, "dimink", line(vec![end[0] + u[0] * 1.0, end[1] + u[1] * 1.0, on[0] + u[0] * 2.5, on[1] + u[1] * 2.5])));
@@ -368,6 +372,23 @@ fn frames_under_callouts(ctx: &Ctx<'_>, annotations: &[Value]) -> std::collectio
 }
 
 /// A leader from a frame or label at `elbow` to `tip`, with its arrowhead.
+/// Where the segment from `from` (on or in `b`) toward `to` leaves `b`, edges included: a leader
+/// from a label's edge that would run inside or along the label starts there instead.
+fn leave_box(b: &BoxR, from: Xy, to: Xy) -> Xy {
+    let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+    let mut t1: f64 = 1.0;
+    for (p, q) in [(dx, b.x1 - from[0]), (-dx, from[0] - b.x0), (dy, b.y1 - from[1]), (-dy, from[1] - b.y0)] {
+        if p > 1e-12 {
+            t1 = t1.min(q.max(0.0) / p);
+        }
+    }
+    let inside = from[0] >= b.x0 - 1e-9 && from[0] <= b.x1 + 1e-9 && from[1] >= b.y0 - 1e-9 && from[1] <= b.y1 + 1e-9;
+    if !inside || t1 >= 1.0 {
+        return from;
+    }
+    [from[0] + dx * t1, from[1] + dy * t1]
+}
+
 fn leader_line(st: &Std, id: &str, tip: Xy, elbow: Xy) -> Vec<Prim> {
     let d = unit(elbow, tip);
     vec![mark(id, "dimink", line(vec![elbow[0], elbow[1], tip[0] - d[0] * st.arrow * 0.5, tip[1] - d[1] * st.arrow * 0.5])), st.arrowhead(id, tip, d)]

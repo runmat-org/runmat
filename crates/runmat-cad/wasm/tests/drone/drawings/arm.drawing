@@ -7,6 +7,8 @@ std 1
 // the hinge bore and the motor holes; detail B enlarges the hinge knuckle in plan; the isometric shows
 // the part. GD&T is to datums A (the motor seat), B (the hinge bore) and C (the knuckle's
 // underside), as the part's PMI declares them.
+// The right view, which carries datums A and C and the seat's parallelism, draws visible lines
+// only: seen end-on, the holes' and the beam's hidden lines would repeat the plan and elevation.
 drawing arm {
     format a3 = {
         size = { size = iso, name = A3 },
@@ -26,7 +28,7 @@ drawing arm {
 
     view front = standard(orientation = front, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 164], display = hidden_lines)
     view top = projected(from = front, direction = up, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 217], display = hidden_lines)
-    view right = projected(from = front, direction = right, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [299, 164], display = hidden_lines)
+    view right = projected(from = front, direction = right, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [299, 164], display = visible_lines)
     view a_a = section(
         from = top,
         plane = feature.pad.face.side(pad_s.c),

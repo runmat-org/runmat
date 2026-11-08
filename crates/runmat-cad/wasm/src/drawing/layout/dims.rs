@@ -362,6 +362,11 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
             }
         };
         let (prims, text_at) = st.linear_dimension(&id, a, b, d.axis, at, &d.text);
+        // Another dimension's extension or dimension line breaks around this figure, as at an
+        // ordinate figure (a figure set outside short extension lines can land on one).
+        if let Some(b) = prims.iter().rev().find(|p| p.style == "dimtext").and_then(text_box) {
+            figures.push((id.clone(), b));
+        }
         ctx.occ.add_prims(&prims, &id);
         ctx.push(prims);
         ctx.out.placed.entry(id.clone()).or_insert(if d.axis == 0 { [a[0], at] } else { [at, a[1]] });
