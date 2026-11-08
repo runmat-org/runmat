@@ -23,6 +23,7 @@ mod retriangulate;
 mod validation;
 pub(in crate::cdt) mod work;
 mod working;
+pub(in crate::cdt) use working::rejected::RejectedCompleteRelocations;
 pub(in crate::cdt) use working::treatment::run_in_state;
 
 pub(super) const CAVITY_SMOOTHING_STEPS: [f64; 4] =

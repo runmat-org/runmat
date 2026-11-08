@@ -58,7 +58,7 @@ fn fields<'a>(
 // witness: FEA-FLUID-TRANSIENT-001/inertia @
 //   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel; coverage:
 //   partial;
-//   boundary: A uniformly accelerating field has the exact inertia-driven pressure and binds cold;
+//   check: uniform-acceleration; boundary: A uniformly accelerating field has the exact inertia-driven pressure and binds cold;
 //   a nontrivial unsteady reference is not covered here.
 #[test]
 fn original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding() {
@@ -127,7 +127,7 @@ fn original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding() {
 
 // witness: FEA-FLUID-TRANSIENT-001/convergence @
 //   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel;
-//   boundary: Uniform exponential translation pressure on three time steps; no vortex or
+//   check: exponential-translation; boundary: Uniform exponential translation pressure on three time steps; no vortex or
 //   independent spatial sweep.
 #[test]
 fn exponential_translation_pressure_shows_first_order_time_convergence() {

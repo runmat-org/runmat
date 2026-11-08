@@ -109,6 +109,9 @@ pub(super) fn converge_volume_quality(
         observer,
     };
     let mut schedule = schedule::CoupledSchedule::default();
+    // Repairs rerun after every accepted refinement; searches they already rejected rerun only
+    // when their neighborhood changed.
+    let mut rejected = crate::cdt::volume_sliver::RejectedCompleteRelocations::default();
     loop {
         let refinement = if state
             .quality()
@@ -144,7 +147,7 @@ pub(super) fn converge_volume_quality(
         let shape_violation = state.quality().worst(QualityObjective::Shape).is_some();
         let mut repair_step = None;
         if schedule.should_repair(refinement, shape_violation) {
-            let repaired = repair.attempt(state, remaining_optimization)?;
+            let repaired = repair.attempt(state, remaining_optimization, &mut rejected)?;
             remaining_optimization =
                 remaining_optimization.saturating_sub(repaired.mutations.len() as u64);
             let step = if repaired.mutations.is_empty() {

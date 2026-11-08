@@ -342,7 +342,7 @@ fn small_boundary_flux_is_not_lost_in_robin_forcing_regardless_of_operator_order
 
 // witness: FEA-THERMAL-FIELDS-001/global_energy @ thermal_steady/tet4|tet10/numerical_kernel;
 //   coverage: partial;
-//   boundary: A bar held at two end temperatures reports its closed-form through-flow
+//   check: bar-heat-flow; boundary: A bar held at two end temperatures reports its closed-form through-flow
 //   k*A*dT/L as the heat entering and leaving through the prescribed ends, while the net
 //   prescribed reaction cancels; other boundary conditions are covered elsewhere.
 #[test]

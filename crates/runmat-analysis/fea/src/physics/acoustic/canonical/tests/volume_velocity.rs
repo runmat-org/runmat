@@ -87,7 +87,7 @@ fn solve(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> CanonicalAcousticR
 }
 
 // witness: FEA-ACOUSTIC-SOURCE-001/resultant @ acoustic_harmonic/tet4|tet10/numerical_kernel;
-//   boundary: Area scaling, complex phase and independent flow/power refinement on slab fixtures.
+//   check: volume-velocity-source; boundary: Area scaling, complex phase and independent flow/power refinement on slab fixtures.
 #[test]
 fn total_volume_flow_area_phase_rotation_and_power_refine_against_continuum() {
     let mut count = 0;

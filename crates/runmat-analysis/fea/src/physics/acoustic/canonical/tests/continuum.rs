@@ -73,7 +73,7 @@ fn pressure_error(
 }
 
 // witness: FEA-ACOUSTIC-NUMERICS-001/duct @ acoustic_harmonic/tet10/numerical_kernel;
-//   boundary: Tet10 slab at two frequencies, three refinements; exact traveling-wave references,
+//   check: traveling-wave; boundary: Tet10 slab at two frequencies, three refinements; exact traveling-wave references,
 //   not all acoustic geometries.
 #[test]
 fn tet10_traveling_wave_phase_pressure_velocity_and_power_converge() {
@@ -139,7 +139,7 @@ fn tet10_traveling_wave_phase_pressure_velocity_and_power_converge() {
 }
 
 // witness: FEA-ACOUSTIC-NUMERICS-001/cavity @ acoustic_harmonic/tet4|tet10/numerical_kernel;
-//   boundary: Forced axial cavity at 0.9/1.1 times first pole, phase/pressure/energy convergence;
+//   check: forced-cavity; boundary: Forced axial cavity at 0.9/1.1 times first pole, phase/pressure/energy convergence;
 //   no complete multidimensional modal-spectrum credit.
 #[test]
 fn tet4_and_tet10_forced_rigid_cavity_converge_on_both_sides_of_axial_resonance() {

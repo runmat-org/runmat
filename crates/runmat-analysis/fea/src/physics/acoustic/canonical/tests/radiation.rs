@@ -149,7 +149,7 @@ fn mean_wave(xs: [f64; 4], k: f64) -> [f64; 2] {
 }
 
 // witness: FEA-ACOUSTIC-BOUNDARY-001/radiation @ acoustic_harmonic/tet4|tet10/numerical_kernel;
-//   boundary: Local radiation reference and original spatial gates; witness linkage is not a
+//   check: local-radiation; boundary: Local radiation reference and original spatial gates; witness linkage is not a
 //   passing verdict or nonlocal exterior-wave qualification.
 #[test]
 fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {

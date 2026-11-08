@@ -274,7 +274,7 @@ pub(super) fn two_medium(
 }
 
 // witness: FEA-ACOUSTIC-OPERATOR-001/regions @ acoustic_harmonic/tet4|tet10/numerical_kernel;
-//   boundary: Aligned two-medium slab, phase rotation and spatial refinement; not arbitrary
+//   check: two-fluid-interface; boundary: Aligned two-medium slab, phase rotation and spatial refinement; not arbitrary
 //   heterogeneous or curved-interface qualification.
 #[test]
 fn two_fluid_interface_pressure_mean_velocity_and_power_refine() {

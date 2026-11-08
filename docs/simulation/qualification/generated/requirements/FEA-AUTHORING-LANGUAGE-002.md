@@ -1,6 +1,6 @@
 # FEA-AUTHORING-LANGUAGE-002: Declarative source semantics and product tooling
 
-0 PASS, 12 PARTIAL, 1 FAIL, 19 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 13 PARTIAL, 0 FAIL, 19 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## language_scope
 
@@ -120,7 +120,7 @@ Evidence kind: SemanticRealization. Criterion: The concrete grammar will be froz
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-fea-syntax[lib]::tests::parses_representative_language_surface` (crates/runmat-fea-syntax/src/tests.rs:66) - Representative declarations, spans and imports only; no complete grammar or semantics proof.<br>`runmat-fea-syntax[lib]::tests::formatter_is_canonical_and_idempotent` (crates/runmat-fea-syntax/src/tests.rs:272) - One formatter fixture and second formatting equality; no complete recovery or adversarial grammar credit. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-fea-syntax[lib]::tests::parses_representative_language_surface` (crates/runmat-fea-syntax/src/tests.rs:66) - Representative declarations, spans and imports only; no complete grammar or semantics proof.<br>`runmat-fea-syntax[lib]::tests::formatter_is_canonical_and_idempotent` (crates/runmat-fea-syntax/src/tests.rs:272) - One formatter fixture and second formatting equality; no complete recovery or adversarial grammar credit. |
 
 ## compiler_and_editor_ownership
 

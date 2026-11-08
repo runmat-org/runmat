@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release": "0.7.0",
-  "about": "The one capability ledger for RunMat simulation. Status, requirement ids, verification cases and docs pages live here; ANALYSIS_IDENTITIES, the docs' pending flags, Validation → Status and the per-family Validation pages are generated from it. See docs/schema/ledger.schema.json.",
+  "about": "The one capability ledger for RunMat simulation. Status, requirement ids, verification cases and docs pages live here; ANALYSIS_IDENTITIES, the docs' pending flags, Validation → Status and the per-family Validation pages (from its reference checks) are generated from it. See docs/schema/ledger.schema.json.",
   "capabilities": [
     {
       "id": "structural.static",
@@ -26,9 +26,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
-      ],
-      "verification": [
-        "cantilever-bending"
       ],
       "docs": [
         "guides/linear-static.md",
@@ -58,7 +55,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "guides/modal-analysis.md",
         "language/reference/procedures.md",
@@ -80,7 +76,6 @@
       "requirements": [
         "FEA-DYNAMICS-PRESTRESS-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -107,7 +102,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -134,7 +128,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -161,7 +154,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -189,7 +181,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -218,7 +209,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -245,7 +235,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -272,7 +261,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -300,7 +288,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -327,7 +314,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -354,7 +340,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md",
@@ -370,7 +355,6 @@
       "requirements": [
         "FEA-DYNAMICS-RESPONSE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/structural.md"
@@ -399,9 +383,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001",
         "FEA-THERMAL-PUBLIC-001"
-      ],
-      "verification": [
-        "radiating-bar"
       ],
       "docs": [
         "guides/steady-heat-transfer.md",
@@ -434,7 +415,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-THERMAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/thermal.md",
@@ -464,11 +444,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [
-        "magnetostatic-bar",
-        "electrostatics-and-current-flow",
-        "electromagnetic-studies"
-      ],
       "docs": [
         "language/reference/procedures.md",
         "physics/electromagnetic.md",
@@ -497,9 +472,6 @@
         "FEA-SCALE-PARALLEL-001",
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
-      ],
-      "verification": [
-        "skin-effect"
       ],
       "docs": [
         "language/reference/procedures.md",
@@ -535,7 +507,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "index.md",
         "language/reference/procedures.md"
@@ -569,7 +540,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -599,7 +569,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/acoustic.md",
@@ -624,7 +593,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/acoustic.md",
@@ -650,7 +618,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/acoustic.md",
@@ -681,7 +648,6 @@
         "runmat run <example>.fea (acoustic static)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -708,7 +674,6 @@
         "runmat run <example>.fea (acoustic nonlinear)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -741,7 +706,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/fluid.md",
@@ -777,7 +741,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/fluid.md",
@@ -808,7 +771,6 @@
         "runmat run <example>.fea (fluid harmonic)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -835,7 +797,6 @@
         "runmat run <example>.fea (fluid nonlinear)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -859,9 +820,6 @@
         "FEA-SCALE-PARALLEL-001",
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
-      ],
-      "verification": [
-        "clamped-bar-thermal-stress"
       ],
       "docs": [
         "language/reference/procedures.md",
@@ -891,7 +849,6 @@
         "FEA-SCALE-SIZE-001",
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/thermomechanical.md",
@@ -922,7 +879,6 @@
       "requirements": [
         "FEA-COUPLING-THERMOELASTIC-002"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/thermomechanical.md"
@@ -949,7 +905,6 @@
         "runmat run <example>.fea (thermomechanical harmonic)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -973,10 +928,6 @@
         "FEA-SCALE-PARALLEL-001",
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
-      ],
-      "verification": [
-        "electromagnetic-studies",
-        "two-way-joule-heating"
       ],
       "docs": [
         "language/reference/procedures.md",
@@ -1004,7 +955,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/electrothermal.md",
@@ -1032,7 +982,6 @@
         "runmat run <example>.fea (electrothermal harmonic)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -1059,7 +1008,6 @@
         "runmat run <example>.fea (electrothermal nonlinear)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -1087,7 +1035,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/conjugate-heat-transfer.md",
@@ -1117,7 +1064,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/conjugate-heat-transfer.md",
@@ -1145,7 +1091,6 @@
         "runmat run <example>.fea (conjugate-heat-transfer harmonic)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -1172,7 +1117,6 @@
         "runmat run <example>.fea (conjugate-heat-transfer nonlinear)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -1198,7 +1142,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/fluid-structure-interaction.md",
@@ -1226,7 +1169,6 @@
         "FEA-SCALE-DISTRIBUTED-001",
         "FEA-SCALE-SIZE-001"
       ],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "physics/fluid-structure-interaction.md",
@@ -1254,7 +1196,6 @@
         "runmat run <example>.fea (fluid-structure-interaction harmonic)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -1280,7 +1221,6 @@
         "runmat run <example>.fea (fluid-structure-interaction nonlinear)"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md"
       ]
@@ -1301,7 +1241,6 @@
         "FEA-COUPLING-FSI-001",
         "FEA-COUPLING-FSI-002"
       ],
-      "verification": [],
       "docs": [
         "physics/fluid-structure-interaction.md"
       ]
@@ -1321,7 +1260,6 @@
       "requirements": [
         "FEA-COUPLING-FSI-002"
       ],
-      "verification": [],
       "docs": [
         "physics/fluid-structure-interaction.md"
       ]
@@ -1333,7 +1271,6 @@
       "area": "acoustic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/acoustic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1346,7 +1283,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1359,7 +1295,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1372,7 +1307,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1385,7 +1319,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1398,7 +1331,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1411,7 +1343,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1424,7 +1355,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1437,7 +1367,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1450,7 +1379,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1463,7 +1391,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1476,7 +1403,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1489,7 +1415,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1502,7 +1427,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1515,7 +1439,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1528,7 +1451,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1541,7 +1463,6 @@
       "area": "structural",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/structural.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1554,7 +1475,6 @@
       "area": "structural",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/structural.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1567,7 +1487,6 @@
       "area": "structural",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/structural.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1580,7 +1499,6 @@
       "area": "thermal",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/thermal.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1593,7 +1511,6 @@
       "area": "acoustic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/acoustic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1606,7 +1523,6 @@
       "area": "thermal",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/thermal.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1619,7 +1535,6 @@
       "area": "structural",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/structural.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1632,7 +1547,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1645,7 +1559,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1658,7 +1571,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1671,7 +1583,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1684,7 +1595,6 @@
       "area": "structural",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/structural.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1697,7 +1607,6 @@
       "area": "thermal",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/thermal.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1710,7 +1619,6 @@
       "area": "thermal",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/thermal.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1723,7 +1631,6 @@
       "area": "acoustic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/acoustic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1736,7 +1643,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1749,7 +1655,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1762,7 +1667,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1775,7 +1679,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1788,7 +1691,6 @@
       "area": "structural",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/structural.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1801,7 +1703,6 @@
       "area": "acoustic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/acoustic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1814,7 +1715,6 @@
       "area": "structural",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/structural.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1827,7 +1727,6 @@
       "area": "thermal",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/thermal.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1840,7 +1739,6 @@
       "area": "electromagnetic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/electromagnetic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1853,7 +1751,6 @@
       "area": "structural",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/structural.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1866,7 +1763,6 @@
       "area": "acoustic",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/acoustic.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1879,7 +1775,6 @@
       "area": "fluid",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "loads/fluid.md",
         "language/reference/constraints-loads-and-interfaces.md"
@@ -1892,7 +1787,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -1905,7 +1799,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -1918,7 +1811,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -1931,7 +1823,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -1944,7 +1835,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -1957,7 +1847,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -1970,7 +1859,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -1983,7 +1871,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -1996,7 +1883,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2009,7 +1895,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2022,7 +1907,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2035,7 +1919,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2048,7 +1931,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2061,7 +1943,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2074,7 +1955,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2087,7 +1967,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2100,7 +1979,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2113,7 +1991,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2126,7 +2003,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2139,7 +2015,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2152,7 +2027,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2165,7 +2039,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2178,7 +2051,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2191,7 +2063,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2204,7 +2075,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2217,7 +2087,6 @@
       "area": "results",
       "status": "release",
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md",
         "language/reference/operations-and-output-queries.md"
@@ -2240,7 +2109,6 @@
         "runmat run docs/simulation/examples/<preload-nonlinear-modal>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/procedures.md",
         "language/studies-analyses-and-state.md"
@@ -2262,7 +2130,6 @@
         "runmat run <periodic-channel>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/fluid.md"
       ]
@@ -2284,7 +2151,6 @@
         "runmat run <motor-sector>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md"
       ]
@@ -2305,7 +2171,6 @@
         "runmat run <prescribed-a>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/electromagnetic.md"
       ]
@@ -2326,7 +2191,6 @@
         "runmat run <cyclic-sector>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "constraints/acoustic.md"
       ]
@@ -2347,7 +2211,6 @@
         "runmat check <study selecting faces by normal>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/geometry-models-and-assignments.md",
         "language/reference/declarations.md"
@@ -2369,7 +2232,6 @@
         "runmat check <study with parameterized include>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/declarations.md"
       ]
@@ -2390,7 +2252,6 @@
         "runmat check <orientation with origin = [0, 0, 0] m>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/types-units-and-expressions.md"
       ]
@@ -2411,7 +2272,6 @@
         "runmat check <input named load>.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/grammar.md",
         "language/types-units-and-expressions.md"
@@ -2434,7 +2294,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2457,7 +2316,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2480,7 +2338,6 @@
       "requirements": [
         "FEA-FLUID-MATERIALS-001"
       ],
-      "verification": [],
       "docs": []
     },
     {
@@ -2498,7 +2355,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2518,7 +2374,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2538,7 +2393,6 @@
       "requirements": [
         "FEA-FLUID-MATERIALS-001"
       ],
-      "verification": [],
       "docs": []
     },
     {
@@ -2556,7 +2410,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2574,7 +2427,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2592,7 +2444,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2610,7 +2461,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2630,7 +2480,6 @@
       "requirements": [
         "FEA-FLUID-MATERIALS-001"
       ],
-      "verification": [],
       "docs": []
     },
     {
@@ -2648,7 +2497,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2670,7 +2518,6 @@
       "requirements": [
         "FEA-FLUID-PHYSICS-001"
       ],
-      "verification": [],
       "docs": []
     },
     {
@@ -2688,7 +2535,6 @@
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],
-      "verification": [],
       "docs": []
     },
     {
@@ -2707,7 +2553,6 @@
         "runmat check claims/probe-siemens.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/types-units-and-expressions.md"
       ]
@@ -2728,7 +2573,6 @@
         "runmat check claims/fail-bare-plastic-law.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "language/reference/declarations.md"
       ]
@@ -2749,7 +2593,6 @@
         "runmat run receipts/r-tuning-fork.fea"
       ],
       "requirements": [],
-      "verification": [],
       "docs": [
         "guides/modal-analysis.md",
         "language/outputs-fields-and-observations.md"
@@ -2773,7 +2616,6 @@
       "requirements": [
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [
         "language/outputs-fields-and-observations.md"
       ]
@@ -2796,7 +2638,6 @@
       "requirements": [
         "FEA-STRUCTURAL-PUBLIC-001"
       ],
-      "verification": [],
       "docs": [],
       "doc_less": "A defect in a released procedure: listed under Known defects on Validation → Status, not flagged in the docs that describe buckling."
     },
@@ -2818,131 +2659,657 @@
       "requirements": [
         "FEA-PUBLIC-LANGUAGE-001"
       ],
-      "verification": [],
       "docs": [
         "guides/linear-static.md"
       ]
     }
   ],
-  "cases": [
+  "checks": [
     {
       "id": "cantilever-bending",
       "area": "structural",
+      "analysis": "Static",
+      "capability": "structural.static",
       "title": "Cantilever bending against beam theory",
-      "narrative": "validation/cases/cantilever-bending.md",
-      "references": [
-        "Euler–Bernoulli beam theory: tip deflection FL³/3EI, bending stress Mc/I",
-        "Timoshenko beam theory: shear deflection FL/κGA"
-      ],
+      "problem": "A 1 m steel cantilever (E = 200 GPa, ν = 0.3) with a 100 mm × 100 mm section is fully fixed at x = 0 and carries a 1,000 N downward traction resultant on the free end face. It is the cantilever of the [linear static](../guides/linear-static.md) and [mesh refinement](../guides/mesh-refinement.md) guides, run as a public study on Tet10 meshes at 150, 75, 50 and 25 mm and Tet4 meshes at 150 and 50 mm.",
+      "reference": "Euler–Bernoulli beam theory: tip deflection $\\delta = FL^3/3EI$ = 0.2000 mm and top-surface bending stress $\\sigma = Mc/I$ with $M = F(L - x)$, 5.40 MPa at x = 100 mm. The support reaction equals the applied 1,000 N. Timoshenko theory adds the shear deflection $FL/\\kappa GA \\approx$ 0.0016 mm (0.8 %), so a converged solid model lies between the two theories.",
+      "quantity": "Largest displacement on the loaded end face; nodal von Mises stress on the top surface at x = 100 mm, one section depth from the clamp; support reaction. The largest element stress at the clamped edge is recorded to show the singularity of the fully fixed face.",
+      "tolerance": "None set; the receipts record each value. Tet10 tip deflection is expected between the Euler–Bernoulli and Timoshenko values.",
+      "result": "Tet10 tip deflection converges to 0.2007 mm, 0.34 % above Euler–Bernoulli theory and below the Timoshenko value. The stress at x = 100 mm settles at 5.41 MPa, 0.2 % above beam theory. The largest element stress at the clamped edge does not settle (5.39, 5.45, 5.27, 5.76 MPa), as expected at a singularity. The reaction balances 1,000 N on every mesh. Tet4 locks in bending: −50 % at 150 mm and −19 % at 50 mm.",
       "receipts": [
-        "cantilever-static#peak-element-von-mises",
-        "cantilever-static#peak-element-von-mises-tet10-25",
-        "cantilever-static#peak-element-von-mises-tet10-50",
-        "cantilever-static#peak-element-von-mises-tet10-75",
-        "cantilever-static#peak-element-von-mises-tet4-150",
-        "cantilever-static#peak-element-von-mises-tet4-50",
-        "cantilever-static#support-reaction",
-        "cantilever-static#support-reaction-tet10-25",
-        "cantilever-static#support-reaction-tet10-50",
-        "cantilever-static#support-reaction-tet10-75",
-        "cantilever-static#support-reaction-tet4-150",
-        "cantilever-static#support-reaction-tet4-50",
         "cantilever-static#tip-deflection",
-        "cantilever-static#tip-deflection-tet10-25",
-        "cantilever-static#tip-deflection-tet10-50",
-        "cantilever-static#tip-deflection-tet10-75",
-        "cantilever-static#tip-deflection-tet4-150",
-        "cantilever-static#tip-deflection-tet4-50",
         "cantilever-static#top-von-mises",
-        "cantilever-static#top-von-mises-tet10-25",
-        "cantilever-static#top-von-mises-tet10-50",
+        "cantilever-static#peak-element-von-mises",
+        "cantilever-static#support-reaction",
+        "cantilever-static#tip-deflection-tet10-75",
         "cantilever-static#top-von-mises-tet10-75",
+        "cantilever-static#peak-element-von-mises-tet10-75",
+        "cantilever-static#support-reaction-tet10-75",
+        "cantilever-static#tip-deflection-tet10-50",
+        "cantilever-static#top-von-mises-tet10-50",
+        "cantilever-static#peak-element-von-mises-tet10-50",
+        "cantilever-static#support-reaction-tet10-50",
+        "cantilever-static#tip-deflection-tet10-25",
+        "cantilever-static#top-von-mises-tet10-25",
+        "cantilever-static#peak-element-von-mises-tet10-25",
+        "cantilever-static#support-reaction-tet10-25",
+        "cantilever-static#tip-deflection-tet4-150",
         "cantilever-static#top-von-mises-tet4-150",
-        "cantilever-static#top-von-mises-tet4-50"
+        "cantilever-static#peak-element-von-mises-tet4-150",
+        "cantilever-static#support-reaction-tet4-150",
+        "cantilever-static#tip-deflection-tet4-50",
+        "cantilever-static#top-von-mises-tet4-50",
+        "cantilever-static#peak-element-von-mises-tet4-50",
+        "cantilever-static#support-reaction-tet4-50"
       ],
-      "tests": []
+      "citation": "(J. M. Gere and B. J. Goodno, *Mechanics of Materials*, 8th ed., Cengage Learning, 2013.)"
     },
     {
-      "id": "skin-effect",
-      "area": "electromagnetic",
-      "title": "Skin effect in a driven conductor",
-      "narrative": "validation/cases/skin-effect.md",
-      "references": [
-        "Parallel-plate line impedance with skin depth δ = √(2/ωμ₀σ)"
-      ],
-      "receipts": [],
-      "tests": []
+      "id": "tet4-affine-patch",
+      "area": "structural",
+      "analysis": "Static",
+      "capability": "structural.static",
+      "title": "Tet4 patch test under an affine displacement field",
+      "problem": "Connected patches of linear tetrahedra (Tet4) under an affine displacement field, the standard patch test for solid elements.",
+      "reference": "The exact uniform strain and stress of the affine field (strain 0.1, 0.2 and 0.3 in x, y and z; stress 32, 40 and 48 in the fixture's units), its strain energy, and nodal forces equal to the independent boundary tractions.",
+      "quantity": "Recovered strain and stress at elements and integration points, strain energy, internal nodal forces.",
+      "tolerance": "Absolute 1e-12 on strain and 1e-11 on stress and energy; relative 1e-12 on nodal forces and energy."
     },
     {
-      "id": "magnetostatic-bar",
-      "area": "electromagnetic",
-      "title": "Magnetostatic field of a current-carrying bar",
-      "narrative": "validation/cases/magnetostatic-bar.md",
-      "references": [
-        "Independent full-volume vector-potential solution"
-      ],
-      "receipts": [],
-      "tests": []
+      "id": "tet10-stress-recovery-patch",
+      "area": "structural",
+      "analysis": "Static",
+      "capability": "structural.static",
+      "title": "Tet10 nodal stress recovery under a linear stress field",
+      "problem": "Two quadratic tetrahedra (Tet10) sharing a face carry a linear stress field; the two elements belong to different regions.",
+      "reference": "The linear stress field evaluated exactly at every corner and midside node, with no averaging across the region interface node.",
+      "quantity": "Recovered nodal stress components.",
+      "tolerance": "Absolute error at most 1e-12 × (1 + |σ|) per component."
     },
     {
-      "id": "electrostatics-and-current-flow",
-      "area": "electromagnetic",
-      "title": "Electrostatics and steady current flow",
-      "narrative": "validation/cases/electrostatics-and-current-flow.md",
-      "references": [
-        "Charged dielectric slab, closed form; terminal power against the Joule integral"
-      ],
-      "receipts": [],
-      "tests": []
+      "id": "shell-membrane-patch",
+      "area": "structural",
+      "analysis": "Static",
+      "capability": "structural.static",
+      "title": "Shell membrane patch under biaxial plane stress",
+      "problem": "A one-layer shell patch in uniform biaxial membrane stress.",
+      "reference": "Plane-stress membrane resultants $N_x = \\sigma_x t$, $N_y = \\sigma_y t$, $N_{xy} = 0$, no bending or shear resultants, and von Mises stress $\\sqrt{\\sigma_x^2 - \\sigma_x\\sigma_y + \\sigma_y^2}$.",
+      "quantity": "Membrane force resultants, bending and shear resultants, von Mises stress.",
+      "tolerance": "Relative 1e-11 on resultants; bending and shear resultants below 1e-12."
     },
     {
-      "id": "electromagnetic-studies",
-      "area": "electromagnetic",
-      "title": "Complete electromagnetic and electrothermal studies",
-      "narrative": "validation/cases/electromagnetic-studies.md",
-      "references": [
-        "σV/L and V²/R for a copper bar; closed-form two-way Joule-heated bar"
-      ],
-      "receipts": [],
-      "tests": [
-        "copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r",
-        "two_way_joule_heating_matches_the_closed_form_bar"
-      ]
+      "id": "navier-plate",
+      "area": "structural",
+      "analysis": "Static",
+      "capability": "structural.static",
+      "title": "Simply supported plate under sinusoidal load",
+      "problem": "A simply supported plate meshed with triangular shell elements carries a sinusoidal transverse pressure; the mesh is refined.",
+      "reference": "Navier's series solution for the center deflection of a simply supported plate.",
+      "quantity": "Center transverse displacement.",
+      "tolerance": "The center displacement approaches the Navier value with refinement; the finest-mesh error is below 8 %.",
+      "citation": "(S. P. Timoshenko and S. Woinowsky-Krieger, *Theory of Plates and Shells*, 2nd ed., McGraw-Hill, 1959.)"
     },
     {
-      "id": "two-way-joule-heating",
-      "area": "electrothermal",
-      "title": "Two-way Joule heating of a bar",
-      "narrative": "validation/cases/two-way-joule-heating.md",
-      "references": [
-        "Closed-form bar with resistivity ρ(T) = ρ₀(1 + α(T − T₀))"
-      ],
-      "receipts": [],
-      "tests": []
+      "id": "axial-rod-modal",
+      "area": "structural",
+      "analysis": "Modal",
+      "capability": "structural.modal",
+      "title": "Fundamental frequency of an axial rod",
+      "problem": "A solid slab rod, fixed at one end and free at the other, in axial vibration on Tet4 meshes (2, 4 and 8 cells) and Tet10 meshes (1, 2 and 4 cells). The retained one-mode response is also compared with a direct harmonic solve.",
+      "reference": "Fixed–free rod fundamental frequency $f_1 = c/4L$ with $c = \\sqrt{E/\\rho}$.",
+      "quantity": "First natural frequency; modal-truncation response against the direct harmonic response.",
+      "tolerance": "Frequency error falls by more than 3× (Tet4) or 6× (Tet10) per refinement; finest-mesh error below 2e-3 (Tet4) and 2e-4 (Tet10)."
+    },
+    {
+      "id": "axial-rod-harmonic",
+      "area": "structural",
+      "analysis": "Harmonic",
+      "capability": "structural.harmonic",
+      "title": "Axial rod under harmonic end traction",
+      "problem": "A Tet4 slab rod, fixed at one end, carries a harmonic axial traction on the free end at three frequencies on both sides of the first resonance; 2, 4 and 8 cells.",
+      "reference": "The continuum complex displacement of the driven rod and the support reaction $-F/\\cos kL$.",
+      "quantity": "Complex displacement field and support reaction; mean input power of the undamped response.",
+      "tolerance": "Displacement and reaction errors fall by more than 2.5× per refinement and are below 2e-2 on the finest mesh; mean input power below 1e-9."
+    },
+    {
+      "id": "free-vibration-time-integration",
+      "area": "structural",
+      "analysis": "Transient",
+      "capability": "structural.transient",
+      "title": "Undamped free vibration under average-acceleration integration",
+      "problem": "An undamped oscillator in free vibration, integrated with the Newmark average-acceleration rule, both directly and in modal coordinates, with the time step halved twice.",
+      "reference": "The exact harmonic free response.",
+      "quantity": "Displacement and velocity at the final time.",
+      "tolerance": "Error ratio above 3.8 per halving of the time step (second order) on both paths; finest direct Newmark error below 2e-3; modal relative residuals at most 2e-15."
+    },
+    {
+      "id": "rod-affine-forcing",
+      "area": "structural",
+      "analysis": "Transient",
+      "capability": "structural.transient",
+      "title": "Rod under affine forcing in time",
+      "problem": "A Tet4 and a Tet10 rod under a physical forcing that is affine in space, integrated with 20, 40 and 80 time intervals, with and without damping.",
+      "reference": "The independent continuum response of the rod and its work–energy balance.",
+      "quantity": "Displacement, velocity and acceleration fields; work–energy balance.",
+      "tolerance": "Spatially exact quantities below 1e-12; time-discretization errors fall by more than 3× per halving and are below 2e-4 at 80 intervals."
+    },
+    {
+      "id": "euler-column",
+      "area": "structural",
+      "analysis": "Buckling",
+      "capability": "structural.buckling",
+      "title": "Fixed–free column against Euler's buckling load",
+      "problem": "A solid column, 1 m long with a 100 × 50 mm section, fixed at the base and free at the top, carries a 250 kN axial preload; Tet10 mesh.",
+      "reference": "Euler's critical load for a fixed–free column, $P_{cr} = \\pi^2EI/4L^2$.",
+      "quantity": "First buckling load factor; eigenpair residuals.",
+      "tolerance": "First load factor within 1 % of $P_{cr}$/250 kN; eigenpairs converged to a relative tolerance of 1e-8.",
+      "citation": "(S. P. Timoshenko and J. M. Gere, *Theory of Elastic Stability*, 2nd ed., McGraw-Hill, 1961.)"
+    },
+    {
+      "id": "modal-combination-rules",
+      "area": "structural",
+      "analysis": "Response spectrum",
+      "capability": "structural.response-spectrum.modal-reduced",
+      "title": "Modal combination rules",
+      "problem": "Two signed modal responses with set frequencies and damping are combined by SRSS, absolute sum and CQC.",
+      "reference": "The SRSS, absolute-sum and CQC formulas evaluated independently, including an independently computed CQC correlation coefficient.",
+      "quantity": "Combined peak response.",
+      "tolerance": "Relative 2e-13.",
+      "citation": "(A. Der Kiureghian, \"A response spectrum method for random vibration analysis of MDF systems,\" *Earthquake Engineering & Structural Dynamics* 9(5), 419–435, 1981.)"
+    },
+    {
+      "id": "j2-uniaxial-bar",
+      "area": "structural",
+      "analysis": "Nonlinear (plasticity)",
+      "capability": "structural.nonlinear",
+      "title": "Uniaxial bar beyond yield",
+      "problem": "A bar in uniaxial tension loaded past yield, with J2 plasticity and linear hardening, solved by Newton iteration on Tet4 and Tet10 meshes and restarted cold from its persisted state.",
+      "reference": "The closed-form uniaxial elastoplastic stress at the final load (5.6 in the fixture's units).",
+      "quantity": "Axial stress at every integration point; restart state.",
+      "tolerance": "Axial stress within 2e-10 of the closed form.",
+      "citation": "(J. C. Simo and T. J. R. Hughes, *Computational Inelasticity*, Springer, 1998.)"
+    },
+    {
+      "id": "j2-manufactured-cube",
+      "area": "structural",
+      "analysis": "Nonlinear (plasticity)",
+      "capability": "structural.nonlinear",
+      "title": "Manufactured fully yielded cube",
+      "problem": "A cube under body force and surface traction yields completely; J2 plasticity, Tet4 and Tet10 meshes, applied in one increment and in eight.",
+      "reference": "A manufactured polynomial J2 solution: quadratic terminal strain with an exact radial return on its proportional path.",
+      "quantity": "Displacement, stress, hardening variable, plastic history, energies and reaction.",
+      "tolerance": "Tet10 in one increment: displacement, stress, hardening variable and energy errors below 1e-7 under the Keast15, Duffy5 and Duffy8 rules. In eight increments the yield front crosses elements mid-step; that path error falls at order 1.5 or better with refinement. Tet4: every quantity refines."
+    },
+    {
+      "id": "series-slab",
+      "area": "thermal",
+      "analysis": "Steady",
+      "capability": "thermal.static",
+      "title": "Two-layer slab in series",
+      "problem": "A slab of two half-meter layers with k = 1 and 4 W/(m·K), held at fixed temperatures on its outer faces; Tet4.",
+      "reference": "One-dimensional series thermal resistance: piecewise-linear temperature and a uniform flux of 160 W/m².",
+      "quantity": "Nodal temperature; element heat flux; dependence on the order in which the materials are authored.",
+      "tolerance": "Temperature within 1e-7 K; flux within 1e-6 W/m²; reordering the materials changes the result by less than 1e-10."
+    },
+    {
+      "id": "bar-heat-flow",
+      "area": "thermal",
+      "analysis": "Steady",
+      "capability": "thermal.static",
+      "title": "Bar between two fixed temperatures",
+      "problem": "A bar held at a hot and a cold end temperature with insulated sides.",
+      "reference": "Fourier's law through the bar, $Q = kA\\,\\Delta T/L$.",
+      "quantity": "Heat entering and leaving through the prescribed ends; net prescribed reaction.",
+      "tolerance": "Heat flow within relative 1e-8 of $kA\\,\\Delta T/L$; the net reaction cancels to 1e-8 of it."
+    },
+    {
+      "id": "tet10-thermal-patch",
+      "area": "thermal",
+      "analysis": "Steady",
+      "capability": "thermal.static",
+      "title": "Tet10 conduction patch test",
+      "problem": "A single quadratic tetrahedron under a linear temperature field.",
+      "reference": "Constant-gradient patch: conductivity rows sum to zero, the gradient is exactly (2, 3, −1), the flux is $-k\\nabla T$, and the integrated capacity equals $\\rho c_p V$.",
+      "quantity": "Conductivity row sums, temperature gradient, heat flux, integrated capacity.",
+      "tolerance": "Relative 1e-12."
     },
     {
       "id": "radiating-bar",
       "area": "thermal",
+      "analysis": "Steady",
+      "capability": "thermal.static",
       "title": "Radiating bar",
-      "narrative": "validation/cases/radiating-bar.md",
-      "references": [
-        "Gray-surface radiation q = εσ(T⁴ − T∞⁴) with conduction qL/k"
-      ],
-      "receipts": [],
-      "tests": [
-        "radiating_bar_matches_the_gray_surface_closed_form_and_balances_power"
-      ]
+      "problem": "A 1 m steel bar ($k$ = 45 W/m/K) takes 1000 W/m² on one end and radiates from the other ($\\varepsilon$ = 0.8, 300 K surroundings). The public example is [radiating-bar.fea](../examples/radiating-bar.fea); the test runs the same bar on Tet4 and Tet10 meshes.",
+      "reference": "Gray-surface radiation at the radiating end, $q = \\varepsilon\\sigma_{SB}(T^4 - T_\\infty^4)$, and conduction $qL/k$ across the bar.",
+      "quantity": "Temperatures at both ends and along the bar; applied and radiated power.",
+      "tolerance": "Nodal temperature within relative 1e-8 of the closed form; applied power equals radiated power.",
+      "result": "RunMat gives 416.6790 K at the radiating end and 438.9013 K at the heated end; the closed form gives the same values to 1e-12. 10 W applied, 10 W radiated."
+    },
+    {
+      "id": "hot-slab-radiation",
+      "area": "thermal",
+      "analysis": "Steady",
+      "capability": "thermal.static",
+      "title": "Slab radiating from a fixed hot face",
+      "problem": "A slab held at 400 K on one face radiates from the opposite face; Tet4 and Tet10.",
+      "reference": "The scalar gray-surface equilibrium of the slab, solved independently by bisection.",
+      "quantity": "Nodal temperature, gradient and flux; radiated power against conducted power.",
+      "tolerance": "Temperature, gradient and flux within relative 1e-8; radiated power equals the prescribed-face power within 1e-8."
+    },
+    {
+      "id": "ramp-heating",
+      "area": "thermal",
+      "analysis": "Transient",
+      "capability": "thermal.transient",
+      "title": "Uniformly heated insulated body",
+      "problem": "An insulated body with uniform volumetric heating, integrated with backward Euler on Tet4 and Tet10 meshes.",
+      "reference": "The continuum temperature history of the heated body and its stored-energy law: storage rate equals applied power.",
+      "quantity": "Temperature at every step; applied, stored and boundary power.",
+      "tolerance": "Discrete solution within 1e-8; error equals the backward-Euler term $B\\,t_f\\,\\Delta t$ within 1e-8 and falls at first order (ratio below 0.56 per halving); storage rate equals applied power within 1e-8; energy residual below 1e-10."
+    },
+    {
+      "id": "radiating-cooling",
+      "area": "thermal",
+      "analysis": "Transient",
+      "capability": "thermal.transient",
+      "title": "Manufactured radiative cooling",
+      "problem": "A body cooling by surface radiation under a manufactured solution, on Tet4 and Tet10 meshes with 8, 16 and 32 backward-Euler steps.",
+      "reference": "The manufactured temperature history and its gradient, flux and stored heat.",
+      "quantity": "Temperature, gradient, heat flux and storage; power closure.",
+      "tolerance": "Every error falls by more than 1.8× per halving of the step (first order); power closes."
+    },
+    {
+      "id": "slab-capacitor-conductor",
+      "area": "electromagnetic",
+      "analysis": "Electrostatics and steady current",
+      "capability": "electromagnetic.static",
+      "title": "Homogeneous slab capacitor and conductor",
+      "problem": "A homogeneous slab between two terminals, solved as a capacitor (electrostatics) and as a conductor (steady current) on Tet4 and Tet10 meshes.",
+      "reference": "Parallel-plate closed form: linear potential, uniform field, terminal charge or current, stored energy and Joule power.",
+      "quantity": "Nodal potential, field, terminal flux, energy, Joule power.",
+      "tolerance": "Potential and field within 1e-8; flux imbalance and energy identity below 1e-8; energy and displacement field within relative 1e-8."
+    },
+    {
+      "id": "layered-slab",
+      "area": "electromagnetic",
+      "analysis": "Electrostatics and steady current",
+      "capability": "electromagnetic.static",
+      "title": "Two-material slab in series",
+      "problem": "A slab of two aligned materials between two terminals, on Tet4 and Tet10 meshes.",
+      "reference": "Series capacitance and series resistance, with continuous normal flux across the interface.",
+      "quantity": "Potential, energy, Joule power, interface flux.",
+      "tolerance": "Relative 1e-8."
+    },
+    {
+      "id": "harmonic-polynomial-potential",
+      "area": "electromagnetic",
+      "analysis": "Electrostatics and steady current",
+      "capability": "electromagnetic.static",
+      "title": "Harmonic polynomial potential",
+      "problem": "The harmonic potential $x^2 - y^2$, solved with both the electrostatic and the conduction equation; Tet10 on one mesh and Tet4 on three.",
+      "reference": "The exact field $(-2x, 2y, 0)$ and energy of the harmonic polynomial.",
+      "quantity": "Field and energy.",
+      "tolerance": "Tet10: field and energy exact to relative 1e-8. Tet4: field error falls below 0.6 of the previous mesh at each refinement."
+    },
+    {
+      "id": "charged-slab",
+      "area": "electromagnetic",
+      "analysis": "Electrostatics and steady current",
+      "capability": "electromagnetic.static",
+      "title": "Uniformly charged dielectric slab",
+      "problem": "A dielectric slab with uniform volume charge on three Tet4 meshes.",
+      "reference": "Closed form: quadratic potential, linear field, conserved charge and energy $\\varepsilon/6$ in the fixture's units.",
+      "quantity": "Potential, field and energy errors; flux imbalance.",
+      "tolerance": "Per refinement: potential error order above 1.7, field order above 0.8, energy error below 0.35 of the previous mesh. Finest mesh: potential below 0.005, field below 0.1, energy below 0.025. Flux imbalance below 1e-9.",
+      "result": "Potential error 4.6e-2, 1.1e-2, 2.9e-3; field error 0.29, 0.14, 0.072; energy error 0.25, 0.063, 0.016."
+    },
+    {
+      "id": "copper-bar-current",
+      "area": "electromagnetic",
+      "analysis": "Electrostatics and steady current",
+      "capability": "electromagnetic.static",
+      "title": "Steady current in a copper bar",
+      "problem": "A 1 m copper bar ($\\sigma$ = 59.6 MS/m) with 1 mV across its ends; Tet10.",
+      "reference": "Uniform current density $J = \\sigma V/L$ and Joule power $P = V^2/R$.",
+      "quantity": "Current density; Joule power from the loss density and from the terminal current.",
+      "tolerance": "Relative 1e-9.",
+      "result": "Peak current density 59 600.000 A/m² against 59 600 A/m² (relative difference 1e-13); Joule power 0.596000 W against 0.596 W (1e-14)."
+    },
+    {
+      "id": "square-conductor-magnetostatic",
+      "area": "electromagnetic",
+      "analysis": "Magnetostatics",
+      "capability": "electromagnetic.static",
+      "title": "Magnetic field of a square conductor",
+      "problem": "A square conductor carries a uniform axial current density and is grounded on every exterior face; Tet4 and Tet10 geometry with the lowest-order edge basis, three meshes per order.",
+      "reference": "An independent Fourier-series solution for the vector potential, flux density and energy; the series tail is bounded by $8/(3\\pi^4N^3)$ at N = 255 terms.",
+      "quantity": "Vector potential, flux density and magnetic energy.",
+      "tolerance": "Each error falls by more than 1.4× per refinement. Finest mesh: potential below 0.02, flux density below 0.10, energy below 0.25. Physical and gauge residuals below 8e-10.",
+      "result": "Flux-density error 0.166, 0.116, 0.064 and energy error 0.80, 0.39, 0.12 on 1, 2 and 4 cells."
+    },
+    {
+      "id": "skin-effect",
+      "area": "electromagnetic",
+      "analysis": "Harmonic",
+      "capability": "electromagnetic.harmonic",
+      "title": "Skin effect in a driven conductor",
+      "problem": "A conducting strip ($W$ = 1 mm, $L$ = 2 mm, $t$ = 1 mm, $\\sigma$ = 1 MS/m) under an air gap $g$ = 0.5 mm, returned through a grounded plane, is driven by a 2 A terminal current at $t/\\delta$ = 0.5, 2 and 4 with 8, 16 and 32 cells through the thickness and along the current.",
+      "reference": "Parallel-plate line impedance $Z = \\frac{L}{W}\\left[\\frac{k\\coth(kt)}{\\sigma} + i\\omega\\mu_0 g\\right]$ with $k = (1+i)/\\delta$ and $\\delta = \\sqrt{2/\\omega\\mu_0\\sigma}$.",
+      "quantity": "Terminal impedance $Z = U/I$; Joule loss against delivered power; Poynting balance and charge continuity.",
+      "tolerance": "Impedance error below 2e-3 at 32 cells and reduced by more than 3× from 8 to 32 cells; Joule loss equals $\\tfrac12\\mathrm{Re}(U\\bar I)$ within 1e-8; Poynting and charge-continuity residuals below 1e-8.",
+      "result": "Relative impedance error at 8, 16 and 32 cells: 4.2e-4, 1.0e-4, 2.6e-5 at $t/\\delta$ = 0.5; 7.3e-3, 1.8e-3, 4.5e-4 at 2; 1.6e-2, 3.9e-3, 9.8e-4 at 4. The error falls fourfold per refinement.",
+      "citation": "(S. Ramo, J. R. Whinnery and T. Van Duzer, *Fields and Waves in Communication Electronics*, 3rd ed., Wiley, 1994.)"
+    },
+    {
+      "id": "low-frequency-strip",
+      "area": "electromagnetic",
+      "analysis": "Harmonic",
+      "capability": "electromagnetic.harmonic",
+      "title": "Low-frequency limit of a driven strip",
+      "problem": "The strip of the skin-effect check, voltage driven at 1 Hz.",
+      "reference": "DC resistance $L/(\\sigma W t)$ and the low-frequency gap inductance.",
+      "quantity": "Real and imaginary parts of the terminal impedance.",
+      "tolerance": "Resistance within relative 1e-6; reactance within relative 2e-2."
+    },
+    {
+      "id": "rigid-cavity-modes",
+      "area": "acoustic",
+      "analysis": "Modal",
+      "capability": "acoustic.modal",
+      "title": "Rigid rectangular cavity modes",
+      "problem": "A rigid-walled cube cavity. The kernel test uses quadratic meshes with 2, 3 and 4 cells per side and a linear mesh with 2 and 4; the public-study test runs a 1 m cube through the command line.",
+      "reference": "Rectangular-cavity frequencies $f_{lmn} = \\frac{c}{2}\\sqrt{(l/L_x)^2 + (m/L_y)^2 + (n/L_z)^2}$, including the zero-frequency uniform mode and degenerate triplets; for the 1 m cube the first axial mode is $c/2L$ = 171.5 Hz.",
+      "quantity": "First eight natural frequencies; residuals and mass orthogonality.",
+      "tolerance": "Quadratic: error ratio above 2.5 per refinement and below 4e-3 at 4 cells, residuals at most 1e-8, mass orthogonality below 1e-8. Linear: error ratio above 3 from 2 to 4 cells. Command line: uniform mode below 1e-3 Hz and the three axial modes within 2 % of 171.5 Hz.",
+      "citation": "(L. E. Kinsler, A. R. Frey, A. B. Coppens and J. V. Sanders, *Fundamentals of Acoustics*, 4th ed., Wiley, 2000.)"
+    },
+    {
+      "id": "open-open-duct-modes",
+      "area": "acoustic",
+      "analysis": "Modal",
+      "capability": "acoustic.modal",
+      "title": "Open–open duct modes",
+      "problem": "A duct with pressure-release ends; Tet10.",
+      "reference": "Open–open duct frequencies $f_n = nc/2L$, with no rigid mode and zero pressure on the released ends.",
+      "quantity": "First five natural frequencies; modal pressure on the released nodes.",
+      "tolerance": "Relative 4e-3; released-node pressure exactly zero."
+    },
+    {
+      "id": "matched-duct-power",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Sound power through a matched duct end",
+      "problem": "A plane wave travels down a duct to an anechoic (matched) end.",
+      "reference": "Plane-wave power $|p|^2A/2\\rho c$.",
+      "quantity": "Power through the matched end; accounted input power.",
+      "tolerance": "Relative 1e-3 (0.1 %)."
+    },
+    {
+      "id": "layer-transmission-loss",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Transmission loss of a plane layer",
+      "problem": "A plane layer between an incident port and an anechoic port, at several frequencies, on two meshes.",
+      "reference": "Closed-form plane-wave transmission loss of the layer at each frequency.",
+      "quantity": "Transmission loss.",
+      "tolerance": "Below 0.05 dB on the finer mesh at every frequency, and no larger than on the coarse mesh."
+    },
+    {
+      "id": "two-fluid-interface",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Plane wave across a two-fluid interface",
+      "problem": "A plane wave crosses the interface between two fluids in an aligned slab. The public example runs the same interface with impedance ratio m = 4 at 500, 1000 and 2000 Hz.",
+      "reference": "Plane-wave reflection and transmission at the interface; for m = 4 the transmission loss is 1.938 dB.",
+      "quantity": "Pressure, mean velocity and transmitted power; transmission loss of the public example.",
+      "tolerance": "Kernel: power residual below 1e-8; finest-mesh pressure error below 0.004 of the incident amplitude and velocity error below 0.01. Public example: within 0.1 dB of 1.938 dB."
+    },
+    {
+      "id": "damped-duct",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Lossy duct standing wave",
+      "problem": "A duct with loss factor 2ζ driven at one end.",
+      "reference": "The complex-wavenumber standing wave and the power it dissipates.",
+      "quantity": "Nodal complex pressure; dissipated against input power.",
+      "tolerance": "Pressure error ratio above 3 per refinement and below 0.004 on the finest mesh; power error below 1e-9."
+    },
+    {
+      "id": "impedance-termination",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Duct with a complex impedance termination",
+      "problem": "A duct terminated by a tabulated complex impedance; Tet4.",
+      "reference": "The two-wave duct solution for the termination's reflection coefficient.",
+      "quantity": "Nodal complex pressure; dissipated against input power.",
+      "tolerance": "Pressure error ratio above 3 per refinement and below 0.004 on the finest mesh; power error below 1e-9."
+    },
+    {
+      "id": "traveling-wave",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Plane traveling wave",
+      "problem": "A Tet10 slab carrying a plane traveling wave at two frequencies, three refinements.",
+      "reference": "The exact traveling wave: pressure phase, particle velocity, intensity and energy.",
+      "quantity": "Pressure, velocity, intensity and energy; power balance.",
+      "tolerance": "Pressure error below 0.004; velocity RMS error below 0.01; intensity and energy RMS errors below 0.005; residual below 1e-10 and power error below 1e-8."
+    },
+    {
+      "id": "forced-cavity",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Forced axial cavity near resonance",
+      "problem": "A rigid cavity forced axially at 0.9 and 1.1 times its first resonance, on Tet4 and Tet10 meshes.",
+      "reference": "The closed-form forced standing wave and its acoustic energy.",
+      "quantity": "Pressure phase and amplitude; acoustic energy.",
+      "tolerance": "Finest-mesh pressure error below 0.10; energy RMS error below 0.15; power error below 1e-8."
+    },
+    {
+      "id": "incident-impedance",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Incident wave on an impedance boundary",
+      "problem": "A planar incident wave meets an impedance boundary with reflection coefficient 7/13.",
+      "reference": "Plane-wave reflection: net power $\\frac{|p|^2}{2\\rho c}(1 - R^2)$, with the reflected pressure and velocity.",
+      "quantity": "Pressure, velocity and net power.",
+      "tolerance": "Pressure error below 0.004 of the incident amplitude; velocity below 0.01; intensity terms below 0.005; power error below 1e-8."
+    },
+    {
+      "id": "periodic-plane-wave",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Plane wave across periodic boundaries",
+      "problem": "An anchored slab carries a plane wave across declared pairs of periodic planes.",
+      "reference": "The exact plane wave with Bloch phase across each periodic pair.",
+      "quantity": "Pressure, mean velocity and signed intensity.",
+      "tolerance": "Pressure error below 0.004; velocity below 0.01; intensity below 0.005."
+    },
+    {
+      "id": "local-radiation",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Plane-wave radiation boundary",
+      "problem": "A slab closed by a local plane-wave radiation boundary.",
+      "reference": "Plane-wave impedance $\\rho c$: inlet and outlet power $|p|^2/2\\rho c$ with the exact phase.",
+      "quantity": "Pressure phase, mean velocity and signed power at inlet and outlet.",
+      "tolerance": "Power within 0.005; velocity error below 0.01; residual below 1e-10 and power error below 1e-8."
+    },
+    {
+      "id": "volume-velocity-source",
+      "area": "acoustic",
+      "analysis": "Harmonic",
+      "capability": "acoustic.harmonic",
+      "title": "Volume-velocity source",
+      "problem": "Slabs of several cross-sectional areas driven by a total volume flow.",
+      "reference": "The plane wave set by the volume velocity, with pressure scaling as 1/A.",
+      "quantity": "Pressure, velocity and power against area and phase.",
+      "tolerance": "Pressure error below 0.004·√1.16/A; velocity below 0.01/A; power error below 1e-8."
+    },
+    {
+      "id": "plane-poiseuille",
+      "area": "fluid",
+      "analysis": "Steady",
+      "capability": "fluid.static",
+      "title": "Plane Poiseuille pressure drop",
+      "problem": "Fully developed laminar flow between parallel plates, refined in the kernel test. The public example has L/h = 30 at Re = 1.",
+      "reference": "Fully developed pressure drop $\\Delta p = 12\\mu\\bar UL/h^2$; 36 Pa for the public example.",
+      "quantity": "Difference of the face-mean pressure between inlet and outlet.",
+      "tolerance": "Kernel: relative error below 5 % and decreasing with refinement. Public example: between 34.2 and 37.8 Pa (5 %), which contains the uniform inlet's entrance loss of about +3 %.",
+      "citation": "(F. M. White, *Viscous Fluid Flow*, 3rd ed., McGraw-Hill, 2006.)"
+    },
+    {
+      "id": "couette",
+      "area": "fluid",
+      "analysis": "Steady",
+      "capability": "fluid.static",
+      "title": "Couette flow",
+      "problem": "Flow between a moving and a fixed wall on canonical tetrahedra.",
+      "reference": "The linear Couette profile, its uniform vorticity and its wall shear stress $\\mu U/h$.",
+      "quantity": "Velocity field, wall shear on both walls, vorticity, global momentum.",
+      "tolerance": "Velocity relative L2 error below 0.25; wall shear within 0.25; global momentum below 1e-6. For the exact linear field, vorticity and wall shear within 1e-6.",
+      "citation": "(F. M. White, *Viscous Fluid Flow*, 3rd ed., McGraw-Hill, 2006.)"
+    },
+    {
+      "id": "rectangular-duct",
+      "area": "fluid",
+      "analysis": "Steady",
+      "capability": "fluid.static",
+      "title": "Fully developed flow in a rectangular duct",
+      "problem": "Pressure-driven laminar flow in a rectangular duct, three refinements.",
+      "reference": "Fourier-series solution for the velocity, flow rate and wall shear; the series tail is below 1e-5 at 255 terms.",
+      "quantity": "Velocity L2 error, flow rate, wall shear.",
+      "tolerance": "Each error decreases with refinement; finest velocity error below 0.35 and flow-rate error below 0.25; boundary flux below 1e-8.",
+      "citation": "(F. M. White, *Viscous Fluid Flow*, 3rd ed., McGraw-Hill, 2006.)"
+    },
+    {
+      "id": "darcy-forchheimer",
+      "area": "fluid",
+      "analysis": "Steady",
+      "capability": "fluid.static",
+      "title": "Uniform flow through a porous zone",
+      "problem": "Uniform flow through a porous slab.",
+      "reference": "Darcy–Forchheimer pressure gradient $\\mu U/K + \\tfrac12\\rho C_2U^2$.",
+      "quantity": "Velocity and pressure gradient.",
+      "tolerance": "Relative 1e-6.",
+      "citation": "(D. A. Nield and A. Bejan, *Convection in Porous Media*, 5th ed., Springer, 2017.)"
+    },
+    {
+      "id": "power-law-channel",
+      "area": "fluid",
+      "analysis": "Steady",
+      "capability": "fluid.static",
+      "title": "Shear-thinning channel flow",
+      "problem": "Pressure-driven channel flow of a power-law fluid with n = 0.5, three refinements.",
+      "reference": "The closed-form power-law channel velocity profile.",
+      "quantity": "Velocity profile error.",
+      "tolerance": "Error decreases with refinement and is below 5 % on the finest mesh."
+    },
+    {
+      "id": "uniform-acceleration",
+      "area": "fluid",
+      "analysis": "Transient",
+      "capability": "fluid.transient",
+      "title": "Uniformly accelerating flow",
+      "problem": "A uniform flow accelerated at a constant rate, at two reference pressures.",
+      "reference": "The exact inertia-driven pressure gradient $-\\rho\\,dU/dt$.",
+      "quantity": "Velocity and pressure gradient.",
+      "tolerance": "Velocity within 1e-8; pressure gradient within 1e-6."
+    },
+    {
+      "id": "exponential-translation",
+      "area": "fluid",
+      "analysis": "Transient",
+      "capability": "fluid.transient",
+      "title": "Exponentially decaying translation",
+      "problem": "A uniform translation decaying as $e^{-t}$, solved with three time steps.",
+      "reference": "The exact pressure gradient of the decaying translation.",
+      "quantity": "Volume-weighted pressure-gradient error.",
+      "tolerance": "Error falls below 0.6 of its previous value at each halving of the step (first order) and is below 0.02 at the finest step."
+    },
+    {
+      "id": "two-way-joule-heating",
+      "area": "electrothermal",
+      "analysis": "Steady",
+      "capability": "electrothermal.static",
+      "title": "Two-way Joule heating of a bar",
+      "problem": "A bar with resistivity $\\rho(T) = \\rho_0(1 + \\alpha(T - T_0))$ carries a fixed current with its ends held at $T_0$ and its sides insulated: $\\sigma_0$ = 3 S/m, $\\alpha$ = 0.004 /K, $k$ = 1 W/m/K, $I$ = 34.64 A on a unit cube, Tet10 with 2, 4 and 8 cells.",
+      "reference": "The temperature rise $\\theta$ solves $\\theta'' + \\beta(1 + \\alpha\\theta) = 0$ with $\\beta = J^2\\rho_0/k$; closed form $\\theta(x) = \\frac{1}{\\alpha}\\left(\\frac{\\cos(m(x - L/2))}{\\cos(mL/2)} - 1\\right)$ with $m^2 = \\alpha\\beta$, and power $\\int I^2\\rho(T)/A\\,dx$.",
+      "quantity": "Nodal temperature; Joule power against terminal power and against $I^2R(T)$.",
+      "tolerance": "At least three coupling sweeps; temperature error falls at second order; terminal power equals the Joule integral within 1e-8; power within 0.5 % of $I^2R(T)$.",
+      "result": "Largest temperature error 2.21, 0.575 and 0.150 K at 2, 4 and 8 cells, against a 59.95 K peak rise; Joule power 461.47, 462.88 and 463.35 W against 463.52 W."
+    },
+    {
+      "id": "one-way-joule-slab",
+      "area": "electrothermal",
+      "analysis": "Steady",
+      "capability": "electrothermal.static",
+      "title": "Joule heating of a slab, one way",
+      "problem": "A slab of constant conductivity dissipates 12 W, which drives a steady thermal solve on the same mesh; Tet4 and Tet10.",
+      "reference": "The quadratic temperature profile of uniform heat generation, and 12 W at the terminals, in the transfer and at the thermal boundary.",
+      "quantity": "Terminal, transferred and boundary power; nodal temperature.",
+      "tolerance": "Power within 1e-8 W; Tet10 temperature within 1e-8; Tet4 interior error below 0.35 of the coarse mesh after one refinement."
     },
     {
       "id": "clamped-bar-thermal-stress",
       "area": "thermomechanical",
+      "analysis": "Static",
+      "capability": "thermomechanical.static",
       "title": "Thermal stress in a clamped bar",
-      "narrative": "validation/cases/clamped-bar-thermal-stress.md",
-      "references": [
-        "Axial stress EαΔT for a fully restrained bar"
-      ],
-      "receipts": [],
-      "tests": []
+      "problem": "The 1 m steel bar of [thermal-stress-static.fea](../examples/thermal-stress-static.fea), clamped at both ends and held at 373.15 K, 80 K above its reference temperature; Tet10 at 50 mm.",
+      "reference": "A fully restrained one-dimensional bar: axial stress $E\\alpha\\Delta T$ = 192 MPa and clamp reaction $EA\\alpha\\Delta T$ = 1920 kN.",
+      "quantity": "Nodal von Mises stress at the center of the bar; axial reaction on a clamped face.",
+      "tolerance": "None set; the receipts record each value. The clamps also restrain lateral expansion, which raises the stress above the one-dimensional value.",
+      "receipts": [
+        "heated-bar-thermal-stress#mid-von-mises",
+        "heated-bar-thermal-stress#clamp-reaction"
+      ]
+    },
+    {
+      "id": "thermal-eigenstrain",
+      "area": "thermomechanical",
+      "analysis": "Static",
+      "capability": "thermomechanical.static",
+      "title": "Thermal eigenstrain in a single element",
+      "problem": "A single Tet4 or Tet10 element with a uniform and with a linear temperature change, free to expand and fully restrained.",
+      "reference": "Free expansion: strain $\\alpha\\Delta T$ and no stress. Full restraint: stress $-E\\alpha\\Delta T/(1 - 2\\nu)$ and the matching strain energy.",
+      "quantity": "Strain, stress and strain-energy density.",
+      "tolerance": "Free strain within 1e-12 and free stress below 2e-3. Restrained stress within 1e-5 for the uniform change and relative 1e-12 for the linear change; energy within relative 1e-12."
+    },
+    {
+      "id": "cht-pipe-nusselt",
+      "area": "conjugate-heat-transfer",
+      "analysis": "Steady",
+      "capability": "conjugate-heat-transfer.static",
+      "title": "Heated pipe wall in fully developed laminar flow against the Nusselt numbers 3.66 (constant wall temperature) and 4.364 (constant heat flux)",
+      "problem": "Fully developed laminar flow in a pipe with a heated wall.",
+      "reference": "Nusselt numbers 3.66 at constant wall temperature and 4.364 at constant heat flux.",
+      "quantity": "Nusselt number from the wall heat flux and bulk temperature.",
+      "tolerance": "Set when the check is built.",
+      "status": "planned",
+      "citation": "(R. K. Shah and A. L. London, *Laminar Flow Forced Convection in Ducts*, Academic Press, 1978.)"
+    },
+    {
+      "id": "fsi-turek-hron",
+      "area": "fluid-structure-interaction",
+      "analysis": "Transient",
+      "capability": "fluid-structure-interaction.transient",
+      "title": "Turek–Hron FSI1, FSI2 and FSI3 flap tip displacement and forces",
+      "problem": "An elastic flap behind a cylinder in laminar channel flow.",
+      "reference": "The Turek–Hron FSI1, FSI2 and FSI3 tip displacements and forces, within the published scatter.",
+      "quantity": "Flap tip displacement; drag and lift.",
+      "tolerance": "Within the published scatter.",
+      "status": "planned",
+      "citation": "(S. Turek and J. Hron, \"Proposal for numerical benchmarking of fluid-structure interaction between an elastic object and laminar incompressible flow,\" in *Fluid-Structure Interaction*, Lecture Notes in Computational Science and Engineering 53, Springer, 2006, pp. 371–385.)"
     }
   ],
   "claims": [
@@ -5015,6 +5382,12 @@
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:24",
       "capability": "Page-shown syntax: TL, sound power, impedance tables, normal velocity from state, pressure drop, buoyancy, carreau and power_law, sampled waveforms, WSS and OSI, species and transport, porous, lubrication family, heat_generation in W, rpm, fractional-power units, mass_flow_rate sweeps",
       "maps": "FEA-PUBLIC-LANGUAGE-001/output_expression_forms|FEA-PUBLIC-LANGUAGE-001/input_forms|FEA-PUBLIC-LANGUAGE-001/unit_and_source_forms"
+    },
+    {
+      "id": "SIMPAGES-14",
+      "source": "sister-comms/2026-11-05-fea-to-private-simulation-pages-plan.md:30",
+      "capability": "Thermal stress over a time history (thermomechanical transient, e.g. one braking stop)",
+      "maps": "FEA-COUPLING-THERMOELASTIC-002/*"
     }
   ],
   "requirements": [

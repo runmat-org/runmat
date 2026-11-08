@@ -77,7 +77,7 @@ fn reference_energy(mu_j2: f64, maximum: usize) -> f64 {
 //   Tet4 to roundoff; no higher-order magnetic convergence or force evidence.
 // witness: FEA-EM-QUALIFICATION-001/references @ magnetostatic/tet4|tet10/numerical_kernel;
 //   coverage: partial;
-//   boundary: Magnetostatic reference: uniform-current square conductor against the Fourier
+//   check: square-conductor-magnetostatic; boundary: Magnetostatic reference: uniform-current square conductor against the Fourier
 //   series with mesh convergence of potential, flux density and energy on Tet4 and Tet10
 //   geometry; no magnetic material interface or gap reference.
 #[test]

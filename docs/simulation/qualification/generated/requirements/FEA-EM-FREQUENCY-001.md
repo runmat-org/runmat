@@ -9,7 +9,7 @@ Evidence kind: PublicRun. Criterion: A single study runs 3, 10 and 30 kHz (or an
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | harmonic_maxwell | edge_elements | numerical_kernel | OPEN |  |
-| harmonic_maxwell | edge_elements | public_study | FAIL | `runmat[test:check_cli]::induction_gear_example_runs_its_three_frequency_harmonic_study` (crates/runmat-cli/tests/check_cli.rs:1265) - The induction-gear example runs three authored frequencies with a current-driven coil terminal from `runmat run`, one case per frequency, to a completed, numeri... |
+| harmonic_maxwell | edge_elements | public_study | FAIL | `runmat[test:check_cli]::induction_gear_example_runs_its_three_frequency_harmonic_study` (crates/runmat-cli/tests/check_cli.rs:1271) - The induction-gear example runs three authored frequencies with a current-driven coil terminal from `runmat run`, one case per frequency, to a completed, numeri... |
 
 ## skin_effect_reference
 

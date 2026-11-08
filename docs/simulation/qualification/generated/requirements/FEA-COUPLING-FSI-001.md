@@ -8,7 +8,7 @@ Evidence kind: PhysicalBalance. Criterion: Resolve exact interface sides and con
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| fluid_structure_interaction | canonical_mixed_topology | public_study | FAIL | `runmat[test:check_cli]::fsi_compliant_tube_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1237) - The compliant-tube example runs steady two-way FSI from `runmat run` to a completed, numerically acceptable run. |
+| fluid_structure_interaction | canonical_mixed_topology | public_study | FAIL | `runmat[test:check_cli]::fsi_compliant_tube_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1243) - The compliant-tube example runs steady two-way FSI from `runmat run` to a completed, numerically acceptable run. |
 
 ## motion
 
