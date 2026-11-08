@@ -51,6 +51,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
     .unwrap();
     let metric_request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -439,6 +440,7 @@ fn authoritative_spherical_octant_runs_the_complete_face_partition() {
     );
     let metric_request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,

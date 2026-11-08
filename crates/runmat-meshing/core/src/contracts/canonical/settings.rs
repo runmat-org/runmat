@@ -140,6 +140,7 @@ pub fn resolve_meshing_request(
         tolerance,
         metric: MetricFieldRequest {
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: metric,
             maximum_grading_ratio: settings.maximum_grading_ratio,

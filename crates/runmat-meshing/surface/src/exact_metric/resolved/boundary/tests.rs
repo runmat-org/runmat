@@ -40,6 +40,7 @@ fn boundary_support_preserves_edge_local_tensors_instead_of_using_the_face_envel
     };
     let request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(10.).unwrap(),
         maximum_grading_ratio: 1.3,

@@ -99,6 +99,7 @@ fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusio
         let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
         let request = MetricFieldRequest {
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(1.).unwrap(),
             maximum_grading_ratio: 1.3,
