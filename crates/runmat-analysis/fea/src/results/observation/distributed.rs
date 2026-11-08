@@ -1,5 +1,7 @@
 mod combination;
+mod payload_bound;
 pub(crate) use combination::combine_observation_partitions;
+pub use payload_bound::ObservationPartitionPayloadCapacity;
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{AnalysisField, AnalysisModel, ObservationId, SpatialReduction};

@@ -391,15 +391,11 @@ fn finalization_resource_plan_bounds_outputs_and_rejects_missing_series() {
         decoded_resident_bytes_admission_budget: ByteCount(8 * 1024 * 1024),
     };
     let history_bound =
-        observation_history_finalization_payload_bytes_upper_bound(&request, &checkpoint, &inputs)
+        observation_history_finalization_payload_bytes_upper_bound(&request, &checkpoint).unwrap();
+    let series_bound =
+        observation_history_series_reduction_payload_bytes_upper_bound(&request, &checkpoint)
+            .unwrap()
             .unwrap();
-    let series_bound = observation_history_series_reduction_payload_bytes_upper_bound(
-        &request,
-        &checkpoint,
-        &inputs,
-    )
-    .unwrap()
-    .unwrap();
     let history_output = projected_canonical_output_resource_facts(history_bound).unwrap();
     let series_output = projected_canonical_output_resource_facts(series_bound).unwrap();
     let output_set = PreparedOutputSetResourceFacts {
@@ -706,4 +702,90 @@ fn thermal_catalog_validation_fits_its_source_validation_law() {
     assert!(catalog
         .thermal_source_validation_resident_bytes_admitted(&workload, &mesh, law - 1)
         .is_err());
+}
+
+#[test]
+fn thermal_finalization_peak_fits_its_source_law_workspace() {
+    use crate::planning::resource::*;
+    let (workload, mesh, plan, catalog, checkpoint) =
+        fixture(RetentionPolicy::Canonical, SeriesReduction::Maximum);
+    let ObservationFieldCatalogSource::Thermal { manifest } = catalog.source() else {
+        unreachable!()
+    };
+    let context = ObservationHistorySourceContext::Thermal {
+        workload: &workload,
+        mesh: &mesh,
+    };
+    let request = ObservationHistoryFinalizationRequest::new(
+        plan.clone(),
+        manifest.producer,
+        ObservationId("temperature_history".into()),
+        &checkpoint,
+        &catalog,
+        context,
+    )
+    .unwrap();
+    let history_bound =
+        observation_history_finalization_payload_bytes_upper_bound(&request, &checkpoint).unwrap();
+    let series_bound =
+        observation_history_series_reduction_payload_bytes_upper_bound(&request, &checkpoint)
+            .unwrap()
+            .unwrap();
+    // The decoded inputs are reserved separately; one more copy is in the workspace. The
+    // checkpoint's canonical size stands in for the decoded inputs here (the measured
+    // finalization copies the checkpoint once).
+    let decoded = checkpoint.canonical_bytes().unwrap().len() as u64 * 25;
+    let inputs = PreparedInputResourceFacts {
+        encoded_payload_bytes: ByteCount(decoded),
+        transport_closure_bytes: ByteCount(decoded),
+        decoded_resident_bytes_admission_budget: ByteCount(decoded),
+    };
+    let resources = build_observation_history_finalization_resource_plan(
+        &request,
+        &checkpoint,
+        &catalog,
+        context,
+        PreparedPhaseResourceFacts {
+            inputs,
+            output: projected_canonical_output_resource_facts(history_bound).unwrap(),
+            output_set: PreparedOutputSetResourceFacts {
+                encoded_bytes_upper_bound: ByteCount(1024 * 1024),
+            },
+        },
+        Some(projected_canonical_output_resource_facts(series_bound).unwrap()),
+    )
+    .unwrap();
+    let crate::planning::resource::FeaResourceDemand::ObservationHistoryFinalization(demand) =
+        &resources.input.demand
+    else {
+        unreachable!()
+    };
+    let workspace = demand.workspace_bytes_upper_bound.0;
+    let law = crate::results::observation::thermal_source_validation_resident_bytes(
+        &workload,
+        manifest,
+        &plan,
+        &mesh,
+        u64::MAX,
+    )
+    .unwrap();
+    let ((), _, peak) = crate::topology::measure_test_allocations(|| {
+        request
+            .validate_inputs(&checkpoint, &catalog, context)
+            .unwrap();
+        let finalized = request
+            .finalize(checkpoint.clone(), &catalog, context)
+            .unwrap();
+        std::hint::black_box(&finalized);
+    });
+    println!(
+        "thermal finalization peak={peak} workspace={workspace} source_law={law} \
+         history_bound={history_bound} series_bound={series_bound}"
+    );
+    assert!(
+        peak as u64 <= workspace,
+        "finalization peak {peak} exceeds workspace {workspace}"
+    );
+    // The source law replaces four decoded copies; it does not scale with the decoded inputs.
+    assert!(workspace < law + 2 * decoded + history_bound + series_bound + 1024 * 1024);
 }

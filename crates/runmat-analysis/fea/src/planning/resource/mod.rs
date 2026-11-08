@@ -165,9 +165,9 @@ pub use thermal_metadata::ThermalMetadataResourceFacts;
 mod thermal_observations;
 pub use thermal_observations::ThermalObservationResourceFacts;
 mod thermal_operator;
-pub use thermal_operator::{ThermalOperatorResourceFacts, ThermalSolvePath};
 #[cfg(test)]
 pub(crate) use thermal_operator::tests as thermal_operator_tests;
+pub use thermal_operator::{ThermalOperatorResourceFacts, ThermalSolvePath};
 mod thermal_preassembly;
 mod thermal_realization;
 pub use thermal_realization::ThermalRealizationResourceFacts;
@@ -248,6 +248,7 @@ pub use post_process::{
     observation_reduction_payload_bytes_upper_bound,
     structural_frequency_receipt_payload_bytes_upper_bound,
     structural_frequency_result_payload_bytes_upper_bound, ObservationPartitionResourcePlanning,
+    ObservationPartitionSourceWorkspace,
 };
 #[cfg(test)]
 pub(crate) use preflight::build_static_resource_plan;

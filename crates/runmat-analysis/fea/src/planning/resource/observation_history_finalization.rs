@@ -1,6 +1,6 @@
 //! Admission bounds for finalizing an existing checkpoint, never a second solve.
 use super::post_process::{
-    derived_output_payload_bytes_upper_bound, post_process_ceiling, post_process_worker,
+    copied_output_payload_bytes_upper_bound, post_process_ceiling, post_process_worker,
     validate_projected_output,
 };
 use super::{
@@ -43,7 +43,6 @@ fn values(checkpoint: &ObservationHistoryCheckpoint) -> Result<u64, ResourcePlan
 pub fn observation_history_finalization_payload_bytes_upper_bound(
     request: &ObservationHistoryFinalizationRequest,
     checkpoint: &ObservationHistoryCheckpoint,
-    inputs: &PreparedInputResourceFacts,
 ) -> Result<u64, ResourcePlanningError> {
     request.validate().map_err(invalid)?;
     checkpoint.validate().map_err(invalid)?;
@@ -52,15 +51,34 @@ pub fn observation_history_finalization_payload_bytes_upper_bound(
             "history finalization checkpoint differs from request",
         ));
     }
-    derived_output_payload_bytes_upper_bound(inputs, add(count(checkpoint.samples().len())?, 1)?, 0)
+    // The published history holds the checkpoint's retained samples and its manifest, plus one
+    // record envelope per sample and one for the manifest.
+    checkpoint_output_payload_bytes_upper_bound(
+        checkpoint,
+        add(count(checkpoint.samples().len())?, 1)?,
+        0,
+    )
+}
+
+/// Output ceiling of a payload built from a retained checkpoint: the checkpoint's own encoded
+/// samples and manifest, the record envelopes, and generated values.
+fn checkpoint_output_payload_bytes_upper_bound(
+    checkpoint: &ObservationHistoryCheckpoint,
+    records: u64,
+    generated_values: u64,
+) -> Result<u64, ResourcePlanningError> {
+    copied_output_payload_bytes_upper_bound(
+        super::post_process::observation_history_checkpoint_payload_bytes(checkpoint)?,
+        records,
+        generated_values,
+    )
 }
 
 pub fn observation_history_series_reduction_payload_bytes_upper_bound(
     request: &ObservationHistoryFinalizationRequest,
     checkpoint: &ObservationHistoryCheckpoint,
-    inputs: &PreparedInputResourceFacts,
 ) -> Result<Option<u64>, ResourcePlanningError> {
-    observation_history_finalization_payload_bytes_upper_bound(request, checkpoint, inputs)?;
+    observation_history_finalization_payload_bytes_upper_bound(request, checkpoint)?;
     if request.series_reduction.is_none() {
         return Ok(None);
     }
@@ -75,7 +93,7 @@ pub fn observation_history_series_reduction_payload_bytes_upper_bound(
         ));
     }
     // Statistical reductions emit one field and no extrema locations. Their original
-    // contributions still retain every source/value, covered by the input envelope.
+    // contributions still retain every source/value, covered by the checkpoint's bytes.
     // Extrema additionally retain actual governing locations, including all ties if requested.
     let operation = request
         .series_reduction
@@ -115,7 +133,7 @@ pub fn observation_history_series_reduction_payload_bytes_upper_bound(
     };
     let records = add(add(samples, extrema_lanes)?, 1)?;
     // Covers the complete contribution values and either one or both terminal fields.
-    derived_output_payload_bytes_upper_bound(inputs, records, multiply(retained_values, 2)?)
+    checkpoint_output_payload_bytes_upper_bound(checkpoint, records, multiply(retained_values, 2)?)
         .map(Some)
 }
 
@@ -136,11 +154,10 @@ pub fn build_observation_history_finalization_resource_plan(
         .validate_inputs(checkpoint, catalog, context)
         .map_err(invalid)?;
     let history_bytes =
-        observation_history_finalization_payload_bytes_upper_bound(request, checkpoint, &inputs)?;
+        observation_history_finalization_payload_bytes_upper_bound(request, checkpoint)?;
     validate_projected_output(&history_output, history_bytes, "history finalization")?;
-    let series_bytes = observation_history_series_reduction_payload_bytes_upper_bound(
-        request, checkpoint, &inputs,
-    )?;
+    let series_bytes =
+        observation_history_series_reduction_payload_bytes_upper_bound(request, checkpoint)?;
     match (&series_output, series_bytes) {
         (Some(output), Some(bound)) => {
             validate_projected_output(output, bound, "history series reduction")?
@@ -154,10 +171,9 @@ pub fn build_observation_history_finalization_resource_plan(
     }
     let retained_values = values(checkpoint)?;
     // Resume/finish validate and serialize retained history; the serial reducer carries
-    // compensated accumulators, extrema locations, and sample evidence. Input facts
-    // account for the authoritative mesh/catalog as well as numerical checkpoint data.
+    // compensated accumulators, extrema locations, and sample evidence.
     let workspace = add(
-        multiply(inputs.decoded_resident_bytes_admission_budget.0, 4)?,
+        source_validation_workspace(request, catalog, context, &inputs)?,
         add(
             multiply(retained_values, 256)?,
             add(history_bytes, series_bytes.unwrap_or(0))?,
@@ -182,4 +198,36 @@ pub fn build_observation_history_finalization_resource_plan(
         worker: post_process_worker(),
         accuracy_ceiling: post_process_ceiling(),
     })
+}
+
+/// Storage of validating the history's source beside the decoded inputs.
+/// - Thermal: the shared thermal source-validation law, plus one more decoded copy of the
+///   inputs (finalization consumes a copy of the checkpoint while the catalog and plan stay
+///   borrowed).
+/// - Other families have no counted source law yet and keep four decoded copies of the inputs,
+///   which covers their mesh and catalog validation.
+fn source_validation_workspace(
+    request: &ObservationHistoryFinalizationRequest,
+    catalog: &ObservationFieldCatalog,
+    context: ObservationHistorySourceContext<'_>,
+    inputs: &PreparedInputResourceFacts,
+) -> Result<u64, ResourcePlanningError> {
+    let decoded = inputs.decoded_resident_bytes_admission_budget.0;
+    match (catalog.source(), context) {
+        (
+            crate::results::observation::ObservationFieldCatalogSource::Thermal { manifest },
+            ObservationHistorySourceContext::Thermal { workload, mesh },
+        ) => add(
+            crate::results::observation::thermal_source_validation_resident_bytes(
+                workload,
+                manifest,
+                &request.plan,
+                mesh,
+                u64::MAX,
+            )
+            .map_err(invalid)?,
+            decoded,
+        ),
+        _ => multiply(decoded, 4),
+    }
 }

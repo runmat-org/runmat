@@ -11,7 +11,8 @@ use crate::execution::{
 use crate::results::field::RecoveredFieldPartitionSet;
 use crate::results::observation::{
     ObservationHistoryCheckpoint, ObservationPartition, ObservationPartitionContribution,
-    ObservationPartitionPayload, ObservationPartitionPlan, ObservationResult,
+    ObservationPartitionPayload, ObservationPartitionPayloadCapacity, ObservationPartitionPlan,
+    ObservationPartitionTarget, ObservationResult,
 };
 
 use super::{
@@ -32,6 +33,7 @@ const DERIVED_OUTPUT_RECORD_OVERHEAD_BYTES: u64 = 64 * 1024;
 const CANONICAL_NUMERIC_BYTES_UPPER_BOUND: u64 = 9;
 
 mod history;
+pub(super) use history::observation_history_checkpoint_payload_bytes;
 pub use history::{
     build_observation_history_checkpoint_resource_plan,
     observation_history_checkpoint_payload_bytes_upper_bound,
@@ -47,35 +49,135 @@ pub struct ObservationPartitionResourcePlanning<'a> {
     pub output: PreparedOutputResourceFacts,
     pub output_set: PreparedOutputSetResourceFacts,
     pub accelerator: Option<&'a AcceleratorRequest>,
+    pub source_workspace: ObservationPartitionSourceWorkspace,
+}
+
+/// Worker storage an observation partition's source needs beside its decoded inputs before the
+/// evaluator runs: source validation, a projection of the mesh and the observation topology.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservationPartitionSourceWorkspace {
+    /// The source family's counted law, in bytes.
+    Counted(u64),
+    /// The source family has no counted law yet (structural, sampled and volume-mesh sources).
+    /// The phase reserves the direct-encoding envelope of twice its encoded inputs, the
+    /// reservation these sources carried before the contribution ceiling was derived from its
+    /// layout.
+    InputEnvelope,
+}
+
+impl ObservationPartitionSourceWorkspace {
+    /// A thermal source: the shared thermal source-validation law (source authority, then one
+    /// projection, then the retained projection with the observation topology).
+    pub fn thermal(
+        workload: &crate::execution::ThermalWorkload,
+        manifest: &crate::execution::ThermalSolverResultManifest,
+        plan: &crate::results::observation::ResolvedObservationPlan,
+        mesh: &runmat_meshing_core::SolverMeshArtifact,
+    ) -> Result<Self, ResourcePlanningError> {
+        crate::results::observation::thermal_source_validation_resident_bytes(
+            workload,
+            manifest,
+            plan,
+            mesh,
+            u64::MAX,
+        )
+        .map(Self::Counted)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
+    }
+
+    fn resident_bytes(
+        self,
+        inputs: &PreparedInputResourceFacts,
+    ) -> Result<u64, ResourcePlanningError> {
+        match self {
+            Self::Counted(bytes) => Ok(bytes),
+            Self::InputEnvelope => {
+                runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
+                    checked_multiply(
+                        inputs.encoded_payload_bytes.0,
+                        2,
+                        "observation source envelope",
+                    )?,
+                    1,
+                )
+                .ok_or(ResourcePlanningError::Overflow(
+                    "observation source envelope",
+                ))
+            }
+        }
+    }
 }
 
 /// Pre-execution canonical payload ceiling for one observation-partition contribution.
 ///
-/// The bound is derived only from admitted inputs and typed cardinalities. It deliberately does
-/// not evaluate the observation on the driver. An accelerated execution may append one governed
-/// provider-evidence record.
+/// The ceiling comes from the payload layout the partition can write (its target's entity kind
+/// and count, the source field's components) and the contribution's identity metadata. It does
+/// not evaluate the observation on the driver, and the partition's inputs (mesh, workload, field
+/// values) do not enter it. An accelerated execution may append one governed provider-evidence
+/// record.
 pub fn observation_partition_payload_bytes_upper_bound(
-    inputs: &PreparedInputResourceFacts,
+    source: &ObservationEvaluationRequest,
+    request: &ObservationPartitionEvaluationRequest,
+    partition_plan: &ObservationPartitionPlan,
+    partition: &ObservationPartition,
     source_fields: &RecoveredFieldPartitionSet,
     accelerated: bool,
 ) -> Result<u64, ResourcePlanningError> {
-    let source_value_count = source_fields
-        .partitions
-        .iter()
-        .try_fold(0_u64, |total, item| {
-            let values = item.storage.as_host_f64().ok_or_else(|| {
-                ResourcePlanningError::Invalid(
-                    "observation resource planning requires host f64 field partitions".into(),
-                )
-            })?;
-            checked_add(
-                total,
-                count(values.len(), "observation source values")?,
-                "observation source values",
-            )
-        })?;
+    let invalid = |error: &dyn std::fmt::Display| ResourcePlanningError::Invalid(error.to_string());
+    let (layout, _) =
+        observation_partition_payload_layout(source, partition_plan, partition, source_fields)?;
+    let size = |value: Count| {
+        usize::try_from(value.0)
+            .map_err(|_| ResourcePlanningError::Overflow("observation payload capacity"))
+    };
+    let capacity = match layout {
+        ObservationPartitionPayloadLayout::SelectedValues {
+            entity_count,
+            component_count,
+        } => ObservationPartitionPayloadCapacity::Entities {
+            extrema: false,
+            entity_count: size(entity_count)?,
+            values_per_entity: size(component_count)?,
+        },
+        ObservationPartitionPayloadLayout::ExtremaCandidates {
+            candidate_count_upper_bound,
+            component_count,
+        } => ObservationPartitionPayloadCapacity::Entities {
+            extrema: true,
+            entity_count: size(candidate_count_upper_bound)?,
+            values_per_entity: size(component_count)?,
+        },
+        // A connector resultant keeps every selected connector value in its sums.
+        ObservationPartitionPayloadLayout::WeightedAccumulator { component_count } => {
+            let per_entity = size(component_count)?;
+            ObservationPartitionPayloadCapacity::Weighted {
+                sum_length: if matches!(
+                    partition.target,
+                    ObservationPartitionTarget::Connectors { .. }
+                ) {
+                    partition
+                        .target
+                        .entity_count()
+                        .checked_mul(per_entity)
+                        .ok_or(ResourcePlanningError::Overflow(
+                            "observation payload capacity",
+                        ))?
+                } else {
+                    per_entity
+                },
+            }
+        }
+    };
+    let contribution = ObservationPartitionContribution::encoded_bytes_upper_bound(
+        partition_plan,
+        partition,
+        source_fields,
+        request.event_attribution,
+        capacity,
+    )
+    .map_err(|error| invalid(&error))?;
     checked_add(
-        derived_output_payload_bytes_upper_bound(inputs, 1, source_value_count)?,
+        contribution,
         if accelerated {
             crate::results::observation::OBSERVATION_ACCELERATION_EVIDENCE_MAX_ENCODED_BYTES
         } else {
@@ -85,23 +187,13 @@ pub fn observation_partition_payload_bytes_upper_bound(
     )
 }
 
-pub fn build_observation_partition_resource_plan(
-    planning: ObservationPartitionResourcePlanning<'_>,
-) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    let ObservationPartitionResourcePlanning {
-        source,
-        request,
-        partition_plan,
-        partition,
-        source_fields,
-        inputs,
-        output,
-        output_set,
-        accelerator,
-    } = planning;
-    request
-        .validate_for(source, partition_plan, partition, source_fields)
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+/// The payload layout an observation partition can write, and its value count.
+fn observation_partition_payload_layout(
+    source: &ObservationEvaluationRequest,
+    partition_plan: &ObservationPartitionPlan,
+    partition: &ObservationPartition,
+    source_fields: &RecoveredFieldPartitionSet,
+) -> Result<(ObservationPartitionPayloadLayout, u64), ResourcePlanningError> {
     let observation = source
         .plan
         .observations
@@ -129,7 +221,7 @@ pub fn build_observation_partition_resource_plan(
         .as_ref()
         .map(|reduction| reduction.spatial)
         .unwrap_or(runmat_analysis_core::SpatialReduction::None);
-    let (output_payload, payload_value_count) = match spatial_reduction {
+    Ok(match spatial_reduction {
         runmat_analysis_core::SpatialReduction::None => (
             ObservationPartitionPayloadLayout::SelectedValues {
                 entity_count: Count(entity_count),
@@ -155,7 +247,29 @@ pub fn build_observation_partition_resource_plan(
                 "observation accumulator measure",
             )?,
         ),
-    };
+    })
+}
+
+pub fn build_observation_partition_resource_plan(
+    planning: ObservationPartitionResourcePlanning<'_>,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let ObservationPartitionResourcePlanning {
+        source,
+        request,
+        partition_plan,
+        partition,
+        source_fields,
+        inputs,
+        output,
+        output_set,
+        accelerator,
+        source_workspace,
+    } = planning;
+    request
+        .validate_for(source, partition_plan, partition, source_fields)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let (output_payload, payload_value_count) =
+        observation_partition_payload_layout(source, partition_plan, partition, source_fields)?;
     let source_value_count = source_fields
         .partitions
         .iter()
@@ -172,16 +286,38 @@ pub fn build_observation_partition_resource_plan(
             )
         })?;
     let output_payload_upper_bound = observation_partition_payload_bytes_upper_bound(
-        &inputs,
+        source,
+        request,
+        partition_plan,
+        partition,
         source_fields,
         accelerator.is_some(),
     )?;
     validate_projected_output(&output, output_payload_upper_bound, "observation partition")?;
-    let evaluator_workspace = checked_add(
+    // The evaluator holds the selected source values, every target entity of the partition
+    // (extrema select from them) and the payload values with one projection copy each. The
+    // source's own storage (validation, projection, topology) precedes and spans evaluation.
+    let entity_workspace = checked_multiply(
+        count(
+            partition.target.entity_count(),
+            "observation partition entities",
+        )?,
+        count(
+            std::mem::size_of::<crate::results::observation::ObservationEntity>(),
+            "observation entity bytes",
+        )?,
+        "observation entity workspace",
+    )?;
+    let evaluator_workspace = [
         checked_multiply(source_value_count, 8, "observation source workspace")?,
         checked_multiply(payload_value_count, 16, "observation payload workspace")?,
-        "observation evaluator workspace",
-    )?;
+        entity_workspace,
+        source_workspace.resident_bytes(&inputs)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, bytes| {
+        checked_add(total, bytes, "observation evaluator workspace")
+    })?;
     let required_accelerator_bytes =
         crate::results::observation::governed_extrema_device_resident_bytes(
             partition.target.entity_count(),
@@ -639,8 +775,30 @@ fn byte_len(bytes: &[u8]) -> Result<u64, ResourcePlanningError> {
     count(bytes.len(), "canonical payload bytes")
 }
 
+/// Output ceiling of a payload derived from all of its inputs: twice the encoded inputs as
+/// copied source metadata, plus record envelopes and generated values. Callers whose output is
+/// built from a known part of their inputs use `copied_output_payload_bytes_upper_bound` with
+/// that part instead.
 pub(super) fn derived_output_payload_bytes_upper_bound(
     inputs: &PreparedInputResourceFacts,
+    output_record_count: u64,
+    generated_numeric_value_count: u64,
+) -> Result<u64, ResourcePlanningError> {
+    copied_output_payload_bytes_upper_bound(
+        checked_multiply(
+            inputs.encoded_payload_bytes.0,
+            2,
+            "derived output source metadata",
+        )?,
+        output_record_count,
+        generated_numeric_value_count,
+    )
+}
+
+/// Output ceiling of a payload that copies at most `copied_bytes` of encoded records, plus one
+/// record envelope per output record and the widest canonical encoding of each generated value.
+pub(super) fn copied_output_payload_bytes_upper_bound(
+    copied_bytes: u64,
     output_record_count: u64,
     generated_numeric_value_count: u64,
 ) -> Result<u64, ResourcePlanningError> {
@@ -650,11 +808,7 @@ pub(super) fn derived_output_payload_bytes_upper_bound(
         ));
     }
     checked_add(
-        checked_multiply(
-            inputs.encoded_payload_bytes.0,
-            2,
-            "derived output source metadata",
-        )?,
+        copied_bytes,
         checked_add(
             checked_multiply(
                 output_record_count,
