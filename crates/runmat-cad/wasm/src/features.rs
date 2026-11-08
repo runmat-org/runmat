@@ -753,10 +753,14 @@ pub fn feature_kind(
                 )
             }
         }
-        _ => return details::feature_kind(command, values, picks),
+        _ => match details::feature_kind(command, values, picks)? {
+            Some(kind) => kind,
+            None => return curves::feature_kind(command, values, picks),
+        },
     }))
 }
 
+mod curves;
 mod details;
 
 #[cfg(test)]

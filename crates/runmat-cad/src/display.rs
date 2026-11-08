@@ -26,6 +26,7 @@ use crate::syntax::refs::print_reference;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod references;
 pub mod wire;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -127,6 +128,10 @@ pub struct PartDisplay {
     /// Solved sketches on their planes (see [`sketch_display`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketches: Vec<SketchDisplay>,
+    /// Datum planes, axes, points and frames, mate connectors and reference curves as lines
+    /// (see [`references::reference_display`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<references::ReferenceDisplay>,
     /// The color the part draws in: its material's appearance ([`crate::appearance`]), sRGB
     /// and opacity. Absent: the CAD face color.
     #[serde(default, skip_serializing_if = "Option::is_none")]

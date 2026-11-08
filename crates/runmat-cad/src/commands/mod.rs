@@ -42,14 +42,10 @@ pub const UNBUILT: &[&str] = &[
     "sketch.image",
     "sketch.dxf-import",
     "sketch.repair",
-    // Part: reference curves, wrap, bodies to parts and where-used.
-    "part.curve-helix",
+    // Part: projected curves and split lines (no projection onto faces in the kernel yet),
+    // wrap (no wrapping onto curved faces yet), bodies to parts and where-used.
     "part.curve-projected",
-    "part.curve-composite",
     "part.curve-split-line",
-    "part.curve-intersection",
-    "part.curve-through-points",
-    "part.curve-equation",
     "part.wrap",
     "part.body-promote",
     "part.where-used",

@@ -233,8 +233,26 @@ fn part_edit(
             let kind: runmat_cad::model::FeatureKind =
                 serde_json::from_value(kind).map_err(|e| model(format!("the {stem}: {e}")))?;
             let mut added = String::new();
+            // A mate connector takes the form's Name: other files mate to it by that name.
+            let named = match text_value(&request.values, "name").trim() {
+                name if command == "part.mate-connector" && !name.is_empty() => Some(name.to_owned()),
+                _ => None,
+            };
             let change = edit_part(text, path, |document| {
-                added = fresh_id(document, stem);
+                added = match &named {
+                    Some(name) => {
+                        let mut chars = name.chars();
+                        let first = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+                        if !first || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                            return Err(model(format!("`{name}` isn't a name: use letters, digits and underscores, starting with a letter")));
+                        }
+                        if document.features.iter().any(|f| f.id.0 == name.as_str()) {
+                            return Err(model(format!("the part already has a `{name}`; pick another name")));
+                        }
+                        name.clone()
+                    }
+                    None => fresh_id(document, stem),
+                };
                 document.features.push(Feature::new(&added, kind.clone()));
                 Ok(())
             })?;

@@ -583,6 +583,58 @@ pub trait DynamicValueEvaluator {
     }
 }
 
+/// The elementary functions values evaluate themselves, so a value (an equation curve's
+/// `cos(input.t) * 10 mm`) needs no `.m` runner: `sin`, `cos`, `tan` (of a number of radians or
+/// an angle), `asin`, `acos`, `atan` (to radians), `atan2(y, x)` (of two like quantities),
+/// `sqrt`, `exp`, `log`, `abs`. `None` for any other call; a call with the wrong arguments
+/// fails naming the function.
+fn elementary(call: &DynamicCall, args: &[(String, Quantity)]) -> Option<Result<Quantity, ValueError>> {
+    let f = call.function.as_str();
+    let arity = match f {
+        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sqrt" | "exp" | "log" | "abs" => 1,
+        "atan2" => 2,
+        _ => return None,
+    };
+    if call.volatile {
+        return None;
+    }
+    let fail = |message: &str| {
+        Some(Err(ValueError::DynamicFailed {
+            function: f.to_owned(),
+            message: message.to_owned(),
+        }))
+    };
+    if args.len() != arity || args.iter().any(|(name, _)| !name.is_empty()) {
+        return fail(&format!("takes {arity} unnamed argument{}", if arity == 1 { "" } else { "s" }));
+    }
+    let a = args[0].1;
+    let plain = a.dimension.is_dimensionless();
+    let angle = plain || a.dimension == Dimension::ANGLE;
+    let number = |v: f64| Some(Ok(Quantity::dimensionless(v)));
+    let radians = |v: f64| Some(Ok(Quantity::new(v, Dimension::ANGLE)));
+    match f {
+        "sin" | "cos" | "tan" if !angle => fail("takes an angle or a number of radians"),
+        "sin" => number(a.si.sin()),
+        "cos" => number(a.si.cos()),
+        "tan" => number(a.si.tan()),
+        "abs" => Some(Ok(Quantity::new(a.si.abs(), a.dimension))),
+        "atan2" => {
+            let b = args[1].1;
+            if a.dimension != b.dimension {
+                return fail("takes two values in the same unit");
+            }
+            radians(a.si.atan2(b.si))
+        }
+        _ if !plain => fail("takes a number"),
+        "asin" => radians(a.si.asin()),
+        "acos" => radians(a.si.acos()),
+        "atan" => radians(a.si.atan()),
+        "sqrt" => number(a.si.sqrt()),
+        "exp" => number(a.si.exp()),
+        _ => number(a.si.ln()),
+    }
+}
+
 /// Rejects every dynamic value. Use until the value phase lands.
 #[derive(Clone, Debug, Default)]
 pub struct NoDynamicValues;
@@ -699,6 +751,9 @@ impl<'a> Evaluator<'a> {
                 let mut args = Vec::with_capacity(call.arguments.len());
                 for (name, arg) in &call.arguments {
                     args.push((name.clone(), self.eval(arg, env)?));
+                }
+                if let Some(q) = elementary(call, &args) {
+                    return q;
                 }
                 let contract = self.dynamic.contract(call);
                 if call.volatile {
