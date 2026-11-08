@@ -148,3 +148,50 @@ fn unfold_flattens_a_bent_sheet_and_fold_bends_it_back() {
     let (developed, refolded) = (lines(&flat), lines(&after));
     assert!(refolded > 0 && refolded == developed, "the blank carries the bend's lines as before the unfold ({refolded} vs {developed}): {after}");
 }
+
+/// Unfolds `text` on the plate's top face, checks it lies flat, folds it and checks it is back
+/// where it was; answers the folded text.
+fn unfold_and_fold(text: &str) -> String {
+    let before = extents(text);
+    let faces = face_names(text);
+    let fixed = faces
+        .iter()
+        .find(|n| n.contains("sheet(plate, ordinal = 1)"))
+        .unwrap_or_else(|| panic!("no top face of the plate in {faces:#?}"))
+        .clone();
+    let unfolded = edit(text, "sheet-metal.unfold", json!({ "fixed": [fixed] }));
+    let flat = extents(&unfolded);
+    let thin = flat.iter().cloned().fold(f64::INFINITY, f64::min);
+    near(thin, 1.5, 0.01, "unfolded");
+    let folded = edit(&unfolded, "sheet-metal.fold", json!({}));
+    let again = extents(&folded);
+    for k in 0..3 {
+        near(again[k], before[k], 1e-3, "folded back");
+    }
+    near(volume(&folded), volume(text), 1e-3 * volume(text), "the folded volume");
+    folded
+}
+
+#[test]
+fn unfold_and_fold_a_plate_with_an_edge_flange() {
+    let plate = plate();
+    let top = edge(&plate, &["sheet(plate, ordinal = 1)", "sheet_edge(l2)"]);
+    let text = edit(&plate, "sheet-metal.edge-flange", json!({ "edges": [top], "length": 20, "angle": 90, "position": "bend_outside", "radius": 1 }));
+    assert!(text.contains("sheet_metal.edge_flange("), "{text}");
+    let folded = unfold_and_fold(&text);
+    // Folded again, the flange's faces answer to their names: a second unfold flattens it.
+    unfold_and_fold(&folded);
+}
+
+/// A plate's flat pattern doesn't develop a miter flange yet, so its unfold says so.
+#[test]
+fn unfolding_a_plate_with_a_miter_flange_is_refused_by_name() {
+    let plate = plate();
+    let top = |side: &str| edge(&plate, &["sheet(plate, ordinal = 1)", side]);
+    let text = edit(&plate, "sheet-metal.miter-flange", json!({ "profile": ["sketch:m"], "edges": [top("sheet_edge(l1)"), top("sheet_edge(l2)")], "gap": 0 }));
+    let fixed = face_names(&text).into_iter().find(|n| n.contains("sheet(plate, ordinal = 1)")).expect("the plate's top face");
+    let unfolded = edit(&text, "sheet-metal.unfold", json!({ "fixed": [fixed] }));
+    let compiled = call("compile", &["/p/sheet.part", &unfolded, "{}", "{}"]);
+    let messages: Vec<String> = compiled["diagnostics"].as_array().into_iter().flatten().filter_map(|d| d["message"].as_str().map(str::to_owned)).collect();
+    assert!(messages.iter().any(|m| m.contains("unfolding a plate with a miter flange")), "{messages:?}");
+}

@@ -287,14 +287,54 @@ impl<'a, 'b> Run<'a, 'b> {
         self.bends_of_plate(self.doc.features.len(), maker)
             .into_iter()
             .filter(|b| !flat.contains(b))
-            .filter_map(|b| {
-                Some(Step {
-                    op: self.st.replays.get(&b)?.clone(),
-                    operands: vec![body],
-                    naming: naming.at_step(Some(b.0.clone()), vec![Restore::all(&b)]),
-                })
-            })
+            .filter_map(|b| self.replay_step(&b, body, naming))
             .collect()
+    }
+
+    /// The plate's edge flanges, hems, corner features and forms that a fold replays, in
+    /// feature order.
+    pub(in crate::regen::engine) fn plate_features_replayed(&self, maker: &FeatureId) -> Vec<FeatureId> {
+        self.doc
+            .features
+            .iter()
+            .filter(|f| {
+                self.st.replays.contains_key(&f.id)
+                    && matches!(
+                        self.st.records.get(&f.id),
+                        Some(FeatureRecord::PlateFlange { base, .. }
+                            | FeatureRecord::PlateCorner { base, .. }
+                            | FeatureRecord::PlateForm { base }) if base == maker
+                    )
+            })
+            .map(|f| f.id.clone())
+            .collect()
+    }
+
+    /// The bends left bent and every flange, corner feature and form of plate `maker`,
+    /// replayed in feature order, so a flange on a flat a bend moved follows that bend.
+    pub(in crate::regen::engine) fn replay_plate(
+        &self,
+        maker: &FeatureId,
+        flat: &[FeatureId],
+        body: usize,
+        naming: &NamingContext,
+    ) -> Vec<Step> {
+        let bends = self.bends_of_plate(self.doc.features.len(), maker);
+        let others = self.plate_features_replayed(maker);
+        self.doc
+            .features
+            .iter()
+            .filter(|f| (bends.contains(&f.id) && !flat.contains(&f.id)) || others.contains(&f.id))
+            .filter_map(|f| self.replay_step(&f.id, body, naming))
+            .collect()
+    }
+
+    fn replay_step(&self, b: &FeatureId, body: usize, naming: &NamingContext) -> Option<Step> {
+        Some(Step {
+            op: self.st.replays.get(b)?.clone(),
+            operands: vec![body],
+            naming: naming.at_step(Some(b.0.clone()), vec![Restore::all(b)]),
+        })
     }
 
     /// Unfolds the named bends of a plate and keeps the rest: the plate rebuilt flat in place,

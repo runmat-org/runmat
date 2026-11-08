@@ -17,7 +17,8 @@ impl<'a, 'b> Run<'a, 'b> {
         if !bends.is_empty() {
             return self.unfold_some(i, id, &h, bends, simple);
         }
-        let Some((maker, _, sec, _)) = self.sheet_of(body) else {
+        // A folded plate's body can lose its body name; its faces answer to the base flange.
+        let Some((maker, _, sec, _)) = self.sheet_of_face(&h) else {
             return Err(self.error(
                 id,
                 Some("fixed_face"),
@@ -26,16 +27,21 @@ impl<'a, 'b> Run<'a, 'b> {
                 Vec::new(),
             ));
         };
-        // A plate's flat pattern checks that only its bends changed it; a bent
-        // sheet's faces come from its base flange and the unfolds and folds since.
+        // A bent sheet's faces come from its base flange and the unfolds and folds since. A
+        // plate's flat pattern develops its bends, edge flanges and hems, and a fold replays
+        // them.
         if sec.is_some() {
             let rebuilders = self.sheet_rebuilders(i, &maker);
             self.only_made_by(id, body, &rebuilders, "unfold")?;
-        } else if !self.plate_flanges_on(body, &maker).is_empty() {
-            // A fold replays only the plate's sketched bends.
+        } else if self.st.bodies[body].names.faces.iter().flatten().any(|n| {
+            matches!(
+                self.doc.feature(n.maker()).map(|f| &f.kind),
+                Some(FeatureKind::SheetMetal(SheetMetalFeature::MiterFlange { .. }))
+            )
+        }) {
             return Err(self.not_lowered(
                 id,
-                "unfolding a plate with edge flanges or hems (its flat pattern develops them)",
+                "unfolding a plate with a miter flange (its flat pattern develops edge flanges and hems)",
             ));
         }
         // The flat pattern's strip, in place of the bent sheet.
@@ -123,6 +129,14 @@ impl<'a, 'b> Run<'a, 'b> {
         let Some(maker) = maker else {
             return Err(self.not_lowered(id, "folding this sheet"));
         };
+        // A partial fold of a plate rebuilds it from its outline with only some bends, which
+        // has no place for its flanges' flats.
+        if !bends.is_empty() && !self.plate_features_replayed(&maker).is_empty() {
+            return Err(self.not_lowered(
+                id,
+                "folding some bends of a plate with edge flanges, hems, corner features or forms (fold them all: leave `bends` empty)",
+            ));
+        }
         // A partial fold of a bent sheet: the bends left flat stay flat.
         if !bends.is_empty() {
             if let Some(FeatureRecord::Sheet {
@@ -167,8 +181,9 @@ impl<'a, 'b> Run<'a, 'b> {
             operands,
             naming: simple.at_step(None, vec![Restore::all(&maker)]),
         }];
-        // Then each sketched bend and jog that stays bent after this fold, replayed in
-        // order: its faces answer to that bend's names again.
+        // Then each sketched bend and jog that stays bent after this fold, and the plate's
+        // flanges, hems, corner features and forms, replayed in feature order: their faces
+        // answer to their names again.
         let mut flat = self.flattened_bends(i, &maker);
         if bends.is_empty() {
             flat.clear();
@@ -177,7 +192,7 @@ impl<'a, 'b> Run<'a, 'b> {
             let folded = self.with_parents(folded);
             flat.retain(|b| !folded.contains(b));
         }
-        steps.extend(self.replay_bends(&maker, &flat, body, simple));
+        steps.extend(self.replay_plate(&maker, &flat, body, simple));
         Ok(Compiled::Steps(steps))
     }
 }

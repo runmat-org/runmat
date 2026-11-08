@@ -285,10 +285,8 @@ impl<'a, 'b> Run<'a, 'b> {
                 base: maker.clone(),
             },
         );
-        Ok(super::super::families::op(
-            labeled(tools, carve, Combine::Add, false),
-            vec![body],
-            naming.clone(),
-        ))
+        let made = labeled(tools, carve, Combine::Add, false);
+        self.st.replays.insert(id.clone(), made.clone());
+        Ok(super::super::families::op(made, vec![body], naming.clone()))
     }
 }

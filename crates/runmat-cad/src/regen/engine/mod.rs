@@ -104,8 +104,9 @@ pub struct PartState {
     /// Typed records of geometry-free features and derived data (reference curves, threads,
     /// sheet metal rules and developments, mold analyses), by feature.
     pub records: BTreeMap<FeatureId, crate::regen::records::FeatureRecord>,
-    /// The kernel operation of each sketched bend and jog, which a fold of the plate replays
-    /// as one of its steps.
+    /// The kernel operation of each sketched bend and jog, and of each edge flange, hem,
+    /// corner feature and form on a plate, which a fold of the plate replays as one of its
+    /// steps.
     pub replays: BTreeMap<FeatureId, KernelOp>,
 }
 

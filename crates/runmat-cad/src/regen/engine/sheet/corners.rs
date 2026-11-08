@@ -568,11 +568,9 @@ impl<'a, 'b> Run<'a, 'b> {
                 edits,
             },
         );
-        Ok(op(
-            labeled(tools, Vec::new(), Combine::Cut, false),
-            vec![view.body],
-            naming.clone(),
-        ))
+        let made = labeled(tools, Vec::new(), Combine::Cut, false);
+        self.st.replays.insert(id.clone(), made.clone());
+        Ok(op(made, vec![view.body], naming.clone()))
     }
 
     pub(in crate::regen::engine) fn closed_corner(
@@ -749,10 +747,8 @@ impl<'a, 'b> Run<'a, 'b> {
             return Ok(Compiled::Record(record));
         }
         self.st.records.insert(id.clone(), record);
-        Ok(op(
-            labeled(tools, Vec::new(), Combine::Add, false),
-            vec![view.body],
-            naming.clone(),
-        ))
+        let made = labeled(tools, Vec::new(), Combine::Add, false);
+        self.st.replays.insert(id.clone(), made.clone());
+        Ok(op(made, vec![view.body], naming.clone()))
     }
 }

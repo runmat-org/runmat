@@ -253,13 +253,12 @@ impl<'a, 'b> Run<'a, 'b> {
                 carve.push(ct);
             }
         }
+        let made = labeled(tools, carve, Combine::Add, false);
         if section.is_none() {
             self.record_plate_flange(i, id, body, &maker, &rules, developed)?;
+            // A fold of the plate replays the flange after the plate's bends before it.
+            self.st.replays.insert(id.clone(), made.clone());
         }
-        Ok(op(
-            labeled(tools, carve, Combine::Add, false),
-            operands,
-            naming.clone(),
-        ))
+        Ok(op(made, operands, naming.clone()))
     }
 }
