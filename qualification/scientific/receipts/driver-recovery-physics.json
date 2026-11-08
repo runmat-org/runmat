@@ -67,14 +67,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "439739512d092976024bf839de61deebb3066be66f9d0c2ca6987b7ff90c912c",
-      "files": 24830,
+      "sha256": "d07d8e67d874d8d3f648050a96bbd50fa5d30ce4291e56f2e07eb4b2c7c0c23d",
+      "files": 24831,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The reviewed 119-path inverse reconstructs the original measured scientific inventory. CI fixture and metadata changes do not affect either workload; Python discovery is outside their execution paths. Original scientific totals and artifact identities are retained. Dev artifact qualification remains separate.",
+    "reason": "The reviewed 122-path inverse reconstructs the measured scientific inventory. Console-consumer observation ordering, CI fixtures and metadata preserve successful numerical work, process-retirement production and resource charges. Fresh deterministic and process-level output checks cover the changed boundary. Original scientific totals, assertions and artifact identities remain; dev product qualification is separate.",
     "review": {
       "path": "qualification/scientific/reviews/dev-ci-repairs.json",
-      "sha256": "2f6d7f768f26fbbfc8c4afe092e7d812a9c111db4a2206b8e3d0cce6e061177d"
+      "sha256": "3fb5ae1fec149cc3d2f67d79bdaa6935df183cbfe337ca96e240e94109b29e08"
     }
   }
 }

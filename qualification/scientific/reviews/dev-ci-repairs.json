@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "status": "Reviewed conservation of Linux authored-physics and driver-recovery measurements across CI fixture, Python discovery and import-metadata repairs",
+  "status": "Reviewed conservation of Linux authored-physics and driver-recovery measurements across bounded CI, metadata and console-observation repairs",
   "measured_inputs": {
     "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
     "files": 24826,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "439739512d092976024bf839de61deebb3066be66f9d0c2ca6987b7ff90c912c",
-    "files": 24830,
+    "sha256": "d07d8e67d874d8d3f648050a96bbd50fa5d30ce4291e56f2e07eb4b2c7c0c23d",
+    "files": 24831,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
-  "source": "527f4e5f32e712d502d16b26e98ea9f91f507e22+workspace-repairs:b93661bae7f766ed29bb19c350d18af5b3a7a14a03eacd33a955bb2348a0c90f+fixture-import:b18ebe8c57efcf4bfe69c39362913726817802aa2bc7ae47f0711faee2f857b5+service-retirement:f94fa5a498d5c2d10bec8271cad7e4ffed052565e8ace6dd29107e90d422db4d+platform-mex:8caeb626fb111e52a50397e814a1c890f93492f84fa6d47476d46edfda477e0b+msvc-utf8:318dd213b623a2d0023df14b1eb6b18570caa3570a106f6c43da1935f906f398+iterator-reference:e0d2143d37c226ae4ff75bf75cc4393ca76aed602e83a09ce23d5e060f0d14df+mex-docs:0e6f1b3e7dd5a646e9163618e9c1e847fe8af3978d04d385ad625df9319090b7+workspace-followup:d93fe5ec68ac999fa3397d04d6e51d93f054ac99889453fe6589659cbc73d250+physical-timing-fixture:07772f04f4d9fcca0d9ec2fa8e310643e7eb1a3ed681f40884ff1a104b399fed+vm-feedback-diagnostic:fde01497e1a1b6491bb8ae0d61dc2d1191412e032d4667917ef61782be96dbd2+logical-host-confirmation:275749253fe1a9f90a965262873a90e89c8f15a5b8bc32dd4795547ab4fa1cc8+output-delivery-schema:31b4cdd603679be17a8ae9024837a0d6b3991c83cf0b73b59c38b90bf33a0e10+output-console-cap:4b75ed04d6c6c8ff107888fb6368ed963c94ab5f59e065eeaed4a1f8fdf2795a+module-private-mex-gateway:faf0001a0503accdd113898c4ee0a3e318657e0d8102e1c1941c2d6199a8de61+registry-and-live-prefix-witness:f3e2a2c11b0c909147cf0cf964f718ca063d5fc6168c4e10768a9a2ddfa88ebc+witness-entrypoint-placement:534d12097187e274a10eb0b59fa2fa5f77fbfabdb3a817140611a2c73cd37e9c+windows-private-state-repairs:10c6ff7f9603e16537dd7b5eed0bc0fb2f551ddfe66e2eb4a6d384c3b778328f+runtime-fixture-portability:483f04a170d2ce1ceb1658da9d2a3d9a127ef8485bd1d86ee929c7855ed22fa6+registry-refresh:0330dcc112bc337ea657e23f0dc66311a3af53e0475ebedcbd94163b35aa7d08+windows-java-and-fixture-lint:873b9c08fe7fac4179a303889c5847d391e42aa99b570ffe6927461861229593+lsp-native-uri-fixture:c5c93079fff3bacd902520735618a13247178215acae1bc605e9773158357155+canonical-registry:06f294819ca6d743601c81574a3e74f6a0383932d7555b58fdd2d7a0a3cc2fc8+portable-dataset-revisions:aa7640635b1511d17c95b917f26ff9381699c19b9fb7d4759220e6b3f4f79687+windows-native-cache-mounts:7ab90118c97f5fccca25cb8ad8dd0a96a13914c3bd87b371fdfcb38c6c728d32+native-conformance-entry-and-loader:84b1c125c85bd5f7072402eff733ba836ec594a4808e125941f374d41a584b23+real-worker-cancellation-witness:a055a903dcadbd2707651d40c9a96ef13300aef3e0a2d8ced4c221d72630a751+java-fixture-compilation-staging:3c956e14547f2558d4554d306b24692a66f1e0130ce94929641ca5f7168d5902+portable-chunk-files-and-windows-fixture-repairs:6c632e5036e6b4c95bf886daa43885b09500a2fce1802b7eb4c8494597e793c3+portable-full-and-slice-storage:595fff00f313ca8761277af15d2a15ebfec8ed20f058e1795bbf95404a492ec8+durable-console-fixture-reservation:068a24101d8b3c9595e24bdf460aef19eeea1ca524bdbb6d426a082574cb6cd6+dataset-and-qualification-docs:6463b1768712a824952e705e207b5e754bcb77d4fc5a6af36f46d0702b68bf28+await-target-retention:8357cf987c070b5d0b6823422c968569f7243d32dccfe8107fc1e9fa0bf02dc9+cold-readiness-reconcile-interval:ede91b4ba9c621a25044413056162ff3586e4d1169023b2dbc4aa78bbfcae4e9+wasm-test-shared-service:7486798778a7ce81af78250029eb156ccd535dd6+dev-ci-repairs:f7e8d47ef8a3d766b976c28599ae48ec4881e129f899007e66d9a926bcd7a434",
+  "source": "527f4e5f32e712d502d16b26e98ea9f91f507e22+workspace-repairs:b93661bae7f766ed29bb19c350d18af5b3a7a14a03eacd33a955bb2348a0c90f+fixture-import:b18ebe8c57efcf4bfe69c39362913726817802aa2bc7ae47f0711faee2f857b5+service-retirement:f94fa5a498d5c2d10bec8271cad7e4ffed052565e8ace6dd29107e90d422db4d+platform-mex:8caeb626fb111e52a50397e814a1c890f93492f84fa6d47476d46edfda477e0b+msvc-utf8:318dd213b623a2d0023df14b1eb6b18570caa3570a106f6c43da1935f906f398+iterator-reference:e0d2143d37c226ae4ff75bf75cc4393ca76aed602e83a09ce23d5e060f0d14df+mex-docs:0e6f1b3e7dd5a646e9163618e9c1e847fe8af3978d04d385ad625df9319090b7+workspace-followup:d93fe5ec68ac999fa3397d04d6e51d93f054ac99889453fe6589659cbc73d250+physical-timing-fixture:07772f04f4d9fcca0d9ec2fa8e310643e7eb1a3ed681f40884ff1a104b399fed+vm-feedback-diagnostic:fde01497e1a1b6491bb8ae0d61dc2d1191412e032d4667917ef61782be96dbd2+logical-host-confirmation:275749253fe1a9f90a965262873a90e89c8f15a5b8bc32dd4795547ab4fa1cc8+output-delivery-schema:31b4cdd603679be17a8ae9024837a0d6b3991c83cf0b73b59c38b90bf33a0e10+output-console-cap:4b75ed04d6c6c8ff107888fb6368ed963c94ab5f59e065eeaed4a1f8fdf2795a+module-private-mex-gateway:faf0001a0503accdd113898c4ee0a3e318657e0d8102e1c1941c2d6199a8de61+registry-and-live-prefix-witness:f3e2a2c11b0c909147cf0cf964f718ca063d5fc6168c4e10768a9a2ddfa88ebc+witness-entrypoint-placement:534d12097187e274a10eb0b59fa2fa5f77fbfabdb3a817140611a2c73cd37e9c+windows-private-state-repairs:10c6ff7f9603e16537dd7b5eed0bc0fb2f551ddfe66e2eb4a6d384c3b778328f+runtime-fixture-portability:483f04a170d2ce1ceb1658da9d2a3d9a127ef8485bd1d86ee929c7855ed22fa6+registry-refresh:0330dcc112bc337ea657e23f0dc66311a3af53e0475ebedcbd94163b35aa7d08+windows-java-and-fixture-lint:873b9c08fe7fac4179a303889c5847d391e42aa99b570ffe6927461861229593+lsp-native-uri-fixture:c5c93079fff3bacd902520735618a13247178215acae1bc605e9773158357155+canonical-registry:06f294819ca6d743601c81574a3e74f6a0383932d7555b58fdd2d7a0a3cc2fc8+portable-dataset-revisions:aa7640635b1511d17c95b917f26ff9381699c19b9fb7d4759220e6b3f4f79687+windows-native-cache-mounts:7ab90118c97f5fccca25cb8ad8dd0a96a13914c3bd87b371fdfcb38c6c728d32+native-conformance-entry-and-loader:84b1c125c85bd5f7072402eff733ba836ec594a4808e125941f374d41a584b23+real-worker-cancellation-witness:a055a903dcadbd2707651d40c9a96ef13300aef3e0a2d8ced4c221d72630a751+java-fixture-compilation-staging:3c956e14547f2558d4554d306b24692a66f1e0130ce94929641ca5f7168d5902+portable-chunk-files-and-windows-fixture-repairs:6c632e5036e6b4c95bf886daa43885b09500a2fce1802b7eb4c8494597e793c3+portable-full-and-slice-storage:595fff00f313ca8761277af15d2a15ebfec8ed20f058e1795bbf95404a492ec8+durable-console-fixture-reservation:068a24101d8b3c9595e24bdf460aef19eeea1ca524bdbb6d426a082574cb6cd6+dataset-and-qualification-docs:6463b1768712a824952e705e207b5e754bcb77d4fc5a6af36f46d0702b68bf28+await-target-retention:8357cf987c070b5d0b6823422c968569f7243d32dccfe8107fc1e9fa0bf02dc9+cold-readiness-reconcile-interval:ede91b4ba9c621a25044413056162ff3586e4d1169023b2dbc4aa78bbfcae4e9+wasm-test-shared-service:7486798778a7ce81af78250029eb156ccd535dd6+dev-ci-repairs:f7e8d47ef8a3d766b976c28599ae48ec4881e129f899007e66d9a926bcd7a434+console-observation-order:b9435ff48d83361558075dfea685a1812b9b666e",
   "cohorts": [
     "authored-cli-physics",
     "driver-recovery-physics"
@@ -186,6 +186,30 @@
       "reason": "A durable await checks retention only for its requested job instead of synchronously reclaiming unrelated expired receipts. Submission retains global reclamation; expired awaited receipts retain the supervisor-authorized terminal/retention check. No solver arithmetic, scientific fixture, admission, output publication or retirement evidence format changes. Complete Windows output conformance passes at R1323, including cold restart and the original responsiveness and quota-cancellation assertions. R1325 records AOT-runtime/WASM dependency conservation; fresh ARM, Intel/Rosetta and Linux native products pass. Final Windows shipping is separate."
     },
     {
+      "path": "crates/runmat-execution-runner-native/src/service/job_output.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8cffc7e9e90891d3ea8be18c7fd3557ca84abd6b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ed5cc23c79129ced539229243483b3b07b037bc0"
+      ],
+      "reason": "Console-consumer snapshot ordering repair. Numerical kernels, original process-retirement writers and resource charges are unchanged. Fresh terminal/header observations precede rejection of older pages; missing proof still fails. Two deterministic tests and full actual output process conformance pass in the bound evidence. Successful scientific measurements and their assertions are conserved."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/service/job_output/tests.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "b2aed591676845307c7ecb895d6de4adb2846090"
+      ],
+      "reason": "Console-consumer snapshot ordering repair. Numerical kernels, original process-retirement writers and resource charges are unchanged. Fresh terminal/header observations precede rejection of older pages; missing proof still fails. Two deterministic tests and full actual output process conformance pass in the bound evidence. Successful scientific measurements and their assertions are conserved."
+    },
+    {
       "path": "crates/runmat-execution-runner-native/src/service/job_receipt.rs",
       "before": [
         "100644",
@@ -198,6 +222,20 @@
         "5dd25a51dd612ff52a58ef28763feb0aa8ffa632"
       ],
       "reason": "A durable await checks retention only for its requested job instead of synchronously reclaiming unrelated expired receipts. Submission retains global reclamation; expired awaited receipts retain the supervisor-authorized terminal/retention check. No solver arithmetic, scientific fixture, admission, output publication or retirement evidence format changes. Complete Windows output conformance passes at R1323, including cold restart and the original responsiveness and quota-cancellation assertions. R1325 records AOT-runtime/WASM dependency conservation; fresh ARM, Intel/Rosetta and Linux native products pass. Final Windows shipping is separate."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/src/service/output.rs",
+      "before": [
+        "100644",
+        "blob",
+        "164f5524191349151f1ffc3bb9bd83fc59eb288e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "f7a245aadbecfd7e1b0fa845a898d3028fd4ed88"
+      ],
+      "reason": "Console-consumer snapshot ordering repair. Numerical kernels, original process-retirement writers and resource charges are unchanged. Fresh terminal/header observations precede rejection of older pages; missing proof still fails. Two deterministic tests and full actual output process conformance pass in the bound evidence. Successful scientific measurements and their assertions are conserved."
     },
     {
       "path": "crates/runmat-execution-runner-native/src/supervisor/auth/tests.rs",
@@ -475,9 +513,9 @@
       "after": [
         "100644",
         "blob",
-        "bd1ec8d0aa2170631c5a552aa65bb50834b3876a"
+        "c53009458e3fa7f4fe6345d7072de3aa5f2fc48a"
       ],
-      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately. Additional reviewed delta: Updates the process-conformance harness to the typed assignment and reserved-console envelope, preserving the non-yielding parent-loss checks. The existing real-worker durable cancellation case also checks quota cause, physical process exit, interrupted console output and stable repeat-cancellation evidence. Production containment/cancellation and both retained scientific cohorts are unchanged. Complete Windows output conformance passes at R1323 with the original numerical, cancellation and responsiveness assertions. Adds a focused test-only entrypoint for the unchanged nested-console assertions with isolated temporary configuration. The ordinary full conformance path remains. This target is outside both retained scientific cohorts."
+      "reason": "Test-only source or support module outside the two retained scientific test definitions. It updates current API/ownership/error assertions, private fixture construction or the conformance host stack. Scientific numerical fixtures and thresholds are unchanged. The conservative package inventory also hashes test inputs, so mesh-cache identities may change; original compiled identities remain recorded separately. Additional reviewed delta: Updates the process-conformance harness to the typed assignment and reserved-console envelope, preserving the non-yielding parent-loss checks. The existing real-worker durable cancellation case also checks quota cause, physical process exit, interrupted console output and stable repeat-cancellation evidence. Production containment/cancellation and both retained scientific cohorts are unchanged. Complete Windows output conformance passes at R1323 with the original numerical, cancellation and responsiveness assertions. Adds a focused test-only entrypoint for the unchanged nested-console assertions with isolated temporary configuration. The ordinary full conformance path remains. This target is outside both retained scientific cohorts. Additional reviewed delta: Separate output process-conformance fixture: focused entrypoint or durable-state failure diagnostics, with all existing assertions retained. This target is outside both retained scientific commands."
     },
     {
       "path": "crates/runmat-execution-runner-native/tests/output_process_conformance/cancellation.rs",
@@ -503,9 +541,9 @@
       "after": [
         "100644",
         "blob",
-        "2418b28f29d330cb0581218fdfff610230b8cef6"
+        "16f9f45d8e2cffdcefc9380b493c588029c3839a"
       ],
-      "reason": "Updates the process-conformance harness to the typed assignment and reserved-console envelope, preserving the non-yielding parent-loss checks. The existing real-worker durable cancellation case also checks quota cause, physical process exit, interrupted console output and stable repeat-cancellation evidence. Production containment/cancellation and both retained scientific cohorts are unchanged. Complete Windows output conformance passes at R1323 with the original numerical, cancellation and responsiveness assertions. The final fixture reserves the canonical console-subtree envelope and reports early terminal failure. Its five-second responsiveness assertion is preserved, with elapsed time added to the failure diagnostic. These integration-test definitions are separate from the retained scientific workloads."
+      "reason": "Updates the process-conformance harness to the typed assignment and reserved-console envelope, preserving the non-yielding parent-loss checks. The existing real-worker durable cancellation case also checks quota cause, physical process exit, interrupted console output and stable repeat-cancellation evidence. Production containment/cancellation and both retained scientific cohorts are unchanged. Complete Windows output conformance passes at R1323 with the original numerical, cancellation and responsiveness assertions. The final fixture reserves the canonical console-subtree envelope and reports early terminal failure. Its five-second responsiveness assertion is preserved, with elapsed time added to the failure diagnostic. These integration-test definitions are separate from the retained scientific workloads. Additional reviewed delta: Separate output process-conformance fixture: focused entrypoint or durable-state failure diagnostics, with all existing assertions retained. This target is outside both retained scientific commands."
     },
     {
       "path": "crates/runmat-execution-runner-native/tests/output_process_conformance/live_prefix.rs",
@@ -1696,6 +1734,10 @@
     {
       "path": "qualification/scientific/evidence/dev-ci-repairs.json",
       "sha256": "80b0c635b79e7f940156c899dc67d4a19ecff10563c1b24dc07ba8bccad8d135"
+    },
+    {
+      "path": "qualification/scientific/evidence/dev-console-observation-order.json",
+      "sha256": "f1c0ac5e4997f11e6bc16e86ddd921837eff58eec790d86e722d3fd1f0d35883"
     }
   ],
   "cache_identity": "Package test inputs can change conservative compiled cache namespaces. This review does not claim byte-identical compiled artifacts or relabel earlier cache implementations.",
