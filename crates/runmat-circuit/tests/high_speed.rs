@@ -393,3 +393,66 @@ fn a_pour_of_the_net_connects_its_via() {
     let (r, _) = checked(&b, &[]);
     assert!(via_stubs(&b, &r, &BoardGraph::new(&b, &[])).is_empty());
 }
+
+fn pour(b: &mut Board, net: NetId, layer: u32, x0: f64, x1: f64, holes: Vec<Vec<Point>>) {
+    use runmat_circuit::geom::poly::Polygon;
+    let id = b.alloc();
+    let outer = vec![Point::mm(x0, 1.0), Point::mm(x1, 1.0), Point::mm(x1, 39.0), Point::mm(x0, 39.0)];
+    // A plane with no pads on it here: keep its fill (a board's planes reach their nets' vias).
+    let mut z = Zone::new(id, "", Some(net), vec![layer], Polygon { outer, holes });
+    z.islands = IslandPolicy::Keep;
+    b.zones.insert(id, z);
+}
+
+fn filled(b: &mut Board) -> Drc {
+    let (mut r, errs) = BoardRules::for_board(b);
+    assert!(errs.is_empty(), "{errs:?}");
+    r.rebuild(&BoardGraph::new(b, &[]));
+    runmat_circuit::zone::fill_zones(b, &r, &[]);
+    checked(b, &[]).1
+}
+
+/// A 50 Ω line on F.Cu over In1.Cu: crossing from the ground pour to the supply pour is a
+/// split; running over a 2 mm hole in the ground pour is a gap; `return_path = false` turns the
+/// check off, and a net with no impedance target isn't checked.
+#[test]
+fn a_controlled_line_over_a_plane_split_or_gap_is_a_return_path_finding() {
+    let hole = || vec![Point::mm(24.0, 18.0), Point::mm(24.0, 22.0), Point::mm(26.0, 22.0), Point::mm(26.0, 18.0)];
+    let w = mm(0.3);
+    let mut b = board();
+    let rf = b.add_net("RF", Some("rf"));
+    let (gnd, vcc) = (b.add_net("GND", None), b.add_net("VCC", None));
+    class(&mut b, "rf", vec![(props::IMPEDANCE, RuleValue::Int(50))]);
+    pour(&mut b, gnd, 1, 1.0, 30.0, vec![]);
+    pour(&mut b, vcc, 1, 31.0, 59.0, vec![]);
+    b.add_track(Some(rf), 0, w, Point::mm(10.0, 20.0), Point::mm(50.0, 20.0));
+    let drc = filled(&mut b);
+    let found = codes(&drc, "return-path");
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].message.contains("crosses a split in its reference plane In1.Cu (`GND` to `VCC`)"), "{}", found[0].message);
+    // Where the ground pour ends under the track.
+    assert!((found[0].at.x - mm(30.0)).abs() < mm(0.6) && found[0].at.y == mm(20.0), "{:?}", found[0].at);
+
+    // One ground pour with a 2 mm hole under the line: a gap, not a split.
+    let mut b = board();
+    let rf = b.add_net("RF", Some("rf"));
+    let gnd = b.add_net("GND", None);
+    class(&mut b, "rf", vec![(props::IMPEDANCE, RuleValue::Int(50))]);
+    pour(&mut b, gnd, 1, 1.0, 59.0, vec![hole()]);
+    b.add_track(Some(rf), 0, w, Point::mm(10.0, 20.0), Point::mm(50.0, 20.0));
+    let drc = filled(&mut b);
+    let found = codes(&drc, "return-path");
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].message.contains("over a gap in its reference plane In1.Cu"), "{}", found[0].message);
+    // The 2 mm hole, give or take a sample step and the fill's edge.
+    assert!((mm(1.8) as f64..mm(3.2) as f64).contains(&found[0].actual.unwrap()), "{:?}", found[0].actual);
+
+    b.net_class_rules.get_mut("rf").unwrap().decls.push((props::RETURN_PATH.into(), RuleValue::Bool(false)));
+    assert!(codes(&filled(&mut b), "return-path").is_empty());
+    let mut b2 = board();
+    let gnd = b2.add_net("GND", None);
+    let sig = b2.add_net("SIG", None);
+    pour(&mut b2, gnd, 1, 1.0, 59.0, vec![hole()]);
+    b2.add_track(Some(sig), 0, w, Point::mm(10.0, 20.0), Point::mm(50.0, 20.0));
+    assert!(codes(&filled(&mut b2), "return-path").is_empty());
+}

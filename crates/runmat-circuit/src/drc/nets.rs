@@ -210,6 +210,41 @@ impl Drc {
                 ),
             });
         }
+        // Controlled tracks over splits and gaps in their reference planes.
+        for c in crate::high_speed::return_path::crossings(board, rules, g) {
+            if !nets.contains(&c.net) {
+                continue;
+            }
+            use crate::high_speed::return_path::{gap_text, CrossingKind};
+            let names = board.stackup.copper_names();
+            let name = |l: CopperIndex| names.get(l as usize).cloned().unwrap_or_default();
+            let it = BItem::Track(c.track);
+            let (rule, source, actual, required, what) = match &c.kind {
+                CrossingKind::Split { from, to } => {
+                    let (rule, source) = rules.single_origin(g, BItem::Net(c.net.0), props::IMPEDANCE);
+                    (rule, source, None, None, format!("crosses a split in its reference plane {} (`{}` to `{}`)", name(c.plane), board.net_name(*from), board.net_name(*to)))
+                }
+                CrossingKind::Gap { length } => {
+                    let (rule, source) = rules.single_origin(g, it, props::RETURN_GAP_MAX);
+                    let max = rules.len(g, it, props::RETURN_GAP_MAX).unwrap_or(crate::high_speed::return_path::DEFAULT_GAP_MAX);
+                    (rule, source, Some(*length as f64), Some(max as f64), format!("runs {} over a gap in its reference plane {}", gap_text(*length), name(c.plane)))
+                }
+            };
+            let mut items = vec![it, BItem::Net(c.net.0)];
+            items.extend(c.zones.iter().map(|&z| BItem::Zone(z)));
+            self.put(DrcFinding {
+                code: "return-path".into(),
+                severity: Severity::Error,
+                items: key_items(items),
+                layer: Some(c.layer),
+                at: c.at,
+                actual,
+                required,
+                rule,
+                source,
+                message: format!("`{}` on {} {what}; its return current detours around it", board.net_name(c.net), name(c.layer)),
+            });
+        }
         // Differential pairs.
         for &(p, nn) in &self.diff_pairs.clone() {
             if !nets.contains(&p) && !nets.contains(&nn) {

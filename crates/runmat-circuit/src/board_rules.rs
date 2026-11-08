@@ -129,6 +129,11 @@ pub mod props {
     pub const BACKDRILL_STUB: &str = "backdrill_stub";
     /// How much wider a back-drill is than the via's drill.
     pub const BACKDRILL_OVERSIZE: &str = "backdrill_oversize";
+    /// Whether a net's tracks are checked over their reference planes (controlled nets are by
+    /// default; see [`crate::high_speed::return_path`]).
+    pub const RETURN_PATH: &str = "return_path";
+    /// The longest stretch a checked track may run over no reference-plane copper.
+    pub const RETURN_GAP_MAX: &str = "return_gap_max";
     pub const IMPEDANCE: &str = "impedance";
     /// A pair's differential impedance target, Ω (see [`crate::high_speed::controlled`]).
     pub const DIFF_IMPEDANCE: &str = "diff_impedance";
@@ -738,6 +743,8 @@ impl BoardRules {
         single.register_property(props::BACKDRILL, false, None);
         single.register_property(props::BACKDRILL_STUB, false, None);
         single.register_property(props::BACKDRILL_OVERSIZE, false, None);
+        single.register_property(props::RETURN_PATH, false, None);
+        single.register_property(props::RETURN_GAP_MAX, false, None);
         single.register_property(props::IMPEDANCE, false, None);
         single.register_property(props::DIFF_IMPEDANCE, false, None);
         single.register_property(props::THERMAL_GAP, true, None);
