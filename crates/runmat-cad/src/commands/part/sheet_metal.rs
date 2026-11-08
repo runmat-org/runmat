@@ -142,9 +142,11 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
                 pick("profile1", "First profile", &[K::Sketch]),
                 pick("profile2", "Second profile", &[K::Sketch]),
                 length("thickness", "Thickness", 1.5),
-                count("bends", "Bends per segment", 8, 1),
+                count("bends", "Bends per arc", 8, 1),
             ],
-        ),
+        )
+        // A lofted bend starts a sheet of its own from two sketches.
+        .when(has(Facet::Sketches)),
         cmd(
             "sheet-metal.convert",
             "Convert to sheet metal",
