@@ -183,17 +183,29 @@ fn unfold_and_fold_a_plate_with_an_edge_flange() {
     unfold_and_fold(&folded);
 }
 
-/// A plate's flat pattern doesn't develop a miter flange yet, so its unfold says so.
+/// A one-bend miter flange along two top edges of a plate develops with the plate: each edge
+/// is a strip as wide as the bend's allowance and the 14 mm flat, and at the shared corner the
+/// strips run on past it by the mitre (the wall's inner face, 1 mm out) and stop short of it by
+/// as much. Unfolded, the blank lies flat with those strips; folded, the wall stands again.
 #[test]
-fn unfolding_a_plate_with_a_miter_flange_is_refused_by_name() {
+fn unfold_and_fold_a_plate_with_a_miter_flange() {
     let plate = plate();
     let top = |side: &str| edge(&plate, &["sheet(plate, ordinal = 1)", side]);
     let text = edit(&plate, "sheet-metal.miter-flange", json!({ "profile": ["sketch:m"], "edges": [top("sheet_edge(l1)"), top("sheet_edge(l2)")], "gap": 0 }));
     let fixed = face_names(&text).into_iter().find(|n| n.contains("sheet(plate, ordinal = 1)")).expect("the plate's top face");
     let unfolded = edit(&text, "sheet-metal.unfold", json!({ "fixed": [fixed] }));
-    let compiled = call("compile", &["/p/sheet.part", &unfolded, "{}", "{}"]);
-    let messages: Vec<String> = compiled["diagnostics"].as_array().into_iter().flatten().filter_map(|d| d["message"].as_str().map(str::to_owned)).collect();
-    assert!(messages.iter().any(|m| m.contains("unfolding a plate with a miter flange")), "{messages:?}");
+    // Bend allowance at k = 0.44: a quarter turn at 1 mm + 0.44 x 1.5 mm.
+    let (a, flat, x) = (std::f64::consts::FRAC_PI_2 * (1.0 + 0.44 * 1.5), 14.0, 1.0);
+    let mitre = 0.5 * a * x + flat * x;
+    near(volume(&unfolded), 1.5 * (80.0 * 50.0 + 130.0 * (a + flat) + 2.0 * mitre), 0.5, "the blank");
+    let folded = unfold_and_fold(&text);
+    unfold_and_fold(&folded);
+    // The flat pattern carries one bend line per edge on each face of the blank; the display
+    // lists each line as its two end points, six numbers.
+    let flat = edit(&text, "sheet-metal.flat-pattern", json!({}));
+    let bodies = compile(&flat)["display"]["data"]["bodies"].as_array().cloned().unwrap_or_default();
+    let numbers: usize = bodies.iter().map(|b| b["bend_lines"].as_array().map_or(0, Vec::len)).sum();
+    assert_eq!(numbers, 2 * 2 * 6, "two bend lines on both faces of the blank");
 }
 
 /// A lofted bend between a straight-cornered profile and an arch 30 mm above it: a sheet of the

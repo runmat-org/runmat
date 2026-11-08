@@ -28,8 +28,8 @@ impl<'a, 'b> Run<'a, 'b> {
             ));
         };
         // A bent sheet's faces come from its base flange and the unfolds and folds since. A
-        // plate's flat pattern develops its bends, edge flanges and hems, and a fold replays
-        // them.
+        // plate's flat pattern develops its bends, edge flanges, hems and one-bend miter
+        // flanges, and a fold replays them.
         if sec.is_some() {
             let rebuilders = self.sheet_rebuilders(i, &maker);
             self.only_made_by(id, body, &rebuilders, "unfold")?;
@@ -37,11 +37,11 @@ impl<'a, 'b> Run<'a, 'b> {
             matches!(
                 self.doc.feature(n.maker()).map(|f| &f.kind),
                 Some(FeatureKind::SheetMetal(SheetMetalFeature::MiterFlange { .. }))
-            )
+            ) && !self.st.records.contains_key(n.maker())
         }) {
             return Err(self.not_lowered(
                 id,
-                "unfolding a plate with a miter flange (its flat pattern develops edge flanges and hems)",
+                "unfolding a plate with a miter flange whose profile has more than one line or turns away from the sheet face its edges lie on",
             ));
         }
         // The flat pattern's strip, in place of the bent sheet.

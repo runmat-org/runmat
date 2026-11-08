@@ -42,7 +42,7 @@ impl<'a, 'b> Run<'a, 'b> {
             ));
         }
         let body = operands[0];
-        let Some((_, rules, _, _)) = self.sheet_of(body) else {
+        let Some((maker, rules, sheet_section, _)) = self.sheet_of(body) else {
             return Err(mismatch(
                 self,
                 "edges",
@@ -322,10 +322,65 @@ impl<'a, 'b> Run<'a, 'b> {
                 tools.push(tool);
             }
         }
-        Ok(op(
-            labeled(tools, Vec::new(), Combine::Add, false),
-            vec![body],
-            naming.clone(),
-        ))
+        let made = labeled(tools, Vec::new(), Combine::Add, false);
+        // On a plate, a one-line profile turned towards the sheet's face develops as an edge
+        // flange strip per edge with mitred ends, so the plate's flat pattern, unfold and fold
+        // take it; a fold replays it.
+        let up = sec.bends.len() == 1 && sec.bends[0].angle > 0.0;
+        if sheet_section.is_none() && up {
+            let (b, flat) = (&sec.bends[0], &sec.flats[1]);
+            let developed = chain
+                .iter()
+                .map(|e| FlangeEdgeIn {
+                    start: e.start,
+                    end: e.end,
+                    frame: frame_of(e.start, e.out, n_sheet),
+                    shift: 0.0,
+                    theta: b.angle,
+                    radius: r,
+                    flat: flat.length(),
+                })
+                .collect();
+            self.record_plate_flange(i, id, body, &maker, &rules, developed)?;
+            // The mitre: a point of the strip at its section distance x out of the sheet edge
+            // (on the bend's inner face) lies on the clip plane where its offset along the edge
+            // is (±gap/2 − x n·out) / n·d.
+            let allowance = match self.st.records.get(id) {
+                Some(FeatureRecord::PlateFlange { edges, .. }) => edges.first().map_or(0.0, |e| e.allowance),
+                _ => 0.0,
+            };
+            let stations = vec![0.0, allowance, allowance + flat.length()];
+            let xs = [0.0, flat.start[0], flat.end[0]];
+            let n = chain.len();
+            let mitres: Vec<crate::regen::records::MitreEnds> = chain
+                .iter()
+                .enumerate()
+                .map(|(k, e)| {
+                    let d = normalize(sub(e.end, e.start));
+                    let offsets = |plane: Option<&([f64; 3], [f64; 3], f64)>, sign: f64| -> Vec<f64> {
+                        xs.iter()
+                            .map(|x| match plane {
+                                Some((_, nrm, _)) => (sign * gap / 2.0 - x * dot(*nrm, e.out)) / dot(*nrm, d),
+                                None => 0.0,
+                            })
+                            .collect()
+                    };
+                    let before = (k > 0 || closed).then(|| &planes[(k + n - 1) % n]);
+                    let after = (k + 1 < n || closed).then(|| &planes[k]);
+                    crate::regen::records::MitreEnds {
+                        stations: stations.clone(),
+                        start: offsets(before, 1.0),
+                        end: offsets(after, -1.0),
+                    }
+                })
+                .collect();
+            if let Some(FeatureRecord::PlateFlange { edges, .. }) = self.st.records.get_mut(id) {
+                for (e, m) in edges.iter_mut().zip(mitres) {
+                    e.mitre = Some(m);
+                }
+            }
+            self.st.replays.insert(id.clone(), made.clone());
+        }
+        Ok(op(made, vec![body], naming.clone()))
     }
 }

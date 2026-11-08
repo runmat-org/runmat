@@ -297,6 +297,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 motion,
                 parent: (region.key != "plate").then(|| region.key.clone()),
                 frame: fr,
+                mitre: None,
             });
         }
         self.st.records.insert(
@@ -364,10 +365,46 @@ impl<'a, 'b> Run<'a, 'b> {
             if !near(s.start, p) {
                 pieces.push(line_seg(c, s.start, p));
             }
-            let (pp, qq) = (plus(p, e.out, reach), plus(q, e.out, reach));
-            pieces.push(line_seg(&format!("{}.p", e.key), p, pp));
-            pieces.push(line_seg(&format!("{}.tip", e.key), pp, qq));
-            pieces.push(line_seg(&format!("{}.q", e.key), qq, q));
+            // Each end of the strip: square, or a miter flange's mitre through its stations.
+            let along = {
+                let l = (e.end[0] - e.start[0]).hypot(e.end[1] - e.start[1]);
+                [(e.end[0] - e.start[0]) / l, (e.end[1] - e.start[1]) / l]
+            };
+            let side = |from: [f64; 2], offsets: Option<&Vec<f64>>| -> Vec<[f64; 2]> {
+                match (&e.mitre, offsets) {
+                    (Some(m), Some(off)) => m
+                        .stations
+                        .iter()
+                        .zip(off)
+                        .map(|(u, z)| plus(plus(from, along, *z), e.out, e.shift + *u))
+                        .collect(),
+                    _ => vec![plus(from, e.out, reach)],
+                }
+            };
+            let forward = param(e.start) <= param(e.end);
+            let (ps, qs) = (
+                e.mitre.as_ref().map(|m| if forward { &m.start } else { &m.end }),
+                e.mitre.as_ref().map(|m| if forward { &m.end } else { &m.start }),
+            );
+            // p, out along the start end to the tip, back along the end end to q.
+            let (out_side, mut back) = (side(p, ps), side(q, qs));
+            let tip = out_side.len() - 1;
+            back.reverse();
+            let mut run = vec![(p, String::new())];
+            for (k, v) in out_side.into_iter().chain(back).enumerate() {
+                let name = match k {
+                    0 => format!("{}.p", e.key),
+                    k if k == tip + 1 => format!("{}.tip", e.key),
+                    k => format!("{}.m{k}", e.key),
+                };
+                run.push((v, name));
+            }
+            run.push((q, format!("{}.q", e.key)));
+            for w in run.windows(2) {
+                if !near(w[0].0, w[1].0) {
+                    pieces.push(line_seg(&w[1].1, w[0].0, w[1].0));
+                }
+            }
             if !near(q, s.end) {
                 pieces.push(line_seg(&format!("{c}.{}", e.key), q, s.end));
             }

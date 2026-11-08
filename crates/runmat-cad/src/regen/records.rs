@@ -136,6 +136,19 @@ pub struct PlateFlangeEdge {
     /// face, `y` out of the sheet face the flange turns towards, `z` along the bend axis, the
     /// origin on the bend's plate-side tangent line.
     pub frame: runmat_geometry_kernel::frame::Frame,
+    /// A miter flange's mitred ends; square ends without.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mitre: Option<MitreEnds>,
+}
+
+/// Where a mitred flange strip's ends lie on the developed plate: at each station (a distance
+/// out from the plate's edge line), how far its start end lies past `start` and its end past
+/// `end`, along the edge from `start` to `end` (metres).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MitreEnds {
+    pub stations: Vec<f64>,
+    pub start: Vec<f64>,
+    pub end: Vec<f64>,
 }
 
 /// A stretch of a plate's developed outline replaced: the outline runs from `from` to `to`
