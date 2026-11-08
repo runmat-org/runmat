@@ -13,6 +13,7 @@
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <BRep_Tool.hxx>
+#include <BRepLib_CheckCurveOnSurface.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -64,6 +65,7 @@
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
@@ -1281,8 +1283,11 @@ static void strip_free_wireframe(CadDocument& document) {
 // Edge tolerances written by CAD exporters bound the gap between an edge's 3D curve and its
 // pcurves only at the writer's control points (OCCT checks 23), and exports often understate it.
 // RunMat's curve, surface and validation stages rely on the edge tolerance continuously, so each
-// understated tolerance is raised to the gap measured at dense control points plus a 5% margin,
-// as OCCT's own shape healing does. A gap is admitted when it is at most ten times the written
+// understated tolerance is raised to the measured gap plus a 5% margin, as OCCT's own shape
+// healing does. The gap is sampled at 101 control points; where that comes within half of the
+// written tolerance, the true maximum between the samples is found by optimisation on each face,
+// since a narrow peak between samples can exceed the sampled gap by a third (an exported filleted
+// skid: 0.25 um sampled, 0.34 um found). A gap is admitted when it is at most ten times the written
 // tolerance or at most kAdmissibleEdgeGapM (1 um), whichever is larger. The absolute bound keeps
 // the rule meaningful for writers that stamp a nominal tolerance near the kernel's confusion
 // distance: an exported EV battery pack writes 0.9 nm on every edge while its B-spline pcurves
@@ -1292,6 +1297,8 @@ static void strip_free_wireframe(CadDocument& document) {
 static void admit_measured_edge_tolerances(const TopoDS_Shape& shape, const OcctImportOptions& options) {
   TopTools_IndexedMapOfShape edges;
   TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+  TopExp::MapShapesAndUniqueAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
   ShapeAnalysis_Edge analysis;
   BRep_Builder builder;
   for (Standard_Integer index = 1; index <= edges.Extent(); ++index) {
@@ -1305,6 +1312,14 @@ static void admit_measured_edge_tolerances(const TopoDS_Shape& shape, const Occt
     Standard_Real deviation = 0.0;
     analysis.CheckSameParameter(edge, deviation, 101);
     const double written = BRep_Tool::Tolerance(edge);
+    if (deviation > 0.5 * written) {
+      for (const TopoDS_Shape& face : edge_faces.FindFromKey(edge)) {
+        BRepLib_CheckCurveOnSurface exact(edge, TopoDS::Face(face));
+        exact.Perform();
+        if (exact.IsDone() && std::isfinite(exact.MaxDistance()))
+          deviation = std::max(deviation, exact.MaxDistance());
+      }
+    }
     const double required = deviation * 1.05;
     const double admissible =
         std::max(10.0 * written, kAdmissibleEdgeGapM / options.step_coordinate_unit_m);
