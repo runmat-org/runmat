@@ -4,7 +4,9 @@
 //!   the mated faces or axes face the other way; the floating component turns half a turn
 //!   about the connector's X axis, since planes and axes solve from where they start.
 //! - `assembly.edit-mate`: writes the selected mate's type, distance or angle target, limits,
-//!   ratio, pitch and alignment from Edit mate's form, on the connectors the mate already has.
+//!   ratio, pitch, radius, profile, path and alignment from Edit mate's form, on the connectors
+//!   the mate already has; a width's other faces and a symmetric mate's plane are picked anew
+//!   or kept.
 //!   The form starts from the mate's current values (`mate_form_values` in the index).
 //! - `assembly.smart-mate`: a component dropped onto a face or axis of another. A planar target
 //!   takes the component's planar face that faces it most squarely (nearest first) in a
@@ -19,7 +21,7 @@ use super::mate::field;
 use super::{model, parse_pick, Compiled};
 use crate::features::picks_of;
 use runmat_cad::assembly::model::{
-    AnchorRef, AngleMeasure, AssemblyDocument, DistanceMeasure, MateKind, OffsetExpr, RotationExpr, TargetExpr,
+    AnchorRef, AngleMeasure, AssemblyDocument, DistanceMeasure, MateKind, OffsetExpr, RotationExpr, TangentSpec, TargetExpr,
 };
 use runmat_cad::syntax::edit::EditFailure;
 use runmat_cad::value::ValueExpr;
@@ -176,13 +178,18 @@ pub(super) fn edit(document: &mut AssemblyDocument, compiled: &Compiled, selecti
         "gear" => MateKind::Gear { ratio: ratio(values)? },
         "screw" => MateKind::Screw { lead: field(values, "pitch", "mm")? },
         "rack_pinion" => MateKind::RackPinion { travel: field(values, "pitch", "mm")? },
-        // A tangent's radius and a cam's profile come from the picks; they keep what they have.
-        same if same == old.name() => old.clone(),
-        other => {
-            return Err(model(format!(
-                "a `{other}` mate needs its own picks; delete this mate and add a new one"
-            )))
+        // A plane on a sphere stays one; any other mate becomes a plane on a cylinder.
+        "tangent" => {
+            let radius = field(values, "radius", "mm")?;
+            MateKind::Tangent {
+                kind: match &old {
+                    MateKind::Tangent { kind: TangentSpec::PlaneSphere { .. } } => TangentSpec::PlaneSphere { radius },
+                    _ => TangentSpec::PlaneCylinder { radius },
+                },
+            }
         }
+        other => super::mate::advanced(document, compiled, values, other, Some(&old))?
+            .ok_or_else(|| model(format!("there is no `{other}` mate")))?,
     };
     let changed_kind = kind.name() != old.name();
     document.mates[at].kind = kind;

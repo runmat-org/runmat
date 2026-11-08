@@ -11,7 +11,7 @@
 //! cut, intersect or a new body, sketch-plane or offset start, draft and thin walls),
 //! `part.delete`, `part.suppress`, `part.unsuppress` (in the active configuration when
 //! `values.configuration` names one), `part.move-up` and `part.move-down`; Properties and
-//! configuration commands ([`configuration`]).
+//! configuration commands ([`configuration`]); `simulate.publish` ([`publish`]).
 //! Sketches: `part.sketch` and the sketch tools ([`sketch`]).
 //! Assemblies: delete, suppress, fix, insert, move, pattern and mate ([`assembly`]). Every
 //! other part command that adds a feature is built by [`crate::features`] from
@@ -19,6 +19,7 @@
 
 mod assembly;
 mod configuration;
+mod publish;
 mod sketch;
 
 use crate::runtime::Files;
@@ -192,6 +193,11 @@ fn part_edit(
             Ok((change, format!("Moved {id}")))
         }
         "repair.repair" => crate::repairs::repair_part(path, text, &request.values),
+        "simulate.publish" => {
+            let parsed = parse_part(path, text);
+            let document = parsed.document.ok_or(EditFailure::Invalid(parsed.diagnostics))?;
+            publish::publish(path, text, &request.values, &crate::picks::Picks::new(&document, path, text))
+        }
         command => {
             // A command that adds a feature: its values and picks as the feature's model.
             let parsed = parse_part(path, text);

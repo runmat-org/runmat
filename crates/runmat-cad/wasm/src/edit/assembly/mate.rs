@@ -18,17 +18,21 @@
 //! Joints (fasten, revolute, slider, cylindrical, planar, ball) are written as themselves, a
 //! revolute's or cylindrical's angle limits and a slider's or cylindrical's travel limits as
 //! ranges. Pin slot, screw (`pitch` is the lead), gear (`ratio`) and rack and pinion (`pitch`
-//! is the rack's travel per turn) too. A cam needs a closed path its cam publishes, which a part
-//! can't publish yet, so the Mate command doesn't offer it.
+//! is the rack's travel per turn) too. The advanced mates ([`advanced`]): width (the first two
+//! picks are a groove face and a tab face, `first2` and `second2` their other faces), symmetric
+//! (`plane`), cam (`profile`, a closed path the first pick's part publishes), path (`path`, a
+//! path the first pick's part publishes), linear coupler (`ratio`), hinge (angle limits) and
+//! universal joint (`joint_point`).
 
 use super::mate_edits::{limits, ANGLE, TRAVEL};
 use super::frames::{cross, dot, edge_frame, face_frame, norm, to_world, Frame, FrameKind, V3};
 use super::{model, parse_pick, Compiled, Entity};
 use crate::features::{picks_of, value};
 use runmat_cad::assembly::model::{
-    AnchorRef, AngleMeasure, AssemblyDocument, DistanceMeasure, MateConnector, MateDef,
+    AnchorRef, AngleMeasure, AssemblyDocument, CamProfile, DistanceMeasure, MateConnector, MateDef,
     MateKind, OffsetExpr, RelPath, RotationExpr, TangentSpec, TargetExpr,
 };
+use runmat_cad::ids::PublishName;
 use runmat_cad::syntax::edit::EditFailure;
 use runmat_cad::value::ValueExpr;
 use serde_json::{Map, Value};
@@ -48,7 +52,7 @@ pub(super) fn field(values: &Values, id: &str, unit: &str) -> Result<ValueExpr, 
         .map_err(|e| model(format!("`{id}` isn't a value: {e}")))
 }
 
-/// The `ratio` field as a plain number (a gear's teeth ratio), 1 when absent.
+/// The `ratio` field as a plain number (a gear's teeth ratio or a coupler's), 1 when absent.
 fn ratio(values: &Values) -> Result<ValueExpr, EditFailure> {
     let v = match values.get("ratio") {
         None | Some(Value::Null) => 1.0,
@@ -63,7 +67,7 @@ fn ratio(values: &Values) -> Result<ValueExpr, EditFailure> {
         }
     };
     if v == 0.0 {
-        return Err(model("a gear ratio must be non-zero"));
+        return Err(model("the ratio must be non-zero"));
     }
     Ok(ValueExpr::Number { value: v })
 }
@@ -286,9 +290,18 @@ pub(super) fn mate(
             travel: field(values, "pitch", "mm")?,
         },
         other => {
-            return Err(model(format!(
-                "the `{other}` mate is written in the source editor in this build"
-            )))
+            if other == "width" {
+                // The tab's other face is on the tab, the groove's on the groove's component.
+                for (id, on, what) in [("first2", &a.occurrence, "groove"), ("second2", &b.occurrence, "tab")] {
+                    if let Some(p) = picks_of(values, id).into_iter().next() {
+                        if &resolve(compiled, &p, "the other face")?.occurrence != on {
+                            return Err(model(format!("pick the {what}'s other face on `{on}`")));
+                        }
+                    }
+                }
+            }
+            advanced(document, compiled, values, other, None)?
+                .ok_or_else(|| model(format!("there is no `{other}` mate")))?
         }
     };
     // Turn the moving component into the mated orientation first, as feature-based CAD tools move a part
@@ -302,7 +315,7 @@ pub(super) fn mate(
         let wanted = match kind.as_str() {
             "perpendicular" | "tangent" => Some(std::f64::consts::FRAC_PI_2),
             "angle" => literal_angle(values),
-            "parallel" | "coincident" | "concentric" | "distance" => Some(nearest),
+            "parallel" | "coincident" | "concentric" | "distance" | "width" => Some(nearest),
             _ => None,
         };
         if let Some(theta) = wanted {
@@ -341,4 +354,73 @@ pub(super) fn mate(
     }
     let fixed = if moving == a.occurrence { &b.occurrence } else { &a.occurrence };
     Ok(format!("Mated {moving} to {fixed} ({kind})"))
+}
+
+/// A pick of field `id` as a new connector, or `None` when the field is empty.
+fn extra_connector(document: &mut AssemblyDocument, compiled: &Compiled, values: &Values, id: &str, what: &str) -> Result<Option<String>, EditFailure> {
+    match picks_of(values, id).into_iter().next() {
+        Some(p) => Ok(Some(connector(document, &resolve(compiled, &p, what)?, false))),
+        None => Ok(None),
+    }
+}
+
+/// A published name from text field `id`.
+fn published(values: &Values, id: &str, what: &str) -> Result<PublishName, EditFailure> {
+    match values.get(id).and_then(Value::as_str).map(str::trim) {
+        Some(name) if !name.is_empty() => Ok(PublishName::new(name)),
+        _ => Err(model(format!("name {what}"))),
+    }
+}
+
+/// The advanced mates from the form's values, on the mate's own two connectors: width's other
+/// faces and symmetric's plane become new connectors in `document`. `keep` is the mate being
+/// edited: a width or symmetric mate keeps the connectors it has where the form picks none.
+/// `None` when `kind` isn't an advanced mate.
+pub(super) fn advanced(
+    document: &mut AssemblyDocument,
+    compiled: &Compiled,
+    values: &Values,
+    kind: &str,
+    keep: Option<&MateKind>,
+) -> Result<Option<MateKind>, EditFailure> {
+    Ok(Some(match kind {
+        "width" => {
+            let (old_a2, old_b2) = match keep {
+                Some(MateKind::Width { a2, b2 }) => (Some(a2.clone()), Some(b2.clone())),
+                _ => (None, None),
+            };
+            let a2 = extra_connector(document, compiled, values, "first2", "the groove's other face")?.or(old_a2);
+            let b2 = extra_connector(document, compiled, values, "second2", "the tab's other face")?.or(old_b2);
+            MateKind::Width {
+                a2: a2.ok_or_else(|| model("pick the groove's other face"))?,
+                b2: b2.ok_or_else(|| model("pick the tab's other face"))?,
+            }
+        }
+        "symmetric" => {
+            let old = match keep {
+                Some(MateKind::Symmetric { plane }) => Some(plane.clone()),
+                _ => None,
+            };
+            let plane = extra_connector(document, compiled, values, "plane", "the symmetry plane")?.or(old);
+            MateKind::Symmetric {
+                plane: plane.ok_or_else(|| model("pick the symmetry plane"))?,
+            }
+        }
+        "cam" => MateKind::Cam {
+            profile: CamProfile {
+                profile: published(values, "profile", "the closed path the cam's part publishes")?,
+            },
+        },
+        "path" => MateKind::Path {
+            path: published(values, "path", "the path the first component's part publishes")?,
+        },
+        "linear_coupler" => MateKind::LinearCoupler { ratio: ratio(values)? },
+        "hinge" => MateKind::Hinge {
+            angle: limits(values, "angle_limits", ANGLE, "deg")?,
+        },
+        "universal_joint" => MateKind::UniversalJoint {
+            joint_point: values.get("joint_point").and_then(Value::as_bool).unwrap_or(true),
+        },
+        _ => return Ok(None),
+    }))
 }

@@ -369,12 +369,14 @@ pub(super) fn simulate() -> Vec<CommandDescriptor> {
             .when(bodies_exist())
             .edit(edit(EditOp::Add, Section::Regions).item("region")),
         cmd("simulate.publish", "Publish", "publish", P)
-            .desc("Publish a region, frame or value for assemblies and studies to use.")
-            .kw(&["interface", "export name"])
+            .desc("Publish a region, frame, value or path for assemblies and studies to use.")
+            .kw(&["interface", "export name", "cam profile", "path"])
             .inputs(vec![
                 text("name", "Name", Some("mount")),
-                radio("target", "Publishes", &[("region", "Region"), ("frame", "Mate connector"), ("value", "Value")]),
-                pick("item", "Item", &[K::Region, K::MateConnector, K::Input]),
+                radio("target", "Publishes", &[("region", "Region"), ("frame", "Mate connector"), ("value", "Value"), ("path", "Path")]),
+                pick("item", "Item", &[K::Region, K::MateConnector, K::Input]).shown("target", &["region", "frame", "value"]),
+                // A cam's closed profile or a path mate's track: edges joined end to end.
+                picks("edges", "Edges", &[K::Edge]).shown("target", &["path"]),
             ])
             .edit(edit(EditOp::Add, Section::Publishes).item("publish")),
         cmd("simulate.representation", "Representation", "representation", P)

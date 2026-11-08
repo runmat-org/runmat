@@ -544,6 +544,31 @@ pub enum MateKind {
     /// `profile`, a closed path the cam's design publishes, seen along the connector's Z (the
     /// follower may sit anywhere along it, as on the cam's extruded face).
     Cam { profile: CamProfile },
+    /// Width: a tab (`b` and `b2`, its two faces) centred in a groove (`a` and `a2`, its two
+    /// faces). Each pair's mid-plane is half way between its two connectors, square to `a`'s
+    /// (or `b`'s) Z; the two mid-planes coincide. Each pair is on one component.
+    Width { a2: String, b2: String },
+    /// `a`'s and `b`'s origins mirror each other in `plane`'s XY plane.
+    Symmetric { plane: String },
+    /// `b`'s origin rides along `path`, a path `a`'s design publishes, seen in `a`'s frame. An
+    /// open path runs on straight past its ends.
+    Path { path: PublishName },
+    /// A linear coupler: `b` moves along its Z by `ratio` times `a`'s travel along its Z, both
+    /// measured in the assembly from where the solve starts.
+    LinearCoupler { ratio: ValueExpr },
+    /// A hinge: concentric (the Z axes coincide) and coincident (`b`'s origin on `a`'s XY
+    /// plane), with an optional angle drive or range about the axis.
+    Hinge {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<TargetExpr>,
+    },
+    /// A universal joint: an arm along `a`'s X (square to `a`'s shaft, its Z) and an arm along
+    /// `b`'s X stay square, so `b`'s shaft follows `a`'s turn with the joint's angle. With
+    /// `joint_point`, the two origins also coincide at the joint's centre.
+    UniversalJoint {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        joint_point: bool,
+    },
 }
 
 /// A cam mate's profile: the name the cam's design publishes it under. `profile` is a tagged
@@ -571,7 +596,31 @@ impl MateKind {
             MateKind::Gear { .. } => "gear",
             MateKind::RackPinion { .. } => "rack_pinion",
             MateKind::Cam { .. } => "cam",
+            MateKind::Width { .. } => "width",
+            MateKind::Symmetric { .. } => "symmetric",
+            MateKind::Path { .. } => "path",
+            MateKind::LinearCoupler { .. } => "linear_coupler",
+            MateKind::Hinge { .. } => "hinge",
+            MateKind::UniversalJoint { .. } => "universal_joint",
         }
+    }
+
+    /// Connectors the kind joins besides the mate's `a` and `b`.
+    pub fn extra_connectors(&self) -> Vec<&str> {
+        match self {
+            MateKind::Width { a2, b2 } => vec![a2, b2],
+            MateKind::Symmetric { plane } => vec![plane],
+            _ => Vec::new(),
+        }
+    }
+}
+
+impl MateDef {
+    /// Every connector the mate joins: `a`, `b`, then the kind's own.
+    pub fn connectors(&self) -> Vec<&str> {
+        let mut out = vec![self.a.as_str(), self.b.as_str()];
+        out.extend(self.kind.extra_connectors());
+        out
     }
 }
 

@@ -9,7 +9,7 @@ const PLATE: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.
 
 const BLOCK: &str = "runmat 0.7\nstd 1\n\npart block {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [20 mm, 0 mm])\n        l2 = line(start = [20 mm, 0 mm], end = [20 mm, 20 mm])\n        l3 = line(start = [20 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 15 mm)\n    output block = { body = feature.body.body }\n}\n";
 
-const PIN: &str = "runmat 0.7\nstd 1\n\npart pin {\n    sketch s1 on origin.xy {\n        c1 = circle(center = [0 mm, 0 mm], radius = 5 mm)\n    }\n    feature body = extrude(profile = sketch.s1, distance = 30 mm)\n    output pin = { body = feature.body.body }\n}\n";
+const PIN: &str = "runmat 0.7\nstd 1\n\npart pin {\n    sketch s1 on origin.xy {\n        c1 = circle(center = [0 mm, 0 mm], radius = 5 mm)\n    }\n    feature body = extrude(profile = sketch.s1, distance = 30 mm)\n    output pin = { body = feature.body.body }\n    region rim : edge = { select = [edges_between(feature.body.face.side(s1.c1), feature.body.face.end)], expect = at_least_one }\n    publish rim = region(region = rim)\n}\n";
 
 const RIG: &str = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as plate\n    use part block as block {\n        placement = { placement = offset, offset = { translation = [30 mm, 10 mm, 40 mm] } }\n    }\n    use part pin as pin {\n        placement = { placement = offset, offset = { translation = [60 mm, 30 mm, 25 mm] } }\n    }\n    use part pin as pin2 {\n        placement = { placement = offset, offset = { translation = [10 mm, 70 mm, 0 mm] } }\n    }\n}\n";
 
@@ -230,13 +230,50 @@ fn every_offered_mate_type_applies() {
     };
     let c = compile(RIG);
     let (pin, pin2, plate) = (c.face("pin", round), c.face("pin2", round), c.face("plate", top));
-    assert_eq!(options.len(), 17, "{options:?}");
+    let (under, block_top, block_under) = (c.face("plate", bottom), c.face("block", top), c.face("block", bottom));
+    assert_eq!(options.len(), 24, "{options:?}");
     for option in options {
         let kind = option.value.as_str();
-        let first = if kind == "tangent" { plate.clone() } else { pin.clone() };
-        let text = mate(RIG, kind, first, pin2.clone(), json!({ "offset": 5, "angle": 30, "ratio": 2, "pitch": 2 }));
+        let (first, second) = match kind {
+            "tangent" => (plate.clone(), pin2.clone()),
+            // The plate's two faces are the groove, the block's the tab.
+            "width" => (plate.clone(), block_under.clone()),
+            _ => (pin.clone(), pin2.clone()),
+        };
+        let values = json!({
+            "offset": 5, "angle": 30, "ratio": 2, "pitch": 2,
+            "first2": [under], "second2": [block_top], "plane": [c.face("plate", side)],
+            "profile": "rim", "path": "rim", "joint_point": true,
+        });
+        let text = mate(RIG, kind, first, second, values);
         compile(&text);
     }
+}
+
+/// The advanced mates write their kind and extra connectors, and solve: the block centred
+/// across the plate's thickness, pin2 mirrored in the plate's side, pin2 on the pin's rim.
+#[test]
+fn advanced_mates_write_and_solve() {
+    let c = compile(RIG);
+    let width = json!({ "first2": [c.face("plate", bottom)], "second2": [c.face("block", top)] });
+    let text = mate(RIG, "width", c.face("plate", top), c.face("block", bottom), width);
+    assert!(text.contains("mate = width, a2 = plate_c1, b2 = block_c1"), "{text}");
+    // Plate 0..10 mm, block 15 mm thick: its bottom at -2.5 mm.
+    let z = compile(&text).transform("block")[11];
+    assert!((z + 0.0025).abs() < 1e-6, "{z}\n{text}");
+    let whole = |name: &str| format!("occurrence:{}", c.uuid(name));
+    let text = mate(RIG, "symmetric", whole("pin"), whole("pin2"), json!({ "plane": [c.face("plate", side)] }));
+    assert!(text.contains("mate = symmetric, plane = plate_c1"), "{text}");
+    // The pin's origin at x = 60 mm mirrors in the plate's side (x = 80 mm) to 100 mm.
+    let x = compile(&text).transform("pin2")[9];
+    assert!((x - 0.100).abs() < 1e-6, "{x}\n{text}");
+    let text = mate(RIG, "path", c.face("pin", round), c.face("pin2", round), json!({ "path": "rim" }));
+    assert!(text.contains("mate = path, path = rim"), "{text}");
+    compile(&text);
+    // The groove's other face on another component is refused by name.
+    let wrong = json!({ "command": "assembly.mate", "values": { "type": "width", "first": [c.face("plate", top)], "second": [c.face("block", bottom)], "first2": [c.face("block", top)], "second2": [c.face("block", top)] } });
+    let out: Value = serde_json::from_str(&edit_json("/p/rig.assembly", RIG, &files(), &wrong.to_string())).unwrap();
+    assert!(out["message"].as_str().unwrap_or("").contains("groove's other face on `plate`"), "{out}");
 }
 
 #[test]

@@ -2,6 +2,7 @@
 
 pub mod part_cache;
 mod prototype_reuse;
+mod published_paths;
 pub mod values_host;
 
 /// Display meshes as bytes beside the JSON, for the hosts' framed compile.
@@ -358,8 +359,9 @@ pub fn regen_diagnostics(path: &str, part: &RegeneratedPart) -> Vec<Diagnostic> 
         .collect()
 }
 
-/// The datum frames, planes, axes and points a part publishes, from its regeneration: what an
-/// assembly attaches to (a skeleton's interface).
+/// The datum frames, planes, axes and points a part publishes, from its regeneration, and its
+/// published edge sets as paths: what an assembly attaches to (a skeleton's interface) and what
+/// a cam or path mate follows.
 fn published_datums(
     part: &RegeneratedPart,
 ) -> BTreeMap<runmat_cad::ids::PublishName, runmat_cad::assembly::source::PublishedGeometry> {
@@ -388,6 +390,7 @@ fn published_datums(
         };
         out.insert(p.name.clone(), g);
     }
+    out.extend(published_paths::published_paths(part));
     out
 }
 

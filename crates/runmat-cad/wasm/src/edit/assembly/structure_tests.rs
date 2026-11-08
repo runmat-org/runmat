@@ -144,7 +144,31 @@ fn edit_mate_starts_from_the_mate_and_writes_its_new_values() {
     assert!(hinge.contains("target = range") && hinge.contains("-10 deg") && hinge.contains("20 deg"), "{hinge}");
     let row = compile(&hinge).mate("distance1")["values"].clone();
     assert_eq!((row["angle_limits"].clone(), row["max"]["text"].clone()), (json!(true), json!("20 deg")), "{row}");
-    assert!(refused(&text, json!({ "command": "assembly.edit-mate", "selection": ["mate:/distance1"], "values": { "type": "tangent" } })).contains("needs its own picks"));
+    // Width needs the other faces it doesn't have yet.
+    assert!(refused(&text, json!({ "command": "assembly.edit-mate", "selection": ["mate:/distance1"], "values": { "type": "width" } })).contains("pick the groove's other face"));
+}
+
+/// Every type Edit mate offers writes on a mate that exists, given its fields: none needs
+/// picks the form doesn't have.
+#[test]
+fn every_type_edit_mate_offers_applies() {
+    use runmat_cad::commands::FieldKind;
+    let catalog = runmat_cad::commands::catalog();
+    let command = catalog.command("assembly.edit-mate").expect("assembly.edit-mate");
+    let FieldKind::Choice { options, .. } = &command.inputs.iter().find(|f| f.id == "type").unwrap().kind else {
+        panic!("Edit mate's type is a choice");
+    };
+    let c = compile(RIG);
+    let text = run(RIG, json!({ "command": "assembly.mate", "values": { "type": "distance", "first": [c.face("plate", top)], "second": [c.face("block", bottom)], "offset": 5 } }));
+    for option in options {
+        let values = json!({
+            "type": option.value, "offset": 5, "angle": 30, "ratio": 2, "pitch": 2, "radius": 5,
+            "profile": "lobe", "path": "rail", "joint_point": false, "flip": false,
+            "first2": [c.face("plate", bottom)], "second2": [c.face("block", top)], "plane": [c.face("plate", top)],
+        });
+        let edited = run(&text, json!({ "command": "assembly.edit-mate", "selection": ["mate:/distance1"], "values": values }));
+        assert!(edited.contains(&format!("mate = {}", option.value)), "{}: {edited}", option.value);
+    }
 }
 
 #[test]

@@ -267,6 +267,19 @@ pub enum Mate {
     /// (`n = radii.len()`, at least 3), with a periodic cubic between stations. B may sit
     /// anywhere along A's Z, as on an extruded profile (1 row: the radial distance).
     Cam { a: EntityId, b: EntityId, radii: std::sync::Arc<[f64]> },
+    /// A linear coupler: B moves along its Z by `ratio` times A's travel along its Z, both
+    /// measured in the assembly from where the solve starts (1 row).
+    LinearCoupler { a: EntityId, b: EntityId, ratio: f64 },
+    /// A universal joint's cross: an arm along A's X (square to A's shaft, its Z) and an arm
+    /// along B's X (square to B's shaft) stay square to each other (1 row). With the joint
+    /// point, the origins also coincide (4 rows).
+    UniversalJoint { a: EntityId, b: EntityId, joint_point: bool },
+    /// Symmetry: A's and B's origins mirror each other in `plane`'s XY plane (3 rows). A and B
+    /// may be on one body; the three can't all be.
+    Symmetric { plane: EntityId, a: EntityId, b: EntityId },
+    /// B's origin lies on a path: the polyline `points`, given in A's connector frame (2 rows:
+    /// the offsets square to the nearest segment; an open path runs on straight past its ends).
+    Path { a: EntityId, b: EntityId, points: std::sync::Arc<[[f64; 3]]> },
 }
 
 /// An ellipse dimension.
@@ -1393,10 +1406,33 @@ impl System {
         let (a, b) = mate_connectors(m);
         let ba = self.expect_connector(a)?;
         let bb = self.expect_connector(b)?;
-        if ba == bb {
-            return Err(BuildError::SameBody(ba));
+        match m {
+            // Two mirrored entities may share a body; the plane must be on another.
+            Mate::Symmetric { plane, .. } => {
+                if self.expect_connector(*plane)? == ba && ba == bb {
+                    return Err(BuildError::SameBody(ba));
+                }
+            }
+            _ if ba == bb => return Err(BuildError::SameBody(ba)),
+            _ => {}
         }
         match m {
+            Mate::LinearCoupler { ratio, .. } => {
+                finite(*ratio)?;
+                if *ratio == 0.0 {
+                    return Err(BuildError::BadValue("a coupler ratio must be non-zero"));
+                }
+            }
+            Mate::Path { points, .. } => {
+                if points.len() < 2 {
+                    return Err(BuildError::BadValue("a path takes at least two points"));
+                }
+                for p in points.iter() {
+                    for c in p {
+                        finite(*c)?;
+                    }
+                }
+            }
             Mate::Tangent {
                 kind: TangentKind::PlaneSphere { radius } | TangentKind::PlaneCylinder { radius },
                 ..
@@ -1456,7 +1492,11 @@ pub(crate) fn mate_connectors(m: &Mate) -> (EntityId, EntityId) {
         | Mate::Screw { a, b, .. }
         | Mate::Gear { a, b, .. }
         | Mate::Cam { a, b, .. }
-        | Mate::RackPinion { a, b, .. } => (a, b),
+        | Mate::RackPinion { a, b, .. }
+        | Mate::LinearCoupler { a, b, .. }
+        | Mate::UniversalJoint { a, b, .. }
+        | Mate::Symmetric { a, b, .. }
+        | Mate::Path { a, b, .. } => (a, b),
     }
 }
 

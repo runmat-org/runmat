@@ -376,7 +376,7 @@ impl V<'_> {
                 file.as_str(),
             );
             let mr = self.region(m.when.as_ref(), &file, &site);
-            for c in [&m.a, &m.b] {
+            for c in m.connectors() {
                 match doc.connector(c) {
                     None => self.diag(
                         DiagCode::AsmUnknownConnector,

@@ -14,26 +14,32 @@ impl Resolver<'_, '_> {
     /// The station radii of `profile`, published by `host`'s design, in the connector frame
     /// `frame` (host coordinates).
     pub(super) fn cam_stations(&mut self, host: NodeId, frame: &Transform, profile: &PublishName) -> Result<Vec<f64>, String> {
+        let points = self.published_path(host, frame, profile, "a cam's profile is a closed curve")?;
+        let polar: Vec<(f64, f64)> = points
+            .iter()
+            .map(|q| (q[1].atan2(q[0]).rem_euclid(std::f64::consts::TAU), q[0].hypot(q[1])))
+            .collect();
+        stations(&polar).ok_or_else(|| {
+            let n = &self.nodes[host as usize];
+            format!("`{profile}` in `{}` does not go once round the cam connector's axis", n.definition)
+        })
+    }
+
+    /// The points of `name`, a path `host`'s design publishes, in the connector frame `frame`
+    /// (host coordinates), its chains one after another. `why` says what the path is for when
+    /// `name` is something else.
+    pub(super) fn published_path(&mut self, host: NodeId, frame: &Transform, name: &PublishName, why: &str) -> Result<Vec<[f64; 3]>, String> {
         let n = self.nodes[host as usize].clone();
         let summary = self
             .configured_summary(&n.definition, n.revision.as_ref(), &n.configuration)
             .map_err(|e| e.to_string())?;
-        let points = match summary.publishes.get(profile) {
+        let points = match summary.publishes.get(name) {
             Some(PublishedGeometry::Path { chains }) => chains.iter().flat_map(|c| c.points.iter().copied()).collect::<Vec<_>>(),
-            Some(_) => return Err(format!("`{profile}` in `{}` is not a path; a cam's profile is a closed curve", n.definition)),
-            None => return Err(format!("`{}` publishes no `{profile}`", n.definition)),
+            Some(_) => return Err(format!("`{name}` in `{}` is not a path; {why}", n.definition)),
+            None => return Err(format!("`{}` publishes no `{name}`", n.definition)),
         };
-        let to_cam = frame.inverse();
-        let polar: Vec<(f64, f64)> = points
-            .iter()
-            .map(|p| {
-                let q = to_cam.apply(*p);
-                (q[1].atan2(q[0]).rem_euclid(std::f64::consts::TAU), q[0].hypot(q[1]))
-            })
-            .collect();
-        stations(&polar).ok_or_else(|| {
-            format!("`{profile}` in `{}` does not go once round the cam connector's axis", n.definition)
-        })
+        let to_local = frame.inverse();
+        Ok(points.iter().map(|p| to_local.apply(*p)).collect())
     }
 }
 

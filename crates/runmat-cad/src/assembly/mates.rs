@@ -38,7 +38,26 @@ struct ActiveMate {
     /// (host node, frame in host coordinates) per side, or the error.
     a: Result<(NodeId, Transform), String>,
     b: Result<(NodeId, Transform), String>,
+    /// The kind's own connectors ([`MateKind::extra_connectors`]), in order.
+    extra: Vec<Result<(NodeId, Transform), String>>,
     outcome: usize,
+}
+
+impl ActiveMate {
+    fn sides(&self) -> impl Iterator<Item = &Result<(NodeId, Transform), String>> {
+        [&self.a, &self.b].into_iter().chain(self.extra.iter())
+    }
+}
+
+/// What a mate needs besides its two connectors.
+#[derive(Default)]
+struct Aux {
+    /// A cam's station radii.
+    cam: Option<Result<Vec<f64>, String>>,
+    /// A path mate's points in `a`'s frame.
+    path: Option<Result<Vec<[f64; 3]>, String>>,
+    /// A symmetric mate's plane.
+    plane: Option<rc::EntityId>,
 }
 
 impl<'a, 'b> Resolver<'a, 'b> {
@@ -116,12 +135,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
                 let a = self.connector(owner, &m.a);
                 let b = self.connector(owner, &m.b);
+                let extra = m.kind.extra_connectors().into_iter().map(|c| self.connector(owner, c)).collect();
                 active.push(ActiveMate {
                     owner,
                     def: m.clone(),
                     env: env.clone(),
                     a,
                     b,
+                    extra,
                     outcome,
                 });
             }
@@ -130,9 +151,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
         let member_set: BTreeSet<NodeId> = members.iter().copied().collect();
         let mut usable = Vec::new();
         for m in active {
-            match (&m.a, &m.b) {
-                (Ok(_), Ok(_)) => usable.push(m),
-                (Err(e), _) | (_, Err(e)) => {
+            let failed = m.sides().find_map(|s| s.as_ref().err()).cloned();
+            match failed {
+                None => usable.push(m),
+                Some(e) => {
                     let file = self.asm[&m.owner].doc.path.clone();
                     self.diag(
                         DiagCode::AsmUnknownConnector,
@@ -149,7 +171,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                             mate: m.def.name.clone(),
                         }],
                     );
-                    self.mates[m.outcome].status = MateStatus::Failed { message: e.clone() };
+                    self.mates[m.outcome].status = MateStatus::Failed { message: e };
                 }
             }
         }
@@ -165,7 +187,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
         let instances: BTreeSet<NodeId> = plans.iter().map(|p| p.instance).collect();
         let touches_instance = |r: &Self, m: &ActiveMate| {
-            [&m.a, &m.b].iter().any(|s| {
+            m.sides().any(|s| {
                 let (host, _) = s.as_ref().unwrap();
                 r.body_of(*host, &member_set, node)
                     .map(|b| {
@@ -294,24 +316,53 @@ impl<'a, 'b> Resolver<'a, 'b> {
         let mut owner_of: BTreeMap<rc::ConstraintId, usize> = BTreeMap::new();
         let mut touched: BTreeSet<NodeId> = BTreeSet::new();
         for (mi, m) in mates.iter().enumerate() {
-            let mut ends = Vec::new();
-            for side in [&m.a, &m.b] {
+            // Each side's body and its frame on that body.
+            let mut end = |r: &Self, side: &Result<(NodeId, Transform), String>| {
                 let (host, f) = side.as_ref().unwrap();
-                let (e, local) = match self.body_of(*host, &member_set, root) {
+                match r.body_of(*host, &member_set, root) {
                     Some(b) => {
                         touched.insert(b);
-                        (body[&b], self.chain(b, *host).compose(f))
+                        (body[&b], r.chain(b, *host).compose(f))
                     }
-                    None => (root_ground, self.chain(root, *host).compose(f)),
-                };
-                ends.push(sys.connector(e, to_frame(&local)).expect("a body"));
-            }
-            let (a, b) = (ends[0], ends[1]);
-            let cam = match (&m.def.kind, &m.a) {
-                (MateKind::Cam { profile }, Ok((host, f))) => Some(self.cam_stations(*host, f, &profile.profile)),
-                _ => None,
+                    None => (root_ground, r.chain(root, *host).compose(f)),
+                }
             };
-            let built = self.mate_constraints(&m.def.kind, a, b, &m.env, cam);
+            let mut sides = vec![end(self, &m.a), end(self, &m.b)];
+            let extra: Vec<(rc::EntityId, Transform)> = m.extra.iter().map(|s| end(self, s)).collect();
+            let mut aux = Aux::default();
+            let mut problem = None;
+            match &m.def.kind {
+                // Each pair's mid-plane: half way between its two connectors, on the first's axes.
+                MateKind::Width { .. } => {
+                    for (i, (pair, what)) in [(extra[0], "groove"), (extra[1], "tab")].into_iter().enumerate() {
+                        if pair.0 != sides[i].0 {
+                            problem = Some(format!("the {what}'s two faces are on different components"));
+                        }
+                        let t = &mut sides[i].1.translation;
+                        for k in 0..3 {
+                            t[k] = (t[k] + pair.1.translation[k]) / 2.0;
+                        }
+                    }
+                }
+                MateKind::Symmetric { .. } => {
+                    aux.plane = Some(sys.connector(extra[0].0, to_frame(&extra[0].1)).expect("a body"));
+                }
+                MateKind::Cam { profile } => {
+                    let (host, f) = m.a.as_ref().unwrap();
+                    aux.cam = Some(self.cam_stations(*host, f, &profile.profile));
+                }
+                MateKind::Path { path } => {
+                    let (host, f) = m.a.as_ref().unwrap();
+                    aux.path = Some(self.published_path(*host, f, path, "a path mate follows a published path"));
+                }
+                _ => {}
+            }
+            let ends: Vec<rc::EntityId> = sides.iter().map(|(e, local)| sys.connector(*e, to_frame(local)).expect("a body")).collect();
+            let (a, b) = (ends[0], ends[1]);
+            let built = match problem {
+                Some(p) => Err(p),
+                None => self.mate_constraints(&m.def.kind, a, b, &m.env, aux),
+            };
             match built {
                 Ok(list) => {
                     for c in list {
@@ -576,14 +627,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
         touched
     }
 
-    /// `cam`: a cam mate's station radii, sampled from its profile by [`Self::cam_stations`].
+    /// `aux`: what a cam, path or symmetric mate needs besides its two connectors.
     fn mate_constraints(
         &self,
         kind: &MateKind,
         a: rc::EntityId,
         b: rc::EntityId,
         env: &ValueEnv,
-        cam: Option<Result<Vec<f64>, String>>,
+        aux: Aux,
     ) -> Result<Vec<rc::Constraint>, String> {
         let target = |t: &TargetExpr, angle: bool| -> Result<rc::Target, String> {
             let v = |e| {
@@ -690,9 +741,48 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 travel: self.length(travel, env)?,
             })],
             MateKind::Cam { profile } => {
-                let radii = cam.unwrap_or_else(|| Err(format!("the cam publishes no `{}`", profile.profile)))?;
+                let radii = aux.cam.unwrap_or_else(|| Err(format!("the cam publishes no `{}`", profile.profile)))?;
                 vec![m(rc::Mate::Cam { a, b, radii: radii.into() })]
             }
+            // The mid-planes coincide: `a` and `b` are already moved half way to `a2` and `b2`.
+            MateKind::Width { .. } => vec![m(rc::Mate::Planar { a, b })],
+            MateKind::Symmetric { .. } => vec![m(rc::Mate::Symmetric {
+                plane: aux.plane.expect("the plane's connector"),
+                a,
+                b,
+            })],
+            MateKind::Path { path } => {
+                let points = aux.path.unwrap_or_else(|| Err(format!("no `{path}` path")))?;
+                if points.len() < 2 {
+                    return Err(format!("`{path}` has fewer than two points"));
+                }
+                vec![m(rc::Mate::Path { a, b, points: points.into() })]
+            }
+            MateKind::LinearCoupler { ratio } => vec![m(rc::Mate::LinearCoupler {
+                a,
+                b,
+                ratio: self.ratio(ratio, env)?,
+            })],
+            MateKind::Hinge { angle: t } => {
+                let mut v = vec![
+                    m(rc::Mate::Cylindrical { a, b }),
+                    m(rc::Mate::Distance {
+                        a,
+                        b,
+                        mode: rc::DistanceMode::PlanePoint,
+                        target: rc::Target::Exact(0.0),
+                    }),
+                ];
+                if let Some(t) = t {
+                    v.push(angle(t)?);
+                }
+                v
+            }
+            MateKind::UniversalJoint { joint_point } => vec![m(rc::Mate::UniversalJoint {
+                a,
+                b,
+                joint_point: *joint_point,
+            })],
             MateKind::Angle { measure, target: t } => vec![m(rc::Mate::Angle {
                 a,
                 b,

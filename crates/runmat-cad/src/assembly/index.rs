@@ -126,14 +126,15 @@ pub struct MateRow {
 
 /// A mate's type, values and alignment keyed by Edit mate's fields: `type` (the mate kind),
 /// `offset` (a distance target), `angle` (an angle target), `angle_limits` with `min`/`max`,
-/// `distance_limits` with `near`/`far`, `ratio`, `pitch` and `flip` (the second connector is
+/// `distance_limits` with `near`/`far`, `ratio`, `pitch`, `profile` (a cam's), `path`,
+/// `joint_point` and `flip` (the second connector is
 /// turned over). Values are value edits (`{ kind: "value", value, text, scope }`), so an
 /// expression comes back as itself.
 pub fn mate_form_values(
     doc: &crate::assembly::model::AssemblyDocument,
     def: &crate::assembly::model::MateDef,
 ) -> serde_json::Map<String, serde_json::Value> {
-    use crate::assembly::model::{MateKind, TargetExpr};
+    use crate::assembly::model::{MateKind, TangentSpec, TargetExpr};
     const ANGLE_RANGE: [&str; 3] = ["angle_limits", "min", "max"];
     const DISTANCE_RANGE: [&str; 3] = ["distance_limits", "near", "far"];
     use serde_json::{json, Value};
@@ -156,13 +157,25 @@ pub fn mate_form_values(
     match &def.kind {
         MateKind::Distance { target: t, .. } => target(&mut out, &Some(t.clone()), "offset", DISTANCE_RANGE),
         MateKind::Angle { target: t, .. } => target(&mut out, &Some(t.clone()), "angle", ANGLE_RANGE),
-        MateKind::Revolute { angle } => target(&mut out, angle, "angle", ANGLE_RANGE),
+        MateKind::Revolute { angle } | MateKind::Hinge { angle } => target(&mut out, angle, "angle", ANGLE_RANGE),
         MateKind::Slider { distance } => target(&mut out, distance, "offset", DISTANCE_RANGE),
         MateKind::Cylindrical { angle, distance } => {
             target(&mut out, angle, "angle", ANGLE_RANGE);
             target(&mut out, distance, "offset", DISTANCE_RANGE);
         }
-        MateKind::Gear { ratio } => {
+        MateKind::Tangent { kind: TangentSpec::PlaneSphere { radius } | TangentSpec::PlaneCylinder { radius } } => {
+            out.insert("radius".into(), edit(radius));
+        }
+        MateKind::Cam { profile } => {
+            out.insert("profile".into(), Value::String(profile.profile.to_string()));
+        }
+        MateKind::Path { path } => {
+            out.insert("path".into(), Value::String(path.to_string()));
+        }
+        MateKind::UniversalJoint { joint_point } => {
+            out.insert("joint_point".into(), Value::Bool(*joint_point));
+        }
+        MateKind::Gear { ratio } | MateKind::LinearCoupler { ratio } => {
             out.insert("ratio".into(), edit(ratio));
         }
         MateKind::Screw { lead: v } | MateKind::RackPinion { travel: v } => {

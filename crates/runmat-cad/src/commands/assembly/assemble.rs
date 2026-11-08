@@ -68,7 +68,7 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             "mate",
             "Constrain two components: standard, advanced and mechanical mates, with limits.",
         )
-        .kw(&["constraint", "joint", "fasten", "revolute", "slider"])
+        .kw(&["constraint", "joint", "fasten", "revolute", "slider", "hinge", "width", "symmetric", "cam", "universal joint"])
         .inputs(vec![
             choice("type", "Type", MATE_TYPES),
             pick("first", "First", conn),
@@ -78,15 +78,18 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
                 .drag(Manipulator::Arrow),
             angle("angle", "Angle", 0.0).shown("type", &["angle"]),
             flag("flip", "Flip", false),
-            flag("angle_limits", "Angle limits", false).shown("type", &["revolute", "cylindrical"]),
+            flag("angle_limits", "Angle limits", false).shown("type", &["revolute", "cylindrical", "hinge"]),
             qty("min", "Min angle", "angle", Some(-30.0)).if_checked("angle_limits"),
             qty("max", "Max angle", "angle", Some(45.0)).if_checked("angle_limits"),
             flag("distance_limits", "Travel limits", false).shown("type", &["slider", "cylindrical"]),
             offset("near", "Min travel", 0.0).if_checked("distance_limits"),
             offset("far", "Max travel", 10.0).if_checked("distance_limits"),
-            qty("ratio", "Ratio", "ratio", Some(1.0)).shown("type", &["gear"]),
+            qty("ratio", "Ratio", "ratio", Some(1.0)).shown("type", &["gear", "linear_coupler"]),
             length("pitch", "Pitch", 1.0).shown("type", &["screw", "rack_pinion"]),
-        ])
+        ]
+        .into_iter()
+        .chain(super::advanced_mate_fields(conn, true))
+        .collect())
         .when(occurrences())
         .preview()
         .edit(edit(EditOp::Add, Section::Mates).item("mate")),

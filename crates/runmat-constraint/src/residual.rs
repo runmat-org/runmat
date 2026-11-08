@@ -220,6 +220,13 @@ pub(crate) enum MateOp {
     RackPinion { travel: f64, xa0: [f64; 3], za0: [f64; 3], ob0: [f64; 3], xb0: [f64; 3] },
     /// The cam's station radii, evenly spaced from its X.
     Cam { radii: std::sync::Arc<[f64]> },
+    /// Each connector's world origin and Z where the solve starts.
+    LinearCoupler { ratio: f64, oa0: [f64; 3], za0: [f64; 3], ob0: [f64; 3], zb0: [f64; 3] },
+    UniversalJoint { joint_point: bool },
+    /// The plane's connector frame; its body's 7 variables follow A's and B's.
+    Symmetric { lc: Frame },
+    /// The path's points in A's connector frame.
+    Path { points: std::sync::Arc<[[f64; 3]]> },
 }
 
 impl Op {
@@ -244,8 +251,9 @@ impl Op {
                 MateOp::Fasten => 6,
                 MateOp::Revolute | MateOp::Slider | MateOp::Screw { .. } => 5,
                 MateOp::Cylindrical | MateOp::PinSlot => 4,
-                MateOp::Planar | MateOp::Ball => 3,
-                MateOp::Parallel | MateOp::TangentCylinder { .. } => 2,
+                MateOp::UniversalJoint { joint_point: true } => 4,
+                MateOp::Planar | MateOp::Ball | MateOp::Symmetric { .. } => 3,
+                MateOp::Parallel | MateOp::TangentCylinder { .. } | MateOp::Path { .. } => 2,
                 _ => 1,
             },
             _ => 1,
@@ -1198,7 +1206,69 @@ fn eval_mate<S: Real>(kind: &MateOp, la: &Frame, lb: &Frame, x: &[S], out: &mut 
             let (px, py) = (dot3(d, xa), dot3(d, ya));
             out[0] = px.hypot(py) - cam_radius(radii, py.atan2(px));
         }
+        MateOp::LinearCoupler { ratio, oa0, za0, ob0, zb0 } => {
+            let ma = dot3(sub3(oa, oa0.map(S::cst)), za0.map(S::cst));
+            let mb = dot3(sub3(ob, ob0.map(S::cst)), zb0.map(S::cst));
+            out[0] = mb - ma * ratio;
+        }
+        MateOp::UniversalJoint { joint_point } => {
+            if joint_point {
+                out[..3].copy_from_slice(&d);
+                out[3] = dot3(xa, xb);
+            } else {
+                out[0] = dot3(xa, xb);
+            }
+        }
+        MateOp::Symmetric { ref lc } => {
+            let (op, _, [_, _, zp]) = connector_world(&x[14..21], lc);
+            let h = dot3(sub3(oa, op), zp) * 2.0;
+            for i in 0..3 {
+                out[i] = oa[i] - zp[i] * h - ob[i];
+            }
+        }
+        MateOp::Path { ref points } => {
+            let q = [dot3(d, xa), dot3(d, ya), dot3(d, za)];
+            let (p0, n1, n2) = path_segment(points, q.map(|c| c.val()));
+            let r = sub3(q, p0.map(S::cst));
+            out[0] = dot3(r, n1.map(S::cst));
+            out[1] = dot3(r, n2.map(S::cst));
+        }
     }
+}
+
+/// The path segment nearest `q`: its start and two unit normals square to it. The choice is
+/// held fixed for the derivative, which is exact inside a segment (the offset along it doesn't
+/// enter the rows).
+fn path_segment(points: &[[f64; 3]], q: [f64; 3]) -> ([f64; 3], [f64; 3], [f64; 3]) {
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let unit = |a: [f64; 3]| {
+        let n = dot(a, a).sqrt();
+        a.map(|c| c / n)
+    };
+    let mut best = (f64::INFINITY, 0);
+    for (i, w) in points.windows(2).enumerate() {
+        let e = sub(w[1], w[0]);
+        let len2 = dot(e, e);
+        if len2 == 0.0 {
+            continue;
+        }
+        let t = (dot(sub(q, w[0]), e) / len2).clamp(0.0, 1.0);
+        let r = sub(q, [w[0][0] + e[0] * t, w[0][1] + e[1] * t, w[0][2] + e[2] * t]);
+        let d2 = dot(r, r);
+        if d2 < best.0 {
+            best = (d2, i);
+        }
+    }
+    let (p0, p1) = (points[best.1], points[best.1 + 1]);
+    let t = unit(sub(p1, p0));
+    // The axis least along the segment gives the first normal.
+    let k = (0..3).min_by(|&i, &j| t[i].abs().total_cmp(&t[j].abs())).unwrap_or(0);
+    let mut e = [0.0; 3];
+    e[k] = 1.0;
+    let n1 = unit(cross(t, e));
+    (p0, n1, cross(t, n1))
 }
 
 /// The cam's pitch radius at angle `phi` from its X: a periodic cubic (Catmull-Rom) through
@@ -1487,7 +1557,11 @@ fn row_units(op: &Op, vars: &[VarId], sys: &System) -> Vec<Unit> {
             MateOp::PinSlot => vec![L, L, A, A],
             MateOp::Screw { .. } => vec![A, A, L, L, L],
             MateOp::Gear { .. } => vec![A],
-            MateOp::RackPinion { .. } | MateOp::Cam { .. } => vec![L],
+            MateOp::RackPinion { .. } | MateOp::Cam { .. } | MateOp::LinearCoupler { .. } => vec![L],
+            MateOp::UniversalJoint { joint_point: true } => vec![L, L, L, A],
+            MateOp::UniversalJoint { joint_point: false } => vec![A],
+            MateOp::Symmetric { .. } => vec![L, L, L],
+            MateOp::Path { .. } => vec![L, L],
         },
         other => vec![L; other.rows()],
     }
@@ -1972,6 +2046,15 @@ fn lower_user(
                 Mate::PinSlot { .. } => MateOp::PinSlot,
                 Mate::Screw { lead, .. } => MateOp::Screw { lead: *lead },
                 Mate::Cam { radii, .. } => MateOp::Cam { radii: radii.clone() },
+                Mate::UniversalJoint { joint_point, .. } => MateOp::UniversalJoint { joint_point: *joint_point },
+                Mate::Symmetric { plane, .. } => MateOp::Symmetric { lc: l.connector(*plane) },
+                Mate::Path { points, .. } => MateOp::Path { points: points.clone() },
+                Mate::LinearCoupler { ratio, .. } => {
+                    let x: Vec<f64> = l.vars.iter().map(|v| l.v(*v)).collect();
+                    let (oa0, _, [_, _, za0]) = connector_world(&x[0..7], &la);
+                    let (ob0, _, [_, _, zb0]) = connector_world(&x[7..14], &lb);
+                    MateOp::LinearCoupler { ratio: *ratio, oa0, za0, ob0, zb0 }
+                }
                 Mate::Gear { ratio, .. } | Mate::RackPinion { travel: ratio, .. } => {
                     // The couplings measure turns from where this solve starts.
                     let x: Vec<f64> = l.vars.iter().map(|v| l.v(*v)).collect();
@@ -2072,6 +2155,17 @@ mod tests {
                 xb0: [0.0, 1.0, 0.0],
             },
             MateOp::Cam { radii: std::sync::Arc::from([0.6, 0.7, 1.1, 1.4, 1.2, 0.8, 0.6, 0.6]) },
+            MateOp::LinearCoupler {
+                ratio: -1.5,
+                oa0: [0.1, 0.0, 0.2],
+                za0: [0.0, 0.6, 0.8],
+                ob0: [0.3, -0.2, 0.0],
+                zb0: [1.0, 0.0, 0.0],
+            },
+            MateOp::UniversalJoint { joint_point: false },
+            MateOp::UniversalJoint { joint_point: true },
+            // Far from the path's corners, so finite differences stay in one segment.
+            MateOp::Path { points: std::sync::Arc::from([[-50.0, -40.0, 3.0], [60.0, 10.0, -2.0], [70.0, 90.0, 5.0]]) },
         ];
         let knots = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
         let mut cases: Vec<(Op, usize)> = vec![
@@ -2266,6 +2360,8 @@ mod tests {
         for m in mates {
             cases.push((Op::Mate { kind: m, la, lb }, 14));
         }
+        let lc = Frame::axis_angle([0.2, 0.1, -0.3], [0.5, 0.2, 1.0], 0.9);
+        cases.push((Op::Mate { kind: MateOp::Symmetric { lc }, la, lb }, 21));
         for (k, (op, n)) in cases.iter().enumerate() {
             for seed in 0..4u64 {
                 let mut x = pseudo(*n, 17 + seed * 31 + k as u64 * 7);

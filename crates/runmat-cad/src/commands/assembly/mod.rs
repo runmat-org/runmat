@@ -30,11 +30,17 @@ pub(super) const EDITABLE_MATE_TYPES: &[(&str, &str)] = &[
     ("rack_pinion", "Rack and pinion"),
     ("screw", "Screw"),
     ("cam", "Cam"),
+    ("width", "Width"),
+    ("symmetric", "Symmetric"),
+    ("path", "Path"),
+    ("linear_coupler", "Linear coupler"),
+    ("hinge", "Hinge"),
+    ("universal_joint", "Universal joint"),
 ];
 
-/// The kinds Mate adds from two picks: the standard mates and every connector mate the solver
-/// has, except a cam, whose profile is a closed path the cam's part publishes (parts publish
-/// datums, regions and values, not paths, so a cam is written in the source editor).
+/// The kinds Mate adds from its picks: the standard mates and every connector mate the solver
+/// has. A cam's profile and a path mate's path are closed or open paths the part publishes
+/// (Publish, Path); width and symmetric take their extra picks.
 pub(super) const MATE_TYPES: &[(&str, &str)] = &[
     ("coincident", "Coincident"),
     ("concentric", "Concentric"),
@@ -53,7 +59,32 @@ pub(super) const MATE_TYPES: &[(&str, &str)] = &[
     ("gear", "Gear"),
     ("rack_pinion", "Rack and pinion"),
     ("screw", "Screw"),
+    ("cam", "Cam"),
+    ("width", "Width"),
+    ("symmetric", "Symmetric"),
+    ("path", "Path"),
+    ("linear_coupler", "Linear coupler"),
+    ("hinge", "Hinge"),
+    ("universal_joint", "Universal joint"),
 ];
+
+/// What a mate's connector can be picked on.
+pub(super) const CONNECTOR_PICKS: &[SelectKind] = &[K::MateConnector, K::Face, K::Edge, K::Vertex, K::Occurrence];
+
+/// The fields the advanced mates add to Mate and Edit mate: width's two other faces, the
+/// symmetry plane, the cam's profile and the path's name, and the universal joint's point. In
+/// Edit mate the picks are optional (a mate that already has them keeps them).
+pub(super) fn advanced_mate_fields(conn: &[SelectKind], required: bool) -> Vec<Field> {
+    let need = |f: Field| if required { f } else { f.optional() };
+    vec![
+        need(pick("first2", "Groove's other face", conn).shown("type", &["width"])),
+        need(pick("second2", "Tab's other face", conn).shown("type", &["width"])),
+        need(pick("plane", "Symmetry plane", conn).shown("type", &["symmetric"])),
+        text("profile", "Profile", Some("lobe")).shown("type", &["cam"]),
+        text("path", "Path", Some("rail")).shown("type", &["path"]),
+        flag("joint_point", "Joint point", true).shown("type", &["universal_joint"]),
+    ]
+}
 
 fn occurrences() -> Predicate {
     has(Facet::Occurrences)
@@ -64,7 +95,7 @@ fn asm(id: &str, label: &str, icon: &str, desc: &str) -> CommandDescriptor {
 }
 
 pub(super) fn add(catalog: &mut Catalog) {
-    let conn = &[K::MateConnector, K::Face, K::Edge, K::Vertex, K::Occurrence];
+    let conn = CONNECTOR_PICKS;
     let mut commands = assemble::assemble(conn);
     commands.extend(layout::layout());
     commands.extend(evaluate::evaluate());
