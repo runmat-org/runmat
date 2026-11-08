@@ -13,6 +13,25 @@ use SelectKind as K;
 
 const A: &[EditorKind] = &[Assembly];
 
+/// The kinds Edit mate changes a mate to, on the connectors it already has.
+pub(super) const EDITABLE_MATE_TYPES: &[(&str, &str)] = &[
+    ("fasten", "Fasten"),
+    ("revolute", "Revolute"),
+    ("slider", "Slider"),
+    ("cylindrical", "Cylindrical"),
+    ("planar", "Planar"),
+    ("ball", "Ball"),
+    ("parallel", "Parallel"),
+    ("distance", "Distance"),
+    ("angle", "Angle"),
+    ("tangent", "Tangent"),
+    ("pin_slot", "Pin slot"),
+    ("gear", "Gear"),
+    ("rack_pinion", "Rack and pinion"),
+    ("screw", "Screw"),
+    ("cam", "Cam"),
+];
+
 pub(super) const MATE_TYPES: &[(&str, &str)] = &[
     ("coincident", "Coincident"),
     ("concentric", "Concentric"),

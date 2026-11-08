@@ -8,6 +8,9 @@
 //! - `assembly.mate`: coincident, concentric, distance, angle, parallel, perpendicular and
 //!   tangent mates (and the connector-based joints) between faces, edges or whole components,
 //!   each pick becoming a mate connector on its component ([`mate`], [`frames`]).
+//! - `assembly.flip-mate`, `assembly.edit-mate`, `assembly.smart-mate`: mates that exist and
+//!   the smart mate ([`mate_edits`]).
+//! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`: structure ([`structure`]).
 //! - `explode.new`, `explode.step`, `explode.radial`, `explode.lines`: exploded views, their
 //!   steps and trail lines ([`explode`]).
 //!
@@ -18,10 +21,14 @@
 mod explode;
 mod frames;
 mod mate;
+mod mate_edits;
 mod mirror;
 mod place;
+mod structure;
 #[cfg(test)]
 mod explode_tests;
+#[cfg(test)]
+mod structure_tests;
 #[cfg(test)]
 mod tests;
 
@@ -300,6 +307,24 @@ pub(super) fn edit(
             mirror::mirror(&mut document, &compiled, files, &names, &request.values)?
         }
         "assembly.mate" => mate::mate(&mut document, &compiled, &request.values)?,
+        "assembly.flip-mate" => mate_edits::flip(&mut document, &compiled, &request.selection)?,
+        "assembly.edit-mate" => mate_edits::edit(&mut document, &compiled, &request.selection, &request.values)?,
+        "assembly.smart-mate" => mate_edits::smart(&mut document, &compiled, &request.values)?,
+        "assembly.replace" => {
+            let names = selected_names(&compiled, request)?;
+            structure::replace(&mut document, files, &names, &request.values)?
+        }
+        "assembly.subassembly" => {
+            let names = selected_names(&compiled, request)?;
+            let (summary, created) = structure::subassembly(&mut document, &compiled, files, &names, &request.values)?;
+            others.extend(created);
+            summary
+        }
+        "assembly.new-part" => {
+            let (summary, created) = structure::new_part(&mut document, &compiled, files, &request.values)?;
+            others.extend(created);
+            summary
+        }
         "repair.repair" => repair(path, text, files, &mut document, &request.values, &mut others)?,
         "explode.new" => explode::new_view(&mut document, &request.values)?,
         "explode.step" | "explode.radial" => {
@@ -316,6 +341,14 @@ pub(super) fn edit(
     };
     // The minimal diff can't yet place every occurrence statement (one with a body block):
     // then the file is reprinted whole and the change says so.
+    // Files the command creates (a new part or subassembly) are in scope for the read-back.
+    let scope = if others.iter().any(|(_, old, _)| old.is_empty()) {
+        let mut with = files.clone();
+        with.extend(others.iter().map(|(p, _, c)| (p.clone(), c.source.clone())));
+        crate::runtime::module_scope(path, text, &with)
+    } else {
+        scope
+    };
     let change = match diff_source_in(&ASSEMBLY, path, text, &document, &parsed.uses, &[], &scope) {
         Ok(change) => change,
         Err(EditFailure::Model(_)) => {

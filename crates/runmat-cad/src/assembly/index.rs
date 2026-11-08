@@ -119,6 +119,61 @@ pub struct MateRow {
     /// The occurrences its two connectors sit on (the assembly's own frame is left out).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub occurrences: Vec<ItemUuid>,
+    /// The mate's inputs as Edit mate's form takes them ([`mate_form_values`]).
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub values: serde_json::Map<String, serde_json::Value>,
+}
+
+/// A mate's type, values and alignment keyed by Edit mate's fields: `type` (the mate kind),
+/// `offset` (a distance target), `angle` (an angle target), `angle_limits` with `min`/`max`,
+/// `distance_limits` with `near`/`far`, `ratio`, `pitch` and `flip` (the second connector is
+/// turned over). Values are value edits (`{ kind: "value", value, text, scope }`), so an
+/// expression comes back as itself.
+pub fn mate_form_values(
+    doc: &crate::assembly::model::AssemblyDocument,
+    def: &crate::assembly::model::MateDef,
+) -> serde_json::Map<String, serde_json::Value> {
+    use crate::assembly::model::{MateKind, TargetExpr};
+    const ANGLE_RANGE: [&str; 3] = ["angle_limits", "min", "max"];
+    const DISTANCE_RANGE: [&str; 3] = ["distance_limits", "near", "far"];
+    use serde_json::{json, Value};
+    let mut out = serde_json::Map::new();
+    let edit = |e: &crate::value::ValueExpr| -> Value {
+        let text = crate::syntax::value::print_value(e).unwrap_or_default();
+        json!({ "kind": "value", "value": e, "text": text, "scope": { "scope": "all" } })
+    };
+    let target = |out: &mut serde_json::Map<String, Value>, t: &Option<TargetExpr>, exact: &str, [flag, low, high]: [&str; 3]| match t {
+        Some(TargetExpr::Exact { value }) => {
+            out.insert(exact.into(), edit(value));
+        }
+        Some(TargetExpr::Range { min, max }) => {
+            out.insert(flag.into(), Value::Bool(true));
+            out.insert(low.into(), edit(min));
+            out.insert(high.into(), edit(max));
+        }
+        None => {}
+    };
+    match &def.kind {
+        MateKind::Distance { target: t, .. } => target(&mut out, &Some(t.clone()), "offset", DISTANCE_RANGE),
+        MateKind::Angle { target: t, .. } => target(&mut out, &Some(t.clone()), "angle", ANGLE_RANGE),
+        MateKind::Revolute { angle } => target(&mut out, angle, "angle", ANGLE_RANGE),
+        MateKind::Slider { distance } => target(&mut out, distance, "offset", DISTANCE_RANGE),
+        MateKind::Cylindrical { angle, distance } => {
+            target(&mut out, angle, "angle", ANGLE_RANGE);
+            target(&mut out, distance, "offset", DISTANCE_RANGE);
+        }
+        MateKind::Gear { ratio } => {
+            out.insert("ratio".into(), edit(ratio));
+        }
+        MateKind::Screw { lead: v } | MateKind::RackPinion { travel: v } => {
+            out.insert("pitch".into(), edit(v));
+        }
+        _ => {}
+    }
+    out.insert("type".into(), Value::String(def.kind.name().into()));
+    let flip = doc.connector(&def.b).is_some_and(|c| c.flip);
+    out.insert("flip".into(), Value::Bool(flip));
+    out
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -164,11 +219,11 @@ fn walk(tree: &ResolvedAssembly, from: NodeId, path: &RelPath) -> Option<NodeId>
     Some(at)
 }
 
-/// The occurrences each mate's connectors sit on, in mate order.
+/// The occurrences each mate's connectors sit on, and its Edit mate values, in mate order.
 fn mate_occurrences(
     tree: &ResolvedAssembly,
     source: Option<&dyn DesignSource>,
-) -> Vec<Vec<NodeId>> {
+) -> Vec<(Vec<NodeId>, serde_json::Map<String, serde_json::Value>)> {
     tree.mates
         .iter()
         .map(|m| {
@@ -177,10 +232,10 @@ fn mate_occurrences(
                 s.assembly(&owner.definition.file, owner.revision.as_ref())
                     .ok()
             }) else {
-                return Vec::new();
+                return Default::default();
             };
             let Some(def) = doc.mates.iter().find(|d| d.name == m.name) else {
-                return Vec::new();
+                return Default::default();
             };
             let mut hosts = Vec::new();
             for connector in [&def.a, &def.b] {
@@ -196,7 +251,7 @@ fn mate_occurrences(
                     }
                 }
             }
-            hosts
+            (hosts, mate_form_values(&doc, def))
         })
         .collect()
 }
@@ -211,7 +266,7 @@ pub fn build_assembly_index(
         .iter()
         .zip(&hosts)
         .filter(|(m, _)| matches!(m.status, MateStatus::Conflicting { .. }))
-        .flat_map(|(_, h)| h.iter().copied())
+        .flat_map(|(_, (h, _))| h.iter().copied())
         .collect();
     let state = |i: NodeId| -> Option<DefinitionState> {
         let n = tree.node(i);
@@ -280,13 +335,14 @@ pub fn build_assembly_index(
         .mates
         .iter()
         .zip(&hosts)
-        .map(|(m, h)| MateRow {
+        .map(|(m, (h, values))| MateRow {
             assembly: tree.path(m.owner),
             name: m.name.clone(),
             kind: m.kind.clone(),
             status: m.status.clone(),
             active_limits: m.active_limits.clone(),
             occurrences: h.iter().map(|n| tree.node(*n).uuid).collect(),
+            values: values.clone(),
         })
         .collect();
     let fasteners = tree

@@ -288,7 +288,8 @@ pub(super) fn mate(
     let (moving_frame, other_frame) = if moving == a.occurrence { (a.world, b.world) } else { (b.world, a.world) };
     if let (Some(m), Some(o)) = (moving_frame, other_frame) {
         let cos = dot(m.z, o.z).clamp(-1.0, 1.0);
-        let nearest = if cos >= 0.0 { 0.0 } else { std::f64::consts::PI };
+        // Planes and axes mate either way round; Flip takes the other way from the nearest.
+        let nearest = if (cos >= 0.0) != flip { 0.0 } else { std::f64::consts::PI };
         let wanted = match kind.as_str() {
             "perpendicular" | "tangent" => Some(std::f64::consts::FRAC_PI_2),
             "angle" => literal_angle(values),

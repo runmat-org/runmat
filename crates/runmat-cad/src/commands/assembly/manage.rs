@@ -141,8 +141,22 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.edit-mate",
             "Edit mate",
             "edit",
-            "Open the mate's inputs in Properties.",
+            "Change the mate's type, distance, angle, limits or alignment.",
         )
+        .inputs(vec![
+            choice("type", "Type", EDITABLE_MATE_TYPES),
+            offset("offset", "Distance", 0.0).shown("type", &["distance"]),
+            angle("angle", "Angle", 0.0).shown("type", &["angle"]),
+            flag("angle_limits", "Angle limits", false).shown("type", &["revolute", "cylindrical"]),
+            qty("min", "Min angle", "angle", Some(-30.0)).if_checked("angle_limits"),
+            qty("max", "Max angle", "angle", Some(45.0)).if_checked("angle_limits"),
+            flag("distance_limits", "Travel limits", false).shown("type", &["slider", "cylindrical"]),
+            offset("near", "Min travel", 0.0).if_checked("distance_limits"),
+            offset("far", "Max travel", 10.0).if_checked("distance_limits"),
+            qty("ratio", "Ratio", "ratio", Some(1.0)).shown("type", &["gear"]),
+            length("pitch", "Pitch", 1.0).shown("type", &["screw", "rack_pinion"]),
+            flag("flip", "Flip", false),
+        ])
         .when(selected_one(&[K::Mate]))
         .on(&[K::Mate])
         .edit(edit(EditOp::Edit, Section::Mates)),
