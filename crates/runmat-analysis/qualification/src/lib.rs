@@ -14,6 +14,11 @@ pub fn requirements() -> impl Iterator<Item = &'static requirement::Requirement>
     requirements::ALL.iter().flat_map(|domain| domain.iter())
 }
 
+/// Ids of the ledger's reference checks; a `; check:` witness field must name one.
+pub fn checks() -> impl Iterator<Item = &'static str> {
+    requirements::CHECKS.iter().copied()
+}
+
 /// Deterministic tab-separated discovery inventory. No row represents a passed gate.
 /// Tabs, newlines, carriage returns and backslashes inside fields are escaped.
 /// Witnesses are declared at tests (see `witness`) and appear in the evidence report.

@@ -10,7 +10,7 @@ RunMat solves finite-element studies from CAD: stress and deflection in a bracke
 
 ## What RunMat FEA does
 
-**Physics families and analysis procedures.** The full matrix, with the status of each combination, is the [family and procedure matrix](./validation/status.md#families-and-procedures).
+**Physics families and analysis procedures.** The full matrix, with the status of each combination, is the [family and procedure matrix](./language/reference/procedures.md#families-and-procedures).
 
 | Family | Procedures |
 | --- | --- |

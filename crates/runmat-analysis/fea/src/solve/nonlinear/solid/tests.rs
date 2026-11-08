@@ -89,7 +89,7 @@ fn anchored_uniaxial_summary(
 //   rest of the listed references (cyclic paths, thick cylinder) are not covered.
 // witness: FEA-NONLINEAR-OPERATOR-001/canonical_state_physical_cutbacks @
 //   small_strain_j2/tet4|tet10/numerical_kernel; coverage: partial;
-//   boundary: The plastic bar solve restarts cold from persisted state for both orders; adaptation
+//   check: j2-uniaxial-bar; boundary: The plastic bar solve restarts cold from persisted state for both orders; adaptation
 //   transfer of state is not covered.
 #[test]
 fn physical_newton_matches_independent_uniaxial_plastic_bar_and_cold_restart_both_orders() {

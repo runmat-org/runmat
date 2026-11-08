@@ -488,7 +488,7 @@ mod tests {
 
     // witness: FEA-DYNAMICS-RESPONSE-001/second_order_equilibrium_excitation @
     //   linear_structural_dynamics/mesh_independent/numerical_kernel; coverage: partial;
-    //   boundary: Average-acceleration modal integration is second order.
+    //   check: free-vibration-time-integration; boundary: Average-acceleration modal integration is second order.
     #[test]
     fn average_acceleration_modal_integration_is_second_order() {
         let exact = 2.0_f64.cos();

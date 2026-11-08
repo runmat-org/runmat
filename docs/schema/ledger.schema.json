@@ -1,10 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "RunMat simulation capability ledger",
-  "description": "The one source of truth for what the RunMat simulation system can do in the current release, what is planned, the requirements each capability answers to, how it is verified and which docs describe it. Generated from it: the compiler's ANALYSIS_IDENTITIES (crates/runmat-analysis/core/build.rs), the qualification register (crates/runmat-analysis/qualification/build.rs), the docs' 'not yet in the current release' flags, Validation → Status and the per-family Validation pages (scripts/docs/generate-pages.mjs).",
+  "description": "The one source of truth for what the RunMat simulation system can do in the current release, what is planned, the requirements each capability answers to, how it is verified and which docs describe it. Generated from it: the compiler's ANALYSIS_IDENTITIES (crates/runmat-analysis/core/build.rs), the qualification register (crates/runmat-analysis/qualification/build.rs), the docs' 'not yet in the current release' flags, Validation → Status and the per-family Validation pages from `checks` (scripts/docs/generate-pages.mjs).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "release", "about", "capabilities", "cases", "claims", "requirements"],
+  "required": ["schema_version", "release", "about", "capabilities", "checks", "claims", "requirements"],
   "definitions": {
     "id": {
       "type": "string",
@@ -38,7 +38,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "title", "kind", "area", "status", "requirements", "verification", "docs"],
+        "required": ["id", "title", "kind", "area", "status", "requirements", "docs"],
         "properties": {
           "id": { "$ref": "#/definitions/id", "description": "Stable dotted key. For a pending row it is the pending id that docs flags, `runmat check` diagnostics and the agent share." },
           "title": { "type": "string", "minLength": 1 },
@@ -64,27 +64,31 @@
           "gaps": { "$ref": "#/definitions/strings", "description": "Engineering-queue and audit ids." },
           "witness": { "$ref": "#/definitions/strings", "description": "Commands or tests that prove the capability once it lands." },
           "requirements": { "type": "array", "items": { "type": "string", "pattern": "^FEA-[A-Z0-9-]+$" }, "description": "Requirement ids from `requirements` that this capability answers to; their tests come from the `// witness:` tags." },
-          "verification": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }, "description": "Ids of `cases` that verify this capability." },
           "docs": { "type": "array", "items": { "$ref": "#/definitions/docPath" }, "description": "Docs pages that describe the capability. For a pending row: exactly the pages that flag it." }
         }
       }
     },
-    "cases": {
+    "checks": {
       "type": "array",
-      "description": "Verification cases shown on the per-family Validation pages: a reference problem with its write-up (validation/cases/<id>.md), the example receipts it quotes and the tests and benchmarks behind it.",
+      "description": "Reference checks shown on the per-family Validation pages: a problem with an independent reference (closed form, manufactured solution or published benchmark), the compared quantity and the tolerance. Tests join a check through a `; check: <id>` field in their `// witness:` tags, and the evidence report lists them with their results. A check with no test cites example receipts instead.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "area", "title", "narrative", "references", "receipts", "tests"],
+        "required": ["id", "area", "analysis", "capability", "title", "problem", "reference", "quantity", "tolerance"],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-          "area": { "$ref": "#/definitions/area", "description": "The Validation page that shows the case." },
+          "area": { "$ref": "#/definitions/area", "description": "The Validation page that shows the check." },
+          "analysis": { "type": "string", "minLength": 1, "description": "Analysis type the page groups the check under (Static, Modal, Harmonic, ...), in ledger order." },
+          "capability": { "type": "string", "minLength": 1, "description": "The capability row the check verifies." },
           "title": { "type": "string", "minLength": 1 },
-          "narrative": { "$ref": "#/definitions/docPath", "description": "The case write-up, under validation/cases/, with links relative to validation/." },
-          "references": { "$ref": "#/definitions/strings", "description": "Closed-form, manufactured or published references." },
-          "receipts": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+#[a-z0-9-]+$" }, "description": "examples/catalog.json receipts the case quotes." },
-          "tests": { "$ref": "#/definitions/strings", "description": "Test functions (package::path) that hold the case in CI." },
-          "benchmarks": { "$ref": "#/definitions/strings" }
+          "problem": { "type": "string", "minLength": 1, "description": "The problem solved: geometry, material, loads and meshes. Markdown; links are relative to validation/." },
+          "reference": { "type": "string", "minLength": 1, "description": "The independent reference: closed form, manufactured solution or published benchmark." },
+          "citation": { "type": "string", "minLength": 1, "description": "Full bibliographic citation of a published reference." },
+          "quantity": { "type": "string", "minLength": 1, "description": "What is compared." },
+          "tolerance": { "type": "string", "minLength": 1, "description": "The bound the tests assert, or how receipt values are read." },
+          "result": { "type": "string", "minLength": 1, "description": "Measured values from a test log, an earlier run or the receipts." },
+          "receipts": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+#[a-z0-9-]+$" }, "description": "examples/catalog.json receipts the check quotes." },
+          "status": { "enum": ["planned"], "description": "A named check that is not built yet; the page lists it as planned." }
         }
       }
     },

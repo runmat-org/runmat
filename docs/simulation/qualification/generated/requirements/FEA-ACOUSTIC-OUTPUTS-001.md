@@ -22,7 +22,7 @@ Evidence kind: IndependentReference. Criterion: `transmission_loss` from inciden
 | acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
 | acoustic_harmonic | tet4 | public_study | OPEN |  |
 | acoustic_harmonic | tet10 | numerical_kernel | OPEN |  |
-| acoustic_harmonic | tet10 | public_study | FAIL | `runmat[test:check_cli]::two_fluid_interface_example_publishes_the_plane_wave_transmission_loss` (crates/runmat-cli/tests/check_cli.rs:1192) - transmission_loss on the public two-fluid interface example (m = 4) lies within 0.1 dB of 1.938 dB at 500, 1000 and 2000 Hz; no muffler or one-third-octave swee... |
+| acoustic_harmonic | tet10 | public_study | FAIL | `runmat[test:check_cli]::two_fluid_interface_example_publishes_the_plane_wave_transmission_loss` (crates/runmat-cli/tests/check_cli.rs:1198) - transmission_loss on the public two-fluid interface example (m = 4) lies within 0.1 dB of 1.938 dB at 500, 1000 and 2000 Hz; no muffler or one-third-octave swee... |
 
 ## intensity_and_sound_power
 

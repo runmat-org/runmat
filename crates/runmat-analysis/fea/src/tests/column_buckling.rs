@@ -109,7 +109,7 @@ fn column_model(mesh: &SolverMeshArtifact) -> AnalysisModel {
 
 // witness: FEA-DYNAMICS-PRESTRESS-001/references @ structural_stability/tet10/numerical_kernel;
 //   coverage: partial;
-//   boundary: A fixed-free Tet10 solid column (1 m, 100 x 50 mm, 250 kN) converges its buckling
+//   check: euler-column; boundary: A fixed-free Tet10 solid column (1 m, 100 x 50 mm, 250 kN) converges its buckling
 //   eigenpairs to the authored relative tolerance and matches Euler's fixed-free load within 1 %;
 //   frames, plates and mesh-convergence studies are not covered.
 #[test]

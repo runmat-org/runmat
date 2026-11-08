@@ -13,7 +13,7 @@ Each term is used in the docs exactly as defined here. Terms written in `code` a
 
 **Analysis step (procedure).** One entry in a study's analysis sequence, such as `static`, `modal`, `transient`, `harmonic`, `buckling`, `response_spectrum` or `random_response`. Steps can run in order with `after` and pass state to one another. See the [procedure reference](./language/reference/procedures.md).
 
-**Physics family.** The equations a step solves: structural, thermal, electromagnetic, acoustic, fluid, and the coupled families thermomechanical, electrothermal, conjugate heat transfer and fluid–structure interaction. Which procedures each family runs is listed in the [family and procedure matrix](./validation/status.md#families-and-procedures).
+**Physics family.** The equations a step solves: structural, thermal, electromagnetic, acoustic, fluid, and the coupled families thermomechanical, electrothermal, conjugate heat transfer and fluid–structure interaction. Which procedures each family runs is listed in the [family and procedure matrix](./language/reference/procedures.md#families-and-procedures).
 
 **Case and sweep.** A case is one combination of input values. A sweep is a declared set of cases, combined as a product or element by element (`zip`).
 

@@ -10,7 +10,7 @@ Evidence kind: ExecutionEquivalence. Criterion: A canonical logical study identi
 |---|---|---|---|---|
 | shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | PARTIAL | `runmat[test:check_cli]::a_script_running_the_same_study_twice_publishes_two_attempts` (crates/runmat-cli/tests/check_cli.rs:1063) - Two executions of one random-response study from a script keep one definition run id, publish distinct attempts, and the definition id resolves to the latest at... |
+| shared_infrastructure | canonical_mixed_topology | native_process | PARTIAL | `runmat[test:check_cli]::a_script_running_the_same_study_twice_publishes_two_attempts` (crates/runmat-cli/tests/check_cli.rs:1069) - Two executions of one random-response study from a script keep one definition run id, publish distinct attempts, and the definition id resolves to the latest at... |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |

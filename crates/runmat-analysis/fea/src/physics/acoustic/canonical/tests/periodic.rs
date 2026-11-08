@@ -78,7 +78,7 @@ fn solve(
 }
 
 // witness: FEA-ACOUSTIC-BOUNDARY-001/phase @ acoustic_harmonic/tet4|tet10/numerical_kernel;
-//   boundary: Anchored slab plane wave and declared paired planes; no unanchored pole/global
+//   check: periodic-plane-wave; boundary: Anchored slab plane wave and declared paired planes; no unanchored pole/global
 //   conditioning credit.
 #[test]
 fn anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine() {

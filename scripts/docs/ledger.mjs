@@ -2,9 +2,10 @@
 // ledger ↔ code ↔ docs consistency checks that CI runs through docs-lint.
 //
 // What the ledger owns (docs/schema/ledger.schema.json):
-// - capabilities: status (release | pending), requirement ids, verification cases, docs pages;
+// - capabilities: status (release | pending), requirement ids, docs pages;
 //   rows with `identity` generate ANALYSIS_IDENTITIES (crates/runmat-analysis/core/build.rs);
-// - cases: reference problems shown on the per-family Validation pages;
+// - checks: reference checks shown on the per-family Validation pages; tests join a check through
+//   a `; check: <id>` field in their witness tags;
 // - claims: scope claims mapped to requirement obligations (qualification scope);
 // - requirements: the requirement register (crates/runmat-analysis/qualification/build.rs).
 import Ajv from "ajv";
@@ -126,11 +127,9 @@ const PROCEDURE_VARIANT = { static: "Static", modal: "ModalExtraction", prestres
 export function lintLedger(source, { ledger, byId }, references, error) {
     const at = (rule, message) => error({ file: LEDGER, line: 0, rule, message });
     const requirementIds = new Set(ledger.requirements.map(requirement => requirement.id));
-    const caseIds = new Set(ledger.cases.map(entry => entry.id));
     const root = join(source, "docs/simulation");
     for (const capability of ledger.capabilities) {
         for (const id of capability.requirements) if (!requirementIds.has(id)) at("ledger-requirement", `${capability.id}: unknown requirement ${id}`);
-        for (const id of capability.verification) if (!caseIds.has(id)) at("ledger-case", `${capability.id}: unknown case ${id}`);
         for (const doc of capability.docs) if (!existsSync(join(root, doc))) at("ledger-docs", `${capability.id}: docs page ${doc} does not exist`);
         if (capability.status === "pending" && !capability.acceptance) at("ledger-acceptance", `${capability.id}: a pending row states its acceptance`);
         if (capability.status === "pending") {
@@ -139,10 +138,25 @@ export function lintLedger(source, { ledger, byId }, references, error) {
             if (flagged.join() !== listed.join()) at("ledger-docs", `${capability.id}: docs lists [${listed.join(", ")}] but these pages flag it: [${flagged.join(", ")}]`);
         }
     }
-    for (const entry of ledger.cases) {
-        if (!existsSync(join(root, entry.narrative))) at("ledger-case", `${entry.id}: narrative ${entry.narrative} does not exist`);
-        if (!ledger.capabilities.some(capability => capability.verification.includes(entry.id))) at("ledger-case", `case ${entry.id} verifies no capability`);
+    // Reference checks: unique ids, a known capability of the same area, receipts that exist, and
+    // evidence (a witness-tagged test in the evidence catalog or a receipt) unless planned.
+    const catalogPath = join(root, "qualification/generated/evidence-catalog.json");
+    const tested = existsSync(catalogPath) ? JSON.parse(readFileSync(catalogPath, "utf8")).checks : undefined;
+    const examplesPath = join(root, "examples/catalog.json");
+    const receipts = existsSync(examplesPath) ? new Set(readJson(examplesPath).examples.flatMap(example => (example.receipts ?? []).map(receipt => `${example.id}#${receipt.id}`))) : null;
+    const checkIds = new Set();
+    for (const check of ledger.checks) {
+        if (checkIds.has(check.id)) at("ledger-check", `duplicate check ${check.id}`);
+        checkIds.add(check.id);
+        const capability = byId.get(check.capability);
+        if (!capability) at("ledger-check", `${check.id}: unknown capability ${check.capability}`);
+        else if (capability.area !== check.area) at("ledger-check", `${check.id}: capability ${check.capability} belongs to ${capability.area}, not ${check.area}`);
+        for (const id of check.receipts ?? []) if (receipts && !receipts.has(id)) at("ledger-check", `${check.id}: no receipt ${id} in examples/catalog.json`);
+        const tests = tested?.find(entry => entry.id === check.id)?.tests ?? [];
+        if (check.status === "planned" && (tests.length || check.receipts?.length)) at("ledger-check", `${check.id}: a planned check has tests or receipts; remove status planned`);
+        if (tested && check.status !== "planned" && !tests.length && !check.receipts?.length) at("ledger-check", `${check.id}: no witness test names this check and it quotes no receipt; tag a test with \`; check: ${check.id}\` and regenerate the evidence catalog`);
     }
+    for (const entry of tested ?? []) if (!checkIds.has(entry.id)) at("ledger-check", `the evidence catalog lists check ${entry.id}, which the ledger does not define; regenerate it`);
     // Claims map to existing requirements and obligations.
     for (const claim of ledger.claims)
         for (const map of claim.maps.split("|")) {

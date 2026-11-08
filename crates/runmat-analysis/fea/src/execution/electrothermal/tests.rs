@@ -68,7 +68,7 @@ fn thermal() -> ThermalWorkload {
 }
 
 // witness: FEA-COUPLING-ELECTROTHERMAL-001/heat @ electrothermal/tet4|tet10/public_study;
-//   boundary: Both-order constant-conductivity same-mesh steady one-way conduction to thermal slab;
+//   check: one-way-joule-slab; boundary: Both-order constant-conductivity same-mesh steady one-way conduction to thermal slab;
 //   12 W terminal/supplied/boundary power, Tet10 quadratic temperature and cold transfer. No
 //   feedback or harmonic Maxwell coupling.
 #[test]
@@ -143,7 +143,7 @@ fn retained_conduction_drives_independent_quadratic_thermal_patch_and_power() {
 }
 
 // witness: FEA-COUPLING-ELECTROTHERMAL-001/heat @ electrothermal/tet4|tet10/public_study;
-//   boundary: Tet4 two-mesh interior temperature refinement and Tet10 voltage sign/gauge invariance
+//   check: one-way-joule-slab; boundary: Tet4 two-mesh interior temperature refinement and Tet10 voltage sign/gauge invariance
 //   at constant conductivity; no two-way thermal iteration.
 #[test]
 fn tet4_refinement_and_voltage_sign_gauge_preserve_independent_heat_and_power() {

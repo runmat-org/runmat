@@ -1,171 +1,172 @@
 // Generates the docs pages derived from the capability ledger (docs/simulation/ledger.json), so no
-// one edits status by hand:
-//   docs/simulation/validation/status.md     what the release runs, the family × procedure matrix, planned features
-//   docs/simulation/validation/<area>.md     per family: capabilities, reference cases, test evidence by requirement
+// one edits status or evidence by hand:
+//   docs/simulation/validation/<area>.md     per family: the reference checks, grouped by analysis type
+//   docs/simulation/validation/status.md     one row per family: analysis types checked, check count, last run
+//   docs/simulation/language/reference/procedures.md   the family × procedure table between its markers
+// Test results and run dates come from the evidence catalog (`evidence_report`), which lists the
+// tests whose `// witness:` tags name each check; receipts come from examples/catalog.json.
 //
 //   node scripts/docs/generate-pages.mjs           # write the pages
 //   node scripts/docs/generate-pages.mjs --check   # exit 1 if a page is stale (CI)
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { markdownFiles } from "./markdown-scan.mjs";
-import { pendingReferences } from "./docs-lint.mjs";
-import { GENERATED_PAGES, VALIDATION_AREAS, loadLedger } from "./ledger.mjs";
+import { VALIDATION_AREAS, loadLedger } from "./ledger.mjs";
 
 const COMMAND = "node scripts/docs/generate-pages.mjs";
-const AREAS = {
-    ...VALIDATION_AREAS,
-    language: "The `.fea` language", geometry: "Geometry", meshing: "Meshing", execution: "Execution and scale", results: "Results", tooling: "Tooling",
-};
 const FAMILY_AREA = { conjugate_heat_transfer: "conjugate-heat-transfer", fluid_structure_interaction: "fluid-structure-interaction" };
 const PROCEDURE = {
     static: "static", modal: "modal", prestressed_modal: "prestressed modal", buckling: "buckling", transient: "transient", harmonic: "harmonic",
     prestressed_harmonic: "prestressed harmonic", response_spectrum: "response spectrum", random_response: "random response", nonlinear: "nonlinear", adaptive: "adaptive",
 };
-const FLAG = id => `[not yet in the current release](pending:${id})`;
-const anchor = text => text.toLowerCase().replace(/[^a-z0-9\s-]/g, "-").trim().replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
 const HEADER = (description, keywords, docType, title) => [
     "---", `description: ${description}`, `keywords: [${keywords.join(", ")}]`, `doc_type: ${docType}`, `generated: ${COMMAND}`, "---",
     `# ${title}`, "", "<!-- Generated from docs/simulation/ledger.json by scripts/docs/generate-pages.mjs; do not edit by hand. -->", "",
 ];
 
-function pageTitle(root, file) {
-    if (GENERATED_PAGES.includes(file)) {
-        const area = file.replace(/^validation\//, "").replace(/\.md$/, "");
-        return area === "status" ? "Status" : `${VALIDATION_AREAS[area]} validation`;
-    }
-    const text = readFileSync(join(root, file), "utf8");
-    return text.match(/^#\s+(.+)$/m)?.[1].trim() ?? file.replace(/^.*\//, "").replace(/\.md$/, "").replace(/-/g, " ").replace(/^./, c => c.toUpperCase());
-}
-
 const procedureLabel = capability => PROCEDURE[capability.identity.procedure] + (capability.identity.solution_space === "modal_reduced" ? " (modal superposition)" : "");
 
-export function statusPage(source) {
-    const root = join(source, "docs/simulation");
-    const { ledger } = loadLedger(source);
-    const references = pendingReferences(root, markdownFiles(root)).filter(reference => !GENERATED_PAGES.includes(reference.file));
-    const capabilities = ledger.capabilities;
-    const procedures = capabilities.filter(capability => capability.identity);
-    const pending = capabilities.filter(capability => capability.status === "pending" && capability.kind !== "defect");
-    const defects = capabilities.filter(capability => capability.status === "pending" && capability.kind === "defect").sort((a, b) => a.id.localeCompare(b.id));
-    const lines = HEADER(
-        "What the current RunMat release runs for each physics family and procedure, which loads, constraints and outputs it accepts, and which documented features are planned, with acceptance criteria.",
-        ["release status", "supported analyses", "family and procedure matrix", "planned features", "not yet in the current release", "FEA"],
-        "release-status", "Status");
-    lines.push(
-        `This page describes RunMat ${ledger.release}. It is generated from the capability ledger, \`docs/simulation/ledger.json\`, the one record of what the simulation system can do. The same ledger generates the compiler's table of family and procedure pairs, so \`runmat check\` and \`runmat run\` accept exactly what this page lists.`,
-        "",
-        "A documented feature that the current release does not include yet carries the marker [not yet in the current release](#planned-features) where the docs describe it, and appears below under its id. `runmat check` reports the same id when a study uses it, so the docs, the diagnostics and the RunMat agent share one key.",
-        "",
-        "## Families and procedures",
-        "",
-        "| Family | Runs in this release | Planned |",
-        "| --- | --- | --- |",
-    );
-    for (const family of [...new Set(procedures.map(capability => capability.identity.family))]) {
-        const rows = procedures.filter(capability => capability.identity.family === family);
-        const runs = rows.filter(capability => capability.status === "release").map(procedureLabel).join(", ") || "—";
-        const planned = rows.filter(capability => capability.status === "pending").map(capability => `[${procedureLabel(capability)}](#${anchor(capability.id)})`).join(", ") || "—";
-        const area = FAMILY_AREA[family] ?? family;
-        lines.push(`| [${VALIDATION_AREAS[area]}](./${area}.md) | ${runs} | ${planned} |`);
-    }
-    lines.push("", "Modal superposition reuses a retained modal basis; every other entry solves the full system directly. The [procedure reference](../language/reference/procedures.md) gives the syntax of each.", "");
-    lines.push("## Loads, constraints and outputs", "");
-    for (const [kind, label, doc] of [["load", "Loads", "../language/reference/constraints-loads-and-interfaces.md"], ["constraint", "Constraints", "../language/reference/constraints-loads-and-interfaces.md"], ["output", "Output operations", "../language/reference/operations-and-output-queries.md"]]) {
-        const names = capabilities.filter(capability => capability.kind === kind && capability.status === "release" && capability.id.startsWith(`${kind}.`)).map(capability => `\`${capability.id.slice(kind.length + 1)}\``);
-        lines.push(`- **${label}** (${names.length}): ${names.join(", ")}. See the [reference](${doc}).`);
-    }
-    lines.push("", "## Planned features", "");
-    if (!pending.length) lines.push("Every documented feature is in the current release.", "");
-    for (const [area, label] of Object.entries(AREAS)) {
-        const features = pending.filter(feature => feature.area === area).sort((a, b) => a.id.localeCompare(b.id));
-        if (!features.length) continue;
-        lines.push(`### ${label}`, "");
-        for (const feature of features) {
-            lines.push(`#### ${feature.id}`, "", `**${feature.title}.**`, "", `- Kind: ${feature.kind}.`, `- Ships when: ${feature.acceptance}`);
-            if (feature.decision === "owner") lines.push("- Scope: awaiting a product decision on whether this belongs in the final system.");
-            if (feature.enforcement) lines.push(`- In this release: ${feature.enforcement}.`);
-            const docs = [...new Set(references.filter(reference => reference.id === feature.id).map(reference => reference.file))].sort();
-            if (docs.length) lines.push(`- Described in: ${docs.map(file => `[${pageTitle(root, file)}](../${file})`).join(", ")}.`);
-            lines.push("");
-        }
-    }
-    lines.push("## Known defects", "");
-    if (!defects.length) lines.push("No open defects are recorded against capabilities in the current release.", "");
-    else lines.push("Defects found in capabilities the current release includes. Each is engineering work with the evidence that shows it; it is removed from the ledger when the witness passes.", "");
-    for (const defect of defects) {
-        lines.push(`#### ${defect.id}`, "", `**${defect.title}.**`, "", `- Affects: ${AREAS[defect.area] ?? defect.area}.`, `- Fixed when: ${defect.acceptance}`);
-        lines.push("");
-    }
-    lines.push("## Validation by family", "", ...Object.entries(VALIDATION_AREAS).map(([area, label]) => `- [${label}](./${area}.md)`), "", "The [validation methodology](./methodology.md) explains how cases, references and tests are read.", "");
-    return lines.join("\n");
-}
-
-function evidenceIndex(root) {
+/** The evidence catalog's checks section: check id → tests with results and run dates. */
+function checkTests(root) {
     const path = join(root, "qualification/generated/evidence-catalog.json");
     if (!existsSync(path)) return new Map();
-    return new Map(JSON.parse(readFileSync(path, "utf8")).requirements.map(requirement => [requirement.id, requirement]));
+    return new Map((JSON.parse(readFileSync(path, "utf8")).checks ?? []).map(entry => [entry.id, entry.tests]));
+}
+
+function receiptIndex(root) {
+    const catalog = JSON.parse(readFileSync(join(root, "examples/catalog.json"), "utf8")).examples;
+    return new Map(catalog.flatMap(example => (example.receipts ?? []).map(receipt => [`${example.id}#${receipt.id}`, receipt])));
+}
+
+/** Everything a page needs about one check: its tests, receipts, verdict and last run date. */
+function checkEvidence(check, tests, receipts) {
+    const ran = tests.get(check.id) ?? [];
+    const quoted = (check.receipts ?? []).map(id => ({ ...receipts.get(id), key: id }));
+    const dates = [...ran.map(test => test.run_date), ...quoted.map(receipt => receipt.run?.date)].filter(Boolean).sort();
+    const failed = ran.filter(test => test.result !== "passed");
+    return { tests: ran, receipts: quoted, failed, last: dates.at(-1) ?? null };
+}
+
+const meshLabel = mesh => `${mesh.order === "quadratic" ? "Tet10" : mesh.order === "linear" ? "Tet4" : mesh.order}, ${mesh.target_size}, ${mesh.nodes.toLocaleString("en-US")} nodes`;
+const signedPercent = ratio => `${ratio < 0 ? "−" : "+"}${Math.abs(ratio * 100).toFixed(2)} %`;
+const testName = test => test.name.split("::").at(-1);
+
+function receiptTable(evidence) {
+    const lines = ["| Quantity | Mesh | RunMat | Reference | Difference |", "| --- | --- | ---: | ---: | ---: |"];
+    const order = [...new Set(evidence.receipts.map(receipt => receipt.quantity))];
+    for (const quantity of order) {
+        evidence.receipts.filter(receipt => receipt.quantity === quantity).forEach((receipt, index) => {
+            const reference = receipt.reference ? `${receipt.reference.value} ${receipt.reference.unit}` : "none";
+            const difference = receipt.reference ? signedPercent((receipt.value - receipt.reference.value) / receipt.reference.value) : "";
+            lines.push(`| ${index === 0 ? quantity : ""} | ${meshLabel(receipt.mesh)} | [${receipt.value} ${receipt.unit}](receipt:${receipt.key}) | ${reference} | ${difference} |`);
+        });
+    }
+    return lines;
+}
+
+function resultLine(evidence) {
+    const parts = [];
+    if (evidence.tests.length) {
+        const count = `${evidence.tests.length} test${evidence.tests.length === 1 ? "" : "s"}`;
+        if (evidence.tests.some(test => test.result === "not_run")) parts.push(`Not yet run by the evidence report (${count}).`);
+        else if (evidence.failed.length) parts.push(`Failed in the evidence run of ${evidence.last}: ${evidence.failed.map(test => `\`${testName(test)}\``).join(", ")}.`);
+        else parts.push(`Passed (${count}) in the evidence run of ${evidence.last}.`);
+    }
+    if (evidence.receipts.length) parts.push(`Run receipts dated ${[...new Set(evidence.receipts.map(receipt => receipt.run.date))].sort().join(", ")}.`);
+    return parts.join(" ") || "Not yet in the evidence catalog; run `evidence_report`.";
 }
 
 export function familyPage(source, area) {
     const root = join(source, "docs/simulation");
     const { ledger } = loadLedger(source);
     const label = VALIDATION_AREAS[area];
-    const capabilities = ledger.capabilities.filter(capability => capability.area === area && capability.kind !== "defect");
-    const cases = ledger.cases.filter(entry => entry.area === area);
-    const evidence = evidenceIndex(root);
+    const tests = checkTests(root);
+    const receipts = receiptIndex(root);
+    const checks = ledger.checks.filter(check => check.area === area && check.status !== "planned");
+    const planned = ledger.checks.filter(check => check.area === area && check.status === "planned");
     const lines = HEADER(
-        `How RunMat checks its ${label.toLowerCase()} results: reference cases with their errors and receipts, and the tests behind each requirement, generated from the capability ledger.`,
-        [`${label.toLowerCase()} validation`, "verification", "reference cases", "convergence", "FEA accuracy"],
+        `Reference checks for RunMat ${label.toLowerCase()} analyses: each problem, its closed-form, manufactured or published reference, the compared quantity, the tolerance and the latest result.`,
+        [`${label.toLowerCase()} validation`, "verification", "reference solution", "mesh convergence", "FEA accuracy"],
         "validation", `${label} validation`);
+    if (!checks.length) {
+        lines.push(`No reference check yet. Planned: ${planned.map(check => check.title).join("; ") || "none named"}.`, "");
+        return lines.join("\n");
+    }
     lines.push(
-        "Each case below compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. Values link to their run receipts. The [validation methodology](./methodology.md) explains how to read them, and [Status](./status.md) lists what the release runs.",
+        "Each check compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. The tests listed under a check run on every change and in the evidence report; receipts record a public study run with its build, commit and mesh. The [validation methodology](./methodology.md) explains how checks are built and how tolerances are set, and [Status](./status.md) summarizes every family.",
         "",
-        "## Capabilities",
-        "",
-        "| Capability | In this release | Cases |",
-        "| --- | --- | --- |",
     );
-    for (const capability of capabilities.filter(capability => capability.kind !== "load" && capability.kind !== "constraint")) {
-        const status = capability.status === "release" ? "yes" : FLAG(capability.id);
-        const caseLinks = capability.verification.map(id => {
-            const entry = ledger.cases.find(item => item.id === id);
-            return entry.area === area ? `[${entry.title}](#${anchor(entry.title)})` : `[${entry.title}](./${entry.area}.md#${anchor(entry.title)})`;
-        }).join(", ") || "—";
-        lines.push(`| ${capability.title} | ${status} | ${caseLinks} |`);
-    }
-    lines.push("", "## Reference cases", "");
-    if (!cases.length) lines.push(`No ${label.toLowerCase()} reference case is published on this page yet; the requirement tests below cover the formulation.`, "");
-    for (const entry of cases) {
-        lines.push(`### ${entry.title}`, "", readFileSync(join(root, entry.narrative), "utf8").trim(), "");
-        lines.push(`- References: ${entry.references.join("; ")}.`);
-        if (entry.tests.length) lines.push(`- Held in CI by: ${entry.tests.map(test => `\`${test}\``).join(", ")}.`);
-        if (entry.benchmarks?.length) lines.push(`- Benchmarks: ${entry.benchmarks.join("; ")}.`);
-        lines.push("");
-    }
-    const requirementIds = [...new Set(capabilities.flatMap(capability => capability.requirements))];
-    lines.push("## Test evidence by requirement", "");
-    if (!requirementIds.length) lines.push("No requirement is mapped to these capabilities yet.", "");
-    else {
-        lines.push(
-            "Each requirement lists acceptance obligations, and each obligation must hold in stated envelopes: formulation, element order and execution provider. Tests declare the obligation and envelope they support at the test; the counts are envelope cells from the latest evidence run. PASS covers the obligation fully, PARTIAL passes with a narrower boundary than the criterion, and OPEN has no supporting test yet.",
-            "",
-            "| Requirement | Title | Obligations | PASS | PARTIAL | FAIL | OPEN |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
-        );
-        for (const id of requirementIds) {
-            const requirement = ledger.requirements.find(item => item.id === id);
-            const run = evidence.get(id);
-            const count = key => run ? run[key] ?? 0 : "—";
-            lines.push(`| ${id} | ${requirement.title} | ${requirement.obligations.length} | ${count("pass")} | ${count("partial")} | ${count("fail")} | ${count("open")} |`);
+    for (const analysis of [...new Set(checks.map(check => check.analysis))]) {
+        lines.push(`## ${analysis}`, "");
+        for (const check of checks.filter(entry => entry.analysis === analysis)) {
+            const evidence = checkEvidence(check, tests, receipts);
+            lines.push(`### ${check.title}`, "");
+            lines.push(`**Problem.** ${check.problem}`, "");
+            lines.push(`**Reference.** ${check.reference}${check.citation ? ` ${check.citation}` : ""}`, "");
+            lines.push(`**Compared.** ${check.quantity}`, "");
+            lines.push(`**Tolerance.** ${check.tolerance}`, "");
+            lines.push(`**Result.** ${[resultLine(evidence), check.result].filter(Boolean).join(" ")}`, "");
+            if (evidence.receipts.length) lines.push(...receiptTable(evidence), "");
+            if (evidence.tests.length) lines.push(`Tests: ${evidence.tests.map(test => `\`${testName(test)}\``).join(", ")}.`, "");
         }
-        lines.push("");
     }
+    if (planned.length) lines.push("## Planned", "", ...planned.map(check => `- ${check.title}: ${check.reference}`), "");
     return lines.join("\n");
+}
+
+export function statusPage(source) {
+    const root = join(source, "docs/simulation");
+    const { ledger } = loadLedger(source);
+    const tests = checkTests(root);
+    const receipts = receiptIndex(root);
+    const lines = HEADER(
+        "Which analysis types of each RunMat physics family have a reference check, how many checks each family has, and when they last ran.",
+        ["validation status", "reference checks", "verification", "FEA accuracy"],
+        "release-status", "Status");
+    lines.push(
+        `Reference checks for RunMat ${ledger.release}, by physics family. Each family page lists its checks with the problem, reference, tolerance and result. The last run is the latest evidence-report run or receipt date among the family's checks.`,
+        "",
+        "| Family | Analysis types with a reference check | Checks | Last run |",
+        "| --- | --- | ---: | --- |",
+    );
+    for (const [area, label] of Object.entries(VALIDATION_AREAS)) {
+        const checks = ledger.checks.filter(check => check.area === area && check.status !== "planned");
+        const analyses = [...new Set(checks.map(check => check.analysis))].join(", ");
+        const last = checks.map(check => checkEvidence(check, tests, receipts).last).filter(Boolean).sort().at(-1);
+        const planned = ledger.checks.filter(check => check.area === area && check.status === "planned").map(check => check.title);
+        lines.push(`| [${label}](./${area}.md) | ${analyses || `None yet; planned: ${planned.join("; ")}`} | ${checks.length} | ${last ?? "none"} |`);
+    }
+    lines.push("", "Which procedures each family runs in this release is in the [procedure reference](../language/reference/procedures.md#families-and-procedures).", "");
+    return lines.join("\n");
+}
+
+/** The family × procedure table generated into the procedure reference between its markers. */
+export const PROCEDURE_TABLE = { file: "docs/simulation/language/reference/procedures.md", start: "<!-- ledger:families-and-procedures -->", end: "<!-- /ledger:families-and-procedures -->" };
+
+export function procedureTable(source) {
+    const { ledger } = loadLedger(source);
+    const procedures = ledger.capabilities.filter(capability => capability.identity);
+    const lines = [PROCEDURE_TABLE.start, "", "| Family | Runs in this release | Planned |", "| --- | --- | --- |"];
+    for (const family of [...new Set(procedures.map(capability => capability.identity.family))]) {
+        const rows = procedures.filter(capability => capability.identity.family === family);
+        const runs = rows.filter(capability => capability.status === "release").map(procedureLabel).join(", ") || "none";
+        const planned = rows.filter(capability => capability.status === "pending").map(procedureLabel).join(", ") || "none";
+        lines.push(`| ${VALIDATION_AREAS[FAMILY_AREA[family] ?? family]} | ${runs} | ${planned} |`);
+    }
+    lines.push("", "Modal superposition reuses a retained modal basis; every other entry solves the full system directly.", "", PROCEDURE_TABLE.end);
+    return lines.join("\n");
+}
+
+function withProcedureTable(source) {
+    const text = readFileSync(join(source, PROCEDURE_TABLE.file), "utf8");
+    const start = text.indexOf(PROCEDURE_TABLE.start), end = text.indexOf(PROCEDURE_TABLE.end);
+    if (start < 0 || end < start) throw new Error(`${PROCEDURE_TABLE.file}: missing ${PROCEDURE_TABLE.start} … ${PROCEDURE_TABLE.end}`);
+    return text.slice(0, start) + procedureTable(source) + text.slice(end + PROCEDURE_TABLE.end.length);
 }
 
 export const generatedPages = source => Object.fromEntries([
     ["docs/simulation/validation/status.md", statusPage(source)],
+    [PROCEDURE_TABLE.file, withProcedureTable(source)],
     ...Object.keys(VALIDATION_AREAS).map(area => [`docs/simulation/validation/${area}.md`, familyPage(source, area)]),
 ]);
 

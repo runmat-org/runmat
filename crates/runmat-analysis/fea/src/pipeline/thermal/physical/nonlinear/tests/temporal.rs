@@ -2,7 +2,7 @@
 use super::*;
 
 // witness: FEA-THERMAL-SOLVE-001/transient @ thermal_transient/tet4|tet10/public_study;
-//   boundary: Tet4/Tet10 manufactured radiating cooling, 8/16/32 steps, first-order
+//   check: radiating-cooling; boundary: Tet4/Tet10 manufactured radiating cooling, 8/16/32 steps, first-order
 //   temperature/gradient/flux/storage and power closure; not temperature-dependent conductivity
 //   coverage.
 #[test]

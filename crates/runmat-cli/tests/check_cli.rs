@@ -1175,7 +1175,7 @@ fn passed_assessment(payload: &Value, id: &str) -> f64 {
 
 // witness: FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate @
 //   incompressible_laminar_steady/tet4/public_study;
-//   coverage: partial; boundary: pressure_drop on the public plane Poiseuille example
+//   coverage: partial; check: plane-poiseuille; boundary: pressure_drop on the public plane Poiseuille example
 //   (L/h = 30, Re = 1) lies within 5% of the fully developed 12 mu U L / h^2 = 36 Pa; the
 //   uniform inlet's entrance loss (about 0.9 h of equivalent length, +3%) is inside the band.
 #[test]
@@ -1191,7 +1191,7 @@ fn plane_poiseuille_example_publishes_the_analytic_pressure_drop() {
 }
 
 // witness: FEA-ACOUSTIC-OUTPUTS-001/transmission_and_insertion_loss @
-//   acoustic_harmonic/tet10/public_study; coverage: partial; boundary: transmission_loss on the
+//   acoustic_harmonic/tet10/public_study; coverage: partial; check: two-fluid-interface; boundary: transmission_loss on the
 //   public two-fluid interface example (m = 4) lies within 0.1 dB of 1.938 dB at 500, 1000 and
 //   2000 Hz; no muffler or one-third-octave sweep.
 #[test]
