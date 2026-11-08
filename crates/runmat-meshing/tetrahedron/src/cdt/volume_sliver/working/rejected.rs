@@ -192,16 +192,39 @@ impl RejectedCompleteRelocations {
         let Some(rejection) = self.entries.get(key) else {
             return false;
         };
-        let holds = Neighborhood::capture(topology, &rejection.region)
-            .is_some_and(|current| current == rejection.neighborhood)
-            && !rejection
+        let current = Neighborhood::capture(topology, &rejection.region);
+        let rerun = match &current {
+            None => Some("a recorded node no longer exists".to_owned()),
+            Some(current) if *current != rejection.neighborhood => Some(format!(
+                "the neighborhood changed ({} of {} recorded cells remain, {} cells now)",
+                current
+                    .cells
+                    .intersection(&rejection.neighborhood.cells)
+                    .count(),
+                rejection.neighborhood.cells.len(),
+                current.cells.len()
+            )),
+            Some(_) => rejection
                 .ranked_out
                 .iter()
-                .any(|candidate| candidate.admissible(ranking));
-        if !holds {
-            self.entries.remove(key);
-        }
-        holds
+                .position(|candidate| candidate.admissible(ranking))
+                .map(|index| {
+                    format!(
+                        "ranked-out candidate {index} of {} is admissible under floor {}",
+                        rejection.ranked_out.len(),
+                        ranking.floor
+                    )
+                }),
+        };
+        let Some(rerun) = rerun else {
+            return true;
+        };
+        tracing::info!(
+            reason = rerun.as_str(),
+            "volume optimization reruns a rejected complete relocation search"
+        );
+        self.entries.remove(key);
+        false
     }
 
     /// Records a search that admitted nothing. `recording.changed` holds every node of a cell
