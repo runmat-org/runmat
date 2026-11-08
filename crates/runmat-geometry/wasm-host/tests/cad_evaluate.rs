@@ -239,3 +239,27 @@ fn a_fillet_that_crosses_a_bore_keeps_every_face_on_its_surface() {
         * 1e6;
     assert!((area - 90.8).abs() < 0.5, "side face {area} mm²");
 }
+
+#[test]
+fn a_split_cuts_a_block_into_two_bodies() {
+    // The block split by the plane x = 40 mm: two bodies, 40 and 60 mm long.
+    let split = BLOCK
+        .replace(
+            "    output block =",
+            "    feature cutp = plane.offset(base = origin.yz, distance = 40 mm)\n    feature halve = split(body = feature.body.body, tool = plane.cutp)\n    output block =",
+        )
+        .replace("body = feature.body.body, part", "body = feature.halve.body.body(side = positive), part");
+    let compiled = call("compile", &["/p/block.part", &split, "{}", "{}"]);
+    let errors: Vec<&Value> =
+        compiled["diagnostics"].as_array().into_iter().flatten().filter(|d| d["severity"] == "error").collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let bodies = compiled["display"]["data"]["bodies"].as_array().unwrap_or_else(|| panic!("{compiled}"));
+    assert_eq!(bodies.len(), 2, "the split leaves two bodies");
+    // The output keeps the positive side: 60 x 20 x 10 mm of 6061 at 2700 kg/m³ is 32.4 g.
+    let request = json!({ "command": "evaluate.mass-properties", "values": { "configuration": "default" } }).to_string();
+    let out = call("analyze", &["/p/block.part", &split, "{}", &request]);
+    assert_eq!(out["ok"], true, "{out}");
+    let mass = out["data"]["total"]["mass"].as_f64().unwrap();
+    let refs: Vec<&Value> = bodies.iter().map(|b| &b["reference"]).collect();
+    assert!((mass - 0.0324).abs() < 1e-6, "the positive side weighs {mass} kg; bodies {refs:?}");
+}

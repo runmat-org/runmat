@@ -78,6 +78,22 @@ struct Group {
     bodies: Vec<u32>,
 }
 
+/// The bodies (by index) a part with one output (or none) is made of: the bodies its output's
+/// `body` names when it names some of them (one side of a split), else every body.
+pub(crate) fn single_output_bodies(doc: &PartDocument, display: &PartDisplay) -> Vec<u32> {
+    let all = || display.bodies.iter().map(|b| b.index).collect();
+    let Some(text) = doc.parts.first().and_then(|o| runmat_cad::syntax::refs::print_reference(&o.body)) else {
+        return all();
+    };
+    let named: Vec<u32> = display
+        .bodies
+        .iter()
+        .filter(|b| b.reference.as_deref() == Some(text.as_str()))
+        .map(|b| b.index)
+        .collect();
+    if named.is_empty() { all() } else { named }
+}
+
 /// The products a regenerated part exports as. A part with one output (or none) is one product
 /// named `name` (or its output's `label`). A part with several outputs (a block and the fluid
 /// that fills its passages) is one product per output, named by its `label` or identifier and
@@ -94,7 +110,7 @@ fn groups(doc: &PartDocument, display: &PartDisplay, name: &str) -> Vec<Group> {
         return vec![Group {
             name: output.and_then(|o| o.label.clone()).unwrap_or_else(|| name.to_owned()),
             material: material(output),
-            bodies: all,
+            bodies: single_output_bodies(doc, display),
         }];
     }
     let mut out = Vec::new();

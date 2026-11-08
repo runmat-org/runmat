@@ -3251,7 +3251,12 @@ impl OcctKernel {
         digest: &str,
         l: &mut Lower<'_>,
     ) -> Result<(), KernelError> {
-        let resolved = match self.imports.get(source) {
+        // `./geometry/x.step` names the same file as `geometry/x.step`.
+        let listed = self
+            .imports
+            .get(source)
+            .or_else(|| self.imports.get(source.trim_start_matches("./")));
+        let resolved = match listed {
             Some(s) => s.clone(),
             None => {
                 let p = match &self.root {

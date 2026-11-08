@@ -91,10 +91,14 @@ fn output_bodies<'a>(
 ) -> Vec<&'a runmat_cad::regen::kernel::BodyHandle> {
     let display = part_display(result, kernel, &TessellationOptions::default());
     let first = document.parts.first().map(|o| o.body.to_string());
+    let single = (document.parts.len() < 2).then(|| crate::exchange::single_output_bodies(document, &display));
     display
         .bodies
         .iter()
-        .filter(|b| document.parts.len() < 2 || b.reference.as_deref() == first.as_deref())
+        .filter(|b| match &single {
+            Some(bodies) => bodies.contains(&b.index),
+            None => b.reference.as_deref() == first.as_deref(),
+        })
         .filter_map(|b| result.state.bodies.get(b.index as usize))
         .filter(|s| !s.topology.edges.iter().any(|e| e.laminar))
         .map(|s| &s.handle)

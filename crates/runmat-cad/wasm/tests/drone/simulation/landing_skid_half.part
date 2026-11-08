@@ -1,0 +1,24 @@
+runmat 0.7
+std 1
+
+// The landing skid's half on the +y side of its centre plane (y = 34 mm), for the demo-speed
+// touchdown study landing_skid_half.fea. It imports the full skid as exported to
+// geometry/landing_skid.step from ../mechanical/body/landing_skid.part, so re-export that file
+// first after changing the skid (rail_thickness). The rail, the struts and the 97 N load are
+// symmetric about this plane; only the struts' tops, trimmed by the belly loft, lean slightly,
+// and they are held fixed. The cut face is the region `symmetry`.
+part landing_skid_half {
+    feature skid = import(source = "./geometry/landing_skid.step", digest = skid_step)
+    feature centre = plane.offset(base = origin.zx, distance = 34 mm)
+    sketch keep_s on plane.centre {
+        l1 = line(start = [-100 mm, -100 mm], end = [100 mm, -100 mm])
+        l2 = line(start = [100 mm, -100 mm], end = [100 mm, 100 mm])
+        l3 = line(start = [100 mm, 100 mm], end = [-100 mm, 100 mm])
+        l4 = line(start = [-100 mm, 100 mm], end = [-100 mm, -100 mm])
+    }
+    feature halve = extrude(profile = sketch.keep_s, distance = 20 mm, mode = cut)
+    region symmetry : face = { select = [feature.halve.face.start], expect = exactly_one }
+    region sole : face = { select = [feature.skid.face("sole")], expect = exactly_one }
+    region mount : face = { select = [feature.skid.face("mount")], expect = at_least_one }
+    output landing_skid_half = { body = feature.skid.body("landing_skid"), material = "glass_filled_nylon" }
+}

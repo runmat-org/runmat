@@ -256,6 +256,13 @@ fn reference_text(kind: TopoKind, name: &EntityName) -> Option<String> {
     })
 }
 
+fn is_split_side(name: &EntityName) -> bool {
+    matches!(
+        name,
+        EntityName::Generated(g) if matches!(g.tag, crate::refs::name::SourceTag::Side { .. })
+    )
+}
+
 fn feature_of(name: &EntityName) -> String {
     name.maker().0.clone()
 }
@@ -394,8 +401,11 @@ fn body_display(
         .collect();
     BodyDisplay {
         index,
+        // A split piece also carries the split body's name; its side name tells the pieces apart.
         reference: body_names
             .iter()
+            .filter(|n| is_split_side(n))
+            .chain(body_names.iter())
             .find_map(|n| reference_text(TopoKind::Body, n)),
         faces,
         edges,
