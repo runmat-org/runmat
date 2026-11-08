@@ -15,8 +15,13 @@
 //! | perpendicular | any two                                 | `angle` between the Z axes, 90°     |
 //! | tangent       | a planar face and a cylindrical face    | `tangent` (plane to cylinder)       |
 //!
-//! Joints (fasten, revolute, slider, cylindrical, planar, ball) are written as themselves.
+//! Joints (fasten, revolute, slider, cylindrical, planar, ball) are written as themselves, a
+//! revolute's or cylindrical's angle limits and a slider's or cylindrical's travel limits as
+//! ranges. Pin slot, screw (`pitch` is the lead), gear (`ratio`) and rack and pinion (`pitch`
+//! is the rack's travel per turn) too. A cam needs a closed path its cam publishes, which a part
+//! can't publish yet, so the Mate command doesn't offer it.
 
+use super::mate_edits::{limits, ANGLE, TRAVEL};
 use super::frames::{cross, dot, edge_frame, face_frame, norm, to_world, Frame, FrameKind, V3};
 use super::{model, parse_pick, Compiled, Entity};
 use crate::features::{picks_of, value};
@@ -256,11 +261,15 @@ pub(super) fn mate(
             }
         }
         "fasten" => MateKind::Fasten,
-        "revolute" => MateKind::Revolute { angle: None },
-        "slider" => MateKind::Slider { distance: None },
+        "revolute" => MateKind::Revolute {
+            angle: limits(values, "angle_limits", ANGLE, "deg")?,
+        },
+        "slider" => MateKind::Slider {
+            distance: limits(values, "distance_limits", TRAVEL, "mm")?,
+        },
         "cylindrical" => MateKind::Cylindrical {
-            angle: None,
-            distance: None,
+            angle: limits(values, "angle_limits", ANGLE, "deg")?,
+            distance: limits(values, "distance_limits", TRAVEL, "mm")?,
         },
         "planar" => MateKind::Planar,
         "ball" => MateKind::Ball,

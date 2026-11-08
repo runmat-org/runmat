@@ -218,6 +218,42 @@ fn gear_screw_rack_and_pin_slot_mates_write_their_values() {
     compile(&text);
 }
 
+/// Every type the Mate command offers applies from the canvas and the result compiles: the list
+/// holds no type the applier refuses.
+#[test]
+fn every_offered_mate_type_applies() {
+    use runmat_cad::commands::FieldKind;
+    let catalog = runmat_cad::commands::catalog();
+    let mate_command = catalog.command("assembly.mate").expect("assembly.mate");
+    let FieldKind::Choice { options, .. } = &mate_command.inputs.iter().find(|f| f.id == "type").unwrap().kind else {
+        panic!("Mate's type is a choice");
+    };
+    let c = compile(RIG);
+    let (pin, pin2, plate) = (c.face("pin", round), c.face("pin2", round), c.face("plate", top));
+    assert_eq!(options.len(), 17, "{options:?}");
+    for option in options {
+        let kind = option.value.as_str();
+        let first = if kind == "tangent" { plate.clone() } else { pin.clone() };
+        let text = mate(RIG, kind, first, pin2.clone(), json!({ "offset": 5, "angle": 30, "ratio": 2, "pitch": 2 }));
+        compile(&text);
+    }
+}
+
+#[test]
+fn joint_limits_are_written_as_ranges() {
+    let c = compile(RIG);
+    let (pin, pin2) = (c.face("pin", round), c.face("pin2", round));
+    let text = mate(RIG, "revolute", pin.clone(), pin2.clone(), json!({ "angle_limits": true, "min": -20, "max": 60 }));
+    assert!(text.contains("angle = { target = range, min = -20 deg, max = 60 deg }"), "{text}");
+    compile(&text);
+    let text = mate(RIG, "slider", pin.clone(), pin2.clone(), json!({ "distance_limits": true, "near": 0, "far": 25 }));
+    assert!(text.contains("distance = { target = range, min = 0 mm, max = 25 mm }"), "{text}");
+    compile(&text);
+    // Unticked, a revolute turns freely.
+    let text = mate(RIG, "revolute", pin, pin2, json!({ "min": -20, "max": 60 }));
+    assert!(text.contains("kind = { mate = revolute }"), "{text}");
+}
+
 #[test]
 fn mates_refuse_picks_that_dont_fit() {
     let c = compile(RIG);

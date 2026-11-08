@@ -32,6 +32,9 @@ pub(super) const EDITABLE_MATE_TYPES: &[(&str, &str)] = &[
     ("cam", "Cam"),
 ];
 
+/// The kinds Mate adds from two picks: the standard mates and every connector mate the solver
+/// has, except a cam, whose profile is a closed path the cam's part publishes (parts publish
+/// datums, regions and values, not paths, so a cam is written in the source editor).
 pub(super) const MATE_TYPES: &[(&str, &str)] = &[
     ("coincident", "Coincident"),
     ("concentric", "Concentric"),
@@ -47,16 +50,9 @@ pub(super) const MATE_TYPES: &[(&str, &str)] = &[
     ("planar", "Planar"),
     ("ball", "Ball"),
     ("pin_slot", "Pin slot"),
-    ("width", "Width"),
-    ("symmetric", "Symmetric"),
-    ("path", "Path"),
-    ("linear_coupler", "Linear coupler"),
     ("gear", "Gear"),
     ("rack_pinion", "Rack and pinion"),
     ("screw", "Screw"),
-    ("cam", "Cam"),
-    ("hinge", "Hinge"),
-    ("universal_joint", "Universal joint"),
 ];
 
 fn occurrences() -> Predicate {

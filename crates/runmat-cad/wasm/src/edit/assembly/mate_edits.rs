@@ -127,7 +127,7 @@ fn target(values: &Values, id: &str, flag: &str, [low, high]: [&str; 2], unit: &
 }
 
 /// A range when `flag` is checked, else no target (free).
-fn limits(values: &Values, flag: &str, ends: [&str; 2], unit: &str) -> Result<Option<TargetExpr>, EditFailure> {
+pub(super) fn limits(values: &Values, flag: &str, ends: [&str; 2], unit: &str) -> Result<Option<TargetExpr>, EditFailure> {
     if checked(values, flag) {
         target(values, "", flag, ends, unit).map(Some)
     } else {
@@ -135,8 +135,8 @@ fn limits(values: &Values, flag: &str, ends: [&str; 2], unit: &str) -> Result<Op
     }
 }
 
-const ANGLE: [&str; 2] = ["min", "max"];
-const TRAVEL: [&str; 2] = ["near", "far"];
+pub(super) const ANGLE: [&str; 2] = ["min", "max"];
+pub(super) const TRAVEL: [&str; 2] = ["near", "far"];
 
 pub(super) fn edit(document: &mut AssemblyDocument, compiled: &Compiled, selection: &[String], values: &Values) -> Result<String, EditFailure> {
     let names = mate_names(selection)?;

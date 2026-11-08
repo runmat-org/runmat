@@ -74,20 +74,18 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             pick("first", "First", conn),
             pick("second", "Second", conn),
             offset("offset", "Offset", 0.0)
-                .shown(
-                    "type",
-                    &["fasten", "planar", "distance", "slider", "cylindrical"],
-                )
+                .shown("type", &["distance"])
                 .drag(Manipulator::Arrow),
-            angle("angle", "Angle", 0.0).shown("type", &["angle", "revolute", "fasten"]),
+            angle("angle", "Angle", 0.0).shown("type", &["angle"]),
             flag("flip", "Flip", false),
-            flag("limits", "Limits", false),
-            qty("min", "Min", "angle", Some(-30.0)).if_checked("limits"),
-            qty("max", "Max", "angle", Some(45.0)).if_checked("limits"),
-            qty("ratio", "Ratio", "ratio", Some(1.0))
-                .shown("type", &["gear", "linear_coupler", "rack_pinion", "screw"]),
+            flag("angle_limits", "Angle limits", false).shown("type", &["revolute", "cylindrical"]),
+            qty("min", "Min angle", "angle", Some(-30.0)).if_checked("angle_limits"),
+            qty("max", "Max angle", "angle", Some(45.0)).if_checked("angle_limits"),
+            flag("distance_limits", "Travel limits", false).shown("type", &["slider", "cylindrical"]),
+            offset("near", "Min travel", 0.0).if_checked("distance_limits"),
+            offset("far", "Max travel", 10.0).if_checked("distance_limits"),
+            qty("ratio", "Ratio", "ratio", Some(1.0)).shown("type", &["gear"]),
             length("pitch", "Pitch", 1.0).shown("type", &["screw", "rack_pinion"]),
-            pick("path", "Path", &[K::Edge, K::Curve]).shown("type", &["path"]),
         ])
         .when(occurrences())
         .preview()
