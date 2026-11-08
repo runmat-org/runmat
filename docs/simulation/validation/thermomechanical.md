@@ -39,4 +39,6 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Free strain within 1e-12 and free stress below 2e-3. Restrained stress within 1e-5 for the uniform change and relative 1e-12 for the linear change; energy within relative 1e-12.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (2 tests) in the evidence run of 2026-11-08.
+
+Tests: `solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy`, `thermal_eigenstrain_recovery_is_stress_free_for_free_expansion_and_compressive_when_fixed`.

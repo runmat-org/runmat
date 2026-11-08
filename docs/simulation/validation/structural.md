@@ -16,7 +16,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Problem.** A 1 m steel cantilever (E = 200 GPa, ν = 0.3) with a 100 mm × 100 mm section is fully fixed at x = 0 and carries a 1,000 N downward traction resultant on the free end face. It is the cantilever of the [linear static](../guides/linear-static.md) and [mesh refinement](../guides/mesh-refinement.md) guides, run as a public study on Tet10 meshes at 150, 75, 50 and 25 mm and Tet4 meshes at 150 and 50 mm.
 
-**Reference.** Euler–Bernoulli beam theory: tip deflection $\delta = FL^3/3EI$ = 0.2000 mm and top-surface bending stress $\sigma = Mc/I$ with $M = F(L - x)$, 5.40 MPa at x = 100 mm. The support reaction equals the applied 1,000 N. Timoshenko theory adds the shear deflection $FL/\kappa GA \approx$ 0.0016 mm (0.8 %), so a converged solid model lies between the two theories.
+**Reference.** Euler–Bernoulli beam theory: tip deflection $\delta = FL^3/3EI$ = 0.2000 mm and top-surface bending stress $\sigma = Mc/I$ with $M = F(L - x)$, 5.40 MPa at x = 100 mm. The support reaction equals the applied 1,000 N. Timoshenko theory adds the shear deflection $FL/\kappa GA \approx$ 0.0016 mm (0.8 %), so a converged solid model lies between the two theories. (J. M. Gere and B. J. Goodno, *Mechanics of Materials*, 8th ed., Cengage Learning, 2013.)
 
 **Compared.** Largest displacement on the loaded end face; nodal von Mises stress on the top surface at x = 100 mm, one section depth from the clamp; support reaction. The largest element stress at the clamped edge is recorded to show the singularity of the fully fixed face.
 
@@ -61,7 +61,9 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Absolute 1e-12 on strain and 1e-11 on stress and energy; relative 1e-12 on nodal forces and energy.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (2 tests) in the evidence run of 2026-11-08.
+
+Tests: `connected_tet4_affine_patch_balances_independent_boundary_tractions`, `connected_tet4_affine_patch_recovers_analytic_strain_stress_and_energy`.
 
 ### Tet10 nodal stress recovery under a linear stress field
 
@@ -73,7 +75,9 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Absolute error at most 1e-12 × (1 + |σ|) per component.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `tet10_nodal_stress_is_exact_for_a_linear_field_and_keeps_regions_apart`.
 
 ### Shell membrane patch under biaxial plane stress
 
@@ -85,19 +89,23 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 1e-11 on resultants; bending and shear resultants below 1e-12.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `one_layer_membrane_patch_matches_the_independent_plane_stress_reference`.
 
 ### Simply supported plate under sinusoidal load
 
 **Problem.** A simply supported plate meshed with triangular shell elements carries a sinusoidal transverse pressure; the mesh is refined.
 
-**Reference.** Navier's series solution for the center deflection of a simply supported plate.
+**Reference.** Navier's series solution for the center deflection of a simply supported plate. (S. P. Timoshenko and S. Woinowsky-Krieger, *Theory of Plates and Shells*, 2nd ed., McGraw-Hill, 1959.)
 
 **Compared.** Center transverse displacement.
 
 **Tolerance.** The center displacement approaches the Navier value with refinement; the finest-mesh error is below 8 %.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `simply_supported_sinusoidal_plate_converges_to_the_navier_solution`.
 
 ## Modal
 
@@ -111,7 +119,9 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Frequency error falls by more than 3× (Tet4) or 6× (Tet10) per refinement; finest-mesh error below 2e-3 (Tet4) and 2e-4 (Tet10).
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (2 tests) in the evidence run of 2026-11-08.
+
+Tests: `solid_rod_modal_frequency_and_retained_response_have_independent_evidence`, `solid_rod_tet10_modal_frequency_and_retained_response_have_independent_evidence`.
 
 ## Harmonic
 
@@ -125,7 +135,9 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Displacement and reaction errors fall by more than 2.5× per refinement and are below 2e-2 on the finest mesh; mean input power below 1e-9.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `solid_rod_harmonic_face_traction_converges_to_independent_continuum`.
 
 ## Transient
 
@@ -139,7 +151,9 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Error ratio above 3.8 per halving of the time step (second order) on both paths; finest direct Newmark error below 2e-3; modal relative residuals at most 2e-15.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (2 tests) in the evidence run of 2026-11-08.
+
+Tests: `average_acceleration_modal_integration_is_second_order`, `undamped_free_vibration_converges_at_second_order`.
 
 ### Rod under affine forcing in time
 
@@ -151,7 +165,9 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Spatially exact quantities below 1e-12; time-discretization errors fall by more than 3× per halving and are below 2e-4 at 80 intervals.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `affine_physical_forcing_qualifies_tet4_tet10_temporal_fields_and_work_energy`.
 
 ## Buckling
 
@@ -159,13 +175,15 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Problem.** A solid column, 1 m long with a 100 × 50 mm section, fixed at the base and free at the top, carries a 250 kN axial preload; Tet10 mesh.
 
-**Reference.** Euler's critical load for a fixed–free column, $P_{cr} = \pi^2EI/4L^2$.
+**Reference.** Euler's critical load for a fixed–free column, $P_{cr} = \pi^2EI/4L^2$. (S. P. Timoshenko and J. M. Gere, *Theory of Elastic Stability*, 2nd ed., McGraw-Hill, 1961.)
 
 **Compared.** First buckling load factor; eigenpair residuals.
 
 **Tolerance.** First load factor within 1 % of $P_{cr}$/250 kN; eigenpairs converged to a relative tolerance of 1e-8.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `fixed_free_column_buckles_at_the_euler_load_with_converged_eigenpairs`.
 
 ## Response spectrum
 
@@ -173,13 +191,15 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Problem.** Two signed modal responses with set frequencies and damping are combined by SRSS, absolute sum and CQC.
 
-**Reference.** The SRSS, absolute-sum and CQC formulas evaluated independently, including an independently computed CQC correlation coefficient.
+**Reference.** The SRSS, absolute-sum and CQC formulas evaluated independently, including an independently computed CQC correlation coefficient. (A. Der Kiureghian, "A response spectrum method for random vibration analysis of MDF systems," *Earthquake Engineering & Structural Dynamics* 9(5), 419–435, 1981.)
 
 **Compared.** Combined peak response.
 
 **Tolerance.** Relative 2e-13.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `modal_combination_matches_independent_quadratic_form_references`.
 
 ## Nonlinear (plasticity)
 
@@ -187,13 +207,15 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Problem.** A bar in uniaxial tension loaded past yield, with J2 plasticity and linear hardening, solved by Newton iteration on Tet4 and Tet10 meshes and restarted cold from its persisted state.
 
-**Reference.** The closed-form uniaxial elastoplastic stress at the final load (5.6 in the fixture's units).
+**Reference.** The closed-form uniaxial elastoplastic stress at the final load (5.6 in the fixture's units). (J. C. Simo and T. J. R. Hughes, *Computational Inelasticity*, Springer, 1998.)
 
 **Compared.** Axial stress at every integration point; restart state.
 
 **Tolerance.** Axial stress within 2e-10 of the closed form.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `physical_newton_matches_independent_uniaxial_plastic_bar_and_cold_restart_both_orders`.
 
 ### Manufactured fully yielded cube
 
@@ -205,4 +227,6 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Tet10 in one increment: displacement, stress, hardening variable and energy errors below 1e-7 under the Keast15, Duffy5 and Duffy8 rules. In eight increments the yield front crosses elements mid-step; that path error falls at order 1.5 or better with refinement. Tet4: every quantity refines.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (3 tests) in the evidence run of 2026-11-08.
+
+Tests: `fresh_tet10_integration_trajectories_meet_original_eight_step_exactness`, `manufactured_fully_yielded_cube_refines_and_checks_load_step_sensitivity`, `manufactured_fully_yielded_tet10_cube_is_exact_on_both_load_schedules`.

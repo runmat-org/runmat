@@ -8,7 +8,7 @@ Evidence kind: PublicationIntegrity. Criterion: Every witness tag in the reposit
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-qualification[test:witness_tags]::all_witness_tags_are_valid_against_the_register` (crates/runmat-analysis/qualification/tests/witness_tags.rs:12) - Scans every crate for witness tags and checks obligation, required envelopes, boundary and test-function placement; does not execute the tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-qualification[test:witness_tags]::all_witness_tags_are_valid_against_the_register` (crates/runmat-analysis/qualification/tests/witness_tags.rs:13) - Scans every crate for witness tags and checks obligation, required envelopes, boundary and test-function placement; does not execute the tests. |
 
 ## evidence_catalog_generated
 
@@ -16,7 +16,7 @@ Evidence kind: PublicationIntegrity. Criterion: The evidence catalog (markdown a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-qualification[test:witness_tags]::verdicts_follow_test_results_and_never_exceed_tags` (crates/runmat-analysis/qualification/tests/witness_tags.rs:64) - Unit-level check of the verdict derivation (PASS only when every tagged test passed, FAIL on failure or missing test, OPEN without tags); the generated files co... |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-qualification[test:witness_tags]::verdicts_follow_test_results_and_never_exceed_tags` (crates/runmat-analysis/qualification/tests/witness_tags.rs:80) - Unit-level check of the verdict derivation (PASS only when every tagged test passed, FAIL on failure or missing test, OPEN without tags); the generated files co... |
 
 ## scope_inventory_complete
 

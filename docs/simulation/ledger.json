@@ -2701,7 +2701,8 @@
         "cantilever-static#top-von-mises-tet4-50",
         "cantilever-static#peak-element-von-mises-tet4-50",
         "cantilever-static#support-reaction-tet4-50"
-      ]
+      ],
+      "citation": "(J. M. Gere and B. J. Goodno, *Mechanics of Materials*, 8th ed., Cengage Learning, 2013.)"
     },
     {
       "id": "tet4-affine-patch",
@@ -2745,7 +2746,8 @@
       "problem": "A simply supported plate meshed with triangular shell elements carries a sinusoidal transverse pressure; the mesh is refined.",
       "reference": "Navier's series solution for the center deflection of a simply supported plate.",
       "quantity": "Center transverse displacement.",
-      "tolerance": "The center displacement approaches the Navier value with refinement; the finest-mesh error is below 8 %."
+      "tolerance": "The center displacement approaches the Navier value with refinement; the finest-mesh error is below 8 %.",
+      "citation": "(S. P. Timoshenko and S. Woinowsky-Krieger, *Theory of Plates and Shells*, 2nd ed., McGraw-Hill, 1959.)"
     },
     {
       "id": "axial-rod-modal",
@@ -2800,7 +2802,8 @@
       "problem": "A solid column, 1 m long with a 100 × 50 mm section, fixed at the base and free at the top, carries a 250 kN axial preload; Tet10 mesh.",
       "reference": "Euler's critical load for a fixed–free column, $P_{cr} = \\pi^2EI/4L^2$.",
       "quantity": "First buckling load factor; eigenpair residuals.",
-      "tolerance": "First load factor within 1 % of $P_{cr}$/250 kN; eigenpairs converged to a relative tolerance of 1e-8."
+      "tolerance": "First load factor within 1 % of $P_{cr}$/250 kN; eigenpairs converged to a relative tolerance of 1e-8.",
+      "citation": "(S. P. Timoshenko and J. M. Gere, *Theory of Elastic Stability*, 2nd ed., McGraw-Hill, 1961.)"
     },
     {
       "id": "modal-combination-rules",
@@ -2811,7 +2814,8 @@
       "problem": "Two signed modal responses with set frequencies and damping are combined by SRSS, absolute sum and CQC.",
       "reference": "The SRSS, absolute-sum and CQC formulas evaluated independently, including an independently computed CQC correlation coefficient.",
       "quantity": "Combined peak response.",
-      "tolerance": "Relative 2e-13."
+      "tolerance": "Relative 2e-13.",
+      "citation": "(A. Der Kiureghian, \"A response spectrum method for random vibration analysis of MDF systems,\" *Earthquake Engineering & Structural Dynamics* 9(5), 419–435, 1981.)"
     },
     {
       "id": "j2-uniaxial-bar",
@@ -2822,7 +2826,8 @@
       "problem": "A bar in uniaxial tension loaded past yield, with J2 plasticity and linear hardening, solved by Newton iteration on Tet4 and Tet10 meshes and restarted cold from its persisted state.",
       "reference": "The closed-form uniaxial elastoplastic stress at the final load (5.6 in the fixture's units).",
       "quantity": "Axial stress at every integration point; restart state.",
-      "tolerance": "Axial stress within 2e-10 of the closed form."
+      "tolerance": "Axial stress within 2e-10 of the closed form.",
+      "citation": "(J. C. Simo and T. J. R. Hughes, *Computational Inelasticity*, Springer, 1998.)"
     },
     {
       "id": "j2-manufactured-cube",
@@ -2992,7 +2997,8 @@
       "reference": "Parallel-plate line impedance $Z = \\frac{L}{W}\\left[\\frac{k\\coth(kt)}{\\sigma} + i\\omega\\mu_0 g\\right]$ with $k = (1+i)/\\delta$ and $\\delta = \\sqrt{2/\\omega\\mu_0\\sigma}$.",
       "quantity": "Terminal impedance $Z = U/I$; Joule loss against delivered power; Poynting balance and charge continuity.",
       "tolerance": "Impedance error below 2e-3 at 32 cells and reduced by more than 3× from 8 to 32 cells; Joule loss equals $\\tfrac12\\mathrm{Re}(U\\bar I)$ within 1e-8; Poynting and charge-continuity residuals below 1e-8.",
-      "result": "Relative impedance error at 8, 16 and 32 cells: 4.2e-4, 1.0e-4, 2.6e-5 at $t/\\delta$ = 0.5; 7.3e-3, 1.8e-3, 4.5e-4 at 2; 1.6e-2, 3.9e-3, 9.8e-4 at 4. The error falls fourfold per refinement."
+      "result": "Relative impedance error at 8, 16 and 32 cells: 4.2e-4, 1.0e-4, 2.6e-5 at $t/\\delta$ = 0.5; 7.3e-3, 1.8e-3, 4.5e-4 at 2; 1.6e-2, 3.9e-3, 9.8e-4 at 4. The error falls fourfold per refinement.",
+      "citation": "(S. Ramo, J. R. Whinnery and T. Van Duzer, *Fields and Waves in Communication Electronics*, 3rd ed., Wiley, 1994.)"
     },
     {
       "id": "low-frequency-strip",
@@ -3014,7 +3020,8 @@
       "problem": "A rigid-walled cube cavity. The kernel test uses quadratic meshes with 2, 3 and 4 cells per side and a linear mesh with 2 and 4; the public-study test runs a 1 m cube through the command line.",
       "reference": "Rectangular-cavity frequencies $f_{lmn} = \\frac{c}{2}\\sqrt{(l/L_x)^2 + (m/L_y)^2 + (n/L_z)^2}$, including the zero-frequency uniform mode and degenerate triplets; for the 1 m cube the first axial mode is $c/2L$ = 171.5 Hz.",
       "quantity": "First eight natural frequencies; residuals and mass orthogonality.",
-      "tolerance": "Quadratic: error ratio above 2.5 per refinement and below 4e-3 at 4 cells, residuals at most 1e-8, mass orthogonality below 1e-8. Linear: error ratio above 3 from 2 to 4 cells. Command line: uniform mode below 1e-3 Hz and the three axial modes within 2 % of 171.5 Hz."
+      "tolerance": "Quadratic: error ratio above 2.5 per refinement and below 4e-3 at 4 cells, residuals at most 1e-8, mass orthogonality below 1e-8. Linear: error ratio above 3 from 2 to 4 cells. Command line: uniform mode below 1e-3 Hz and the three axial modes within 2 % of 171.5 Hz.",
+      "citation": "(L. E. Kinsler, A. R. Frey, A. B. Coppens and J. V. Sanders, *Fundamentals of Acoustics*, 4th ed., Wiley, 2000.)"
     },
     {
       "id": "open-open-duct-modes",
@@ -3157,7 +3164,8 @@
       "problem": "Fully developed laminar flow between parallel plates, refined in the kernel test. The public example has L/h = 30 at Re = 1.",
       "reference": "Fully developed pressure drop $\\Delta p = 12\\mu\\bar UL/h^2$; 36 Pa for the public example.",
       "quantity": "Difference of the face-mean pressure between inlet and outlet.",
-      "tolerance": "Kernel: relative error below 5 % and decreasing with refinement. Public example: between 34.2 and 37.8 Pa (5 %), which contains the uniform inlet's entrance loss of about +3 %."
+      "tolerance": "Kernel: relative error below 5 % and decreasing with refinement. Public example: between 34.2 and 37.8 Pa (5 %), which contains the uniform inlet's entrance loss of about +3 %.",
+      "citation": "(F. M. White, *Viscous Fluid Flow*, 3rd ed., McGraw-Hill, 2006.)"
     },
     {
       "id": "couette",
@@ -3168,7 +3176,8 @@
       "problem": "Flow between a moving and a fixed wall on canonical tetrahedra.",
       "reference": "The linear Couette profile, its uniform vorticity and its wall shear stress $\\mu U/h$.",
       "quantity": "Velocity field, wall shear on both walls, vorticity, global momentum.",
-      "tolerance": "Velocity relative L2 error below 0.25; wall shear within 0.25; global momentum below 1e-6. For the exact linear field, vorticity and wall shear within 1e-6."
+      "tolerance": "Velocity relative L2 error below 0.25; wall shear within 0.25; global momentum below 1e-6. For the exact linear field, vorticity and wall shear within 1e-6.",
+      "citation": "(F. M. White, *Viscous Fluid Flow*, 3rd ed., McGraw-Hill, 2006.)"
     },
     {
       "id": "rectangular-duct",
@@ -3179,7 +3188,8 @@
       "problem": "Pressure-driven laminar flow in a rectangular duct, three refinements.",
       "reference": "Fourier-series solution for the velocity, flow rate and wall shear; the series tail is below 1e-5 at 255 terms.",
       "quantity": "Velocity L2 error, flow rate, wall shear.",
-      "tolerance": "Each error decreases with refinement; finest velocity error below 0.35 and flow-rate error below 0.25; boundary flux below 1e-8."
+      "tolerance": "Each error decreases with refinement; finest velocity error below 0.35 and flow-rate error below 0.25; boundary flux below 1e-8.",
+      "citation": "(F. M. White, *Viscous Fluid Flow*, 3rd ed., McGraw-Hill, 2006.)"
     },
     {
       "id": "darcy-forchheimer",
@@ -3190,7 +3200,8 @@
       "problem": "Uniform flow through a porous slab.",
       "reference": "Darcy–Forchheimer pressure gradient $\\mu U/K + \\tfrac12\\rho C_2U^2$.",
       "quantity": "Velocity and pressure gradient.",
-      "tolerance": "Relative 1e-6."
+      "tolerance": "Relative 1e-6.",
+      "citation": "(D. A. Nield and A. Bejan, *Convection in Porous Media*, 5th ed., Springer, 2017.)"
     },
     {
       "id": "power-law-channel",
@@ -3284,7 +3295,8 @@
       "reference": "Nusselt numbers 3.66 at constant wall temperature and 4.364 at constant heat flux.",
       "quantity": "Nusselt number from the wall heat flux and bulk temperature.",
       "tolerance": "Set when the check is built.",
-      "status": "planned"
+      "status": "planned",
+      "citation": "(R. K. Shah and A. L. London, *Laminar Flow Forced Convection in Ducts*, Academic Press, 1978.)"
     },
     {
       "id": "fsi-turek-hron",
@@ -3296,7 +3308,8 @@
       "reference": "The Turek–Hron FSI1, FSI2 and FSI3 tip displacements and forces, within the published scatter.",
       "quantity": "Flap tip displacement; drag and lift.",
       "tolerance": "Within the published scatter.",
-      "status": "planned"
+      "status": "planned",
+      "citation": "(S. Turek and J. Hron, \"Proposal for numerical benchmarking of fluid-structure interaction between an elastic object and laminar incompressible flow,\" in *Fluid-Structure Interaction*, Lecture Notes in Computational Science and Engineering 53, Springer, 2006, pp. 371–385.)"
     }
   ],
   "claims": [

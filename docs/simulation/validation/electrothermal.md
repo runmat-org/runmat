@@ -22,7 +22,9 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** At least three coupling sweeps; temperature error falls at second order; terminal power equals the Joule integral within 1e-8; power within 0.5 % of $I^2R(T)$.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`. Largest temperature error 2.21, 0.575 and 0.150 K at 2, 4 and 8 cells, against a 59.95 K peak rise; Joule power 461.47, 462.88 and 463.35 W against 463.52 W.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08. Largest temperature error 2.21, 0.575 and 0.150 K at 2, 4 and 8 cells, against a 59.95 K peak rise; Joule power 461.47, 462.88 and 463.35 W against 463.52 W.
+
+Tests: `two_way_joule_heating_matches_the_closed_form_bar`.
 
 ### Joule heating of a slab, one way
 
@@ -34,4 +36,6 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Power within 1e-8 W; Tet10 temperature within 1e-8; Tet4 interior error below 0.35 of the coarse mesh after one refinement.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (2 tests) in the evidence run of 2026-11-08.
+
+Tests: `retained_conduction_drives_independent_quadratic_thermal_patch_and_power`, `tet4_refinement_and_voltage_sign_gauge_preserve_independent_heat_and_power`.

@@ -31,7 +31,7 @@ Evidence kind: IndependentReference. Criterion: A compliant channel reproduces l
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | fluid_structure_interaction | tet4 | numerical_kernel | OPEN |  |
-| fluid_structure_interaction | tet4 | public_study | FAIL | `runmat[test:check_cli]::fsi_compliant_tube_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1237) - Steady compliant tube only; no transient ALE run. |
+| fluid_structure_interaction | tet4 | public_study | FAIL | `runmat[test:check_cli]::fsi_compliant_tube_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1243) - Steady compliant tube only; no transient ALE run. |
 | fluid_structure_interaction | tet10 | numerical_kernel | OPEN |  |
 | fluid_structure_interaction | tet10 | public_study | OPEN |  |
 
