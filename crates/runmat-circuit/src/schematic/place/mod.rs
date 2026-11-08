@@ -149,6 +149,18 @@ fn place_once(cells: &mut [Cell], nets: &[NetInfo]) -> Placed {
     let n = cells.len();
     let rail = |net: Option<usize>| net.is_some_and(|k| nets[k].rail);
     let signal = |net: Option<usize>| net.is_some_and(|k| !nets[k].rail);
+    // A net a box's power output drives that the page doesn't draw as a rail (a regulator's
+    // output onto a supply declared elsewhere, such as a connector's GPS_VCC): a cap from it to
+    // ground decouples that output, as one on a rail does.
+    let powered = |net: Option<usize>| {
+        net.is_some_and(|k| {
+            !nets[k].rail
+                && cells.iter().any(|c| {
+                    !small(c) && c.nets.iter().zip(&c.lay.pins).any(|(x, p)| *x == Some(k) && p.kind == PinType::PowerOut)
+                })
+        })
+    };
+    let ground = |net: Option<usize>| net.is_some_and(|k| nets[k].rail && nets[k].ground);
     // Roles of the small parts first: shunts, feedback, decoupling.
     let mut roles = vec![Role::Chain; n];
     for i in 0..n {
@@ -161,6 +173,10 @@ fn place_once(cells: &mut [Cell], nets: &[NetInfo]) -> Placed {
             continue;
         }
         let (a, b) = (c.nets[0], c.nets[1]);
+        if c.lay.art == Art::Capacitor && ((powered(a) && ground(b)) || (ground(a) && powered(b))) {
+            roles[i] = Role::Decap { host: None, pin: if powered(a) { 0 } else { 1 } };
+            continue;
+        }
         roles[i] = match (rail(a), rail(b)) {
             (true, true) => {
                 let pin = if nets[a.unwrap()].ground && !nets[b.unwrap()].ground {

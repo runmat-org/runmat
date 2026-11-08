@@ -463,6 +463,49 @@ fn a_new_regulator_lands_with_its_caps_on_a_recorded_sheet() {
     }
 }
 
+/// An agent's edit as it came: an LDO from +5 V onto GPS_VCC, a supply net the connectors
+/// sheet declares (J5's pin), with its input cap on +5 V and its output cap on GPS_VCC. The caps
+/// share a net with a pin of the new LDO, so each stands beside that pin, in a row under the
+/// LDO as C18 and C19 stand under U3, input cap on the input side, clear of every symbol.
+#[test]
+fn an_agent_added_regulator_on_an_existing_supply_keeps_its_caps_beside_its_pins() {
+    let (before, after) = flight_controller_edited(&[
+        (
+            "        component C19 = { part = \"C0402-1U\" }\n",
+            "        component C19 = { part = \"C0402-1U\" }\n        component U6 = { part = \"LDO-3V3-SOT23\" }\n        component C24 = { part = \"C0402-1U\" }\n        component C25 = { part = \"C0402-1U\" }\n",
+        ),
+        (", U3.VIN, U3.EN, \"C18.1\"]", ", U3.VIN, U3.EN, \"C18.1\", U6.VIN, U6.EN, \"C24.1\"]"),
+        (
+            "        connect = [\"net.+3V3\", U3.VOUT, \"C19.1\"]\n",
+            "        connect = [\"net.+3V3\", U3.VOUT, \"C19.1\"]\n        connect = [net.GPS_VCC, U6.VOUT, \"C25.1\"]\n",
+        ),
+        ("U3.GND, \"C18.2\", \"C19.2\",", "U3.GND, \"C18.2\", \"C19.2\", U6.GND, \"C24.2\", \"C25.2\","),
+    ]);
+    let page = |i: &SchematicIndex| i.sheets.iter().find(|s| s.path == "/pwr").cloned().expect("the power page");
+    let (old, pwr) = (page(&before), page(&after));
+    dump("fc-gps-vcc", &after);
+    for s in &old.symbols {
+        let now = pwr.symbols.iter().find(|n| n.key == s.key).expect("still drawn");
+        assert_eq!((now.x_mm, now.y_mm, now.rotation), (s.x_mm, s.y_mm, s.rotation), "{} moved", s.designator);
+    }
+    check_page(&pwr);
+    let sym = |d: &str| pwr.symbols.iter().find(|s| s.designator == d).unwrap_or_else(|| panic!("{d} drawn"));
+    let (u6, c24, c25) = (body_box(sym("U6")), body_box(sym("C24")), body_box(sym("C25")));
+    let (u3, c18) = (body_box(sym("U3")), body_box(sym("C18")));
+    let row = u3[1] - c18[3];
+    for (cap, b) in [("C24", c24), ("C25", c25)] {
+        let below = u6[1] - b[3];
+        assert!(below > 0.0 && below <= row + EPS, "{cap} {b:?} stands under U6 {u6:?} as C18 stands under U3 ({row} mm)");
+        assert!(b[0] > u6[0] - 15.0 && b[2] < u6[2] + 15.0, "{cap} {b:?} is under U6 {u6:?}");
+    }
+    assert!(c24[2] <= c25[0], "the input cap C24 {c24:?} stands on the input side of the output cap C25 {c25:?}");
+    for s in pwr.symbols.iter().filter(|s| !["U6", "C24", "C25"].contains(&s.designator.as_str())) {
+        for d in ["U6", "C24", "C25"] {
+            assert!(!overlaps(&body_box(sym(d)), &body_box(s), 0.0), "{d} sits on {}", s.designator);
+        }
+    }
+}
+
 /// Annotating records the places; an added part goes to free space and nothing else moves.
 #[test]
 fn recorded_places_stick_through_an_edit() {
