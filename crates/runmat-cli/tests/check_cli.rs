@@ -210,6 +210,27 @@ fn canonical_fea_documentation_examples_check_cleanly() {
     }
 }
 
+// The trace-impedance example is written in its final form. `runmat check` rejects it until
+// `electromagnetic line_parameters` and the `cross_section` geometry land (ledger rows
+// electromagnetic.line_parameters and electromagnetic.cross_section_geometry). When it starts
+// checking, move it into `canonical_fea_documentation_examples_check_cleanly`.
+#[test]
+fn trace_impedance_example_waits_for_the_line_parameters_procedure() {
+    let temp = TempDir::new().unwrap();
+    let path = "docs/simulation/examples/trace-impedance.fea";
+    let output = runmat_from_repository(&temp, &["check", path, "--json"]);
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !output.status.success(),
+        "{path} now checks: list it with the canonical examples and land the ledger rows\n{text}"
+    );
+    assert!(!text.trim().is_empty(), "{path}: check failed without a diagnostic");
+}
+
 #[test]
 fn representative_documentation_plans_expose_the_complete_resolved_contract() {
     struct Expected<'a> {
