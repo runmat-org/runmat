@@ -271,7 +271,9 @@ def shard_commands(commands: list[list[str]], index: int, count: int) -> list[li
     return commands[index::count]
 
 
-WINDOWS_ARCHIVE_FREE_SPACE = 32 * 1024 ** 3
+# A single observed Windows batch added 48 GiB. Compact retained archives
+# before that working set can exhaust the volume, while keeping runner logs.
+WINDOWS_ARCHIVE_FREE_SPACE = 64 * 1024 ** 3
 WINDOWS_ARCHIVE_MIN_BYTES = 16 * 1024 ** 2
 
 
