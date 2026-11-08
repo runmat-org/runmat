@@ -155,10 +155,10 @@ struct Model {
     axes: Vec<Axis>,
 }
 
+/// A number array of a display, inline or a mesh reference read in place
+/// ([`runmat_cad::display::wire::numbers`]).
 fn floats(v: &Value) -> Vec<f64> {
-    v.as_array()
-        .map(|a| a.iter().filter_map(Value::as_f64).collect())
-        .unwrap_or_default()
+    runmat_cad::display::wire::numbers(v)
 }
 
 fn transform(t: &[f64], p: P3) -> P3 {
@@ -782,6 +782,7 @@ mod merge;
 use merge::{merge_overlaps, push};
 
 pub mod exact;
+pub mod thin;
 
 #[cfg(test)]
 mod tests;

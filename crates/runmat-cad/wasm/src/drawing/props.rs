@@ -86,8 +86,36 @@ pub fn item_properties(assembly: &str, bom: &Bom, files: &Files) -> BTreeMap<Str
         if let Some(document) = parse_part(&at, source).document {
             let configuration = label_configuration(&row.item.configuration)
                 .filter(|name| document.configuration(name).is_some());
-            out.insert(key, output_properties(&document.in_configuration(configuration.as_ref())));
+            let document = document.in_configuration(configuration.as_ref());
+            let mut props = output_properties(&document);
+            if let Some(description) = description_of(&document, &props) {
+                props.insert("description".to_owned(), description);
+            }
+            out.insert(key, props);
         }
     }
     out
+}
+
+/// What a parts list's Description column reads for a part: its `description` property, else
+/// its output's label (`label = "Cold plate"`) or `title` property, else its output's name as
+/// words (`body_top` → "Body top").
+pub fn description_of(document: &PartDocument, props: &BTreeMap<String, String>) -> Option<String> {
+    let given = |k: &str| props.get(k).filter(|v| !v.trim().is_empty()).cloned();
+    if let Some(d) = given("description") {
+        return Some(d);
+    }
+    let output = document.parts.first()?;
+    if let Some(label) = output.label.as_ref().filter(|l| !l.trim().is_empty()) {
+        return Some(label.clone());
+    }
+    given("title").or_else(|| words(output.name.as_str()))
+}
+
+/// An identifier as words: `body_top` → "Body top".
+fn words(name: &str) -> Option<String> {
+    let spaced = name.split('_').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+    let mut chars = spaced.chars();
+    let first = chars.next()?;
+    Some(first.to_uppercase().chain(chars).collect())
 }

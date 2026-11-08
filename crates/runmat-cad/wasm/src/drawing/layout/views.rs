@@ -413,7 +413,8 @@ pub fn draw(ctx: &mut Ctx<'_>, plans: &[ViewPlan]) {
     }
     for v in plans {
         let mut out: Vec<Prim> = Vec::new();
-        let place = |e: &[f64]| -> Vec<f64> { e.chunks_exact(2).flat_map(|p| v.to_sheet([p[0], p[1]])).collect() };
+        // Sheet millimetres to the micrometre: finer than any print, and short in the answer.
+        let place = |e: &[f64]| -> Vec<f64> { e.chunks_exact(2).flat_map(|p| v.to_sheet([p[0], p[1]]).map(|c| (c * 1e3).round() / 1e3)).collect() };
         // Hidden lines first, so a visible edge over a hidden one draws solid (ISO 128-20).
         if v.show_hidden {
             for e in &v.hidden {

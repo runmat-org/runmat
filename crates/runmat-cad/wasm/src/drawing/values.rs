@@ -34,10 +34,10 @@ pub fn number(v: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
+/// A number array of a display, inline or a mesh reference read in place
+/// ([`runmat_cad::display::wire::numbers`]).
 fn floats(v: &Value) -> Vec<f64> {
-    v.as_array()
-        .map(|a| a.iter().filter_map(Value::as_f64).collect())
-        .unwrap_or_default()
+    runmat_cad::display::wire::numbers(v)
 }
 
 /// A part face's mesh points (mm) and its surface, by the reference text it carries.

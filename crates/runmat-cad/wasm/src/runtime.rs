@@ -717,12 +717,14 @@ pub fn compile_json_known(path: &str, text: &str, files: &Files, configuration: 
         match compile_assembly_known(path, text, files, known) {
             Ok((mut index, display, diagnostics)) => {
                 crate::repairs::label_candidates(&mut index["diagnostics"]);
-                json!({
-                    "projection": { "kind": "assembly", "data": index },
-                    "display": { "kind": "assembly", "data": display },
-                    "diagnostics": diagnostics,
-                    "kernel": crate::kernel::name(),
-                })
+                // Built from the values held: `json!` would serialize a copy of the assembly's
+                // display, which runs to hundreds of thousands of values.
+                let mut out = serde_json::Map::new();
+                out.insert("projection".into(), crate::drawing::tagged("assembly", index));
+                out.insert("display".into(), crate::drawing::tagged("assembly", display));
+                out.insert("diagnostics".into(), json!(diagnostics));
+                out.insert("kernel".into(), json!(crate::kernel::name()));
+                return crate::drawing::json_text(&Value::Object(out));
             }
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),
         }

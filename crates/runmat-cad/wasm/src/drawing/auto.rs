@@ -26,10 +26,10 @@ use serde_json::{Map, Value};
 /// Preferred scales, largest first.
 const SCALES: &[(u32, u32)] = &[(5, 1), (2, 1), (1, 1), (1, 2), (1, 5), (1, 10)];
 
+/// A number array of a display, inline or a mesh reference read in place
+/// ([`runmat_cad::display::wire::numbers`]).
 fn floats(v: &Value) -> Vec<f64> {
-    v.as_array()
-        .map(|a| a.iter().filter_map(Value::as_f64).collect())
-        .unwrap_or_default()
+    runmat_cad::display::wire::numbers(v)
 }
 
 /// The planar face whose outward normal is `axis`·`sign` and that lies furthest that way.

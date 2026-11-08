@@ -324,13 +324,11 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         }
     }
     // The models as the output carries them (in the browser host, mesh arrays as references to
-    // the bytes beside the JSON); the drawing measures and projects their numbers.
+    // the bytes beside the JSON). The drawing measures and projects their numbers in place: its
+    // readers take each mesh array through `wire::numbers`, which reads a reference from the
+    // bytes, so no inline copy of an assembly's display (tens of megabytes) is held.
     let models_out = displays;
-    // Outside that framed call the models already hold their numbers, and the drawing reads them
-    // in place: a second copy of an assembly's display as JSON values takes tens of megabytes.
-    let inlined: Option<serde_json::Map<String, Value>> =
-        models_out.iter().map(|(k, v)| Some((k.clone(), runmat_cad::display::wire::inlined(v)?))).collect();
-    let displays = inlined.as_ref().unwrap_or(&models_out);
+    let displays = &models_out;
     let index = build_drawing_index(
         &document,
         &models,
@@ -493,6 +491,13 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             if let (Some(a), Value::Object(o)) = (drawn_in, &mut entry) {
                 o.insert("axes".into(), json!({ "u": a.u, "v": a.v, "depth": a.depth }));
             }
+            // As few points as the sheet needs at the view's scale; hidden lines only where
+            // the view draws them.
+            let ratio = |v: &Value| v.as_array().filter(|a| a.len() == 2).and_then(|a| Some(a[0].as_f64()? / a[1].as_f64().filter(|d| *d != 0.0)?));
+            let sheet_scale = document.sheets.iter().find(|s| view["sheet"] == s.name.as_str()).map(|s| s.scale).filter(|s| s.1 != 0).map(|s| s.0 as f64 / s.1 as f64);
+            let scale = ratio(&view["scale"]).or(sheet_scale).unwrap_or(1.0);
+            let shows_hidden = !matches!(view["display"].as_str(), Some("visible_lines" | "shaded"));
+            crate::hlr::thin::thin(&mut entry, scale, shows_hidden);
             hlr.insert(name.to_owned(), entry);
         }
     }
@@ -584,7 +589,6 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     }
     // The models' numbers as JSON values and the regenerated parts are done with: free them
     // before the answer is written, the step that holds the most at once.
-    drop(inlined);
     drop(exact);
     drop(documents);
     let mut answer = serde_json::Map::new();
@@ -596,7 +600,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
 
 /// `{ "kind": kind, "data": data }`, holding `data` as it is: `json!` would serialize a copy of
 /// it, and a drawing's data and an assembly's display run to hundreds of thousands of values.
-fn tagged(kind: &str, data: Value) -> Value {
+pub(crate) fn tagged(kind: &str, data: Value) -> Value {
     let mut out = serde_json::Map::new();
     out.insert("kind".into(), Value::from(kind));
     out.insert("data".into(), data);
@@ -607,7 +611,7 @@ fn tagged(kind: &str, data: Value) -> Value {
 /// buffer by doubling holds the old and the new buffer while it copies, up to three times the
 /// text (an assembly drawing's text runs to tens of megabytes). One byte more is left for the
 /// NUL the host adds when it hands the text out as a C string.
-fn json_text(value: &Value) -> String {
+pub(crate) fn json_text(value: &Value) -> String {
     struct Count(usize);
     impl std::io::Write for Count {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {

@@ -3,7 +3,9 @@
 //! A BOM is computed from a resolved (100%) tree, so it is configuration-aware by
 //! construction: resolve at a configuration, then group. Items group by definition, revision,
 //! configuration, part number and material, so a dash number or a material override is its own
-//! line. Fastener rules contribute counts per selected part, without occurrence nodes.
+//! line. A part with a part number groups by that number: occurrences whose parameters differ
+//! but keep the number (four arms set to their stations) are one line with their count, as a
+//! parts list counts them. Fastener rules contribute counts per selected part, without occurrence nodes.
 //!
 //! Where-used runs two ways: within a resolved tree (occurrence paths of a definition), and
 //! across the project's 150% structure ([`WhereUsedIndex`]: every authored use with its `when`
@@ -131,6 +133,17 @@ fn item_of(tree: &ResolvedAssembly, n: NodeId, numbers: &[Option<String>]) -> Bo
     }
 }
 
+/// The key occurrences of one BOM line share: the item itself, or for a part that carries a
+/// part number the item without its configuration label (the first occurrence's label stays on
+/// the line).
+fn group_key(item: &BomItem) -> BomItem {
+    if item.kind != BomKind::Assembly && item.part_number.as_deref().is_some_and(|n| !n.is_empty()) {
+        BomItem { configuration: String::new(), ..item.clone() }
+    } else {
+        item.clone()
+    }
+}
+
 fn fastener_item(p: &FastenerPart) -> BomItem {
     BomItem {
         kind: BomKind::Fastener,
@@ -149,7 +162,7 @@ pub fn flat_bom(
     opts: &BomOptions,
 ) -> Bom {
     let numbers = prototype_numbers(tree, source);
-    let mut rows: BTreeMap<BomItem, (u64, Vec<String>)> = BTreeMap::new();
+    let mut rows: BTreeMap<BomItem, (BomItem, u64, Vec<String>)> = BTreeMap::new();
     let mut parts = 0;
     for (i, n) in tree.nodes.iter().enumerate().skip(1) {
         let is_asm = n.definition.kind == DefinitionKind::Assembly;
@@ -159,10 +172,10 @@ pub fn flat_bom(
             continue;
         }
         let item = item_of(tree, i as NodeId, &numbers);
-        let e = rows.entry(item).or_insert((0, Vec::new()));
-        e.0 += 1;
-        if e.1.len() < opts.paths_per_row {
-            e.1.push(tree.path(i as NodeId));
+        let e = rows.entry(group_key(&item)).or_insert_with(|| (item, 0, Vec::new()));
+        e.1 += 1;
+        if e.2.len() < opts.paths_per_row {
+            e.2.push(tree.path(i as NodeId));
         }
         if !is_asm {
             parts += 1;
@@ -172,12 +185,13 @@ pub fn flat_bom(
     if opts.include_fasteners {
         for f in &tree.fasteners {
             for (p, c) in f.expansion.counts() {
-                let e = rows.entry(fastener_item(p)).or_insert((0, Vec::new()));
-                e.0 += c;
+                let item = fastener_item(p);
+                let e = rows.entry(group_key(&item)).or_insert_with(|| (item, 0, Vec::new()));
+                e.1 += c;
                 fasteners += c;
-                if e.1.len() < opts.paths_per_row {
+                if e.2.len() < opts.paths_per_row {
                     let owner = tree.path(f.owner);
-                    e.1.push(if owner.is_empty() {
+                    e.2.push(if owner.is_empty() {
                         format!("fasteners.{}", f.expansion.set)
                     } else {
                         format!("{}/fasteners.{}", owner, f.expansion.set)
@@ -190,7 +204,7 @@ pub fn flat_bom(
         variant: tree.variant.clone(),
         rows: rows
             .into_iter()
-            .map(|(item, (quantity, paths))| BomRow {
+            .map(|(_, (item, quantity, paths))| BomRow {
                 item,
                 quantity,
                 paths,
@@ -215,13 +229,12 @@ pub fn indented_bom(
         out: &mut Vec<IndentedRow>,
     ) {
         let node = tree.node(n);
-        let mut groups: BTreeMap<BomItem, (u64, Vec<NodeId>)> = BTreeMap::new();
+        let mut groups: BTreeMap<BomItem, (BomItem, u64, Vec<NodeId>)> = BTreeMap::new();
         for &c in &node.children {
-            let e = groups
-                .entry(item_of(tree, c, numbers))
-                .or_insert((0, Vec::new()));
-            e.0 += 1;
-            e.1.push(c);
+            let item = item_of(tree, c, numbers);
+            let e = groups.entry(group_key(&item)).or_insert_with(|| (item, 0, Vec::new()));
+            e.1 += 1;
+            e.2.push(c);
         }
         let mut fasteners: BTreeMap<BomItem, u64> = BTreeMap::new();
         for f in tree.fasteners.iter().filter(|f| f.owner == n) {
@@ -230,7 +243,7 @@ pub fn indented_bom(
             }
         }
         let parent = tree.path(n);
-        for (item, (q, members)) in groups {
+        for (_, (item, q, members)) in groups {
             let expand = item.kind == BomKind::Assembly;
             out.push(IndentedRow {
                 level: node.depth + 1,

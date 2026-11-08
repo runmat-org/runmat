@@ -16,13 +16,17 @@ const ROW: f64 = 7.0;
 const PAD: f64 = 1.5;
 /// The space between stacked tables.
 const SPACE: f64 = 4.0;
+/// The pitch of a wrapped cell's lines.
+const PITCH: f64 = TEXT * 1.5;
 
 /// A table ready to draw: columns (title, alignment), rows of cells (a group title spans the
-/// table), and an optional title row.
+/// table), and an optional title row. The `wrap` column keeps its set width and breaks longer
+/// text at spaces onto more lines, its row growing to fit (a parts list's descriptions).
 pub struct Grid {
     pub title: Option<String>,
     pub columns: Vec<(String, &'static str, Option<f64>)>,
     pub rows: Vec<Row>,
+    pub wrap: Option<usize>,
 }
 
 pub enum Row {
@@ -36,15 +40,41 @@ impl Grid {
             .iter()
             .enumerate()
             .map(|(i, (title, _, fixed))| {
+                let text = |n: usize| n as f64 * TEXT * 0.6 + 2.0 * PAD;
+                if let (Some(w), true) = (fixed, self.wrap == Some(i)) {
+                    return w.max(text(title.chars().count()));
+                }
                 let longest = self.rows.iter().filter_map(|r| if let Row::Cells(c) = r { c.get(i).map(|s| s.chars().count()) } else { None }).max().unwrap_or(0).max(title.chars().count());
-                fixed.unwrap_or(0.0).max(longest as f64 * TEXT * 0.6 + 2.0 * PAD)
+                fixed.unwrap_or(0.0).max(text(longest))
             })
             .collect()
     }
 
+    /// Each cell's lines: the wrap column's text broken at spaces to its width.
+    fn lines(&self, widths: &[f64], cells: &[String]) -> Vec<Vec<String>> {
+        cells
+            .iter()
+            .enumerate()
+            .map(|(i, v)| match (self.wrap == Some(i), widths.get(i)) {
+                (true, Some(w)) => wrap_text(v, ((w - 2.0 * PAD) / (TEXT * 0.6)).floor().max(1.0) as usize),
+                _ => vec![v.clone()],
+            })
+            .collect()
+    }
+
+    /// A row's height: one line, plus a pitch for each further wrapped line.
+    fn row_height(&self, widths: &[f64], row: &Row) -> f64 {
+        match row {
+            Row::Cells(c) => ROW + (self.lines(widths, c).iter().map(Vec::len).max().unwrap_or(1).max(1) - 1) as f64 * PITCH,
+            Row::Group(_) => ROW,
+        }
+    }
+
     pub fn size(&self) -> Xy {
-        let w: f64 = self.widths().iter().sum();
-        [w, (self.rows.len() + 1 + usize::from(self.title.is_some())) as f64 * ROW]
+        let widths = self.widths();
+        let w: f64 = widths.iter().sum();
+        let body: f64 = self.rows.iter().map(|r| self.row_height(&widths, r)).sum();
+        [w, (1 + usize::from(self.title.is_some())) as f64 * ROW + body]
     }
 
     /// The table with its top-left corner at `top_left`.
@@ -61,30 +91,34 @@ impl Grid {
             row = 1;
         }
         let body_top = y0 - row as f64 * ROW;
-        let cells = |row: usize, values: &[String], style: &'static str, out: &mut Vec<Prim>| {
-            let top = y0 - row as f64 * ROW;
-            out.push(p("frame", line(vec![x0, top - ROW, x0 + w, top - ROW])));
+        // One row of cells from `top` down, `rh` high; each cell's lines centred in it.
+        let cells = |top: f64, rh: f64, values: &[String], style: &'static str, out: &mut Vec<Prim>| {
+            out.push(p("frame", line(vec![x0, top - rh, x0 + w, top - rh])));
             let mut x = x0;
-            for (i, (_, align, _)) in self.columns.iter().enumerate() {
+            for (i, ((_, align, _), lines)) in self.columns.iter().zip(self.lines(&widths, values)).enumerate() {
                 let cw = widths[i];
-                if let Some(v) = values.get(i).filter(|v| !v.is_empty()) {
-                    let tx = match *align {
-                        "end" => x + cw - PAD,
-                        "middle" => x + cw / 2.0,
-                        _ => x + PAD,
-                    };
-                    out.push(p(style, text(tx, top - ROW / 2.0 - TEXT / 2.0, v, TEXT, align)));
+                let tx = match *align {
+                    "end" => x + cw - PAD,
+                    "middle" => x + cw / 2.0,
+                    _ => x + PAD,
+                };
+                let first = top - rh / 2.0 + (TEXT + (lines.len().max(1) - 1) as f64 * PITCH) / 2.0 - TEXT;
+                for (k, v) in lines.iter().enumerate().filter(|(_, v)| !v.is_empty()) {
+                    out.push(p(style, text(tx, first - k as f64 * PITCH, v, TEXT, align)));
                 }
                 x += cw;
             }
         };
         let heads: Vec<String> = self.columns.iter().map(|c| c.0.to_uppercase()).collect();
-        cells(row, &heads, "note", &mut out);
-        for (n, r) in self.rows.iter().enumerate() {
+        cells(body_top, ROW, &heads, "note", &mut out);
+        let mut top = body_top - ROW;
+        for r in &self.rows {
+            let rh = self.row_height(&widths, r);
             match r {
-                Row::Cells(c) => cells(row + n + 1, c, "note", &mut out),
-                Row::Group(t) => out.push(p("muted", text(x0 + PAD, y0 - (row + n + 1) as f64 * ROW - ROW / 2.0 - TEXT / 2.0, t, TEXT, "start"))),
+                Row::Cells(c) => cells(top, rh, c, "note", &mut out),
+                Row::Group(t) => out.push(p("muted", text(x0 + PAD, top - ROW / 2.0 - TEXT / 2.0, t, TEXT, "start"))),
             }
+            top -= rh;
         }
         let mut x = x0;
         for cw in &widths[..widths.len().saturating_sub(1)] {
@@ -93,6 +127,25 @@ impl Grid {
         }
         out
     }
+}
+
+/// `text` broken at spaces into lines of at most `chars` characters (a longer word keeps its
+/// own line).
+fn wrap_text(text: &str, chars: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split(' ').filter(|w| !w.is_empty()) {
+        match lines.last_mut() {
+            Some(l) if l.chars().count() + 1 + word.chars().count() <= chars => {
+                l.push(' ');
+                l.push_str(word);
+            }
+            _ => lines.push(word.to_owned()),
+        }
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 fn align(v: &Value) -> &'static str {
@@ -119,25 +172,27 @@ fn strings(v: &Value) -> Vec<String> {
 
 /// A parts list or cut list (`bom_tables` / `cut_list_tables` data) as a grid.
 fn bom_grid(data: &Value) -> Grid {
+    let keys: Vec<&str> = data["columns"].as_array().into_iter().flatten().map(|c| c["key"].as_str().unwrap_or("")).collect();
     let columns = data["columns"].as_array().into_iter().flatten().map(|c| (c["title"].as_str().unwrap_or("").to_owned(), align(&c["align"]), fixed(c["key"].as_str().unwrap_or("")))).collect();
+    let wrap = keys.iter().position(|k| *k == "description");
     let rows = if let Some(lines) = data["lines"].as_array() {
         lines.iter().map(|l| if l["line"] == "group" { Row::Group(l["title"].as_str().unwrap_or("").to_owned()) } else { Row::Cells(strings(&l["cells"])) }).collect()
     } else {
         data["rows"].as_array().into_iter().flatten().map(|r| Row::Cells(strings(&r["cells"]))).collect()
     };
-    Grid { title: None, columns, rows }
+    Grid { title: None, columns, rows, wrap }
 }
 
 fn hole_grid(data: &Value) -> Grid {
     let columns = vec![("TAG".into(), "middle", Some(12.0)), ("X".into(), "end", Some(16.0)), ("Y".into(), "end", Some(16.0)), ("SIZE".into(), "start", Some(30.0))];
     let rows = data["rows"].as_array().into_iter().flatten().map(|r| Row::Cells(["tag", "x_text", "y_text", "size"].iter().map(|k| r[*k].as_str().unwrap_or("").to_owned()).collect())).collect();
-    Grid { title: Some("HOLE TABLE".into()), columns, rows }
+    Grid { title: Some("HOLE TABLE".into()), columns, rows, wrap: None }
 }
 
 fn revision_grid(rows: &Value) -> Grid {
     let columns = vec![("REV".into(), "middle", Some(12.0)), ("DESCRIPTION".into(), "start", Some(50.0)), ("DATE".into(), "start", Some(24.0)), ("APPROVED".into(), "start", Some(30.0))];
     let rows = rows.as_array().into_iter().flatten().map(|r| Row::Cells(["rev", "description", "date", "by"].iter().map(|k| r[*k].as_str().unwrap_or("").to_owned()).collect())).collect();
-    Grid { title: Some("REVISIONS".into()), columns, rows }
+    Grid { title: Some("REVISIONS".into()), columns, rows, wrap: None }
 }
 
 fn fmt(v: f64, places: usize) -> String {
@@ -157,7 +212,7 @@ fn bend_grid(flat: &Value) -> Option<Grid> {
         return None;
     }
     let columns = [("TAG", 12.0), ("DIRECTION", 20.0), ("ANGLE", 16.0), ("RADIUS", 16.0), ("BA", 16.0), ("BD", 16.0)].iter().map(|(t, w)| ((*t).to_owned(), "middle", Some(*w))).collect();
-    Some(Grid { title: Some("BEND TABLE".into()), columns, rows })
+    Some(Grid { title: Some("BEND TABLE".into()), columns, rows, wrap: None })
 }
 
 #[derive(Clone, Copy, PartialEq)]

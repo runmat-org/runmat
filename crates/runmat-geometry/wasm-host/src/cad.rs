@@ -210,13 +210,19 @@ pub unsafe extern "C" fn runmat_cad_seed(frames: *const u8, len: usize) -> u32 {
 
 /// One frame holding a framed answer: the JSON's length and the bytes' length (`u32`,
 /// little-endian), the JSON, zero padding to a multiple of 4, then the bytes.
-pub fn frame(json: &str, bytes: &[u8]) -> Vec<u8> {
-    let padded = json.len().div_ceil(4) * 4;
-    let mut out = Vec::with_capacity(8 + padded + bytes.len());
-    out.extend_from_slice(&(json.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-    out.extend_from_slice(json.as_bytes());
+///
+/// The frame is built in the JSON text's own buffer: it grows by the header, padding and bytes
+/// and the text moves up 8 bytes, so an answer of tens of megabytes isn't held twice.
+pub fn frame(json: String, bytes: &[u8]) -> Vec<u8> {
+    let n = json.len();
+    let padded = n.div_ceil(4) * 4;
+    let mut out = json.into_bytes();
+    out.reserve_exact((8 + padded + bytes.len()).saturating_sub(out.len()));
     out.resize(8 + padded, 0);
+    out.copy_within(0..n, 8);
+    out[n + 8..8 + padded].fill(0);
+    out[..4].copy_from_slice(&(n as u32).to_le_bytes());
+    out[4..8].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
     out.extend_from_slice(bytes);
     out
 }
@@ -237,7 +243,7 @@ pub unsafe extern "C" fn runmat_cad_call_framed(request: *const c_char) -> *mut 
             Err(e) => (error(&e.to_string()), Vec::new()),
         }
     };
-    Box::into_raw(frame(&json, &bytes).into_boxed_slice()) as *mut u8
+    Box::into_raw(frame(json, &bytes).into_boxed_slice()) as *mut u8
 }
 
 /// Frees a frame [`runmat_cad_call_framed`] returned.

@@ -165,6 +165,38 @@ pub fn inlined(value: &serde_json::Value) -> Option<serde_json::Value> {
     })
 }
 
+/// A display's number array as numbers, read in place: an inline array as it is, or a mesh
+/// reference read from the active buffer while [`collect`] runs (each `f32` read as its
+/// shortest text reads, so the numbers equal those [`inlined`] gives). Readers of a display
+/// that [`collect`] serialized use this instead of an [`inlined`] copy of the whole display.
+/// Anything else reads as no numbers.
+pub fn numbers(value: &serde_json::Value) -> Vec<f64> {
+    use serde_json::Value;
+    match value {
+        Value::Array(a) => a.iter().filter_map(Value::as_f64).collect(),
+        Value::Object(o) if o.len() == 1 => {
+            let (tag, at) = o.iter().next().expect("one entry");
+            let Some((offset, count)) = at.as_array().and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize))) else {
+                return Vec::new();
+            };
+            SINK.with(|s| {
+                let sink = s.borrow();
+                let Some(bytes) = sink.as_ref() else { return Vec::new() };
+                if !count.checked_mul(4).and_then(|n| n.checked_add(offset)).is_some_and(|e| e <= bytes.len()) {
+                    return Vec::new();
+                }
+                let words = bytes[offset..offset + 4 * count].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]);
+                match tag.as_str() {
+                    "$f32" => words.filter_map(|w| f32::from_le_bytes(w).to_string().parse::<f64>().ok()).collect(),
+                    "$u32" => words.map(|w| u32::from_le_bytes(w) as f64).collect(),
+                    _ => Vec::new(),
+                }
+            })
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Appends what `write` writes to the active buffer; their byte offset, or `None`
 /// when no buffer is active.
 fn append(write: impl FnOnce(&mut Vec<u8>)) -> Option<usize> {

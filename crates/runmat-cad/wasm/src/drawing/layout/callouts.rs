@@ -223,7 +223,10 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 ctx.push(vec![mark(&id, "center", line(pts))]);
             }
             "balloon" => {
-                let Some(part) = occurrence_box(ctx, v, &kind["occurrence"]) else { continue };
+                let Some(part) = occurrence_box(ctx, v, &kind["occurrence"]) else {
+                    ctx.finding("balloon_no_part", &aid, format!("Balloon {aid} points at no part the {} shows; point it at a part occurrence", v.title().to_lowercase()));
+                    continue;
+                };
                 let number = ctx.data["balloons"][&aid].as_str().unwrap_or("?").to_owned();
                 let r = st.balloon_radius();
                 // The leader ends a little inside the part, on the side nearest the view's edge.

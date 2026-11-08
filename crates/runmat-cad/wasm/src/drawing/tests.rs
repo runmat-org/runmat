@@ -237,3 +237,22 @@ fn auto_drawing_lays_out_views_a_section_and_hole_callouts() {
     );
     assert_eq!(again.source.matches("sheet \"1\" =").count(), 1);
 }
+
+/// A parts list counts a part by its part number: four brackets set to two widths are one line,
+/// quantity 4. A part with no `description` reads its output's name as words.
+#[test]
+fn a_parts_list_groups_one_part_number_and_fills_its_description() {
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n    use part bracket as c {\n        configuration = { select = inputs, values = { width = 90 mm } }\n        placement = { placement = offset, offset = { translation = [0 mm, 100 mm, 0 mm] } }\n    }\n    use part bracket as d {\n        configuration = { select = inputs, values = { width = 70 mm } }\n        placement = { placement = offset, offset = { translation = [100 mm, 100 mm, 0 mm] } }\n    }\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation b1 = balloon(occurrence = [{ name = c }], table = parts, view = iso)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0])\n}\n";
+    let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned()), ("/p/rig.assembly".to_owned(), rig.to_owned())].into();
+    let out: Value = serde_json::from_str(&compile_json("/p/rig.drawing", drawing, &files)).unwrap();
+    let table = &out["projection"]["data"]["bom_tables"]["parts"];
+    let lines = table["lines"].as_array().unwrap_or_else(|| panic!("{}", out["diagnostics"]));
+    assert_eq!(lines.len(), 1, "{table}");
+    assert_eq!(lines[0]["quantity"], 4, "{table}");
+    assert_eq!(lines[0]["cells"], serde_json::json!(["1", "BR-100", "Bracket", "Aluminum", "4"]), "{table}");
+    assert!(table["diagnostics"]["diagnostics"].as_array().is_none_or(|d| d.is_empty()), "{table}");
+    // The balloon on the widened bracket reads the line's number.
+    let layout = &out["projection"]["data"]["layouts"]["1"];
+    assert!(layout["findings"].as_array().is_some_and(|f| f.is_empty()), "{}", layout["findings"]);
+}
