@@ -91,11 +91,15 @@ pub fn build(dir: &Path) -> Build {
     b.run("board.place-via", serde_json::json!({ "points": [[-4.6, 0.75]], "net": "net:+3V3", "size": "0.2/0.45" }), &[]);
     // The USB pair first, while the way to the MCU's USB pins is open.
     b.run("board.autoroute", serde_json::json!({ "nets": ["net:USB_DP", "net:USB_DN"] }), &[]);
-    // The ESC telemetry line runs from the top edge to the MCU's lower right, past the GPS port,
-    // and the I2C clock from the MCU's top side to the barometer and the port: each gets its way
-    // before the rest fills the right side.
-    b.run("board.autoroute", serde_json::json!({ "nets": ["net:TLM"] }), &[]);
-    b.run("board.autoroute", serde_json::json!({ "nets": ["net:I2C_SCL"] }), &[]);
+    // The right side is busy since the GPS port joined it: these nets get their ways first, in this
+    // order, or the autorouter leaves one unrouted. The ESC telemetry line runs from the top edge
+    // to the MCU's lower right; the IMU chip select stays clear of the open spot under C5, where
+    // the ECAD video places a capacitor; then the I2C clock, the video transmitter's pair and the
+    // IMU interrupt.
+    for nets in [&["TLM"][..], &["IMU_CS"], &["I2C_SCL"], &["VTX_TX", "VTX_RX"], &["IMU_INT"]] {
+        let nets: Vec<String> = nets.iter().map(|n| format!("net:{n}")).collect();
+        b.run("board.autoroute", serde_json::json!({ "nets": nets }), &[]);
+    }
     b.finish(&[]);
     b
 }
