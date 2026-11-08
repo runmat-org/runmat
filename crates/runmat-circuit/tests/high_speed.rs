@@ -437,6 +437,9 @@ fn a_controlled_line_over_a_plane_split_or_gap_is_a_return_path_finding() {
     let found = codes(&drc, "return-path");
     assert_eq!(found.len(), 1, "{found:#?}");
     assert!(found[0].message.contains("crosses a split in its reference plane In1.Cu (`GND` to `VCC`)"), "{}", found[0].message);
+    // The finding names both unnamed pours by net and layer.
+    let objects: Vec<String> = found[0].items.iter().map(|it| runmat_circuit::index::item_label(&b, it)).collect();
+    assert!(objects.contains(&"GND pour on In1.Cu".to_owned()) && objects.contains(&"VCC pour on In1.Cu".to_owned()), "{objects:?}");
     // Where the ground pour ends under the track.
     assert!((found[0].at.x - mm(30.0)).abs() < mm(0.6) && found[0].at.y == mm(20.0), "{:?}", found[0].at);
 

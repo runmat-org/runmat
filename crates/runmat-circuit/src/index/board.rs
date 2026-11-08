@@ -745,7 +745,8 @@ fn rule_value_display(v: &RuleValue) -> String {
 }
 
 /// How an error list names a board item: `board edge`, a net name, `U3`, `U3.4` (pads count
-/// from one), `track 12`, `via 3`, `pour GND`.
+/// from one), `track 12`, `via 3`, `pour Shield`, or an unnamed pour by its net and layers:
+/// `GND pour on In1.Cu`.
 pub fn item_label(board: &Board, it: &BItem) -> String {
     match it {
         BItem::Edge => "board edge".to_owned(),
@@ -770,11 +771,34 @@ pub fn item_label(board: &Board, it: &BItem) -> String {
         ),
         BItem::Track(id) => format!("track {}", id.0),
         BItem::Via(id) => format!("via {}", id.0),
-        BItem::Zone(id) => board
-            .zones
-            .get(id)
-            .map(|z| format!("pour {}", z.name))
-            .unwrap_or_default(),
+        BItem::Zone(id) => board.zones.get(id).map(|z| pour_label(board, z)).unwrap_or_default(),
+    }
+}
+
+/// A named pour reads `pour <name>`. An unnamed one reads by its net and copper layers
+/// (`GND pour on In1.Cu`, `unconnected pour on F.Cu and B.Cu`); a finding joins its objects with commas, so two pours in one finding
+/// stay apart.
+fn pour_label(board: &Board, z: &crate::layout::Zone) -> String {
+    if !z.name.trim().is_empty() {
+        return format!("pour {}", z.name);
+    }
+    let net = z
+        .net
+        .and_then(|n| board.nets.get(n.0 as usize))
+        .map(|n| n.name.as_str())
+        .filter(|n| !n.is_empty())
+        .unwrap_or("unconnected");
+    let names = board.stackup.copper_names();
+    let count = names.len() as crate::layout::CopperIndex;
+    let layers: Vec<String> = z
+        .layers
+        .iter()
+        .map(|&l| names.get(l as usize).cloned().unwrap_or_else(|| crate::layout::copper_name(l, count)))
+        .collect();
+    if layers.is_empty() {
+        format!("{net} pour")
+    } else {
+        format!("{net} pour on {}", layers.join(" and "))
     }
 }
 
