@@ -195,3 +195,42 @@ fn unfolding_a_plate_with_a_miter_flange_is_refused_by_name() {
     let messages: Vec<String> = compiled["diagnostics"].as_array().into_iter().flatten().filter_map(|d| d["message"].as_str().map(str::to_owned)).collect();
     assert!(messages.iter().any(|m| m.contains("unfolding a plate with a miter flange")), "{messages:?}");
 }
+
+/// A lofted bend between a straight-cornered profile and an arch 30 mm above it: a sheet of the
+/// form's thickness, as tall as the planes are apart, its arch formed in the form's bends.
+#[test]
+fn a_lofted_bend_joins_two_open_profiles() {
+    let text = "runmat 0.7\nstd 1\n\npart sheet {\n    sketch a on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n    }\n    feature top = plane.offset(base = origin.xy, distance = 30 mm)\n    sketch b on plane.top {\n        a1 = arc(center = [20 mm, 0 mm], start = [40 mm, 0 mm], end = [0 mm, 0 mm])\n    }\n}\n";
+    let lofted = edit(text, "sheet-metal.lofted-bend", json!({ "profile1": ["sketch:a"], "profile2": ["sketch:b"], "thickness": 1.5, "bends": 6 }));
+    assert!(lofted.contains("sheet_metal.lofted_bend("), "{lofted}");
+    let e = extents(&lofted);
+    near(e[2], 30.0, 0.01, "height");
+    // Each level is a thin section 1.5 mm thick whose path runs between the two profiles'
+    // (60 mm and 63 mm long at the ends, shorter in between where the rulings cut the corner).
+    let v = volume(&lofted);
+    assert!(v > 1.5 * 30.0 * 40.0 && v < 1.5 * 30.0 * 63.0, "volume {v:.1} mm³");
+    // Fewer bends form a coarser arch: a different solid that still spans the planes.
+    let coarse = edit(text, "sheet-metal.lofted-bend", json!({ "profile1": ["sketch:a"], "profile2": ["sketch:b"], "thickness": 1.5, "bends": 2 }));
+    near(extents(&coarse)[2], 30.0, 0.01, "height");
+    assert!((volume(&coarse) - v).abs() > 1.0, "the bend count changes the arch");
+}
+
+/// Two tabs on one plate's end edge reach through a 2 mm wall standing against that end, and
+/// the wall gets two slots 0.1 mm clear of them all round.
+#[test]
+fn tabs_reach_through_slots_in_the_other_sheet() {
+    let text = "runmat 0.7\nstd 1\n\npart sheet {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])\n        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])\n        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])\n    }\n    feature wall_plane = plane.offset(base = origin.yz, distance = 80 mm)\n    sketch w on plane.wall_plane {\n        k1 = line(start = [0 mm, -10 mm], end = [50 mm, -10 mm])\n        k2 = line(start = [50 mm, -10 mm], end = [50 mm, 20 mm])\n        k3 = line(start = [50 mm, 20 mm], end = [0 mm, 20 mm])\n        k4 = line(start = [0 mm, 20 mm], end = [0 mm, -10 mm])\n    }\n}\n";
+    let plate = edit(text, "sheet-metal.base-flange", json!({ "profile": ["sketch:s1"], "thickness": 1.5, "radius": 1, "bend_rule": "k_factor", "k": 0.44 }));
+    let both = edit(&plate, "sheet-metal.base-flange", json!({ "profile": ["sketch:w"], "thickness": 2, "radius": 1, "bend_rule": "k_factor", "k": 0.44 }));
+    let before = volume(&both);
+    near(before, 80.0 * 50.0 * 1.5 + 50.0 * 30.0 * 2.0, 0.5, "the plate and the wall");
+    let tab_edge = edge(&both, &["flange1.face.sheet(plate, ordinal = 1)", "flange1.face.sheet_edge(l2)"]);
+    let faces = face_names(&both);
+    let slot_face = faces.iter().find(|n| n.contains("flange2.face.sheet(plate, ordinal = 0)")).unwrap_or_else(|| panic!("no wall face in {faces:#?}")).clone();
+    let text = edit(&both, "sheet-metal.tab-and-slot", json!({ "edge": [tab_edge], "face": [slot_face], "count": 2, "length": 10, "clearance": 0.1 }));
+    assert!(text.contains("sheet_metal.tab_and_slot("), "{text}");
+    // Two 10 x 1.5 x 2 mm tabs in; two 10.2 x 1.7 x 2 mm slots out.
+    near(volume(&text), before + 2.0 * 10.0 * 1.5 * 2.0 - 2.0 * 10.2 * 1.7 * 2.0, 0.05, "tabs and slots");
+    // The tabs reach to the wall's far face, 2 mm past the plate's end.
+    near(extents(&text)[0], 82.0, 1e-3, "x");
+}

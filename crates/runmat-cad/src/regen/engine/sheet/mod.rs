@@ -28,11 +28,13 @@
 
 mod corners;
 mod forms;
+mod lofted;
 mod miter;
 mod plate_bends;
 mod plate_cuts;
 mod plate_flanges;
 mod strips;
+mod tabs;
 
 pub(in crate::regen::engine) use plate_flanges::FlangeEdgeIn;
 

@@ -7,7 +7,12 @@
 //! - `sheet-metal.unfold` → `sheet_metal.unfold(fixed_face, bends)`: the picked bends (all,
 //!   when none are picked) flattened about the fixed face;
 //! - `sheet-metal.fold` → `sheet_metal.fold(bends)`: the bends an earlier unfold flattened,
-//!   folded back (all, when none are picked).
+//!   folded back (all, when none are picked);
+//! - `sheet-metal.lofted-bend` → `sheet_metal.lofted_bend(profiles, facets, rules)`: a sheet of
+//!   the form's thickness between two open profiles, each arc formed in `bends` bends;
+//! - `sheet-metal.tab-and-slot` → `sheet_metal.tab_and_slot(edge, slot_face, count, length,
+//!   clearance)`: tabs on one sheet's edge and matching slots in the face of the sheet they
+//!   reach into.
 
 use crate::features::{picks_of, value};
 use crate::picks::Picks;
@@ -18,6 +23,20 @@ type Values = Map<String, Value>;
 
 fn model(message: impl Into<String>) -> EditFailure {
     EditFailure::Model(message.into())
+}
+
+/// A whole number field of at least 1.
+fn whole(values: &Values, id: &str, what: &str) -> Result<u64, EditFailure> {
+    let n = match values.get(id) {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .ok_or_else(|| model(format!("`{id}` needs a value")))?;
+    if n < 1.0 || n.fract() != 0.0 {
+        return Err(model(format!("{what} is a whole number of at least 1")));
+    }
+    Ok(n as u64)
 }
 
 fn some(values: &Values, id: &str, what: &str) -> Result<Vec<String>, EditFailure> {
@@ -61,6 +80,28 @@ pub fn sheet_metal_kind(command: &str, values: &Values, picks: &Picks) -> Result
             let mut k = sm("fold");
             k["bends"] = json!(picks.references(&picks_of(values, "bends"))?);
             ("fold", k)
+        }
+        "sheet-metal.lofted-bend" => {
+            let mut k = sm("lofted_bend");
+            let first = picks.sketch(&some(values, "profile1", "the first profile")?[0])?;
+            let second = picks.sketch(&some(values, "profile2", "the second profile")?[0])?;
+            k["profiles"] = json!([{ "sketch": first }, { "sketch": second }]);
+            k["facets"] = json!(whole(values, "bends", "the bends per arc")?);
+            k["rules"] = json!({
+                "thickness": value(values, "thickness", "mm")?,
+                "bend_radius": { "form": "quantity", "value": 0.0, "unit": "mm" },
+                "rule": { "rule": "k_factor", "k": { "form": "number", "value": 0.44 } },
+            });
+            ("loft", k)
+        }
+        "sheet-metal.tab-and-slot" => {
+            let mut k = sm("tab_and_slot");
+            k["edge"] = picks.reference(&some(values, "edge", "the edge the tabs grow from")?[0])?;
+            k["slot_face"] = picks.reference(&some(values, "face", "the face the slots go through")?[0])?;
+            k["count"] = json!({ "form": "number", "value": whole(values, "count", "the tab count")? });
+            k["length"] = value(values, "length", "mm")?;
+            k["clearance"] = value(values, "clearance", "mm")?;
+            ("tabs", k)
         }
         _ => return Ok(None),
     }))

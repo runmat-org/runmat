@@ -57,11 +57,8 @@ pub const UNBUILT: &[&str] = &[
     // Direct's Replace face.
     "surface.untrim",
     "surface.replace-face",
-    // Sheet metal the regeneration doesn't build yet: lofted bends, converting a solid, tabs
-    // and slots.
-    "sheet-metal.lofted-bend",
+    // Sheet metal the regeneration doesn't build yet: converting a solid to a sheet.
     "sheet-metal.convert",
-    "sheet-metal.tab-and-slot",
     // Assembly fasteners: the runtime publishes no edge paths for a rule to run along and has
     // no catalog of a fastener family's sizes, so rules, smart fasteners, the library and hole
     // series are written in Source until it does.

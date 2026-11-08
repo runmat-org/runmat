@@ -4,7 +4,7 @@
 use super::*;
 
 impl<'a, 'b> Run<'a, 'b> {
-    pub(super) fn sheet_rules(
+    pub(in crate::regen::engine) fn sheet_rules(
         &mut self,
         id: &FeatureId,
         r: &SheetMetalRules,
@@ -551,7 +551,11 @@ impl<'a, 'b> Run<'a, 'b> {
                 };
                 self.bend_chain(i, id, face, line, theta, r, None, Some(*fixed), &simple)
             }
-            SheetMetalFeature::LoftedBend { .. } => Err(self.not_lowered(id, "lofted bends")),
+            SheetMetalFeature::LoftedBend {
+                profiles,
+                facets,
+                rules,
+            } => self.lofted_bend(i, id, profiles, *facets, rules, &simple),
             SheetMetalFeature::ConvertToSheetMetal { .. } => {
                 Err(self.not_lowered(id, "convert to sheet metal"))
             }
@@ -566,7 +570,18 @@ impl<'a, 'b> Run<'a, 'b> {
             SheetMetalFeature::CornerRelief { corners, relief } => {
                 self.corner_relief(i, id, corners, relief, &simple)
             }
-            SheetMetalFeature::TabAndSlot { .. } => Err(self.not_lowered(id, "tabs and slots")),
+            SheetMetalFeature::TabAndSlot {
+                edge,
+                slot_face,
+                count,
+                length,
+                clearance,
+            } => {
+                let count = self.value(id, "count", count, Dimension::DIMENSIONLESS)?;
+                let length = self.value(id, "length", length, Dimension::LENGTH)?;
+                let clearance = self.value(id, "clearance", clearance, Dimension::LENGTH)?;
+                self.tab_and_slot(i, id, edge, slot_face, count, length, clearance, &simple)
+            }
             SheetMetalFeature::FormTool {
                 tool,
                 face,

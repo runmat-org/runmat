@@ -2319,12 +2319,12 @@ fn not_lowered_cases_fail_with_the_named_case() {
     let mut d = sheet_doc(&[(0.0, 30.0), (0.0, 0.0), (50.0, 0.0)], &["up", "base"]);
     d.features.push(Feature::new(
         "relief",
-        FeatureKind::SheetMetal(SheetMetalFeature::TabAndSlot {
-            edge: sheet_face("base", 0),
-            slot_face: sheet_face("up", 0),
-            count: ValueExpr::number(2.0),
-            length: mm(5.0),
-            clearance: mm(0.1),
+        FeatureKind::SheetMetal(SheetMetalFeature::ConvertToSheetMetal {
+            body: sheet_face("base", 0),
+            fixed_face: sheet_face("base", 0),
+            bend_edges: Vec::new(),
+            rip_edges: Vec::new(),
+            rules: rules(),
         }),
     ));
     let r = env.regen(&d);
