@@ -1,0 +1,689 @@
+{
+  "schema_version": 1,
+  "issue": "RM-1287",
+  "toolchain": "1.90.0",
+  "distinct_sites": 183,
+  "baseline_sha256": "ac2dc0c17431559fc93c0f3b4f0c14307a47190394c761dd4f7ae7cf45de3186",
+  "diagnostics": [
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `ExcitationSamplePoint<'_>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/physics/electrical/mod.rs\",\"return terminals::solve(model, step_id, sample.clone(), |fixed| {\"]]]",
+      4
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `ExcitationSamplePoint<'_>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/physics/electrical/mod.rs\",\"sample.clone(),\"]]]",
+      4
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `ExcitationSamplePoint<'_>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/physics/electrical/terminals.rs\",\"let loads = crate::excitation::realize_step_excitations(model, step, sample.clone())\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `ExcitationSamplePoint<'_>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/physics/electrical/terminals.rs\",\"sample.clone(),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `ExcitationSamplePoint<'_>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/drive.rs\",\"sample.clone(),\"]]]",
+      4
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `Quantity<Position, [[f64; 3]; 10]>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/post/solid/thermoelastic_tests.rs\",\"*coordinates_m = coordinates_m\\n.clone()\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `Quantity<Power>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/contracts/thermal_state/energy/tests.rs\",\"forged.applied_power_w = forged\\n.applied_power_w\\n.clone()\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `Quantity<Power>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/contracts/thermal_state/energy/tests.rs\",\"forged.scale.prescribed_w = forged\\n.scale\\n.prescribed_w\\n.clone()\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `Quantity<Power>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/execution/thermal_result_manifest_tests.rs\",\"malformed.energy_balances[0].residual_w = malformed.energy_balances[0]\\n.residual_w\\n.clone()\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `Quantity<VolumeFlowRate>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/execution/fluid/receipt/tests.rs\",\"substituted.receipt.global_boundary_flux_m3_per_s = substituted\\n.receipt\\n.global_boundary_flux_m3_per_s\\n.clone()\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::clone_on_copy\",\"using `clone` on type `UnitDefinition` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/solve/dynamics/modal_projection.rs\",\"runmat_types::physical::LengthUnit::Millimeter\\n.definition()\\n.clone(),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::derivable_impls\",\"this `impl` can be derived\",[[\"crates/runmat-analysis/fea/src/contracts/mod.rs\",\"impl Default for ModalSolveOptions {\\nfn default() -> Self {\\nSelf {\\ntruncation: crate::pipeline::modal_governance::ModalTruncationPolicy::default(),\\nconvergence: crate::pipeline::modal_governance::ModalConvergencePolicy::default(),\\nresidual_vector_directions: Vec::new(),\\nsolver_mesh: None,\\n}\\n}\\n}\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::doc_lazy_continuation\",\"doc list item without indentation\",[[\"crates/runmat-analysis/fea/src/execution/electrothermal/coupled.rs\",\"//! tabulated Joule source, until the temperature history stops changing. With alpha = 0\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::doc_lazy_continuation\",\"doc list item without indentation\",[[\"crates/runmat-analysis/fea/src/execution/electrothermal/coupled.rs\",\"//! the first sweep is exact (one-way coupling) and the second confirms it.\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::doc_lazy_continuation\",\"doc list item without indentation\",[[\"crates/runmat-analysis/fea/src/execution/electrothermal/coupled.rs\",\"//! The two are iterated to a fixed point. In a transient step the iteration acts on the\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::doc_lazy_continuation\",\"doc list item without indentation\",[[\"crates/runmat-analysis/fea/src/execution/electrothermal/coupled.rs\",\"//! time point of the thermal schedule, then the complete thermal transient with the\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::doc_lazy_continuation\",\"doc list item without indentation\",[[\"crates/runmat-analysis/fea/src/execution/electrothermal/coupled.rs\",\"//! whole temperature history (waveform relaxation): every sweep solves conduction at every\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::excessive_precision\",\"float has excessive precision\",[[\"crates/runmat-analysis/fea/src/execution/electrothermal/tests/coupled.rs\",\"const CURRENT: f64 = 34.641016151377546; // J^2 rho0 / k = 400 on the unit cube\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::items_after_test_module\",\"items after a test module\",[[\"crates/runmat-analysis/fea/src/excitation/evidence.rs\",\"mod tests {\"],[\"crates/runmat-analysis/fea/src/excitation/evidence.rs\",\"impl runmat_types::physical::QuantityStorage for ProjectionScalar {\"],[\"crates/runmat-analysis/fea/src/excitation/evidence.rs\",\"impl runmat_types::physical::QuantityStorage for ProjectionVector3 {\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::items_after_test_module\",\"items after a test module\",[[\"crates/runmat-analysis/fea/src/execution/fluid/profile.rs\",\"mod tests {\"],[\"crates/runmat-analysis/fea/src/execution/fluid/profile.rs\",\"impl<T: runmat_types::physical::QuantityStorage> runmat_types::physical::QuantityStorage\\nfor Repeated<T>\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::items_after_test_module\",\"items after a test module\",[[\"crates/runmat-analysis/fea/src/solve/dynamics/modal_projection.rs\",\"mod tests {\"],[\"crates/runmat-analysis/fea/src/solve/dynamics/modal_projection.rs\",\"pub trait ModalCoordinateQuantity: runmat_types::physical::QuantityMarker {\"],[\"crates/runmat-analysis/fea/src/solve/dynamics/modal_projection.rs\",\"impl ModalCoordinateQuantity for runmat_types::physical::kind::Displacement {\"],[\"crates/runmat-analysis/fea/src/solve/dynamics/modal_projection.rs\",\"impl ModalCoordinateQuantity for runmat_types::physical::kind::Velocity {\"],[\"crates/runmat-analysis/fea/src/solve/dynamics/modal_projection.rs\",\"impl ModalCoordinateQuantity for runmat_types::physical::kind::Acceleration {\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::iter_nth_zero\",\"called `.nth(0)` on a `std::iter::Iterator`, when `.next()` is equivalent\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid.rs\",\"lumped_mass_diag: vectors.into_iter().nth(LUMPED_MASS).unwrap_or_default(),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::large_enum_variant\",\"large size difference between variants\",[[\"crates/runmat-analysis/fea/src/assembly/explicit_elements.rs\",\"enum ExplicitRecovery {\\nBeam(BeamRecoveryElementSummary),\\nShell(ShellRecoveryElementSummary),\\n}\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::len_zero\",\"length comparison to one\",[[\"crates/runmat-analysis/fea/src/results/observation/tests.rs\",\"assert!(owners.len() >= 1 && area > 0.0);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::manual_is_multiple_of\",\"manual implementation of `.is_multiple_of()`\",[[\"crates/runmat-analysis/fea/src/algebra/element_assembly/tests.rs\",\"} else if r % 29 == 0 && local > 0 {\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::manual_is_multiple_of\",\"manual implementation of `.is_multiple_of()`\",[[\"crates/runmat-analysis/fea/src/algebra/element_assembly/tests.rs\",\"let dof = if r % 23 == 0 {\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::manual_is_multiple_of\",\"manual implementation of `.is_multiple_of()`\",[[\"crates/runmat-analysis/fea/src/solve/affine.rs\",\"reduction.free_dof_indices.len() % 3 == 0\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/mod.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(region_id)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"&& !boundary_faces_matching(&projection, target)\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"&& boundary_faces_matching(&projection, target)\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"&projection,\"]]]",
+      4
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"apply_entity_force(&projection, layout, rhs, load, &nodal, value.real)?,\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"apply_projected_body_force(&projection, layout, rhs, load, density)?;\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"apply_projected_force(&projection, layout, rhs, load, target, value.real)?,\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"apply_projected_pressure(&projection, layout, rhs, load, target, value.real)?;\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"apply_projected_traction(&projection, layout, rhs, load, target, value.real)?;\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"boundary_normal(&boundary_faces_matching(&projection, target)),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid_boundary.rs\",\"let (target_nodes, target_face_count) = projection_region_nodes(&projection, target);\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/assembly/transient_basis/forcing.rs\",\"&topology,\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/constraints/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[0])),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/constraints/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[3])),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/execution/electrothermal/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/execution/electrothermal/tests/coupled.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/execution/maxwell_harmonic/fields/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/execution/maxwell_harmonic/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/execution/state/maxwell/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(id)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum/fixture.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum/reference_coordinates.rs\",\"&(face),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/nonuniform.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/modal/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/response/reduced/tests.rs\",\"build_phase_reduction(4, &[], &assembly.prescribed.canonical_values()).unwrap(),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests.rs\",\"&(&impedance_face.provenance[0].source_topology_id),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests.rs\",\"&(&pressure_face.provenance[0].source_topology_id),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/interface.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(target)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation.rs\",\"&(target),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(target)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/volume_velocity.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(source_side)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/symmetry.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(id)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/conjugate_heat/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/electrical/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(target)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/fluid_structure/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/magnetic/test_support.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/magnetic/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/tests/terminal.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/structural/contact/operator/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/physics/thermal/assembly/convergence_tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(region)),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/pipeline/thermal/physical/interface_tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/planning/resource/maxwell_harmonic/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(id)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/planning/resource/maxwell_recovery/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(id)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_borrow\",\"this expression creates a reference which is immediately dereferenced by the compiler\",[[\"crates/runmat-analysis/fea/src/study/maxwell_planning/tests.rs\",\"runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `at` is used to index `columns`\",[[\"crates/runmat-analysis/fea/src/physics/cfd/canonical/jacobian.rs\",\"for at in offsets[r] as usize..offsets[r + 1] as usize {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `axis` is used to index `gradient`\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/drive.rs\",\"for axis in 0..3 {\"]]]",
+      4
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `axis` is used to index `p`\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"for axis in 0..3 {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `d` is used to index `weight`\",[[\"crates/runmat-analysis/fea/src/physics/cfd/canonical/velocity_gradient.rs\",\"for d in 0..3 {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `element` is used to index `component_of`\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"for element in 0..elements {\"]]]",
+      4
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `i` is used to index `local`\",[[\"crates/runmat-analysis/fea/src/physics/conjugate_heat/evidence.rs\",\"for i in 0..dofs.len() {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `j` is used to index `g`\",[[\"crates/runmat-analysis/fea/src/assembly/nonlinear_solid/evaluation.rs\",\"for j in 0..3 {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `node` is used to index `KRONROD_NODES`\",[[\"crates/runmat-analysis/fea/src/solve/dynamics/random_response/quadrature.rs\",\"for node in 0..7 {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `ritz` is used to index `values`\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/modal.rs\",\"for ritz in 0..wanted {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `x` is only used to index `xs`\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/tests/layered.rs\",\"for x in 0..nx {\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `y` is only used to index `ys`\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/tests/layered.rs\",\"for y in 0..ny {\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_range_loop\",\"the loop variable `z` is only used to index `zs`\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/tests/layered.rs\",\"for z in 0..nz {\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::needless_update\",\"struct update has no effect, all the fields in the struct have already been specified\",[[\"crates/runmat-analysis/fea/src/study/acoustic_response_planning.rs\",\"..AcousticTransientPolicy::default()\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/coercivity.rs\",\"if !(f64::from_bits(anchor_rank_ratio_bits) > 0.) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(k_norm > 0.0) || !k_norm.is_finite() {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(length > 1.0e-6 * original) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(pivot > 0.0) || !pivot.is_finite() {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(residual <= RIGID_MODE_RESIDUAL_RATIO) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(scale > 0.0) || !scale.is_finite() {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(trace > 0.0) || !cholesky_in_place(&mut shifted, 6) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/execution/acoustic_response/result.rs\",\"|| time_points_s.windows(2).any(|pair| !(pair[0] < pair[1]))\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/real_solve.rs\",\"if !(relative_residual <= self.relative_tolerance) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/response.rs\",\"|| !(self.contraction_bound < self.limit)\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/conjugate_heat.rs\",\"if !(report.relative_residual <= policy.linear_relative_tolerance) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/conjugate_heat/evidence.rs\",\"if previous.len() != values.len() || !(dt > 0.0) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/electrical/sources.rs\",\"|| !(face.area_m2.canonical_value() > 0.0)\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/electrical/terminals.rs\",\"if !(scale > 0.0) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/fluid_structure.rs\",\"if !(report.relative_residual <= policy.relative_tolerance)\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/fluid_structure/transient.rs\",\"if times.len() < 2 || times.windows(2).any(|w| !(w[1] > w[0])) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/authored.rs\",\".any(|pair| !(pair[0].frequency_hz < pair[1].frequency_hz))\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/pipeline/nonlinear/contact.rs\",\"if count == 0 || !(area > 0.0) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/solve/certificate.rs\",\"if !bound.is_finite() || !(bound < limit) {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/topology/finite_volume/derive.rs\",\"&& !(dot(boundary.oriented_area_vector_m2, face.owner_area_vector_m2) > 0.0)\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::nonminimal_bool\",\"this boolean expression can be simplified\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/authored.rs\",\"if !(scales.conductivity >= 0.0 && scales.permittivity > 0.0 && scales.permeability > 0.0)\\n|| !scales.conductivity.is_finite()\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::op_ref\",\"needlessly taken reference of both operands\",[[\"crates/runmat-analysis/fea/src/execution/acoustic_response/result.rs\",\"|| &d.publication_declaration != &workload.step()?.state_outputs[0]\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::ptr_arg\",\"writing `&Vec` instead of `&[_]` involves a new object where a slice will do\",[[\"crates/runmat-analysis/fea/src/execution/thermal_result/identity.rs\",\"entries: &Vec<crate::results::field::RecoveredFieldArtifactEntry>,\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::ptr_arg\",\"writing `&Vec` instead of `&[_]` involves a new object where a slice will do\",[[\"crates/runmat-analysis/fea/src/execution/thermal_result/identity.rs\",\"identities: &Vec<crate::results::field::RecoveredFieldIdentity>,\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::redundant_closure\",\"redundant closure\",[[\"crates/runmat-analysis/fea/src/pipeline/thermal/physical.rs\",\".map_err(|error| FeaRunError::Solve(error))?;\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::single_element_loop\",\"for loop over a single element\",[[\"crates/runmat-analysis/fea/src/execution/thermal_receipt/tests.rs\",\"for other in [&gpu] {\\nassert_eq!(\\ncpu.numerical_intent_identity().unwrap(),\\nother.numerical_intent_identity().unwrap()\\n);\\nassert_ne!(cpu.identity().unwrap(), other.identity().unwrap());\\n}\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::single_element_loop\",\"for loop over a single element\",[[\"crates/runmat-analysis/fea/src/solve/krylov/right_ilu/tests.rs\",\"for limit in [1] {\\nlet calls = Cell::new(0);\\nassert_eq!(\\nilu.apply(&[1., 2.], || {\\ncalls.set(calls.get() + 1);\\ncalls.get() > limit\\n}),\\nErr(SparseRightIluError::Cancelled)\\n);\\n}\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::single_element_loop\",\"for loop over a single element\",[[\"crates/runmat-analysis/fea/src/solve/krylov/right_ilu/tests.rs\",\"for limit in [1] {\\nlet calls = Cell::new(0);\\nassert_eq!(\\nSparseRightIlu::factor(&a, || {\\ncalls.set(calls.get() + 1);\\ncalls.get() > limit\\n}),\\nErr(SparseRightIluError::Cancelled)\\n);\\n}\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/assembly/entry_points.rs\",\"pub(crate) fn assemble_structural_system_with_execution(\\nmodel: &AnalysisModel,\\nexcitations: &RealizedExcitations,\\nsolver_mesh: Option<SolverMeshArtifact>,\\nrequirement: StructuralFormulationRequirement,\\nconstraint_plan: Option<&CanonicalStructuralConstraintPlan>,\\nlocal_execution: crate::planning::resource::LocalExecutionPlan,\\nsolved_nodal_temperature_k: Option<&crate::execution::SolvedTemperatureField>,\\nsolid_energy: Option<&mut solver_solid::SolidEnergyPreparation>,\\n) -> Result<AssemblySummary, LinearAssemblyError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/assembly/explicit_elements/beam_contribution.rs\",\"pub(super) fn compute(\\nstructural: &StructuralModel,\\nnodes: &super::ExplicitNodeIndex,\\nelement: &StructuralElement,\\nbeam: &BeamElementModel,\\nproperties: &CompiledPropertyMap,\\nlayout: &StructuralDofLayout,\\ncanonical_node_indices: &[usize],\\ntopology_digest: runmat_execution::Digest,\\n) -> Result<BeamElementContribution, StructuralAssemblyError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/assembly/explicit_elements/shell_contribution.rs\",\"pub(super) fn compute(\\nstructural: &StructuralModel,\\nnodes: &super::ExplicitNodeIndex,\\nelement: &StructuralElement,\\nshell: &ShellElementModel,\\nproperties: &CompiledPropertyMap,\\nlayout: &StructuralDofLayout,\\ncanonical_node_indices: &[usize],\\ntopology_digest: runmat_execution::Digest,\\n) -> Result<ShellElementContribution, StructuralAssemblyError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/pipeline/thermal/physical.rs\",\"fn solve_unchecked(\\noperator: &ThermalSystem,\\nrequested_solver_backend: LinearAlgebraBackendKind,\\nalgebra: &dyn LinearAlgebraBackend,\\ninitial_guess: Option<\\nrunmat_types::physical::Quantity<\\nrunmat_types::physical::kind::TemperatureDifference,\\n&[f64],\\n>,\\n>,\\nfacts: &crate::planning::resource::ThermalOperatorResourceFacts,\\nresidual_target: f64,\\npreparation: Option<&mut crate::algebra::LinearPreparationReuse>,\\nrelations: &[ScalarNodeRelation],\\n) -> Result<ThermalSolveResult, FeaRunError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/pipeline/thermal/physical.rs\",\"pub(super) fn solve_checked(\\noperator: &ThermalSystem,\\nrequested_solver_backend: LinearAlgebraBackendKind,\\nalgebra: &dyn LinearAlgebraBackend,\\ninitial_guess: Option<\\nrunmat_types::physical::Quantity<\\nrunmat_types::physical::kind::TemperatureDifference,\\n&[f64],\\n>,\\n>,\\nfacts: &crate::planning::resource::ThermalOperatorResourceFacts,\\nresidual_target: f64,\\npreparation: Option<&mut crate::algebra::LinearPreparationReuse>,\\nrelations: &[ScalarNodeRelation],\\n) -> Result<ThermalSolveResult, FeaRunError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/pipeline/thermal/physical.rs\",\"pub(super) fn solve_refinement(\\noperator: &ThermalSystem,\\nrequested_solver_backend: LinearAlgebraBackendKind,\\nalgebra: &dyn LinearAlgebraBackend,\\ninitial_guess: &ThermalDeparture,\\nfacts: &crate::planning::resource::ThermalOperatorResourceFacts,\\nresidual_target: f64,\\npreparation: Option<&mut crate::algebra::LinearPreparationReuse>,\\nrelations: &[ScalarNodeRelation],\\n) -> Result<ThermalSolveResult, FeaRunError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/frequency/admission.rs\",\"pub fn build_structural_frequency_entry_resource_plan_from_compilation(\\nmesh: &SolverMeshArtifact,\\ncompiled: &crate::constraints::ConstraintCompilation<'_>,\\nworkload: &StructuralFrequencyWorkload,\\nrequest: &StructuralFrequencyEntryRequest,\\nstates: StructuralFrequencyStateInputs<'_>,\\naccelerator_requests: &[AcceleratorRequest],\\nprepared: PreparedPhaseResourceFacts,\\nlocal_execution: LocalExecutionPlan,\\n) -> Result<FeaResourcePlan, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/frequency/admission.rs\",\"pub fn build_structural_frequency_entry_resource_plan(\\nmesh: &SolverMeshArtifact,\\nconstraints: &CanonicalStructuralConstraintPlan,\\nworkload: &StructuralFrequencyWorkload,\\nrequest: &StructuralFrequencyEntryRequest,\\nstates: StructuralFrequencyStateInputs<'_>,\\naccelerator_requests: &[AcceleratorRequest],\\nprepared: PreparedPhaseResourceFacts,\\nlocal_execution: LocalExecutionPlan,\\n) -> Result<FeaResourcePlan, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/frequency/admission.rs\",\"pub fn build_structural_frequency_recovery_resource_plan_from_compilation(\\nmesh: &SolverMeshArtifact,\\ncompiled: &crate::constraints::ConstraintCompilation<'_>,\\nworkload: &StructuralFrequencyWorkload,\\nrecovery: StructuralFrequencyRecoveryResourceInput<'_>,\\nstates: StructuralFrequencyStateInputs<'_>,\\naccelerator_requests: &[AcceleratorRequest],\\nprepared: PreparedPhaseResourceFacts,\\nlocal_execution: LocalExecutionPlan,\\n) -> Result<FeaResourcePlan, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/frequency/admission.rs\",\"pub fn build_structural_frequency_recovery_resource_plan(\\nmesh: &SolverMeshArtifact,\\nconstraints: &CanonicalStructuralConstraintPlan,\\nworkload: &StructuralFrequencyWorkload,\\nrecovery: StructuralFrequencyRecoveryResourceInput<'_>,\\nstates: StructuralFrequencyStateInputs<'_>,\\naccelerator_requests: &[AcceleratorRequest],\\nprepared: PreparedPhaseResourceFacts,\\nlocal_execution: LocalExecutionPlan,\\n) -> Result<FeaResourcePlan, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/preflight/compilation.rs\",\"pub fn build_structural_resource_plan_from_compilation(\\nmesh: Option<&SolverMeshArtifact>,\\ncompilation: &crate::constraints::ConstraintCompilation<'_>,\\nobservations: &ResolvedObservationPlan,\\nworkload: &StructuralLinearWorkload,\\naccelerator_requests: &[AcceleratorRequest],\\nlocal_execution: LocalExecutionPlan,\\nprepared_inputs: Option<&PreparedInputResourceFacts>,\\nselection: StaticSolveSelection,\\n) -> Result<FeaResourcePlan, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/preflight/solve_workspace.rs\",\"pub(super) fn solve_policy(\\npreconditioner: SpdPreconditionerKind,\\npath: StaticSolvePath,\\ndofs: u64,\\nconstraint_rows: u64,\\nenforcement: ConstraintEnforcement,\\nstiffness_nonzeros: u64,\\nadmission: SolverAdmissionResourcePolicy,\\ntranspose_index_bytes: u64,\\n) -> Result<SolveResourcePolicy, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/random_response.rs\",\"pub fn plan_for_assembly(\\n&self,\\nrequest: &StructuralRandomResponseAssemblyRequest,\\ninputs: PreparedInputResourceFacts,\\nresult_output: PreparedOutputResourceFacts,\\nreceipt_output: PreparedOutputResourceFacts,\\nstate_profiles_output: PreparedOutputResourceFacts,\\noutput_set: PreparedOutputSetResourceFacts,\\nlocal_execution: LocalExecutionPlan,\\n) -> Result<FeaResourcePlan, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/thermal_manifest_retained.rs\",\"pub fn derive(\\nmodel: &AnalysisModel,\\nstep: &ProcedureStep,\\nmesh: &SolverMeshArtifact,\\nschedule: &ThermalSolveSchedule,\\nidentity: &AnalysisRunIdentity,\\nmetadata: &ThermalMetadataResourceFacts,\\nsources: &ThermalSourceEvidenceResourceFacts,\\ninterface_nodes: usize,\\n) -> Result<Self, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/transient_block.rs\",\"pub fn build_structural_transient_block_resource_plan(\\nworkload: &StructuralTransientWorkload,\\nmesh: &SolverMeshArtifact,\\nmodal_state: Option<&CanonicalSemanticState>,\\nrequest: &StructuralTransientBlockRequest,\\npredecessor: Option<&StructuralTransientCheckpoint>,\\nprepared_inputs: Option<PreparedInputResourceFacts>,\\noutput_set: Option<PreparedOutputSetResourceFacts>,\\nlocal_execution: super::LocalExecutionPlan,\\n) -> Result<FeaResourcePlan, ResourcePlanningError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/solve/linear/input.rs\",\"pub(super) fn solve_structural_system_with_execution(\\nsummary: &StructuralLinearSystemView<'_>,\\npreconditioner_kind: SpdPreconditionerKind,\\nbackend_kind: LinearAlgebraBackendKind,\\nalgebra_backend: &dyn LinearAlgebraBackend,\\ninitial_guess: Option<&[f64]>,\\nplan: LocalExecutionPlan,\\nadmission: Option<&SolverAdmissionResourcePolicy>,\\npreparation: Option<&mut crate::algebra::LinearPreparationReuse>,\\n) -> Result<LinearSolveResult, ScopedSpmvError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (9/7)\",[[\"crates/runmat-analysis/fea/src/solve/affine.rs\",\"pub(super) fn solve_affine_constraint_system_with_execution(\\nsummary: &StructuralLinearSystemView<'_>,\\nreduction: &AffineConstraintReduction,\\nrequested_backend: LinearAlgebraBackendKind,\\n_algebra_backend: &dyn LinearAlgebraBackend,\\ninitial_guess: Option<&[f64]>,\\nplan: LocalExecutionPlan,\\nadmission: Option<&SolverAdmissionResourcePolicy>,\\npreconditioner: SpdPreconditionerKind,\\npreparation: Option<&mut crate::algebra::LinearPreparationReuse>,\\n) -> Result<LinearSolveResult, ScopedSpmvError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (9/7)\",[[\"crates/runmat-analysis/fea/src/solve/linear.rs\",\"pub(crate) fn solve_linear_system_with_execution_admitted(\\nsummary: &AssemblySummary,\\npreconditioner_kind: SpdPreconditionerKind,\\nbackend_kind: LinearAlgebraBackendKind,\\nalgebra_backend: &dyn LinearAlgebraBackend,\\ninitial_guess: Option<&[f64]>,\\nplan: LocalExecutionPlan,\\nadmission: Option<&SolverAdmissionResourcePolicy>,\\nplanned_reduced_support: Option<&crate::algebra::SparsePattern>,\\npreparation: Option<&mut crate::algebra::LinearPreparationReuse>,\\n) -> Result<LinearSolveResult, ScopedSpmvError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::type_complexity\",\"very complex type used. Consider factoring parts into `type` definitions\",[[\"crates/runmat-analysis/fea/src/algebra/element_assembly/tests.rs\",\") -> (\\nVec<BTreeMap<usize, f64>>,\\nVec<BTreeMap<usize, f64>>,\\nVec<f64>,\\nf64,\\n) {\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::type_complexity\",\"very complex type used. Consider factoring parts into `type` definitions\",[[\"crates/runmat-analysis/fea/src/algebra/matrix.rs\",\"|&block| -> Result<(Vec<u64>, Vec<u64>, Vec<f64>), RealSparseMatrixError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::type_complexity\",\"very complex type used. Consider factoring parts into `type` definitions\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/system.rs\",\"pub fn assemble(&self) -> Result<(Vec<ComplexEntry>, Vec<(f64, f64)>), MaxwellError> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::type_complexity\",\"very complex type used. Consider factoring parts into `type` definitions\",[[\"crates/runmat-analysis/fea/src/physics/thermal_interface.rs\",\"pub(crate) fn split(&self, values: &[f64]) -> Result<(Vec<f64>, Vec<(usize, f64)>), String> {\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/assembly/mod.rs\",\"(Some(0.125)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/assembly/mod.rs\",\"(Some(1_000.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/assembly/mod.rs\",\"(Some(2_000.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/assembly/mod.rs\",\"zero.mass_density_kg_per_m3 = (Some(1_600.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/assembly/solver_solid/tests.rs\",\"target.mass_density_kg_per_m3 = (Some(source.density_kg_per_m3.canonical_value()))\\n.map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/assembly/transient_basis/tests.rs\",\"(Some(1234.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/excitation/waveform.rs\",\"duration_seconds: (Some(2.0)).map(runmat_types::physical::Time::new),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/excitation/waveform.rs\",\"sine.frequency_hz = (Some(0.25)).map(runmat_types::physical::Frequency::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/excitation/waveform.rs\",\"sine.frequency_hz = (Some(1.0)).map(runmat_types::physical::Frequency::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/execution/acoustic/tests.rs\",\"(Some(3.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/execution/fluid/tests.rs\",\"(Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum/fixture.rs\",\"(Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/nonuniform.rs\",\"(Some(2.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests.rs\",\"(Some(3.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/interface.rs\",\"(Some(3.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/interface.rs\",\"right.mass_density_kg_per_m3 = (Some(5.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation.rs\",\"(Some(5.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/physics/thermal/assembly/convergence_tests.rs\",\"(Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/physics/thermal/assembly/tests.rs\",\"material.mass_density_kg_per_m3 = (Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/physics/thermal/assembly/tests.rs\",\"unused.mass_density_kg_per_m3 = (Some(9.0e8)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/physics/thermal/qualification/mod.rs\",\"(Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/pipeline/modal/curved_tet10_tests.rs\",\"(Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/pipeline/modal/curved_tet10_tests/harmonic.rs\",\"(Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs\",\"(Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/pipeline/transient/rod_qualification.rs\",\"(Some(1.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/pipeline/transient/rod_qualification/affine_forcing.rs\",\"frequency_hz: (Some(OMEGA / std::f64::consts::TAU))\\n.map(runmat_types::physical::Frequency::new),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/planning/resource/acoustic/tests.rs\",\"(Some(3.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/planning/resource/excitation_workspace/tests.rs\",\"frequency_hz: (Some(1.0)).map(runmat_types::physical::Frequency::new),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/solve/dynamics/random_response/tests.rs\",\"max_absolute_density_error: (Some(0.0))\\n.map(runmat_types::physical::AccelerationPowerSpectralDensity::new),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/study/acoustic_planning/tests.rs\",\"(Some(3.0)).map(runmat_types::physical::MassDensity::new);\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/study/acoustic_product/tests.rs\",\"mass_density_kg_per_m3: (Some(3.0)).map(runmat_types::physical::MassDensity::new),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/study/planning/tests.rs\",\"max_absolute_density_error: (Some(0.0))\\n.map(runmat_types::physical::AccelerationPowerSpectralDensity::new),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/tests/random_response_portable.rs\",\"max_absolute_density_error: (Some(0.0))\\n.map(runmat_types::physical::AccelerationPowerSpectralDensity::new),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_on_constructor\",\"unnecessary map on constructor Some(_)\",[[\"crates/runmat-analysis/fea/src/tests/random_response_qualification/fixture.rs\",\"max_absolute_density_error: (Some(0.0))\\n.map(runmat_types::physical::AccelerationPowerSpectralDensity::new),\"]]]",
+      1
+    ],
+    [
+      "[\"clippy::unnecessary_map_or\",\"this `map_or` can be simplified\",[[\"crates/runmat-analysis/fea/src/physics/maxwell/input.rs\",\"self.sampling\\n.integration_sample_identity(index)\\n.map_or(true, |identity| source.sample_identity != identity)\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::useless_conversion\",\"explicit call to `.into_iter()` in function argument accepting `IntoIterator`\",[[\"crates/runmat-analysis/fea/src/results/observation/catalog/volume_mesh.rs\",\"definitions.into_iter(),\"]]]",
+      2
+    ],
+    [
+      "[\"clippy::useless_conversion\",\"useless conversion to the same type: `std::string::String`\",[[\"crates/runmat-analysis/fea/src/assembly/mod.rs\",\"region_id: region_id.into(),\"]]]",
+      1
+    ]
+  ]
+}

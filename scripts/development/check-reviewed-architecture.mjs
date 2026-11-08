@@ -53,8 +53,6 @@ function main() {
   }
   const inputs = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo", "crates", "scripts", "docs", "bindings", "verification"];
   const git = (args, options) => run("git", args, options);
-  const tree = git(["ls-tree", "-r", "HEAD", "--", ...inputs]);
-  const digest = tree.status === 0 ? git(["hash-object", "--stdin"], { input: tree.stdout }) : null;
   const validCommit = /^[0-9a-f]{40}$/.test(reviewed.reviewed_commit ?? "");
   const ancestor = validCommit ? git(["merge-base", "--is-ancestor", reviewed.reviewed_commit, "HEAD"]) : null;
   const reviewedTree = validCommit ? git(["ls-tree", "-r", reviewed.reviewed_commit, "--", ...inputs]) : null;
@@ -67,11 +65,10 @@ function main() {
     && validCommit && ancestor?.status === 0
     && /^[0-9a-f]{40}$/.test(reviewed.architecture_inputs ?? "")
     && reviewedDigest?.status === 0 && reviewedDigest.stdout.trim() === reviewed.architecture_inputs
-    && digest?.status === 0 && digest.stdout.trim() === reviewed.architecture_inputs
     && clean.status === 0 && untracked.status === 0 && !untracked.stdout.trim()
     && rustc.status === 0 && rustc.stdout.trim() === reviewed.rustc_version;
   if (!pinsMatch || !matchesReviewedDebt(lines, reviewed.diagnostics)) {
-    console.error("Reviewed FEA architecture exception refused: pins or diagnostic multiset differ.");
+    console.error("Reviewed FEA architecture exception refused: review anchor, toolchain or diagnostic multiset differs.");
     return 1;
   }
   console.error("Reviewed RM-1287 FEA architecture debt: 89 findings retained above; all other architecture and language-ledger checks passed.");

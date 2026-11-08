@@ -56,7 +56,7 @@ export function runNativeEmbeddedAotProbe(fields) {
         const source = join(directory, "embedded-aot-probe.m");
         const output = join(directory, process.platform === "win32" ? "embedded-aot-probe.exe" : "embedded-aot-probe");
         writeFileSync(source, NATIVE_VECTOR_SOURCE, "utf8");
-        const environment = { ...process.env, NO_COLOR: "1" };
+        const environment = { ...process.env, ...fields.environment, NO_COLOR: "1" };
         const compilation = spawnSync(runmat, ["compile", source, "-o", output], {
             cwd: directory,
             env: environment,
@@ -65,6 +65,7 @@ export function runNativeEmbeddedAotProbe(fields) {
             timeout: fields.timeoutMs ?? 120_000
         });
         compileExitCode = processExitCode(compilation.status);
+        reportProcessFailure("native compile", compilation);
         if (compileExitCode === 0) {
             if (process.platform !== "win32") chmodSync(output, 0o700);
             const execution = spawnSync(output, [], {
@@ -75,6 +76,7 @@ export function runNativeEmbeddedAotProbe(fields) {
                 timeout: fields.timeoutMs ?? 120_000
             });
             executeExitCode = processExitCode(execution.status);
+            reportProcessFailure("native execute", execution);
             stdout = Buffer.isBuffer(execution.stdout) ? execution.stdout : Buffer.alloc(0);
         }
         // Re-read the complete staged product after execution. This makes a probe
@@ -107,6 +109,13 @@ export function runNativeEmbeddedAotProbe(fields) {
     } finally {
         rmSync(directory, { recursive: true, force: true });
     }
+}
+
+function reportProcessFailure(phase, result) {
+    if (result.status === 0 && !result.error && !result.signal) return;
+    const stderr = Buffer.isBuffer(result.stderr) ? result.stderr.toString("utf8") : "";
+    const stdout = Buffer.isBuffer(result.stdout) ? result.stdout.toString("utf8") : "";
+    console.error(`${phase} failed: exit=${result.status}, signal=${result.signal ?? "none"}, error=${result.error?.message ?? "none"}\n${stderr.slice(-32768)}\n${stdout.slice(-32768)}`);
 }
 
 export async function runDesktopHostProtocolProbe(fields) {

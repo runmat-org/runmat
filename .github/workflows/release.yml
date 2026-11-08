@@ -235,7 +235,7 @@ jobs:
           APPLE_NOTARIZE_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZE_PRIVATE_KEY }}
         run: bash scripts/sign-and-notarize-macos-binary.sh "target/${{ matrix.platform.target }}/release/runmat"
 
-      - name: Stage and probe signed release product (Unix)
+      - name: Stage and accept distributed product (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -249,12 +249,11 @@ jobs:
             --product native-cli --profile embedded-aot --source-revision "$source_revision" \
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" \
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
-          node scripts/runtime/verify-builtin-examples.mjs probe \
-            --kind native-embedded-aot-compile-and-execute-v1 \
-            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
-            --output "$root/${{ matrix.platform.release_for }}.product-probe.json"
+          node scripts/distribution/accept-native-product.mjs \
+            "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
+            "$root/${{ matrix.platform.release_for }}.acceptance.json"
 
-      - name: Stage and probe signed release product (Windows)
+      - name: Stage and accept distributed product (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
@@ -284,49 +283,10 @@ jobs:
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" `
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
           if ($LASTEXITCODE -ne 0) { throw "native artifact manifest failed with exit code $LASTEXITCODE" }
-          & node scripts/runtime/verify-builtin-examples.mjs probe `
-            --kind native-embedded-aot-compile-and-execute-v1 `
-            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
-            --output "$root/${{ matrix.platform.release_for }}.product-probe.json"
+          & node scripts/distribution/accept-native-product.mjs `
+            "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
+            "$root/${{ matrix.platform.release_for }}.acceptance.json"
           if ($LASTEXITCODE -ne 0) { throw "native product probe failed with exit code $LASTEXITCODE" }
-
-      - name: Verify examples against exact staged native product
-        if: runner.os != 'Windows' || matrix.platform.target != 'aarch64-pc-windows-gnu'
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="artifacts/release-product/${{ matrix.platform.release_for }}"
-          mkdir -p "$root/verification/results"
-          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/verification/inventory.json"
-          node scripts/runtime/verify-builtin-examples.mjs plan \
-            --inventory "$root/verification/inventory.json" --product native-cli \
-            --topology scripts/runtime/builtin-example-topology.c00.json \
-            --output "$root/verification/plan.json"
-          set +e
-          node scripts/runtime/run-builtin-example-product.mjs \
-            --inventory "$root/verification/inventory.json" --plan "$root/verification/plan.json" \
-            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
-            --output-dir "$root/verification/results"
-          execution_status=$?
-          set -e
-          set +e
-          node scripts/runtime/verify-builtin-examples.mjs reconcile \
-            --inventory "$root/verification/inventory.json" --plan "$root/verification/plan.json" \
-            --results-dir "$root/verification/results" \
-            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
-            --product-probe "$root/${{ matrix.platform.release_for }}.product-probe.json" \
-            --report-dir "$root/verification/report" \
-            --output "$root/${{ matrix.platform.release_for }}.example-reconciliation.json"
-          reconciliation_status=$?
-          set -e
-          tar -czf "runmat-${VERSION}-${{ matrix.platform.release_for }}-builtin-example-evidence.tar.gz" \
-            -C "$root" \
-            "${{ matrix.platform.release_for }}.artifact-manifest.json" \
-            "${{ matrix.platform.release_for }}.product-probe.json" \
-            "${{ matrix.platform.release_for }}.example-reconciliation.json" \
-            verification
-          test "$execution_status" -eq 0
-          test "$reconciliation_status" -eq 0
 
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'

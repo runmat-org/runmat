@@ -193,10 +193,13 @@ struct SlowKernel;
 impl MeshingStageKernel for SlowKernel {
     fn execute(
         &self,
-        invocation: MeshingStageInvocation<'_, '_>,
+        _invocation: MeshingStageInvocation<'_, '_>,
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
-        std::thread::sleep(Duration::from_secs(5));
-        AdmissionKernel.execute(invocation)
+        // Keep the worker active until its driver retires it. A fixed sleep
+        // can finish before the parent requests cancellation on a busy host.
+        loop {
+            std::thread::park();
+        }
     }
 }
 
@@ -525,13 +528,20 @@ async fn parent() {
     })
     .await
     .unwrap();
-    assert!(matches!(
-        cancelled,
-        Err(runmat_execution_runner_native::NativeProgramFailure::Cancelled)
-    ));
+    assert!(
+        matches!(
+            &cancelled,
+            Err(runmat_execution_runner_native::NativeProgramFailure::Cancelled)
+        ),
+        "cancelled result: {cancelled:?}"
+    );
     drop(cancel_task);
     drop(cancel_session);
     assert!(!cancel_store_root.exists());
+
+    if std::env::args().any(|argument| argument == "--cancellation-only") {
+        return;
+    }
 
     remote_conformance().await;
     remote_recovery::run().await;

@@ -65,14 +65,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "414b12c71918894968bd083a7d9dc54f900c91280a5d18ebc6559dd649f9aba1",
+      "sha256": "439739512d092976024bf839de61deebb3066be66f9d0c2ca6987b7ff90c912c",
       "files": 24830,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The reviewed 114-path inverse reconstructs the unchanged original scientific inventory. Existing affected qualification is retained; the additional WASM cfg(test) correction preserves every production byte and all assertions. Browser test qualification is tracked separately in dev CI.",
+    "reason": "The reviewed 119-path inverse reconstructs the original measured scientific inventory. CI fixture and metadata changes do not affect either workload; Python discovery is outside their execution paths. Original scientific totals and artifact identities are retained. Dev artifact qualification remains separate.",
     "review": {
-      "path": "qualification/scientific/reviews/dev-wasm-fixture.json",
-      "sha256": "02c0d9eede8ea86866c368a82c8aaf4cda92f464aee298d47f1554bca51ac2b3"
+      "path": "qualification/scientific/reviews/dev-ci-repairs.json",
+      "sha256": "2f6d7f768f26fbbfc8c4afe092e7d812a9c111db4a2206b8e3d0cce6e061177d"
     }
   }
 }

@@ -1,5 +1,16 @@
 # FEA style debt for the 0.7.0 qualification
 
+CI runs a fresh FEA Clippy census and compares its diagnostic source anchors and
+emission counts with `fea-lint-debt-0.7.json`. The ledger comes from the approved
+R1053 JSONL identified below. Line-number shifts preserve an identity; changing
+the lint, diagnostic message, primary source text or emission count requires
+review. Compiler errors and findings outside the FEA crate fail the gate.
+Every other first-party crate retains strict all-target Clippy.
+
+The earlier source pins below describe the original review. Current CI checks
+the emitted diagnostics directly, so unrelated documentation changes do not
+require renewing a whole-workspace exception.
+
 The approved release exception covers 183 existing Clippy findings in
 `runmat-analysis-fea`, across 109 files. The all-target/all-feature census emits
 273 diagnostics: 90 library findings recur in the library-test target, which

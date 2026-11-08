@@ -4,10 +4,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.meshing.validate_corpus import CorpusError, validate_manifest
+from scripts.meshing.validate_corpus import CorpusError, validate_integration_coverage, validate_manifest
 
 
 class CorpusValidatorTests(unittest.TestCase):
+    def test_integration_inventory_requires_exact_fixture_coverage(self):
+        catalog = self.write(self.document())
+        integration = self.root / "integration.json"
+        case = {"fixture_id": "shape", "admission_scenarios": [{"id": "default"}], "mesh_scenarios": []}
+        integration.write_text(json.dumps({"cases": [case]}))
+        self.assertEqual(validate_integration_coverage(catalog, integration), 1)
+        for cases in ([], [case, case], [{**case, "fixture_id": "unknown"}]):
+            integration.write_text(json.dumps({"cases": cases}))
+            with self.assertRaisesRegex(CorpusError, "exactly once"):
+                validate_integration_coverage(catalog, integration)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

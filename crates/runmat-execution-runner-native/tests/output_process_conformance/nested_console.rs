@@ -61,7 +61,12 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     let root = host.finish(false).unwrap();
     drop(service);
     drop(host);
-    assert_eq!(root.records().len(), 1);
+    assert_eq!(
+        root.records().len(),
+        1,
+        "root console: {:?}",
+        root.records()
+    );
     assert_eq!(root.records()[0].text.as_ref(), "parent-only");
     let mut identities = BTreeSet::new();
     let mut texts = BTreeSet::new();

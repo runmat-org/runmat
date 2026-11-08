@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 
 # Match the native CLI command/Tokio-worker stack reserve. Unoptimized native
@@ -21,6 +24,20 @@ def test_environment() -> dict[str, str]:
     environment = os.environ.copy()
     environment["RUST_MIN_STACK"] = str(NATIVE_TEST_STACK_BYTES)
     return environment
+
+
+@contextmanager
+def test_runtime_environment():
+    environment = test_environment()
+    if sys.platform != "linux":
+        yield environment
+        return
+    # Native GPU discovery also runs in child processes. Keep their physical
+    # runtime directory valid for the entire test group, including cold reopen.
+    with tempfile.TemporaryDirectory(prefix="runmat-test-xdg-") as directory:
+        os.chmod(directory, 0o700)
+        environment["XDG_RUNTIME_DIR"] = directory
+        yield environment
 
 
 GROUPS = {
@@ -128,15 +145,19 @@ def scientific_filters(group: str) -> tuple[str, ...]:
 
 
 def workspace_packages(repo_root: Path) -> set[str]:
+    return {package["name"] for package in workspace_metadata(repo_root)["packages"]}
+
+
+def workspace_metadata(repo_root: Path) -> dict:
     result = subprocess.run(
         ["cargo", "metadata", "--no-deps", "--format-version", "1"],
         cwd=repo_root,
         check=True,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     metadata = json.loads(result.stdout)
-    return {package["name"] for package in metadata["packages"]}
+    return metadata
 
 
 def validate_groups(actual: set[str]) -> None:
@@ -184,9 +205,9 @@ def benchmark_commands(group: str) -> list[list[str]]:
     ]
 
 
-def test_commands(group: str, include_extended: bool) -> list[list[str]]:
+def test_commands(group: str, include_extended: bool, metadata: dict | None = None) -> list[list[str]]:
     packages = GROUPS[group]
-    common = ["cargo", "test", "--lib", "--bins", "--tests", "--examples", "--no-fail-fast"]
+    common = ["cargo", "test", "--no-fail-fast"]
     ordinary = [package for package in packages if package not in PACKAGE_TEST_FEATURE_PROFILES]
     commands = [
         [*common, "--all-features", *(argument for package in ordinary for argument in ("--package", package))]
@@ -197,6 +218,38 @@ def test_commands(group: str, include_extended: bool) -> list[list[str]]:
             if features:
                 command.extend(("--features", ",".join(features)))
             commands.append(command)
+    if metadata is None:
+        selections = [["--lib", "--bins", "--tests", "--examples"]]
+    else:
+        # Keep the complete package/feature union for every invocation. Only the
+        # linked root targets vary; dependencies remain reusable between batches.
+        targets = [target for package in metadata["packages"] if package["name"] in packages
+                   and package["name"] not in PACKAGE_TEST_FEATURE_PROFILES
+                   for target in package["targets"]]
+        selections = []
+        library_kinds = {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"}
+        if any(library_kinds.intersection(target["kind"]) for target in targets):
+            selections.append(["--lib"])
+        if any("bin" in target["kind"] for target in targets):
+            selections.append(["--bins"])
+        for kind, flag in (("test", "--test"), ("example", "--example")):
+            names = Counter(target["name"] for target in targets if kind in target["kind"])
+            batch, count = [], 0
+            for name, roots in sorted(names.items()):
+                # Cargo selects a shared target name in every selected package.
+                # Keep those roots together while preserving the feature union.
+                if batch and count + roots > 4:
+                    selections.append(batch)
+                    batch, count = [], 0
+                batch.extend((flag, name))
+                count += roots
+            if batch:
+                selections.append(batch)
+    ordinary_count = 1 if ordinary else 0
+    commands = [commands[0] + selection for selection in selections] + [
+        command + ["--lib", "--bins", "--tests", "--examples"]
+        for command in commands[ordinary_count:]
+    ] if ordinary else [command + ["--lib", "--bins", "--tests", "--examples"] for command in commands]
     if not include_extended:
         filters = scientific_filters(group)
         if filters:
@@ -207,9 +260,56 @@ def test_commands(group: str, include_extended: bool) -> list[list[str]]:
     return commands
 
 
+def run_batch(command: list[str], repo_root: Path, target_directory: Path, reclaim: bool,
+              environment: dict[str, str] | None = None) -> int:
+    """Retain dependencies; release only completed root test executables in CI."""
+    command = [*command[:2], "--message-format=json-render-diagnostics", *command[2:]]
+    print("+ " + " ".join(command), flush=True)
+    executables: set[Path] = set()
+    with subprocess.Popen(command, cwd=repo_root, env=environment if environment is not None else test_environment(), encoding="utf-8", errors="replace",
+                          stdout=subprocess.PIPE) as process:
+        for line in process.stdout:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                print(line, end="", flush=True)
+                continue
+            if not isinstance(message, dict) or "reason" not in message:
+                print(line, end="", flush=True)
+                continue
+            if message["reason"] not in {"compiler-message", "compiler-artifact", "build-script-executed", "build-finished"}:
+                print(line, end="", flush=True)
+                continue
+            if message["reason"] == "compiler-message":
+                print(message["message"].get("rendered") or "", end="", flush=True)
+            if (message["reason"] == "compiler-artifact" and message.get("executable")
+                    and (message.get("profile", {}).get("test")
+                         or "example" in message.get("target", {}).get("kind", []))):
+                executable = Path(message["executable"]).resolve()
+                if executable.is_relative_to(target_directory.resolve()):
+                    executables.add(executable)
+        code = process.wait()
+    print(f"Batch exit: {code}", flush=True)
+    if reclaim:
+        for executable in executables:
+            executable.unlink(missing_ok=True)
+            # MSVC emits a matching root PDB; dependency PDBs stay in the cache.
+            if os.name == "nt":
+                executable.with_suffix(".pdb").unlink(missing_ok=True)
+    return code
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group", nargs="?", choices=GROUPS)
+    parser.add_argument(
+        "--reclaim-completed-test-binaries", action="store_true",
+        help="remove completed root test executables from this exclusive CI target directory",
+    )
+    parser.add_argument(
+        "--benchmark-smokes", action="store_true",
+        help="also build and execute the standalone benchmark programs (manual qualification)",
+    )
     parser.add_argument(
         "--include-extended",
         action="store_true",
@@ -225,16 +325,22 @@ def main() -> int:
         parser.error("group is required unless --check is used")
 
     repo_root = Path(__file__).resolve().parents[2]
-    validate_groups(workspace_packages(repo_root))
+    metadata = workspace_metadata(repo_root)
+    validate_groups({package["name"] for package in metadata["packages"]})
     if args.check:
         print(f"{sum(map(len, GROUPS.values()))} workspace packages assigned across {len(GROUPS)} groups")
         return 0
 
     failure = 0
-    for command in [*test_commands(args.group, args.include_extended), *benchmark_commands(args.group)]:
-        code = subprocess.run(command, cwd=repo_root, env=test_environment()).returncode
-        if code and not failure:
-            failure = code
+    commands = test_commands(args.group, args.include_extended, metadata)
+    if args.benchmark_smokes:
+        commands.extend(benchmark_commands(args.group))
+    with test_runtime_environment() as environment:
+        for command in commands:
+            code = run_batch(command, repo_root, Path(metadata["target_directory"]),
+                             args.reclaim_completed_test_binaries, environment)
+            if code and not failure:
+                failure = code
     return failure
 
 

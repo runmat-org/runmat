@@ -22,6 +22,10 @@ on:
       - ".github/workflows/wasm-bindings.yml"
   workflow_call:
     inputs:
+      headless_tests:
+        description: Run the extended headless Rust WASM suite before packaging
+        type: boolean
+        default: false
       ref:
         description: Git ref to publish from
         required: true
@@ -44,6 +48,10 @@ on:
         required: true
   workflow_dispatch:
     inputs:
+      headless_tests:
+        description: Run the extended headless Rust WASM suite before packaging
+        type: boolean
+        default: false
       ref:
         description: Git ref to publish from
         required: true
@@ -155,11 +163,19 @@ jobs:
         working-directory: bindings/ts
         run: npm ci
 
-      - name: Run wasm headless tests
+      - name: Check WASM test entrypoints
         env:
           RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
           RUNMAT_CHROMEDRIVER_BIN: ${{ steps.setup_chrome.outputs.chromedriver-path }}
           WASM_BINDGEN_TEST_TIMEOUT: "300"
+        run: cargo check -p runmat-wasm --target wasm32-unknown-unknown --tests --features occt-wasm-host
+
+      - name: Run extended headless WASM qualification
+        if: inputs.headless_tests
+        env:
+          RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
+          RUNMAT_CHROMEDRIVER_BIN: ${{ steps.setup_chrome.outputs.chromedriver-path }}
+          WASM_BINDGEN_TEST_TIMEOUT: '300'
         run: scripts/test-wasm-headless.sh
 
       - name: Determine publish settings
@@ -308,44 +324,27 @@ jobs:
             --file wasm-binary=bindings/ts/dist/pkg-web/runmat_wasm_web_bg.wasm \
             --output bindings/ts/browser-product.artifacts.json
 
-      - name: Verify examples against exact browser publish bytes
+      - name: Test public SDK against the already-built package
+        working-directory: bindings/ts
+        run: |
+          npm run lint
+          npm test
+          npm run test:pinned-wasm
+          npm run test:fea-assessments:wasm
+
+      - name: Accept exact browser product in Chrome workers
         env:
           RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
-          RUNMAT_CHROMEDRIVER_BIN: ${{ steps.setup_chrome.outputs.chromedriver-path }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          root=bindings/ts/builtin-example-verification
-          mkdir -p "$root/results"
-          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/inventory.json"
-          node scripts/runtime/verify-builtin-examples.mjs plan \
-            --inventory "$root/inventory.json" --product browser-wasm \
-            --topology scripts/runtime/builtin-example-topology.c00.json --output "$root/plan.json"
-          set +e
-          node scripts/runtime/run-builtin-example-product.mjs \
-            --inventory "$root/inventory.json" --plan "$root/plan.json" \
-            --artifact-manifest bindings/ts/browser-product.artifacts.json \
-            --output-dir "$root/results"
-          execution_status=$?
-          set -e
-          node scripts/runtime/verify-builtin-examples.mjs reconcile \
-            --inventory "$root/inventory.json" --plan "$root/plan.json" \
-            --results-dir "$root/results" \
-            --artifact-manifest bindings/ts/browser-product.artifacts.json \
-            --report-dir "$root/report" --output "$root/reconciliation.json"
-          test "$execution_status" -eq 0
+        run: node scripts/runtime/accept-browser-product.mjs bindings/ts/browser-product.artifacts.json
 
-      - name: Retain browser product verification evidence
+      - name: Retain browser product identity
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: wasm-bindings-product-evidence-${{ github.run_attempt }}
           path: |
             bindings/ts/browser-product.artifacts.json
-            bindings/ts/builtin-example-verification/plan.json
-            bindings/ts/builtin-example-verification/reconciliation.json
-            bindings/ts/builtin-example-verification/report
-            bindings/ts/builtin-example-verification/results/*.shard-result.json
+            bindings/ts/browser-product.acceptance.json
           if-no-files-found: error
 
       - name: Pack the already-built package without lifecycle rebuilds

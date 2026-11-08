@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "issue": "RM-1287",
-  "reviewed_commit": "0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf",
-  "architecture_inputs": "e0741de497f040a32725421ae6a5ea700136ecc7",
+  "reviewed_commit": "3ada296b4dd5abe642669b93c2c7241621d0e32f",
+  "architecture_inputs": "a79878cbe2fad0edd0160b386a1a6a24632913cc",
   "rustc_version": "rustc 1.90.0 (1159e78c4 2025-09-14)",
   "diagnostics": [
     "architecture boundary check failed: crates/runmat-analysis/language/src/operations/output.rs exceeds the 600-line FEA module concentration limit",
@@ -31,7 +31,7 @@
     "architecture boundary check failed: crates/runmat-analysis/core/src/study/sequence.rs grew from its 726-line debt ceiling to 797 lines",
     "architecture boundary check failed: crates/runmat-analysis/core/src/validate_materials.rs has 637 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-analysis/fea/src/admission/structural.rs has 619 lines and adds untracked module-size debt",
-    "architecture boundary check failed: crates/runmat-analysis/fea/src/algebra/coercivity.rs has 718 lines and adds untracked module-size debt",
+    "architecture boundary check failed: crates/runmat-analysis/fea/src/algebra/coercivity.rs has 721 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-analysis/fea/src/algebra/element_assembly.rs has 1146 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-analysis/fea/src/algebra/operator.rs has 659 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-analysis/fea/src/assembly/elements/shell.rs has 689 lines and adds untracked module-size debt",
@@ -94,5 +94,6 @@
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/operations/query.rs grew from its 1541-line debt ceiling to 1582 lines",
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/storage.rs grew from its 869-line debt ceiling to 932 lines",
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/storage/publication.rs has 755 lines and adds untracked module-size debt"
-  ]
+  ],
+  "conservation": "The only diagnostic change since the approved 89-finding census is coercivity.rs growing by three lines to preserve SolverError::Cancelled. CI reruns the complete architecture checker and language ledger and requires this exact diagnostic multiset; unrelated source or documentation edits do not invalidate conserved debt."
 }

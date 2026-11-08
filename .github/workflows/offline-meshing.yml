@@ -1,0 +1,76 @@
+name: Offline governed meshing qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact source commit to qualify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  meshing:
+    runs-on: warp-ubuntu-latest-x64-16x
+    env:
+      MATRIX_NAME: linux-offline
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf autoconf-archive automake build-essential cmake curl git libhdf5-dev libopenblas-dev liblapack-dev libssl-dev libzmq3-dev libtool ninja-build pkg-config unzip zip
+      - name: Ensure pinned OpenCASCADE
+        run: infra/scripts/ensure-linux-vcpkg-occt.sh
+      - name: Build native meshing integration runner
+        run: cargo build --release -p runmat --example meshing-corpus --no-default-features --features occt-native
+
+      - name: Run small governed meshing corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_dir="${GITHUB_WORKSPACE}/target/runmat-meshing-integration"
+          state_dir="${RUNNER_TEMP}/runmat-meshing-integration-${GITHUB_RUN_ID}"
+          mkdir -p "${report_dir}"
+          RUNMAT_EXECUTION_STATE_DIR="${state_dir}" \
+            "${CARGO_TARGET_DIR}/release/examples/meshing-corpus" \
+            --tier small \
+            --report "${report_dir}/small-${MATRIX_NAME}.json"
+
+      - name: Upload meshing integration report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: meshing-integration-linux-offline
+          path: target/runmat-meshing-integration/small-linux-offline.json
+          if-no-files-found: error
+
+      - name: Build native meshing performance verifier
+        run: cargo build --release -p runmat --example meshing-verification --no-default-features --features occt-native
+
+      - name: Gate native meshing resource smoke SLO
+        shell: bash
+        run: |
+          state_dir="${RUNNER_TEMP}/runmat-meshing-performance-${GITHUB_RUN_ID}-${MATRIX_NAME}"
+          export RUNMAT_EXECUTION_STATE_DIR="${state_dir}"
+          python3 scripts/meshing/performance.py \
+            --binary "${CARGO_TARGET_DIR}/release/examples/meshing-verification" \
+            --profile smoke \
+            --samples 3 \
+            --report "target/runmat-meshing-verification/performance-${MATRIX_NAME}.json"
+
+      - name: Upload native meshing performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: meshing-performance-linux-offline
+          path: target/runmat-meshing-verification/performance-linux-offline.json
+          if-no-files-found: error

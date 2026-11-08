@@ -271,6 +271,13 @@ async fn await_in_context(
 }
 
 async fn witness() {
+    if std::env::args().any(|argument| argument == "--nested-console-only") {
+        let directory = tempfile::tempdir().unwrap();
+        std::env::set_var("RUNMAT_EXECUTION_STATE_DIR", directory.path());
+        let config = NativeExecutionConfig::for_current_executable().unwrap();
+        nested_console::verify(&config).await;
+        return;
+    }
     fixture::verify_unwind().await;
     let namespace = fixture::SupervisorFixture::new("original-output-authority");
     std::env::set_var("RUNMAT_EXECUTION_STATE_DIR", namespace.root());

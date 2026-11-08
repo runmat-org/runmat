@@ -2,7 +2,10 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +18,60 @@ SPEC.loader.exec_module(runner)
 
 
 class ScientificRoutingTests(unittest.TestCase):
+    def test_linux_runtime_directory_is_private_live_and_replaces_stale_input(self):
+        with patch.object(runner.sys, "platform", "linux"), patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/stale-runtime"}):
+            with runner.test_runtime_environment() as environment:
+                directory = Path(environment["XDG_RUNTIME_DIR"])
+                self.assertTrue(directory.is_dir())
+                if os.name != "nt":
+                    self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+                    self.assertEqual(directory.stat().st_uid, os.getuid())
+                self.assertEqual(os.environ["XDG_RUNTIME_DIR"], "/stale-runtime")
+            self.assertFalse(directory.exists())
+
+    def test_batches_cover_roots_once_and_keep_package_feature_union(self):
+        members = runner.GROUPS["language"]
+        metadata = {"packages": [{"name": name, "targets": [
+            {"name": name, "kind": ["lib"]},
+            *[{"name": f"integration_{index}", "kind": ["test"]} for index in range(11)],
+            {"name": "demo", "kind": ["example"]},
+        ]} for name in members]}
+        commands = runner.test_commands("language", True, metadata)
+        roots = [(flag, command[index + 1]) for command in commands
+                 for index, flag in enumerate(command) if flag in ("--test", "--example")]
+        self.assertEqual(len(roots), 12)
+        self.assertEqual(len(set(roots)), 12)
+        self.assertEqual(sum("--lib" in command for command in commands), 1)
+        for command in commands:
+            self.assertIn("--all-features", command)
+            self.assertEqual({command[index + 1] for index, token in enumerate(command)
+                              if token == "--package"}, set(members))
+            self.assertLessEqual(command.count("--test"), 4)
+
+    def test_cargo_batch_selection_and_reclamation(self):
+        # Exercise Cargo's actual mixed-package root selection and JSON stream.
+        # A package without a selected target must keep contributing features.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text('[workspace]\nmembers=["a", "b"]\nresolver="2"\n')
+            for name in ("a", "b"):
+                member = root / name
+                (member / "src").mkdir(parents=True)
+                (member / "Cargo.toml").write_text(f'[package]\nname="{name}"\nversion="0.1.0"\nedition="2021"\n')
+                (member / "src/lib.rs").write_text('pub fn value() -> u8 { 42 }\n')
+            (root / "a/tests").mkdir()
+            (root / "a/src/main.rs").write_text('fn main() { println!("42"); }\n')
+            (root / "a/tests/only_a.rs").write_text('#[test] fn smoke() { assert_eq!(a::value(), 42); }\n')
+            target = root / "target"
+            with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target), "CARGO_NET_OFFLINE": "true"}):
+                result = runner.run_batch(["cargo", "test", "-p", "a", "-p", "b", "--test", "only_a"],
+                                          root, target, True)
+            self.assertEqual(result, 0)
+            self.assertFalse(any(path.is_file() and os.access(path, os.X_OK)
+                                 and path.suffix != ".d" for path in (target / "debug/deps").glob("only_a-*")))
+            self.assertTrue(list((target / "debug/deps").glob("liba-*.rlib")))
+            self.assertTrue((target / "debug" / ("a.exe" if os.name == "nt" else "a")).is_file())
+
     def test_native_stack_matches_command_host_without_mutating_parent(self):
         with patch.dict(runner.os.environ, {"RUST_MIN_STACK": "2097152", "RUST_TEST_THREADS": "1"}):
             environment = runner.test_environment()

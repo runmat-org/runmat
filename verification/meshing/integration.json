@@ -342,6 +342,202 @@
       "mesh_scenarios": [
         { "id": "curved-coarse", "tier": "small", "admission": "default", "profile": "curved_coarse", "expected": { "outcome": "success", "regions": 1 } }
       ]
+    },
+    {
+      "fixture_id": "authored-face-names",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "part-in-air-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "two-cavity-air-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 3
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "touching-parts-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "overlapping-parts-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "failure",
+            "kind": "import"
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "fused-compound",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "free-wireframe-part",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "named-cavity-part",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "strip-line-imprinted-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "ap242-exchange-metadata",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "iges-authored-unit-override",
+      "source_units": "meter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "named-step-edges-vertices",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "reversed-shell-hole",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "touching-parts-edge-vertex-names",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
     }
   ],
   "metamorphic_relations": [

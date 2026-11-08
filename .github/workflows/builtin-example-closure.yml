@@ -92,9 +92,15 @@ jobs:
           node scripts/runtime/verify-builtin-examples.mjs artifacts \
             --product native-cli --profile embedded-aot --source-revision "$source_revision" \
             --root "$root/product" --entrypoint runmat-binary=runmat --output "$root/artifacts.json"
-          node scripts/runtime/verify-builtin-examples.mjs probe \
-            --kind native-embedded-aot-compile-and-execute-v1 \
-            --artifact-manifest "$root/artifacts.json" --output "$root/embedded-aot.product-probe.json"
+          node scripts/distribution/accept-native-product.mjs "$root/artifacts.json" "$root/acceptance.json"
+          node -e 'const fs=require("node:fs"); const root=process.argv[1]; const receipt=JSON.parse(fs.readFileSync(root+"/acceptance.json")); fs.writeFileSync(root+"/embedded-aot.product-probe.json",JSON.stringify(receipt.results.at(-1),null,2)+"\n");' "$root"
+      - name: Retain native probe diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: builtin-example-native-probe-${{ github.run_attempt }}
+          path: artifacts/builtin-example-closure/products/native/*.json
+          if-no-files-found: warn
       - name: Build browser product once without OCCT
         working-directory: bindings/ts
         shell: bash
