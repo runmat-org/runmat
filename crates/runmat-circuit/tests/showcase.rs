@@ -426,3 +426,39 @@ fn write_when_asked(name: &str, text: &str) {
         std::fs::write(PathBuf::from(dir).join(name), text).expect("write the edited layout");
     }
 }
+
+/// A designator template on the repeated channel (`designators = "{prefix}{n}0{i}"`) renames
+/// each channel's parts, and Update board stages each rename as a designator change.
+#[test]
+fn a_channel_designator_template_reaches_the_board_as_designator_changes() {
+    use runmat_circuit::runtime::{compile, CompileOptions};
+    let mut files = files();
+    let circuit = "/p/daq.circuit";
+    let text = files[circuit].replace("            repeat = 3,\n", "            repeat = 3,\n            designators = \"{prefix}{n}0{i}\",\n");
+    assert_ne!(text, files[circuit], "the channel instance is written as expected");
+    files.insert(circuit.into(), text);
+    let layout = "/p/daq.circuit.layout";
+    let out = compile(layout, &files[layout], &files, &CompileOptions::default());
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let index = out.index.expect("compiles");
+    let renames: Vec<(String, String)> = index
+        .eco
+        .groups
+        .iter()
+        .flat_map(|g| g.rows.iter())
+        .filter(|r| r.id.starts_with("change_designator:"))
+        .map(|r| (r.id.clone(), r.to.clone().unwrap_or_default()))
+        .collect();
+    // Twelve parts per channel, three channels. RS and CF (the sheet's first R and C) were
+    // already R10i and C10i on the board, so the other ten of each channel are renamed: U is
+    // U10i, RG (the second R) R20i, CO (the second C) C20i.
+    assert_eq!(renames.len(), 30, "{renames:#?}");
+    for k in 0..3 {
+        for (part, to) in [("U", "U10"), ("RG", "R20"), ("CO", "C20")] {
+            assert!(renames.contains(&(format!("change_designator:/ch[{k}]/{part}"), format!("{to}{}", k + 1))), "{renames:#?}");
+        }
+        for part in ["RS", "CF"] {
+            assert!(!renames.iter().any(|(id, _)| *id == format!("change_designator:/ch[{k}]/{part}")), "{renames:#?}");
+        }
+    }
+}

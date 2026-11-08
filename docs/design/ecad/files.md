@@ -96,7 +96,7 @@ Inside a sheet:
 | `net <name> = { class, global, power_flag, renamed_from }` | a net and its settings; a net first named in a `connect` needs no declaration |
 | `bus <name> = [<members>]` | a bus |
 | `harness <name> = <interface>` | a harness of an interface type |
-| `instance <name> = { sheet, repeat, bind }` | a sheet placed as a block, or repeated as channels |
+| `instance <name> = { sheet, repeat, designators, bind }` | a sheet placed as a block, or repeated as channels; `designators = "{prefix}{n}0{i}"` names each channel's parts |
 | `connect = [<endpoints>]` | joins every endpoint listed into one net |
 | `no_erc = [<pins>]` | pins the electrical rules leave alone |
 | `diff_pair <name> = { p, n }` | a differential pair |

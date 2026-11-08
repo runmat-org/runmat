@@ -402,6 +402,7 @@ fn read_sheet(
                     repeat: None,
                     bindings: vec![],
                     renamed_from: None,
+                    designators: None,
                     source: Default::default(),
                 });
                 for pin in node.children("pin") {

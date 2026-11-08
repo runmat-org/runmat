@@ -347,11 +347,13 @@ pub enum FieldKind {
 }
 
 /// Shows a field only while another field has one of the listed values (`true`/`false` for
-/// booleans).
+/// booleans), or, with `filled`, while it has any value at all (a Bus typed in).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FieldCondition {
     pub field: String,
     pub any_of: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub filled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

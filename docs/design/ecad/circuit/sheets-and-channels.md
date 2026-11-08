@@ -69,4 +69,6 @@ Channel `k` binds `IN` to `AIN<k>` and `OUT` to `ADC<k>`. The board can place ea
 
 A component or net inside a block is named by its path: `/baro/U2`, `/ch[1]/RF`, `/ch[1]/FBK`. Board footprints link to components by these paths in the board's `sync` section, and a variant names a component in a channel the same way (`"/ch[0]/CD2"`). See [Names and selectors](/docs/design-language/names-and-selectors#pins-nets-and-designators).
 
+Channel parts are numbered on in sequence unless the instance names them with a template. `designators = "{prefix}{n}0{i}"` builds each designator from the part's letters (`{prefix}`: R, C, U), its number on the sheet (`{n}`: R1 is 1; a part named without a number takes the next free one for its letters) and the channel from 1 (`{i}`), so R1 in channel 2 is R102. The template needs `{n}` and `{i}`. The Repeat channel tool writes it from its Designators field, and Update board stages each renamed part as a designator change.
+
 A circuit can also use a sheet, an interface or a net class that a circuit in another folder declares, named by symbol with the folder it comes from. See [Folders, modules and use](/docs/design-language/modules).

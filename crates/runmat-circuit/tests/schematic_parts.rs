@@ -195,6 +195,22 @@ fn a_pasted_group_keeps_the_wires_between_its_parts_and_its_rails() {
 }
 
 #[test]
+fn a_pasted_group_names_its_copy_of_a_named_net_after_it() {
+    // U1's output joins C1 by the local net +3V3, drawn by its labels.
+    let text = BLANK.replace("connect = [U1.VIN, \"C1.1\"]", "net \"+3V3\"\n        connect = [\"net.+3V3\", U1.VOUT, \"C1.1\"]");
+    let p = Project { circuit: text, lock: None }.step("schematic.annotate", json!({}));
+    let (p2, summary) = p.run("schematic.paste", json!({ "items": ["component:U1", "component:C1"], "dx": 0, "dy": -25.4 })).unwrap();
+    assert_eq!(summary, "pasted U1 as U2, C1 as C2 with 1 connection");
+    assert!(p2.circuit.contains("net \"+3V3_2\"\n        connect = [\"net.+3V3_2\", U2.VOUT, \"C2.1\"]"), "{}", p2.circuit);
+    let index = p2.index();
+    let pins: Vec<_> = index.schematic.sheets.iter().flat_map(|s| s.symbols.iter()).flat_map(|s| s.pins.iter().map(move |p| (format!("{}.{}", s.designator, p.name), p.net.clone()))).collect();
+    let net = |pin: &str| pins.iter().find(|(n, _)| n == pin).and_then(|(_, net)| net.clone()).unwrap_or_default();
+    assert_eq!(net("U2.VOUT"), "+3V3_2");
+    assert_eq!(net("C2.1"), "+3V3_2");
+    assert_eq!(net("U1.VOUT"), "+3V3", "the originals keep their net");
+}
+
+#[test]
 fn a_moved_part_keeps_its_wires_and_mirror_flips_it() {
     let p = blank();
     let (x, y, _, _) = p.symbol("C1");

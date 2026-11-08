@@ -64,9 +64,10 @@ pub const NAME_OFFSET: Coord = 508_000;
 pub const NO_CONNECT_HALF: Coord = 800_000;
 /// The content's inset from the paper edge.
 pub(super) const MARGIN: Coord = 20 * GRID;
-/// The title block, bottom right inside the frame (mm).
-pub const TITLE_W_MM: f64 = 130.0;
-pub const TITLE_ROW_MM: f64 = 6.0;
+/// The title block, bottom right inside the frame (mm): a compact identification block in
+/// ISO 7200's proportions, narrow beside the sheet's parts, its rows one text line tall.
+pub const TITLE_W_MM: f64 = 100.0;
+pub const TITLE_ROW_MM: f64 = 5.0;
 /// The frame's inset from the paper edge (mm).
 pub const FRAME_MM: f64 = 10.0;
 /// Sheet sizes tried in order, landscape (mm).

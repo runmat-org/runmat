@@ -443,7 +443,8 @@ fn a_new_regulator_lands_with_its_caps_on_a_recorded_sheet() {
             .filter(|b| !old_boxes.iter().any(|o| o.iter().zip(b).all(|(x, y)| (x - y).abs() < EPS)))
             .collect()
     };
-    let title = [pwr.width_mm - 10.0 - 130.0 - 2.0, 0.0, pwr.width_mm, 10.0 + 5.0 * 6.0 + 2.0];
+    use runmat_circuit::schematic::{FRAME_MM, TITLE_ROW_MM, TITLE_W_MM};
+    let title = [pwr.width_mm - FRAME_MM - TITLE_W_MM - 2.0, 0.0, pwr.width_mm, FRAME_MM + 5.0 * TITLE_ROW_MM + 2.0];
     for b in &new_boxes {
         assert!(!overlaps(b, &title, 0.0), "{b:?} reaches the title block {title:?}");
         assert!(b[0] >= 10.0 && b[2] <= pwr.width_mm - 10.0 && b[1] >= 10.0 && b[3] <= pwr.height_mm - 10.0, "{b:?} leaves the frame");

@@ -306,6 +306,9 @@ struct Ctx<'a> {
     no_erc: Vec<(usize, usize)>,
     explicit_designator: BTreeMap<usize, String>,
     sheet_renames: BTreeMap<NamePath, NamePath>,
+    /// The template and channel (from 0) of the repeated instance being walked, if it names
+    /// its parts (`designators = "{prefix}{n}0{i}"`).
+    channel_designators: Option<(String, u32)>,
 }
 
 impl<'a> Ctx<'a> {
@@ -729,7 +732,10 @@ impl<'a> Ctx<'a> {
                 ),
             }
         }
-        // Components.
+        // Components. A templated channel numbers its parts per prefix in source order ({n}),
+        // keeping a number a part's own name gives (R3 is 3).
+        let own_numbers: BTreeSet<(String, u32)> = sheet.components.iter().filter_map(|d| written_number(&d.name)).collect();
+        let mut next_number: BTreeMap<String, u32> = BTreeMap::new();
         for decl in &sheet.components {
             let path = inst.child(decl.name.clone());
             let fit = self.fitting(&path, decl);
@@ -793,7 +799,21 @@ impl<'a> Ctx<'a> {
             });
             self.comp_index.insert(path, ci);
             let repeated = channel.is_some() || inst.0.iter().any(|s| s.ends_with(']'));
-            if !decl.name.contains('?') && !repeated {
+            if let Some((template, ch)) = &self.channel_designators {
+                let prefix = self.comps[ci].entity.and_then(|e| self.pool.entities.get(&e)).map(|e| e.prefix.clone()).unwrap_or_else(|| prefix_of(&decl.name));
+                let n = match written_number(&decl.name) {
+                    Some((_, n)) => n,
+                    None => {
+                        let k = next_number.entry(prefix.clone()).or_insert(1);
+                        while own_numbers.contains(&(prefix.clone(), *k)) {
+                            *k += 1;
+                        }
+                        *k += 1;
+                        *k - 1
+                    }
+                };
+                self.explicit_designator.insert(ci, channel_designator(template, &prefix, n, ch + 1));
+            } else if !decl.name.contains('?') && !repeated {
                 self.explicit_designator.insert(ci, decl.name.clone());
             }
         }
@@ -816,7 +836,14 @@ impl<'a> Ctx<'a> {
                         })
                     }
                 };
+                // A repeated instance's template names its channels' parts; a block placed once
+                // keeps the template of the channel it sits in.
+                let outer = self.channel_designators.clone();
+                if si.repeat.is_some() {
+                    self.channel_designators = si.designators.clone().map(|t| (t, ch));
+                }
                 self.walk(&si.sheet, child.clone(), chan, depth + 1, old_child);
+                self.channel_designators = outer;
                 let child_def: Option<&'a SheetDef> = self.design.sheets.get(&si.sheet);
                 let Some(child_def) = child_def else { continue };
                 for (port, binding) in &si.bindings {
@@ -1048,6 +1075,41 @@ pub fn find_pins(pins: &[PinInst], pin: &str) -> Result<Vec<usize>, String> {
     Err(format!("no pin `{pin}`"))
 }
 
+/// `R12` → (`R`, 12): a component name that is letters then a number.
+fn written_number(name: &str) -> Option<(String, u32)> {
+    let letters: String = name.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+    let digits = &name[letters.len()..];
+    if letters.is_empty() || digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some((letters, digits.parse().ok()?))
+}
+
+/// A channel part's designator from its instance's template: `{prefix}` is the part's letters
+/// (R, C, U), `{n}` its number on the sheet and `{i}` the channel, from 1. `{prefix}{n}0{i}`
+/// names R1 in channel 2 R102; `{prefix}{n}_{i}` names it R1_2.
+pub fn channel_designator(template: &str, prefix: &str, n: u32, channel: u32) -> String {
+    template.replace("{prefix}", prefix).replace("{n}", &n.to_string()).replace("{i}", &channel.to_string())
+}
+
+/// Why `template` can't name channel parts: it needs `{n}` and `{i}` (or parts would share a
+/// name), and only the three fields.
+pub fn check_channel_designators(template: &str) -> Result<(), String> {
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let close = rest[open..].find('}').ok_or_else(|| format!("`{template}` has a `{{` with no `}}`"))?;
+        let field = &rest[open + 1..open + close];
+        if !["prefix", "n", "i"].contains(&field) {
+            return Err(format!("`{{{field}}}` isn't a designator field; use {{prefix}}, {{n}} and {{i}}"));
+        }
+        rest = &rest[open + close + 1..];
+    }
+    if !template.contains("{n}") || !template.contains("{i}") {
+        return Err(format!("`{template}` needs {{n}} (the part's number) and {{i}} (the channel), such as {{prefix}}{{n}}0{{i}}"));
+    }
+    Ok(())
+}
+
 fn prefix_of(name: &str) -> String {
     let p: String = name
         .chars()
@@ -1085,6 +1147,7 @@ pub fn elaborate(
         no_erc: Vec::new(),
         explicit_designator: BTreeMap::new(),
         sheet_renames: BTreeMap::new(),
+        channel_designators: None,
     };
     let mut global_class: BTreeMap<String, Option<String>> = BTreeMap::new();
     for s in design.sheets.values() {

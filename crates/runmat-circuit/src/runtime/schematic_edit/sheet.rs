@@ -80,6 +80,7 @@ pub(super) fn sheet_symbol(e: &mut Editor) -> Result<String, EditError> {
         repeat: (channels > 1).then_some(channels),
         bindings: Vec::new(),
         renamed_from: None,
+        designators: None,
         source: Default::default(),
     };
     let text = instance_statement(&instance).map_err(|e| EditError::new(e.0))?;
@@ -139,10 +140,18 @@ pub(super) fn repeat_channel(e: &mut Editor) -> Result<String, EditError> {
         return Err(EditError::new("a sheet repeats at least once"));
     }
     let (_, instance, _) = picked_instance(e)?;
-    let repeated = SheetInstance { repeat: (channels > 1).then_some(channels), ..instance.clone() };
+    let designators = match e.value_str("designators") {
+        Some(t) if channels > 1 => {
+            crate::elab::check_channel_designators(&t).map_err(EditError::new)?;
+            Some(t)
+        }
+        _ => None,
+    };
+    let named = designators.as_ref().map(|t| format!(", parts named {t}")).unwrap_or_default();
+    let repeated = SheetInstance { repeat: (channels > 1).then_some(channels), designators, ..instance.clone() };
     let text = instance_statement(&repeated).map_err(|e| EditError::new(e.0))?;
     e.replace(instance.source.start as usize, instance.source.end as usize, text);
-    Ok(format!("{} repeats as {channels} channel(s)", instance.name))
+    Ok(format!("{} repeats as {channels} channel(s){named}", instance.name))
 }
 
 /// `schematic.no-erc`: marks the picked pin so ERC doesn't report it.

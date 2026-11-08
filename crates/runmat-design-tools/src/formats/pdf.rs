@@ -85,6 +85,12 @@ struct Page<'a> {
     sheet: &'a Sheet,
 }
 
+/// The line width (mm) a symbol drawn in text of height `h` (mm) strokes with: h/14, the
+/// stem of the writer's Courier, so a stroked Ω weighs as the letters beside it.
+fn stroke_width(h: f64) -> f64 {
+    h / 14.0
+}
+
 impl Page<'_> {
     fn block(&self, name: &str) -> Option<&Block> {
         self.sheet.blocks.iter().find(|b| b.name == name)
@@ -264,6 +270,7 @@ impl Page<'_> {
     }
 
     /// A drawing symbol in the character cell at `origin` (left baseline), `h` the text height.
+    /// Its strokes are [`stroke_width`] wide.
     fn symbol(&mut self, ch: char, origin: [f64; 2], h: f64, rotation: f64) {
         let t = Transform { at: origin, scale: h, rotation };
         // Cell units: 0.6 wide, the cap height 0.72 tall; the middle at (0.3, 0.36).
@@ -326,7 +333,9 @@ impl Page<'_> {
             }
             _ => letter = Some('?'),
         }
-        self.out.push_str("0.25 w [] 0 d\n");
+        // The strokes match the font's weight: h/14, Courier's stem at its height (0.25 mm at
+        // a drawing's 3.5 mm text, 0.09 mm at a schematic value's 1.27 mm).
+        let _ = writeln!(self.out, "{:.3} w [] 0 d", stroke_width(h));
         for l in lines {
             let pts: Vec<[f64; 2]> = l.iter().map(|q| t.apply(*q)).collect();
             self.path(&pts, false);
@@ -390,6 +399,11 @@ mod tests {
         o.text("NOTES", [20.0, 20.0], 3.5, "5.1 kΩ");
         let ohm = String::from_utf8_lossy(&write(&o)).into_owned();
         assert!(ohm.contains("(5.1 k) Tj") && !ohm.contains("(?) Tj"), "{ohm}");
+        // Its strokes weigh as the text: 3.5 mm text strokes at 0.25 mm, 1.27 mm text at 0.091 mm.
+        assert!(ohm.contains("0.250 w [] 0 d"), "{ohm}");
+        let mut small = Sheet { paper: [420.0, 297.0], ..Sheet::default() };
+        small.text("NOTES", [20.0, 20.0], 1.27, "10 kΩ");
+        assert!(String::from_utf8_lossy(&write(&small)).contains("0.091 w [] 0 d"));
         // The xref offsets point at their objects (bytes: the header's comment is binary).
         let find = |hay: &[u8], needle: &[u8]| hay.windows(needle.len()).rposition(|w| w == needle).unwrap();
         let after = find(&pdf, b"startxref\n") + b"startxref\n".len();

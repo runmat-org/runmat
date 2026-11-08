@@ -4,7 +4,8 @@
 //!
 //! Each page draws as the canvas lays it out: symbol bodies and art, pin lines with their names
 //! and numbers (small parts hide them), designators and values, sheet symbols with their
-//! entries, wires, junction dots, net labels and power ports, no-connect crosses and notes.
+//! entries, wires, junction dots, net labels and power ports, no-connect crosses, notes, and
+//! blankets as dashed boxes with their captions.
 //! Text sets in the PDF writer's Courier, its baseline start shifted for centred and
 //! right-aligned text by the font's 0.6-of-height character width.
 
@@ -45,8 +46,8 @@ fn frame(sheet: &mut Sheet, page: &SchematicSheet) {
         if k > 0 {
             sheet.line("OUTLINE", [x0, y1], [x1, y1]);
         }
-        text(sheet, [x0 + 1.5, y1 - 1.8], 1.2, "start", field);
-        text(sheet, [x0 + 30.0, y0 + 1.6], 2.5, "start", value);
+        text(sheet, [x0 + 1.5, y1 - 1.6], 1.2, "start", field);
+        text(sheet, [x0 + 16.0, y0 + 1.3], 2.5, "start", value);
     }
 }
 
@@ -127,6 +128,16 @@ pub fn page_sheet(page: &SchematicSheet) -> Sheet {
     for t in &page.texts {
         text(&mut sheet, [t.x_mm, t.y_mm], t.size_mm, "start", &t.text);
     }
+    // Blankets: a dashed box round the nets each covers, captioned above its top-left corner.
+    if !page.blankets.is_empty() {
+        sheet.linetypes = crate::formats::sheet::standard_linetypes();
+        sheet.layers.push(crate::formats::sheet::Layer { name: "BLANKET".into(), color: 5, linetype: "DASHED".into() });
+    }
+    for b in &page.blankets {
+        let [x0, y0, x1, y1] = b.rect;
+        rect(&mut sheet, "BLANKET", x0, y0, x1, y1);
+        text(&mut sheet, b.caption_at, b.caption_mm, "start", &b.caption);
+    }
     sheet
 }
 
@@ -140,5 +151,28 @@ mod tests {
         text(&mut sheet, [10.0, 5.0], 2.0, "middle", "ABCD");
         let Shape::Text { at, .. } = &sheet.entities[0].shape else { panic!() };
         assert!((at[0] - (10.0 - 2.4)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_blanket_draws_dashed_with_its_caption() {
+        let page = SchematicSheet {
+            width_mm: 297.0,
+            height_mm: 210.0,
+            blankets: vec![runmat_circuit::schematic::SheetBlanket {
+                name: "rails".into(),
+                caption: "blanket rails · class power".into(),
+                caption_at: [20.0, 60.6],
+                caption_mm: 1.27,
+                rect: [20.0, 30.0, 80.0, 60.0],
+                nets: vec!["GND".into()],
+            }],
+            ..Default::default()
+        };
+        let sheet = page_sheet(&page);
+        let layer = sheet.layers.iter().find(|l| l.name == "BLANKET").expect("a blanket layer");
+        assert_eq!(layer.linetype, "DASHED");
+        assert!(sheet.linetypes.iter().any(|t| t.name == "DASHED"));
+        assert!(sheet.entities.iter().any(|e| e.layer == "BLANKET" && matches!(&e.shape, Shape::Polyline { points, closed: true } if points[0] == [20.0, 30.0] && points[2] == [80.0, 60.0])));
+        assert!(sheet.entities.iter().any(|e| matches!(&e.shape, Shape::Text { text, at, .. } if text == "blanket rails · class power" && at[0] == 20.0)));
     }
 }

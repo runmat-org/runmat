@@ -374,7 +374,7 @@ pub(super) fn paste(project: &Project, files: &Files, request: &EditRequest) -> 
         for (s, line) in &wires {
             if s == sheet {
                 lines.push(line.clone());
-                kept += 1;
+                kept += usize::from(line.starts_with("connect"));
             }
         }
         let indent = st.component_ends.last().map(|&e| super::indent_at(text, e)).unwrap_or_default();
@@ -394,6 +394,10 @@ pub(super) fn paste(project: &Project, files: &Files, request: &EditRequest) -> 
 ///   pasted power port keeps its rail;
 /// - any other net (one that leaves the group) stays with the originals, and the copy's pin
 ///   is left open.
+///
+/// A new net copied from a named one is named after it (`+3V3` → `+3V3_2`), so the copies are
+/// drawn joined the way the originals are, by their labels or ports, not by one long wire
+/// between parts the group placed apart.
 fn group_wires(project: &Project, copies: &BTreeMap<usize, String>) -> Result<Vec<(String, String)>, EditError> {
     let nl = &project.netlist;
     let end = |ci: usize, pi: usize, name: &str| {
@@ -403,6 +407,7 @@ fn group_wires(project: &Project, copies: &BTreeMap<usize, String>) -> Result<Ve
         crate::syntax::endpoint(&Endpoint::pin(name, &pin)).map_err(|e| EditError::new(e.0))
     };
     let mut out = Vec::new();
+    let mut names: BTreeSet<String> = nl.nets.iter().flat_map(|n| std::iter::once(n.path.leaf().to_owned()).chain(n.aliases.iter().cloned())).collect();
     for net in &nl.nets {
         let mut by_sheet: BTreeMap<&str, Vec<(usize, usize)>> = BTreeMap::new();
         for &(ci, pi) in &net.pins {
@@ -417,6 +422,16 @@ fn group_wires(project: &Project, copies: &BTreeMap<usize, String>) -> Result<Ve
                 ends.push(end(ci, pi, nl.components[ci].path.leaf())?);
             } else if pins.len() < 2 {
                 continue;
+            }
+            let leaf = net.path.leaf();
+            if !net.global && !leaf.starts_with("Net-(") {
+                let name = (2..).map(|n| format!("{leaf}_{n}")).find(|n| !names.contains(n)).expect("a free name");
+                names.insert(name.clone());
+                let decl = crate::syntax::endpoint(&Endpoint::net(&name)).map_err(|e| EditError::new(e.0))?;
+                // A name the endpoint quotes (`"net.+3V3_2"`) is quoted where it is declared too.
+                let declared = if decl.starts_with('"') { quote(&name) } else { name.clone() };
+                out.push((sheet.to_owned(), format!("{} {declared}", words::NET)));
+                ends.push(decl);
             }
             for &(ci, pi) in &pins {
                 ends.push(end(ci, pi, &copies[&ci])?);

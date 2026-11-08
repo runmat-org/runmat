@@ -514,12 +514,18 @@ pub(super) fn read_instance(
         repeat: None,
         bindings: Vec::new(),
         renamed_from: None,
+        designators: None,
         source,
     };
     for (field, value) in record_of(expr, span)? {
         match field.as_str() {
             "sheet" => instance.sheet = word_of(Some(value), span)?,
             "repeat" => instance.repeat = Some(u32_of(value)?),
+            "designators" => {
+                let template = word_of(Some(value), span)?;
+                crate::elab::check_channel_designators(&template).map_err(|m| diagnostic(span, m))?;
+                instance.designators = Some(template);
+            }
             "renamed_from" => instance.renamed_from = Some(word_of(Some(value), span)?),
             "bind" => {
                 for (port, binding) in record_of(Some(value), span)? {

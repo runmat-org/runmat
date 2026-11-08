@@ -323,6 +323,9 @@ pub struct SheetInstance {
     pub repeat: Option<u32>,
     pub bindings: Vec<(String, Binding)>,
     pub renamed_from: Option<String>,
+    /// How a repeated sheet's parts are named per channel (`{prefix}{n}0{i}`: R1 in channel 2
+    /// is R102); `None` numbers them on in sequence. See [`crate::elab::channel_designator`].
+    pub designators: Option<String>,
     pub source: SourceKey,
 }
 
@@ -538,6 +541,7 @@ impl<'a> DesignBuilder<'a> {
             repeat,
             bindings: Vec::new(),
             renamed_from: None,
+            designators: None,
             source: SourceKey::default(),
         });
         self.s().instances.last_mut().unwrap()

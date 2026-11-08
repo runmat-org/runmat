@@ -414,6 +414,9 @@ pub(crate) fn instance_statement(instance: &SheetInstance) -> Print {
     if let Some(repeat) = instance.repeat {
         entries.push(("repeat".into(), repeat.to_string()));
     }
+    if let Some(template) = &instance.designators {
+        entries.push(("designators".into(), quote(template)));
+    }
     if let Some(renamed) = &instance.renamed_from {
         entries.push(("renamed_from".into(), name(renamed)));
     }

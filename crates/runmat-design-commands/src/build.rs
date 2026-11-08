@@ -140,7 +140,13 @@ impl Field {
         self.visible_when = Some(FieldCondition {
             field: field.to_owned(),
             any_of: values.iter().map(|v| (*v).to_owned()).collect(),
+            filled: false,
         });
+        self
+    }
+    /// Shown only while `field` has a value (text typed, a pick made).
+    pub fn if_filled(mut self, field: &str) -> Self {
+        self.visible_when = Some(FieldCondition { field: field.to_owned(), any_of: Vec::new(), filled: true });
         self
     }
     /// Shown only while the boolean `field` is checked.

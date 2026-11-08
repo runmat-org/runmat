@@ -228,6 +228,26 @@ fn a_blanket_sets_a_class_over_several_nets_and_is_drawn_round_them() {
 }
 
 #[test]
+fn repeated_channels_name_their_parts_from_the_template() {
+    let mut t = step(&wired_regulator(), "schematic.sheet-symbol", json!({ "name": "led", "sheet": "indicator", "channels": 1 }));
+    t = t.replace("sheet indicator {\n    }", "sheet indicator {\n        port PWR : passive\n        component R1 = { part = \"R0402-10K\" }\n        component RX = { part = \"R0402-10K\" }\n        connect = [port.PWR, \"R1.1\", \"RX.1\"]\n        no_erc = [\"R1.2\", \"RX.2\"]\n    }");
+    let (t, summary) = run(&t, "schematic.repeat-channel", json!({ "symbol": ["sheet:/led"], "channels": 3, "designators": "{prefix}{n}0{i}" })).unwrap();
+    assert_eq!(summary, "led repeats as 3 channel(s), parts named {prefix}{n}0{i}");
+    assert!(t.contains(r#"instance led = { sheet = indicator, repeat = 3, designators = "{prefix}{n}0{i}" }"#), "{t}");
+    let drawn = index(&t);
+    let mut names: Vec<String> = drawn.bom.iter().flat_map(|r| r.designators.clone()).filter(|d| d.starts_with('R')).collect();
+    names.sort();
+    // R1 keeps its number; RX, with none, takes the next free one (2).
+    assert_eq!(names, ["R101", "R102", "R103", "R201", "R202", "R203"]);
+    for bad in ["{prefix}{n}", "{prefix}{i}", "{part}{n}{i}"] {
+        assert!(run(&t, "schematic.repeat-channel", json!({ "symbol": ["sheet:/led"], "channels": 3, "designators": bad })).is_err(), "{bad}");
+    }
+    // Back to one channel: the template goes with the repeat.
+    let t = step(&t, "schematic.repeat-channel", json!({ "symbol": ["sheet:/led"], "channels": 1 }));
+    assert!(t.contains("instance led = { sheet = indicator }"), "{t}");
+}
+
+#[test]
 fn hierarchy_sheet_symbols_entries_ports_and_channels() {
     let mut t = wired_regulator();
     t = step(&t, "schematic.sheet-symbol", json!({ "name": "led", "sheet": "indicator", "channels": 1 }));

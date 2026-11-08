@@ -68,8 +68,8 @@ pub(super) fn add(c: &mut Catalog) {
             ),
             offset("dx", "Delta X", 0.0).drag(Manipulator::Point),
             offset("dy", "Delta Y", 0.0),
-            angle("rotation", "Rotation", 0.0),
-            flag("mirror", "Mirror", false),
+            angle("rotation", "Rotation", 0.0).help("Space turns the part a quarter turn while it is placed or moved."),
+            flag("mirror", "Mirror", false).help("X mirrors it."),
             flag("drag_wires", "Keep wires attached", true),
         ])
         .when(selected(&[K::Component, K::Wire, K::Port, K::SheetSymbol]))
@@ -87,8 +87,8 @@ pub(super) fn add(c: &mut Catalog) {
             text("designator", "Designator", Some("R?")),
             text("value", "Value", Some("10 kohm ± 1 %")).optional(),
             pick("at", "Place at", &[K::Point]).optional(),
-            angle("rotation", "Rotation", 0.0),
-            flag("mirror", "Mirror", false),
+            angle("rotation", "Rotation", 0.0).help("Space turns the part a quarter turn while it is placed or moved."),
+            flag("mirror", "Mirror", false).help("X mirrors it."),
         ])
         .preview()
         .edit(place("component", Section::Components)),
@@ -247,7 +247,10 @@ pub(super) fn add(c: &mut Catalog) {
             text("bus", "Bus", Some("D"))
                 .optional()
                 .help("A bus on the symbol's sheet: channel i of a repeated symbol takes member offset + i."),
-            count("offset", "Offset", 0, 0).optional(),
+            count("offset", "Offset", 0, 0)
+                .optional()
+                .if_filled("bus")
+                .help("The bus member channel 0 takes."),
         ])
         .when(selected_one(&[K::SheetSymbol]))
         .edit(place("binding", Section::Components)),
@@ -298,11 +301,9 @@ pub(super) fn add(c: &mut Catalog) {
         .inputs(vec![
             pick("symbol", "Sheet symbol", &[K::SheetSymbol]),
             count("channels", "Channels", 4, 2),
-            text(
-                "designators",
-                "Designators",
-                Some("$Component_$ChannelIndex"),
-            ),
+            text("designators", "Designators", Some("{prefix}{n}0{i}"))
+                .optional()
+                .help("How each channel names its parts: {prefix} is R, C or U, {n} the part's number on the sheet, {i} the channel from 1, so {prefix}{n}0{i} names R1 in channel 2 R102. Empty numbers them on in sequence."),
         ])
         .when(selected_one(&[K::SheetSymbol]))
         .edit(edit(EditOp::Set, Section::Components).item("channels")),
