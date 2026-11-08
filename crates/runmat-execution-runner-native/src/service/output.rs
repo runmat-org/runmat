@@ -72,6 +72,10 @@ impl CallerOutput {
             .active
             .as_mut()
             .expect("original output reader selected");
+        // Completion joins the pipe owners before publication. Snapshot it
+        // before reading their heads so a later completion cannot invalidate
+        // an earlier, still-Reading page.
+        let terminal_before_page = completion.verified_terminal().is_some();
         let mut buffer = [0; OUTPUT_PAGE_BYTES];
         let mut progress = false;
         for (index, stream, console_stream) in [
@@ -122,7 +126,7 @@ impl CallerOutput {
             if let Some(error) = completion.raw_output_failure() {
                 return Err(output_error(error, runtime));
             }
-            if self.active.is_some() && completion.verified_terminal().is_some() {
+            if self.active.is_some() && terminal_before_page {
                 // Terminal completion follows the original pipe owners' join.
                 // A remaining Reading head therefore cannot acquire more bytes;
                 // refusing publication is preferable to an endless pending wait

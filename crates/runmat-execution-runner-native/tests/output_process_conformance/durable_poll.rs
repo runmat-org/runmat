@@ -100,7 +100,10 @@ pub(super) async fn verify(service: &NativeExecutionService, config: &NativeExec
                         match wait.await {
                             Ok(()) => {}
                             Err(ExecutionServiceError::Cancelled) => break,
-                            Err(error) => panic!("original pending job wait returned {error:?}"),
+                            Err(error) => panic!(
+                                "original pending job wait returned {error:?}; durable observation: {:?}",
+                                client.attach(job.id, 0, 0).await
+                            ),
                         }
                     } else {
                         tokio::time::sleep(Duration::from_millis(10)).await;
