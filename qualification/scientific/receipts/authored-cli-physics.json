@@ -65,14 +65,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "d07d8e67d874d8d3f648050a96bbd50fa5d30ce4291e56f2e07eb4b2c7c0c23d",
+      "sha256": "14c90edfac4c0499a6894495923fadf278a7e41d59d9d3ceb2d694fd65b22ea7",
       "files": 24831,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The reviewed 122-path inverse reconstructs the measured scientific inventory. Console-consumer observation ordering, CI fixtures and metadata preserve successful numerical work, process-retirement production and resource charges. Fresh deterministic and process-level output checks cover the changed boundary. Original scientific totals, assertions and artifact identities remain; dev product qualification is separate.",
+    "reason": "The reviewed 123-path inverse reconstructs the measured scientific inventory. Console-consumer observation ordering, CI fixtures and metadata preserve successful numerical work, process-retirement production and resource charges. The logspace change is confined to its cfg(test) GPU witness and preserves scientific implementation and assertions. Original scientific totals and artifact identities remain; revised Windows GPU-witness qualification is pending separately.",
     "review": {
       "path": "qualification/scientific/reviews/dev-ci-repairs.json",
-      "sha256": "3fb5ae1fec149cc3d2f67d79bdaa6935df183cbfe337ca96e240e94109b29e08"
+      "sha256": "5645e5810d3cefa27ed7c6024239c91fe3dd1121e6ab7df1bb52d6e54f635476"
     }
   }
 }
