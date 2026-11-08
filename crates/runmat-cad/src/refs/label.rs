@@ -76,6 +76,17 @@ fn role_words(role: Role) -> &'static str {
     }
 }
 
+/// The feature and the face's role, with the role left out when the feature's name already
+/// ends with it: a fillet feature named `round` reads `Round between …`, not `Round round`.
+fn head(feature: &str, role: &str) -> String {
+    let lower = feature.to_lowercase();
+    if lower == role || lower.ends_with(&format!(" {role}")) {
+        feature.to_string()
+    } else {
+        format!("{feature} {role}")
+    }
+}
+
 fn instance(key: &InstanceKey) -> String {
     match key {
         InstanceKey::Linear { step } | InstanceKey::Circular { step } | InstanceKey::Curve { step } => format!("copy {step}"),
@@ -90,8 +101,8 @@ fn instance(key: &InstanceKey) -> String {
 
 impl NameTable {
     /// The name as an engineer reads it: the feature, what the face is to it, and what it was
-    /// made from (`Hollow inner wall · body side 1`, `Round between body side 1 and body end
-    /// face`, `Row copy 2 · boss side 1`). Names the table doesn't hold read through the
+    /// made from (`Hollow inner wall · body side 1`, `Edge round between body side 1 and body
+    /// end face`, `Row copy 2 · boss side 1`). Names the table doesn't hold read through the
     /// recipes their tags recorded, else as `a face`.
     pub fn label(&self, name: &EntityName) -> String {
         capitalized(&self.label_at(name, 0))
@@ -110,7 +121,7 @@ impl NameTable {
     fn label_at(&self, name: &EntityName, depth: u32) -> String {
         match name {
             EntityName::Generated(GenerationName { feature, role, tag, ordinal, step: _ }) => {
-                let head = format!("{} {}", words(&feature.0), role_words(*role));
+                let head = head(&words(&feature.0), role_words(*role));
                 let mut text = match tag {
                     SourceTag::None => head,
                     SourceTag::Curve { entity, .. } => format!("{head} {}", curve(&entity.0)),
@@ -168,7 +179,12 @@ mod tests {
         assert_eq!(table.label(&side("body", "yaw_bore")), "Body side yaw bore");
         assert_eq!(table.label(&inner), "Hollow inner wall · body side 2");
         let r = table.label(&round);
-        assert!(r.starts_with("Edge round round between "), "{r}");
+        assert!(r.starts_with("Edge round between "), "{r}");
+        // A feature named after its role says the word once.
+        let named_round = EntityName::generated("round", Role::Blend, SourceTag::edge_between(&wall, &top));
+        let n = table.label(&named_round);
+        assert!(n.starts_with("Round between ") && n.contains("body side 2") && n.contains("body end face"), "{n}");
+        assert_eq!(table.label(&EntityName::generated("chamfer", Role::Chamfer, SourceTag::None)), "Chamfer");
         assert!(r.contains("body side 2") && r.contains("body end face"), "{r}");
         assert_eq!(table.label(&copy), "Row copy 2 · hollow inner wall · body side 2");
     }
