@@ -192,7 +192,7 @@ jobs:
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             autoconf autoconf-archive automake build-essential ca-certificates cmake curl \
             gdb git libdbus-1-dev libegl1-mesa-dev libgl1-mesa-dev libhdf5-dev \
-            liblapack-dev libopenblas-dev libssl-dev libtool libudev-dev libwayland-dev \
+            liblapack-dev libopenblas-dev libssl-dev libtool libudev-dev libvulkan1 mesa-vulkan-drivers libwayland-dev \
             libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxkbcommon-dev \
             libxkbcommon-x11-0 libxrandr-dev libzmq3-dev ninja-build pkg-config unzip zip \
             xauth xvfb
@@ -243,6 +243,35 @@ jobs:
         if: runner.os == 'Windows' && matrix.needs_occt
         shell: pwsh
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target x86_64-pc-windows-msvc
+
+      - name: Enable Windows compiler for native interoperability tests
+        if: runner.os == 'Windows' && matrix.task == 'test'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (!$installation) { throw 'Visual Studio C++ tools are required by native interoperability tests' }
+          $devCmd = Join-Path $installation 'Common7\Tools\VsDevCmd.bat'
+          $command = '"{0}" -no_logo -arch=x64 -host_arch=x64 >nul && set' -f $devCmd
+          $environment = & $env:ComSpec /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw 'Visual Studio developer environment failed' }
+          foreach ($line in $environment) {
+            if ($line -match '^(PATH|INCLUDE|LIB|LIBPATH)=(.*)$') {
+              "$($Matches[1])=$($Matches[2])" >> $env:GITHUB_ENV
+            }
+          }
+
+      - name: Install pinned shader compiler beside Windows test executables
+        if: runner.os == 'Windows' && matrix.task == 'test' && matrix.test_group != 'language'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dxc = & ./scripts/distribution/prepare-windows-dxc-runtime.ps1 -Target x86_64-pc-windows-msvc -Destination "$env:RUNNER_TEMP/runmat-test-dxc"
+          foreach ($directory in @("$env:CARGO_TARGET_DIR/debug", "$env:CARGO_TARGET_DIR/debug/deps", "$env:CARGO_TARGET_DIR/debug/examples")) {
+            New-Item -ItemType Directory -Force -Path $directory | Out-Null
+            Copy-Item -LiteralPath (Join-Path $dxc.BinDir 'dxcompiler.dll'),(Join-Path $dxc.BinDir 'dxil.dll') -Destination $directory
+          }
 
       - name: Select native Perl for Windows quality builds
         if: matrix.name == 'windows-quality'
@@ -351,6 +380,9 @@ jobs:
         env:
           RUST_BACKTRACE: 1
           RUST_TEST_THREADS: 1
+          # The headless runner provides Mesa Vulkan. Avoid initializing EGL
+          # against Xvfb, whose DRI warnings pollute captured child stderr.
+          WGPU_BACKEND: vulkan
         run: |
           set -o pipefail
           xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
