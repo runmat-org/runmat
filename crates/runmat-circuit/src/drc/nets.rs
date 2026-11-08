@@ -81,7 +81,7 @@ impl Drc {
                     severity: Severity::Error,
                     items: vec![net_item],
                     layer: None,
-                    at: Point::ORIGIN,
+                    at: net_anchor(board, n),
                     actual: Some(len),
                     required: Some(lmin.or(lmax).unwrap_or(0) as f64),
                     rule,
@@ -128,7 +128,7 @@ impl Drc {
                         severity: Severity::Error,
                         items: key_items(members.iter().map(|m| BItem::Net(m.0)).collect()),
                         layer: None,
-                        at: Point::ORIGIN,
+                        at: net_anchor(board, members[0]),
                         actual: Some(spread),
                         required: Some(s as f64),
                         rule: gname.clone(),
@@ -164,7 +164,7 @@ impl Drc {
                     severity: Severity::Error,
                     items: vec![BItem::Net(m.net.0)],
                     layer: None,
-                    at: Point::ORIGIN,
+                    at: net_anchor(board, m.net),
                     actual: Some(m.value),
                     required: Some(group.target),
                     rule: group.rule.clone(),
@@ -336,7 +336,7 @@ impl Drc {
                     severity: Severity::Error,
                     items: key_items(vec![pi, BItem::Net(n.0)]),
                     layer: None,
-                    at: Point::ORIGIN,
+                    at: net_anchor(board, p),
                     actual: Some(uncoupled),
                     required: Some(m as f64),
                     rule,
@@ -357,7 +357,7 @@ impl Drc {
                     severity: Severity::Error,
                     items: key_items(vec![pi, BItem::Net(n.0)]),
                     layer: None,
-                    at: Point::ORIGIN,
+                    at: net_anchor(board, p),
                     actual: Some(skew),
                     required: Some(max_ps),
                     rule,
@@ -376,7 +376,7 @@ impl Drc {
                     severity: Severity::Error,
                     items: key_items(vec![pi, BItem::Net(n.0)]),
                     layer: None,
-                    at: Point::ORIGIN,
+                    at: net_anchor(board, p),
                     actual: Some((lp - ln).abs()),
                     required: Some(s as f64),
                     rule,
@@ -488,4 +488,26 @@ impl Drc {
             });
         }
     }
+}
+
+/// Where a finding about a whole net is drawn: the middle of the net's longest track, or the
+/// first part with a pad on the net while it is unrouted. A finding at the board origin drew
+/// its marker over whatever part sits there.
+pub(crate) fn net_anchor(board: &Board, net: NetId) -> Point {
+    let longest = board
+        .tracks
+        .values()
+        .filter(|t| t.net == Some(net))
+        .max_by(|a, b| a.length().total_cmp(&b.length()).then(b.id.cmp(&a.id)));
+    if let Some(t) = longest {
+        return match t.geom {
+            crate::layout::TrackGeom::Arc { mid, .. } => mid,
+            crate::layout::TrackGeom::Segment { a, b } => Point { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+        };
+    }
+    board
+        .footprints
+        .values()
+        .find(|fp| fp.pad_nets.values().any(|&x| x == net))
+        .map_or(Point::ORIGIN, |fp| fp.at)
 }

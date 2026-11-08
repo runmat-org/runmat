@@ -200,6 +200,9 @@ fn a_length_group_reads_its_written_target_and_tolerance() {
     let found = codes(&drc, "length-match");
     assert_eq!(found.len(), 1);
     assert!(found[0].message.contains("over the target 30.000 mm by 5.000 mm"), "{}", found[0].message);
+    // The marker sits on the member's own copper (its longest track's middle), not at the
+    // board origin.
+    assert_eq!(found[0].at, Point::mm(22.5, 20.0));
     assert!(pair::tune(&mut b, c, 30.0, 0.5, &[], Pattern::Trombone, 0.0).unwrap_err().contains("longer"));
 }
 
@@ -216,6 +219,7 @@ fn in_pair_skew_in_picoseconds_counts_each_layers_velocity() {
     assert_eq!(skew.len(), 1, "{skew:#?}");
     // 30 mm at about 6.8 − 5.9 ps/mm.
     assert!((15.0..40.0).contains(&skew[0].actual.unwrap()), "{:?}", skew[0]);
+    assert_eq!(skew[0].at, Point::mm(20.0, 5.0));
 }
 
 /// PCB-41: a signal through a series resistor is one tuned signal: both nets' copper plus the
