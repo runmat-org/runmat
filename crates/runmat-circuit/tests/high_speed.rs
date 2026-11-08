@@ -456,3 +456,41 @@ fn a_controlled_line_over_a_plane_split_or_gap_is_a_return_path_finding() {
     b2.add_track(Some(sig), 0, w, Point::mm(10.0, 20.0), Point::mm(50.0, 20.0));
     assert!(codes(&filled(&mut b2), "return-path").is_empty());
 }
+
+/// A short pair in a group is meandered together: both nets gain the same length, so the
+/// pair's skew holds, and the meander keeps the pair's gap (no gap, clearance or uncoupled
+/// findings).
+#[test]
+fn a_pair_in_a_group_is_tuned_with_coupled_meanders() {
+    use runmat_circuit::high_speed::tuning::tune_group;
+    for pattern in [Pattern::Trombone, Pattern::Accordion] {
+        let mut b = board();
+        let (p, n) = (b.add_net("CLK_P", None), b.add_net("CLK_N", None));
+        let other = b.add_net("D0", None);
+        b.rules.push(
+            RuleSpec::single("grp", ":net(CLK_P, CLK_N, D0)")
+                .set(props::MATCH_GROUP, RuleValue::Text("bus".into()))
+                .set(props::MATCH_TOLERANCE, RuleValue::Len(mm(0.1))),
+        );
+        b.rules.push(RuleSpec::single("pair", ":net(CLK_P)").set(props::DIFF_GAP, RuleValue::Len(mm(0.2))));
+        // The pair: 30 mm at a 0.4 mm pitch (0.2 mm tracks, 0.2 mm gap); D0 is 34 mm.
+        let w = mm(0.2);
+        b.add_track(Some(p), 0, w, Point::mm(10.0, 20.0), Point::mm(40.0, 20.0));
+        b.add_track(Some(n), 0, w, Point::mm(10.0, 19.6), Point::mm(40.0, 19.6));
+        b.add_track(Some(other), 0, w, Point::mm(8.0, 5.0), Point::mm(42.0, 5.0));
+        let pairs = [(p, n)];
+        let results = tune_group(&mut b, "bus", pattern, &pairs).unwrap();
+        assert_eq!(results.len(), 2, "{results:?}");
+        let t: Vec<_> = results.into_iter().map(Result::unwrap).collect();
+        for x in &t {
+            assert!((x.after - 34.0).abs() <= 0.1, "{pattern:?} {x:?}");
+        }
+        // Equal gains: the skew (none here) holds.
+        assert!((t[0].after - t[1].after).abs() < 0.01, "{pattern:?} {t:?}");
+        // More than the one track each: the meander replaced the run on both nets.
+        assert!(b.tracks.values().filter(|x| x.net == Some(p)).count() > 3);
+        let (_, drc) = checked(&b, &pairs);
+        let bad: Vec<_> = drc.findings().into_iter().filter(|f| ["clearance", "diff-pair-gap", "diff-pair-uncoupled", "length-match"].contains(&f.code.as_str())).collect();
+        assert!(bad.is_empty(), "{pattern:?} {bad:#?}");
+    }
+}

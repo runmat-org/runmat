@@ -127,7 +127,7 @@ fn length(path: &[Point]) -> f64 {
 }
 
 /// Adds `paths` as tracks of their nets, then keeps them only if DRC names none of them.
-fn add_checked(board: &mut Board, pairs: &[(NetId, NetId)], layer: CopperIndex, width: Coord, paths: &[(NetId, Vec<Point>)]) -> Result<Vec<Vec<ItemId>>, String> {
+pub(crate) fn add_checked(board: &mut Board, pairs: &[(NetId, NetId)], layer: CopperIndex, width: Coord, paths: &[(NetId, Vec<Point>)]) -> Result<Vec<Vec<ItemId>>, String> {
     let ids: Vec<Vec<ItemId>> = paths
         .iter()
         .map(|(net, path)| path.windows(2).filter(|w| w[0] != w[1]).map(|w| board.add_track(Some(*net), layer, width, w[0], w[1])).collect())
@@ -232,7 +232,7 @@ impl Pattern {
         }
     }
     /// The bump height that adds `missing` (nm) with `bumps` bumps `pitch` wide.
-    fn amplitude(self, missing: f64, bumps: usize, pitch: f64) -> f64 {
+    pub(crate) fn amplitude(self, missing: f64, bumps: usize, pitch: f64) -> f64 {
         let each = missing / bumps as f64;
         match self {
             // Two sides of `amp` per bump.
@@ -245,7 +245,7 @@ impl Pattern {
 
 /// Meander points on `a`→`b`: `bumps` bumps (or teeth) of `amp`, starting to the left (`side`
 /// 1) or right (-1), each `pitch` wide, centred on the run.
-fn meander(a: Point, b: Point, pattern: Pattern, bumps: usize, pitch: f64, amp: f64, side: f64) -> Vec<Point> {
+pub(crate) fn meander(a: Point, b: Point, pattern: Pattern, bumps: usize, pitch: f64, amp: f64, side: f64) -> Vec<Point> {
     let l = a.dist(b);
     let (ux, uy) = ((b.x - a.x) as f64 / l, (b.y - a.y) as f64 / l);
     let (nx, ny) = (-uy, ux);

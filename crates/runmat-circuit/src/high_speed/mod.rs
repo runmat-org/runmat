@@ -8,6 +8,7 @@
 //! - [`groups`]: matched-length groups (`match_group`), compared in length or in delay.
 //! - [`cross_section`]: each controlled line's cross-section for the board study's field solve.
 //! - [`signals`]: a signal's length and delay across two-pin series parts.
+//! - [`pair_tune`]: coupled meanders that tune a differential pair as one.
 //! - [`return_path`]: controlled tracks crossing a split or gap in their reference plane.
 //! - [`stubs`]: via stubs past a net's connected layers, and back-drills that remove them.
 //!
@@ -19,6 +20,7 @@ pub mod controlled;
 pub mod cross_section;
 pub mod delay;
 pub mod groups;
+pub mod pair_tune;
 pub mod return_path;
 pub mod signals;
 pub mod stubs;

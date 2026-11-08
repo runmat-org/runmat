@@ -122,7 +122,9 @@ fn tune_length_reaches_a_delay_target_with_each_pattern_and_tune_group_matches_a
     assert!(g.members.iter().all(|m| m.status == "short"), "{g:?}");
     assert_eq!(b.drc.iter().filter(|r| r.code == "length-match").count(), 2, "{:#?}", b.drc);
     let summary = run(&mut grouped, "board.tune-group", json!({ "group": "usb", "pattern": "trombone" }));
-    assert!(summary.starts_with("Tuned usb: Tuned USB_DN") && !summary.contains("not tuned"), "{summary}");
+    // The pair is tuned together, in the pair's order, with one shared meander.
+    assert!(summary.starts_with("Tuned usb: Tuned USB_DP") && summary.contains("; Tuned USB_DN") && !summary.contains("not tuned"), "{summary}");
+    assert_eq!(summary.matches("with 1 trombone meander(s)").count(), 2, "{summary}");
     let b = index(&grouped);
     let g = b.length_groups.iter().find(|g| g.name == "usb").unwrap();
     assert!(g.members.iter().all(|m| m.status == "matched"), "{g:?}");

@@ -1,6 +1,8 @@
 //! Tuning a net, or every short member of a group, to a length or delay target.
 //!
-//! The meanders go on the net's longest straight track ([`crate::pair::tune`]). A delay target
+//! The meanders go on the net's longest straight track ([`crate::pair::tune`]); two short
+//! members of a group that form a declared pair are meandered together along their coupled
+//! run ([`super::pair_tune`]), so they keep their gap. A delay target
 //! becomes a length on that track's layer: the missing picoseconds divided by the layer's
 //! ps/mm at the track's width. A net whose rules set `through_parts` is tuned as its whole
 //! signal: the copper and part delays beyond it count toward the target.
@@ -83,10 +85,64 @@ pub fn tune_group(board: &mut Board, group: &str, pattern: Pattern, pairs: &[(Ne
         Basis::Length => Target::Length(grp.target),
         Basis::Delay => Target::Delay(grp.target),
     };
-    Ok(grp
-        .members
-        .iter()
-        .filter(|m| m.status == Status::Short)
-        .map(|m| tune_net(board, m.net, target, grp.tolerance, pattern, pairs))
-        .collect())
+    // Two short members that form a declared pair are tuned together, so they stay coupled.
+    let short: Vec<_> = grp.members.iter().filter(|m| m.status == Status::Short).collect();
+    let mut out = vec![];
+    let mut done = std::collections::BTreeSet::new();
+    for m in &short {
+        if done.contains(&m.net) {
+            continue;
+        }
+        let partner = pairs.iter().find_map(|&(a, b)| (a == m.net).then_some(b).or((b == m.net).then_some(a)));
+        if let Some(q) = partner.and_then(|q| short.iter().find(|x| x.net == q)) {
+            done.extend([m.net, q.net]);
+            let (p, n) = pairs.iter().copied().find(|&(a, b)| (a, b) == (m.net, q.net) || (b, a) == (m.net, q.net)).unwrap_or((m.net, q.net));
+            out.extend(tune_pair_to(board, p, n, &grp, pattern, pairs));
+            continue;
+        }
+        done.insert(m.net);
+        out.push(tune_net(board, m.net, target, grp.tolerance, pattern, pairs));
+    }
+    Ok(out)
+}
+
+/// Tunes a pair of short members together by their mean shortfall, reported per net.
+fn tune_pair_to(board: &mut Board, p: NetId, n: NetId, grp: &super::groups::Group, pattern: Pattern, pairs: &[(NetId, NetId)]) -> Vec<Result<Tuned, String>> {
+    let dev = |net: NetId| grp.members.iter().find(|m| m.net == net).map_or(0.0, |m| m.deviation);
+    let short = -(dev(p) + dev(n)) / 2.0;
+    let missing_mm = match grp.basis {
+        Basis::Length => short,
+        Basis::Delay => {
+            let Some(run) = super::pair_tune::coupled_run(board, p, n) else {
+                return vec![Err(format!("{}/{} has no coupled run to meander", board.net_name(p), board.net_name(n)))];
+            };
+            short / DelayModel::new(&board.stackup).ps_per_mm(run.p.layer, run.p.width)
+        }
+    };
+    let value = |board: &Board, net: NetId| {
+        let (mut rules, _) = BoardRules::for_board(board);
+        let g = BoardGraph::new(board, pairs);
+        rules.rebuild(&g);
+        let t = net_timing(board, &rules, &g);
+        let sig = signal_of(board, &rules, &g, net, &t);
+        match grp.basis {
+            Basis::Length => sig.timing.length * 1e-6,
+            Basis::Delay => sig.timing.delay,
+        }
+    };
+    let before = (value(board, p), value(board, n));
+    match super::pair_tune::tune_pair(board, p, n, missing_mm, pairs, pattern) {
+        Ok(t) => {
+            let after = (value(board, p), value(board, n));
+            let one = |net: NetId, b: f64, a: f64, lb: f64, la: f64| Tuned {
+                net: board.net_name(net).to_owned(),
+                basis: grp.basis,
+                before: b,
+                after: a,
+                tuning: Tuning { before: lb, after: la, bumps: t.bumps, amplitude: t.amplitude },
+            };
+            vec![Ok(one(p, before.0, after.0, t.before.0, t.after.0)), Ok(one(n, before.1, after.1, t.before.1, t.after.1))]
+        }
+        Err(e) => vec![Err(e)],
+    }
 }
