@@ -323,6 +323,10 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             ))),
         }
     }
+    // The models as the output carries them (in the browser host, mesh arrays as references to
+    // the bytes beside the JSON); the drawing measures and projects their numbers.
+    let models_out = displays;
+    let displays: serde_json::Map<String, Value> = models_out.iter().map(|(k, v)| (k.clone(), runmat_cad::display::wire::inlined(v))).collect();
     let index = build_drawing_index(
         &document,
         &models,
@@ -576,7 +580,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     }
     json!({
         "projection": { "kind": "drawing", "data": data },
-        "models": displays,
+        "models": models_out,
         "diagnostics": problems,
     })
     .to_string()

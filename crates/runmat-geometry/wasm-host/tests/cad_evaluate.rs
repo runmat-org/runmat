@@ -263,3 +263,38 @@ fn a_split_cuts_a_block_into_two_bodies() {
     let refs: Vec<&Value> = bodies.iter().map(|b| &b["reference"]).collect();
     assert!((mass - 0.0324).abs() < 1e-6, "the positive side weighs {mass} kg; bodies {refs:?}");
 }
+
+/// An L bracket (base 60 × 10, upright 10 × 50, 20 deep) with a 5 mm fillet on its inside
+/// corner, the concave edge at (10, 10).
+const L_BRACKET: &str = "runmat 0.7\nstd 1\n\npart l_bracket {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [60 mm, 0 mm])\n        l2 = line(start = [60 mm, 0 mm], end = [60 mm, 10 mm])\n        l3 = line(start = [60 mm, 10 mm], end = [10 mm, 10 mm])\n        l4 = line(start = [10 mm, 10 mm], end = [10 mm, 50 mm])\n        l5 = line(start = [10 mm, 50 mm], end = [0 mm, 50 mm])\n        l6 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 20 mm)\n    feature round = fillet(edges = [edges_between(feature.body.face.side(s1.l3), feature.body.face.side(s1.l4))], radius = 5 mm)\n    output l_bracket = { body = feature.body.body, material = \"material.aluminum_6061\" }\n}\n";
+
+#[test]
+fn an_inside_corner_fillet_adds_material_tangent_to_both_faces() {
+    let compiled = call("compile", &["/p/l_bracket.part", L_BRACKET, "{}", ""]);
+    let body = &compiled["display"]["data"]["bodies"][0];
+    let faces = body["faces"].as_array().unwrap_or_else(|| panic!("{compiled}"));
+    let num = |v: &Value| v.as_f64().unwrap();
+    // The round is a 5 mm cylinder whose axis runs along z through (15, 15): 5 mm from each face,
+    // on the material's outside, so the blend fills the corner. A blend centred on the corner
+    // edge itself would cut into the solid.
+    let rounds: Vec<&Value> = faces.iter().filter(|f| f["surface"]["surface"] == "cylinder").collect();
+    assert_eq!(rounds.len(), 1, "{compiled}");
+    let s = &rounds[0]["surface"];
+    assert!((num(&s["radius"]) * 1e3 - 5.0).abs() < 1e-6, "{s}");
+    let (a, d) = (&s["axis_point"], &s["axis_direction"]);
+    assert!((num(&d[2]).abs() - 1.0).abs() < 1e-9, "{s}");
+    assert!((num(&a[0]) * 1e3 - 15.0).abs() < 1e-6 && (num(&a[1]) * 1e3 - 15.0).abs() < 1e-6, "axis at {a}, not (15, 15) mm");
+    // Every vertex of the round lies in the corner's quarter: between the two tangent lines.
+    let pos = rounds[0]["positions"].as_array().unwrap();
+    for p in pos.chunks(3) {
+        let (x, y) = (num(&p[0]) * 1e3, num(&p[1]) * 1e3);
+        assert!((10.0 - 1e-6..=15.0 + 1e-6).contains(&x) && (10.0 - 1e-6..=15.0 + 1e-6).contains(&y), "round vertex ({x}, {y}) outside the corner");
+    }
+    // The volume grows by the corner's fill: (25 - 25π/4) mm² × 20 mm on 1000 mm² × 20 mm.
+    let request = json!({ "command": "evaluate.mass-properties", "values": {} }).to_string();
+    let out = call("analyze", &["/p/l_bracket.part", L_BRACKET, "{}", &request]);
+    assert_eq!(out["ok"], true, "{out}");
+    let volume_mm3 = out["data"]["total"]["mass"].as_f64().unwrap() / 2700.0 * 1e9;
+    let want = (1000.0 + 25.0 - 25.0 * std::f64::consts::PI / 4.0) * 20.0;
+    assert!((volume_mm3 - want).abs() < 1.0, "volume {volume_mm3} mm³, want {want}");
+}

@@ -26,7 +26,7 @@ drawing arm {
 
     view front = standard(orientation = front, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 164], display = hidden_lines)
     view top = projected(from = front, direction = up, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 217], display = hidden_lines)
-    view right = projected(from = front, direction = right, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [299, 166], display = hidden_lines)
+    view right = projected(from = front, direction = right, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [299, 164], display = hidden_lines)
     view a_a = section(
         from = top,
         plane = feature.pad.face.side(pad_s.c),
@@ -47,7 +47,7 @@ drawing arm {
         scale = [3, 1],
         display = hidden_lines
     )
-    view iso = standard(orientation = isometric, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [340, 105], scale = [1, 1], display = visible_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [339, 102], scale = [1, 1], display = visible_lines)
 
     annotation knuckle_height = dimension(style = linear, references = [feature.knuckle.face.start, feature.knuckle.face.end], view = front)
     annotation pad_thickness = dimension(style = linear, references = [feature.pad.face.start, feature.pad.face.end], view = front)

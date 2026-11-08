@@ -54,3 +54,47 @@ fn a_lugs_rounded_end_keeps_its_outline_in_the_side_view() {
     // rounded end turns away from the viewer, on its tangent edges with the flat sides.
     assert!(has_side(&visible, -7.5) && has_side(&visible, 7.5), "right view: {visible:?}");
 }
+
+/// The Desktop's standard drawing of its bracket fixture, on OCCT: the front view's width and
+/// thickness measure the part (80 and 10 mm) and show the cut's walls and the hole dashed.
+#[test]
+fn the_standard_drawing_measures_the_bracket_on_occt() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures");
+    let (Ok(part), Ok(drawing)) = (std::fs::read_to_string(dir.join("bracket.part")), std::fs::read_to_string(dir.join("standard.drawing"))) else {
+        eprintln!("the Desktop checkout isn't beside runmat-cad; skipped");
+        return;
+    };
+    let files = serde_json::json!({ "/p/bracket.part": part }).to_string();
+    let request = serde_json::json!({ "fn": "compile", "args": ["/p/standard.drawing", drawing, files, "{}"] });
+    let v: serde_json::Value = serde_json::from_str(&runmat_geometry_wasm_host::cad::call(&request.to_string())).unwrap();
+    let data = &v["projection"]["data"];
+    if let Ok(out) = std::env::var("RUNMAT_STANDARD_OUT") {
+        std::fs::write(out, v.to_string()).unwrap();
+    }
+    assert_eq!(data["text"]["width"], "80", "{}", data["text"]);
+    assert_eq!(data["text"]["thickness"], "10", "{}", data["text"]);
+    // The browser's framed call writes the models' meshes as bytes beside the JSON; the drawing
+    // still measures their faces (it once read 0 for every face of 16 or more mesh values).
+    let (framed, bytes) = runmat_geometry_wasm_host::cad::call_framed(&request.to_string());
+    let framed: serde_json::Value = serde_json::from_str(&framed).unwrap();
+    assert!(!bytes.is_empty());
+    assert_eq!(framed["projection"]["data"]["text"], data["text"]);
+    if let Ok(out) = std::env::var("RUNMAT_STANDARD_OUT") {
+        std::fs::write(format!("{out}.framed"), framed.to_string()).unwrap();
+    }
+    // The same lines and sheet, to the meshes' f32 precision.
+    for key in ["hlr", "layouts", "anchors"] {
+        assert!(close(&framed["projection"]["data"][key], &data[key]), "{key} differs when framed");
+    }
+}
+
+/// Two JSON values equal but for numbers within 1e-4 of each other (f32 mesh points at 8:1).
+fn close(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => (x.as_f64().unwrap() - y.as_f64().unwrap()).abs() < 1e-4,
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| close(p, q)),
+        (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, p)| y.get(k).is_some_and(|q| close(p, q))),
+        _ => a == b,
+    }
+}

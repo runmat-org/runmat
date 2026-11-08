@@ -170,6 +170,14 @@ fn the_arm_drawing_dimensions_read_the_part() {
     // The bore's frame leader ends on the R2.05 bore, not the R7 knuckle round it.
     let r = v["projection"]["data"]["radii"]["bore_square"].as_f64().unwrap_or(0.0);
     assert!((r - 2.05).abs() < 1e-6, "bore_square radius {r}");
+    // The sheet lays out with no findings: the right view in line with the front, room for
+    // every datum symbol, each view at its standard gap. With `RUNMAT_ARM_OUT` set to a file, the
+    // projection is written there (for review).
+    if let Ok(out) = std::env::var("RUNMAT_ARM_OUT") {
+        std::fs::write(out, v["projection"].to_string()).unwrap();
+    }
+    let findings = &v["projection"]["data"]["layouts"]["1"]["findings"];
+    assert_eq!(findings.as_array().map(Vec::len), Some(0), "{findings}");
 }
 
 /// The hinge mount's lug profiles are fully defined before they extrude (the Desktop's sketch

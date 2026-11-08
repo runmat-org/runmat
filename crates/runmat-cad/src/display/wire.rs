@@ -128,6 +128,41 @@ pub fn collect<T>(run: impl FnOnce() -> T) -> (T, Vec<u8>) {
     (out, bytes)
 }
 
+/// `value` with each mesh reference written into the active buffer read back as its array of
+/// numbers. Code that reads a display it serialized while [`collect`] runs (a drawing measuring
+/// its models' faces) reads it through this; outside [`collect`] `value` comes back as it is.
+pub fn inlined(value: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    SINK.with(|s| {
+        let sink = s.borrow();
+        let Some(bytes) = sink.as_ref() else { return value.clone() };
+        fn walk(v: &Value, bytes: &[u8]) -> Value {
+            match v {
+                Value::Object(o) if o.len() == 1 => {
+                    let (tag, at) = o.iter().next().expect("one entry");
+                    let range = at.as_array().and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize)));
+                    match (tag.as_str(), range) {
+                        (tag @ ("$f32" | "$u32"), Some((offset, count))) if count.checked_mul(4).and_then(|n| n.checked_add(offset)).is_some_and(|e| e <= bytes.len()) => {
+                            let words = bytes[offset..offset + 4 * count].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]);
+                            if tag == "$f32" {
+                                // As an inline array reads: the f32's shortest text, read as a number.
+                                Value::Array(words.map(|w| f32::from_le_bytes(w).to_string().parse::<f64>().ok().and_then(serde_json::Number::from_f64).map_or(Value::Null, Value::Number)).collect())
+                            } else {
+                                Value::Array(words.map(|w| Value::from(u32::from_le_bytes(w))).collect())
+                            }
+                        }
+                        _ => Value::Object(o.iter().map(|(k, x)| (k.clone(), walk(x, bytes))).collect()),
+                    }
+                }
+                Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), walk(x, bytes))).collect()),
+                Value::Array(a) => Value::Array(a.iter().map(|x| walk(x, bytes)).collect()),
+                other => other.clone(),
+            }
+        }
+        walk(value, bytes)
+    })
+}
+
 /// Appends what `write` writes to the active buffer; their byte offset, or `None`
 /// when no buffer is active.
 fn append(write: impl FnOnce(&mut Vec<u8>)) -> Option<usize> {
