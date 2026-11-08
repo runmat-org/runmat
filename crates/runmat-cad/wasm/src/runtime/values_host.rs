@@ -9,7 +9,7 @@ use runmat_cad::modules::ModuleScope;
 use runmat_cad::value::m_functions::{MFunctions, MRunner};
 use runmat_cad::value::{DynamicValueEvaluator, NoDynamicValues};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 /// What a host lends the regeneration: its workspace files and its `.m` runner.
@@ -121,50 +121,5 @@ pub fn compile_json_with_values(path: &str, text: &str, files: &super::Files, op
         Some(head) if head.trim_end().ends_with('{') => format!("{head}\"pending_values\":{list}}}"),
         Some(head) => format!("{head},\"pending_values\":{list}}}"),
         None => out,
-    }
-}
-
-/// The folders a part's `.m` calls can reach, as folder dependencies (`/p/`): its own folder
-/// and `private/`, the folders its `use`s bring in, and `+pkg` folders above it for `pkg.fn`.
-/// Empty when the part calls no function.
-pub fn call_folders(path: &str, text: &str, document: &runmat_cad::model::PartDocument) -> Vec<String> {
-    let mut functions = BTreeSet::new();
-    if let Ok(json) = serde_json::to_value(document) {
-        collect_calls(&json, &mut functions);
-    }
-    if functions.is_empty() {
-        return Vec::new();
-    }
-    let folder = runmat_cad::modules::folder_of(path);
-    let listing = |f: &str| if f.ends_with('/') { f.to_owned() } else { format!("{f}/") };
-    let mut out: BTreeSet<String> = BTreeSet::new();
-    out.insert(listing(folder));
-    out.insert(listing(&runmat_cad::modules::normalize(&format!("{folder}/private"))));
-    out.extend(runmat_cad::modules::dependencies(path, text));
-    for function in &functions {
-        let segments: Vec<&str> = function.split('.').collect();
-        if segments.len() < 2 {
-            continue;
-        }
-        let package = segments[..segments.len() - 1].iter().map(|s| format!("+{s}")).collect::<Vec<_>>().join("/");
-        for at in runmat_cad::modules::ancestors(folder) {
-            out.insert(listing(&runmat_cad::modules::normalize(&format!("{at}/{package}"))));
-        }
-    }
-    out.into_iter().collect()
-}
-
-fn collect_calls(value: &serde_json::Value, out: &mut BTreeSet<String>) {
-    match value {
-        serde_json::Value::Object(obj) => {
-            if obj.get("form").and_then(|f| f.as_str()) == Some("dynamic") {
-                if let Some(f) = obj.get("call").and_then(|c| c.get("function")).and_then(|f| f.as_str()) {
-                    out.insert(f.to_owned());
-                }
-            }
-            obj.values().for_each(|v| collect_calls(v, out));
-        }
-        serde_json::Value::Array(items) => items.iter().for_each(|v| collect_calls(v, out)),
-        _ => {}
     }
 }

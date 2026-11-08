@@ -165,7 +165,7 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
             })
             .collect();
         // Values that call `.m` functions: the folders those functions can be in.
-        out.extend(values_host::call_folders(path, text, &doc));
+        out.extend(runmat_cad::value::m_functions::call_folders(path, text, &doc));
         return out;
     }
     // The folders it can name designs in, and the design files it names by path.
