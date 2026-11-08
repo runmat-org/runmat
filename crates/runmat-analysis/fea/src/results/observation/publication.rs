@@ -82,11 +82,29 @@ impl ObservationPublicationEntry {
     }
 }
 
+/// Which authored declarations one catalog discharges. A sampled study with several entries
+/// (one solve per frequency of a sweep, for example) publishes one `Entry` catalog per entry
+/// and one `EntryHistories` catalog for the study; together they discharge every declaration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationPublicationScope {
+    /// Every authored declaration.
+    Complete,
+    /// The field and scalar declarations scheduled at the samples of one entry. Histories
+    /// scheduled there ride along in the entry's sample manifest and are discharged by the
+    /// study's `EntryHistories` catalog.
+    Entry,
+    /// Every history declaration, finalized over all entries of the study against an
+    /// entry-history source catalog. Field declarations belong to the entry catalogs.
+    EntryHistories,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "CatalogWire")]
 pub struct ObservationPublicationCatalog {
     schema_version: u16,
     identity: ObservationPublicationCatalogIdentity,
+    scope: ObservationPublicationScope,
     producer: StepIdentity,
     plan: ResolvedObservationPlan,
     source: ObservationFieldCatalog,
@@ -100,6 +118,7 @@ pub struct ObservationPublicationCatalog {
 struct CatalogWire {
     schema_version: u16,
     identity: ObservationPublicationCatalogIdentity,
+    scope: ObservationPublicationScope,
     producer: StepIdentity,
     plan: ResolvedObservationPlan,
     source: ObservationFieldCatalog,
@@ -114,6 +133,7 @@ impl TryFrom<CatalogWire> for ObservationPublicationCatalog {
         let value = Self {
             schema_version: wire.schema_version,
             identity: wire.identity,
+            scope: wire.scope,
             producer: wire.producer,
             plan: wire.plan,
             source: wire.source,
@@ -176,7 +196,30 @@ impl ObservationPublicationCatalog {
         entries: Vec<ObservationPublicationEntry>,
         context: ObservationHistorySourceContext<'_>,
     ) -> AnalysisExecutionResult<Self> {
+        Self::scoped(
+            ObservationPublicationScope::Complete,
+            producer,
+            plan,
+            source,
+            step,
+            entries,
+            context,
+        )
+    }
+
+    /// A catalog that discharges only the declarations `scope` owns (see
+    /// [`ObservationPublicationScope`]).
+    pub fn scoped(
+        scope: ObservationPublicationScope,
+        producer: StepIdentity,
+        plan: ResolvedObservationPlan,
+        source: ObservationFieldCatalog,
+        step: &ProcedureStep,
+        entries: Vec<ObservationPublicationEntry>,
+        context: ObservationHistorySourceContext<'_>,
+    ) -> AnalysisExecutionResult<Self> {
         Self::build(
+            scope,
             producer,
             plan,
             source,
@@ -203,10 +246,21 @@ impl ObservationPublicationCatalog {
             _ => PlanCheck::Reresolve,
         };
         let (source, plan) = authority.into_parts();
-        Self::build(producer, plan, source, step, entries, context, check)
+        Self::build(
+            ObservationPublicationScope::Complete,
+            producer,
+            plan,
+            source,
+            step,
+            entries,
+            context,
+            check,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build(
+        scope: ObservationPublicationScope,
         producer: StepIdentity,
         plan: ResolvedObservationPlan,
         source: ObservationFieldCatalog,
@@ -226,6 +280,7 @@ impl ObservationPublicationCatalog {
         let mut value = Self {
             schema_version: 2,
             identity: ObservationPublicationCatalogIdentity(Digest::sha256([])),
+            scope,
             producer,
             plan,
             source,
@@ -249,6 +304,9 @@ impl ObservationPublicationCatalog {
     }
     pub const fn producer(&self) -> StepIdentity {
         self.producer
+    }
+    pub const fn scope(&self) -> ObservationPublicationScope {
+        self.scope
     }
     pub fn plan(&self) -> &ResolvedObservationPlan {
         &self.plan
@@ -444,7 +502,23 @@ impl ObservationPublicationCatalog {
                     .validate_structural_plan(&self.plan, model, mesh)?;
             }
             (
-                ObservationFieldCatalogSource::StructuralFrequencyHistory { .. },
+                ObservationFieldCatalogSource::EntryHistory { .. },
+                ObservationHistorySourceContext::VolumeMesh { mesh },
+            ) => {
+                if self
+                    .entries
+                    .iter()
+                    .any(|entry| matches!(entry, ObservationPublicationEntry::Sample(_)))
+                {
+                    return Err(invalid(
+                        "entry history publication holds samples of individual entries",
+                    ));
+                }
+                self.source
+                    .validate_volume_mesh_history_plan(&self.plan, self.producer, step, mesh)?;
+            }
+            (
+                ObservationFieldCatalogSource::EntryHistory { .. },
                 ObservationHistorySourceContext::Structural {
                     source: crate::execution::StructuralObservationSource::Frequency(workload),
                     mesh,
@@ -473,6 +547,7 @@ impl ObservationPublicationCatalog {
             "identity",
             &(
                 self.schema_version,
+                self.scope,
                 self.producer,
                 &self.plan,
                 self.source.identity(),

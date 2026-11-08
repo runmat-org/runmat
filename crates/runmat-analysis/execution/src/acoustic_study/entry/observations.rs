@@ -144,6 +144,63 @@ impl AcousticStudyEntryCoordinator {
         Ok(())
     }
 
+    /// The solve task's producing step, shared by every entry of the study.
+    pub(in crate::acoustic_study) fn producer(
+        &self,
+    ) -> AnalysisBridgeResult<runmat_analysis_fea::execution::StepIdentity> {
+        Ok(self
+            .solve_task
+            .as_ref()
+            .ok_or_else(|| invalid("acoustic solve task absent"))?
+            .host
+            .workload
+            .step)
+    }
+
+    /// The canonical mesh objects the entry was solved on.
+    pub(in crate::acoustic_study) fn mesh_objects(
+        &self,
+    ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
+        self.input(Kind::Mesh)
+    }
+
+    /// This complete entry's field catalog, plan and reduced observations for the study's
+    /// entry-history phase.
+    pub(in crate::acoustic_study) fn history_sample(
+        &self,
+    ) -> AnalysisBridgeResult<crate::sampled_study_observations::history::EntryHistorySample> {
+        if !self.is_complete() {
+            return Err(invalid("acoustic entry is not complete"));
+        }
+        let recovery = self
+            .recovery_task
+            .as_ref()
+            .ok_or_else(|| invalid("acoustic recovery absent"))?;
+        let fields = self
+            .fields
+            .as_ref()
+            .ok_or_else(|| invalid("acoustic fields absent"))?;
+        let state = &self.observation_state;
+        if state.reduced.len() != state.reduction_hosts.len() {
+            return Err(invalid("acoustic reductions lost their task hosts"));
+        }
+        Ok(crate::sampled_study_observations::history::EntryHistorySample {
+            catalog: ObservationFieldCatalog::volume_mesh_recovery(
+                recovery.request.clone(),
+                fields.manifest.clone(),
+                SequenceIdentity::from_solver_contract(&self.workload().model.sequence)?,
+                self.preparation.selected_step().clone(),
+            )?,
+            plan: state.plan().cloned(),
+            reduced: state
+                .reduced
+                .iter()
+                .cloned()
+                .zip(state.reduction_hosts.iter().cloned())
+                .collect(),
+        })
+    }
+
     pub(super) fn observation_partition_count(&self) -> usize {
         self.observation_state
             .fanout
@@ -240,7 +297,7 @@ impl AcousticStudyEntryCoordinator {
             self.preparation.output_policy,
         )?;
         let usage = self.extend_usage(&plan, accounting)?;
-        self.observation_state.reduced.push(reduced);
+        self.observation_state.push_reduced(reduced)?;
         self.usage = Some(usage);
         self.closures.push(closure);
         self.attempts.extend(task_attempts);
@@ -312,6 +369,7 @@ impl AcousticStudyEntryCoordinator {
             ObservationHistorySourceContext::VolumeMesh {
                 mesh: &self.preparation.mesh,
             },
+            runmat_analysis_fea::results::observation::ObservationPublicationScope::Entry,
         )?;
         let observation_objects = crate::import_analysis_objects(
             source,

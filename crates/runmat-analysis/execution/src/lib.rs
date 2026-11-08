@@ -178,6 +178,9 @@ pub use fluid_study::{
 mod sampled_history_observations;
 pub use sampled_history_observations::{CompletedSampledObservations, SampledObservationTask};
 mod sampled_study_observations;
+pub use sampled_study_observations::history::{
+    EntryHistoryContext, EntryHistoryPhase, EntryHistorySample,
+};
 mod statistical_study_observations;
 pub use statistical_study_observations::{
     StatisticalObservationSource, StatisticalStudyObservations,
@@ -308,7 +311,7 @@ pub use acoustic_study::{
     AcousticStudyAssemblyClosure, AcousticStudyCoordinator, AcousticStudyEntryClosure,
     AcousticStudyEntryCoordinator, AcousticStudyPhase, AcousticStudyPreparation,
     AcousticStudyResultClosure, AcousticStudyResultPhase, CompletedAcousticStudy,
-    CompletedAcousticStudyEntry, PreparedAcousticStudyRoot,
+    CompletedAcousticStudyEntry, CompletedEntryHistories, PreparedAcousticStudyRoot,
 };
 mod structural_prestressed_frequency_study;
 mod structural_prestressed_modal_frequency_study;

@@ -133,12 +133,18 @@ pub(super) fn execute(
             ObservationHistorySourceContext::Structural { source, mesh }
         }
         (
-            ObservationFieldCatalogSource::StructuralFrequencyHistory { .. },
+            ObservationFieldCatalogSource::EntryHistory { .. },
             None,
             Some(source @ StructuralObservationSource::Frequency(_)),
             mesh,
         ) => ObservationHistorySourceContext::Structural { source, mesh },
-        (ObservationFieldCatalogSource::VolumeMeshRecovery { .. }, None, None, Some(mesh)) => {
+        (
+            ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
+            | ObservationFieldCatalogSource::EntryHistory { .. },
+            None,
+            None,
+            Some(mesh),
+        ) => {
             ObservationHistorySourceContext::VolumeMesh { mesh }
         }
         _ => {

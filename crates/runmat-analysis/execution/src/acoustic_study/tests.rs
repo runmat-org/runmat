@@ -200,6 +200,7 @@ fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() 
             entry,
             closures: vec![closure]
         }],
+        Vec::new(),
         assembly,
         1
     )
@@ -240,6 +241,7 @@ fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() 
             entry,
             closures: vec![closure]
         }],
+        Vec::new(),
         assembly,
         1
     )

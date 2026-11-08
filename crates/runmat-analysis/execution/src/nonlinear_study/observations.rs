@@ -181,7 +181,7 @@ impl NonlinearSolidStudyCoordinator {
             self.preparation.output_policy,
         )?;
         let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
-        self.observation_state.reduced.push(reduced);
+        self.observation_state.push_reduced(reduced)?;
         self.attempts.extend(task_attempts);
         self.closures.push(closure);
         let count = self.observation_state.reduction_count();
@@ -263,6 +263,7 @@ impl NonlinearSolidStudyCoordinator {
                 ),
                 mesh: Some(&self.preparation.mesh),
             },
+            runmat_analysis_fea::results::observation::ObservationPublicationScope::Complete,
         )?;
         let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         let mut attempts = self.attempts.clone();

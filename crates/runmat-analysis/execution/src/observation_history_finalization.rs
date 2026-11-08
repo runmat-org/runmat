@@ -32,6 +32,7 @@ use crate::{
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
+#[derive(Clone)]
 pub enum ObservationHistoryFinalizationSource {
     Structural {
         workload: ObservationWorkloadSource,
