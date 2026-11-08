@@ -121,7 +121,7 @@ function literalIdentityRows(source) {
 }
 
 const FAMILY_CONST = { structural: "STRUCTURAL", thermal: "THERMAL", electromagnetic: "EM", acoustic: "ACOUSTIC", fluid: "FLUID", thermomechanical: "TM", electrothermal: "ET", conjugate_heat_transfer: "CHT", fluid_structure_interaction: "FSI" };
-const PROCEDURE_VARIANT = { static: "Static", modal: "ModalExtraction", prestressed_modal: "PrestressedModalExtraction", buckling: "EigenvalueBuckling", transient: "TransientResponse", harmonic: "HarmonicResponse", prestressed_harmonic: "PrestressedHarmonicResponse", response_spectrum: "ModalResponseSpectrum", random_response: "RandomResponse", nonlinear: "Nonlinear", adaptive: "Adaptive" };
+const PROCEDURE_VARIANT = { static: "Static", modal: "ModalExtraction", prestressed_modal: "PrestressedModalExtraction", buckling: "EigenvalueBuckling", transient: "TransientResponse", harmonic: "HarmonicResponse", prestressed_harmonic: "PrestressedHarmonicResponse", response_spectrum: "ModalResponseSpectrum", random_response: "RandomResponse", nonlinear: "Nonlinear", adaptive: "Adaptive", line_parameters: "LineParameters" };
 
 /** Ledger integrity and ledger ↔ code ↔ docs consistency. `references` are the docs' pending flags. */
 export function lintLedger(source, { ledger, byId }, references, error) {

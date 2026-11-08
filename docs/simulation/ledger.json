@@ -549,6 +549,11 @@
       "title": "Transmission-line parameters of a board cross-section (quasi-static TEM)",
       "kind": "procedure",
       "area": "electromagnetic",
+      "identity": {
+        "family": "electromagnetic",
+        "procedure": "line_parameters",
+        "solution_space": "direct"
+      },
       "status": "pending",
       "acceptance": "`runmat check` and `runmat run` admit `electromagnetic line_parameters {}` on a `cross_section` geometry; the solver (two 2D electrostatic solves, with dielectrics and in vacuum) runs on the admitted CPU plan and the trace-impedance example runs to completion with receipts against Hammerstad–Jensen.",
       "owner": "q-trace-impedance",

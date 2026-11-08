@@ -108,6 +108,7 @@ pub const fn procedure_label(procedure: AnalysisProcedure) -> &'static str {
         P::RandomResponse => "random_response",
         P::Nonlinear => "nonlinear",
         P::Adaptive => "adaptive",
+        P::LineParameters => "line_parameters",
     }
 }
 
@@ -245,7 +246,7 @@ mod tests {
                     !id.is_empty()
                         && id
                             .chars()
-                            .all(|c| c.is_ascii_lowercase() || c == '.' || c == '-'),
+                            .all(|c| c.is_ascii_lowercase() || matches!(c, '.' | '-' | '_')),
                     "{id}"
                 );
             }

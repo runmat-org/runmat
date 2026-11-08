@@ -2293,6 +2293,7 @@ fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
         AnalysisProcedure::RandomResponse => "random response",
         AnalysisProcedure::Nonlinear => "nonlinear",
         AnalysisProcedure::Adaptive => "adaptive",
+        AnalysisProcedure::LineParameters => "line parameters",
     };
     format!("{family} {procedure}")
 }

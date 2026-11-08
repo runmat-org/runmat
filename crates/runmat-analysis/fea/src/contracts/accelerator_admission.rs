@@ -112,7 +112,11 @@ impl AcceleratorFamily {
             Family::Coupled(Coupled::FluidStructureInteraction) => Self::FluidStructureInteraction,
             Family::Structural | Family::Coupled(Coupled::Thermomechanical) => {
                 match step.procedure {
-                    Procedure::Static | Procedure::Adaptive => Self::StructuralStatic,
+                    // Line parameters are electromagnetic only; sequence validation rejects
+                    // them on a structural step before admission.
+                    Procedure::Static | Procedure::Adaptive | Procedure::LineParameters => {
+                        Self::StructuralStatic
+                    }
                     Procedure::ModalExtraction | Procedure::PrestressedModalExtraction => {
                         Self::StructuralModal
                     }

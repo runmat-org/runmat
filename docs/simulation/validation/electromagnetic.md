@@ -127,3 +127,53 @@ Tests: `current_driven_strip_impedance_converges_to_the_skin_effect_solution`.
 **Result.** Passed (1 test) in the evidence run of 2026-11-08.
 
 Tests: `voltage_drive_and_low_frequency_limit_match_dc_resistance_and_inductance`.
+
+## Transmission-line parameters
+
+### Microstrip impedance against Hammerstad–Jensen
+
+**Problem.** A zero-thickness surface microstrip on a 0.2 mm substrate over a reference plane, open above, with w/h = 0.5, 1 and 2 on εr = 4.4, w/h = 4 on εr = 2.2 and w/h = 1 on εr = 9.8, on the default graded mesh.
+
+**Reference.** Hammerstad and Jensen's closed forms for Z0 and εeff of a zero-thickness microstrip; the authors state Z0 in air within 0.01 % (w/h ≤ 1) and 0.03 % (w/h ≤ 1000) and εeff within 0.2 % (εr ≤ 128, 0.01 ≤ w/h ≤ 100) of exact quasi-static values. E. Hammerstad and Ø. Jensen, "Accurate models for microstrip computer-aided design," IEEE MTT-S International Microwave Symposium Digest, 1980, pp. 407–409.
+
+**Compared.** Z0, εeff and delay per length of the line.
+
+**Tolerance.** 0.5 % on Z0 and εeff; the delay follows from εeff.
+
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
+
+### Stripline and coupled stripline against Cohn's exact forms
+
+**Problem.** Zero-thickness strips centred between planes 0.5 mm apart in εr = 3.0: single strips with w/b = 0.2, 0.5 and 1.0, and edge-coupled pairs with (w/b, s/b) = (0.5, 0.2), (0.5, 0.5) and (0.3, 1.0).
+
+**Reference.** Cohn's conformal-mapping solutions, exact for zero-thickness strips between infinite planes: Z0 = (30π/√εr) K(k)/K(k′) with k = sech(πw/2b), and the even- and odd-mode impedances with k_e = tanh(πw/2b) tanh(π(w+s)/2b), k_o = tanh(πw/2b) coth(π(w+s)/2b). S. B. Cohn, "Characteristic impedance of the shielded-strip transmission line," IRE Trans. Microwave Theory Tech., vol. MTT-2, pp. 52–57, 1954; S. B. Cohn, "Shielded coupled-strip transmission line," IRE Trans. Microwave Theory Tech., vol. MTT-3, pp. 29–38, 1955.
+
+**Compared.** Z0 of single strips; even- and odd-mode impedances of pairs, with Zdiff = 2 Zodd, Zcommon = Zeven / 2, εeff = εr and zero far-end coupling in the homogeneous dielectric.
+
+**Tolerance.** 0.3 % on each impedance; the identities hold to 1e-9.
+
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
+
+### Microstrip and stripline against IPC-2141A
+
+**Problem.** 35 µm copper. Surface microstrips (w, h, εr) = (0.35 mm, 0.2 mm, 4.1), (0.2 mm, 0.15 mm, 4.3) and (0.15 mm, 0.25 mm, 3.5); centred striplines (w, b, εr) = (0.15 mm, 0.6 mm, 4.2), (0.1 mm, 0.5 mm, 3.6) and (0.2 mm, 0.8 mm, 4.4). Every case is inside the forms' stated ranges.
+
+**Reference.** IPC-2141A surface microstrip Z0 = 87/√(εr + 1.41) · ln(5.98h/(0.8w + t)) for 0.1 < w/h < 2.0 and 1 < εr < 15, and symmetric stripline Z0 = 60/√εr · ln(1.9b/(0.8w + t)) for w/b < 0.35 and t/b < 0.25. IPC-2141A, Design Guide for High-Speed Controlled Impedance Circuit Boards, IPC, 2004.
+
+**Compared.** Z0 of each line.
+
+**Tolerance.** 5 %: the IPC-2141A forms are empirical fits, so this check bounds agreement with the board-industry forms; Hammerstad–Jensen and Cohn are the tight references.
+
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
+
+### Mesh and enclosure convergence of Z0
+
+**Problem.** A 0.35 mm, 35 µm-thick surface microstrip on 0.2 mm of εr = 4.1, meshed with edge sizes of 7, 3.5, 1.75 and 0.875 µm, then with the default mesh in an enclosure twice the default width and height.
+
+**Reference.** Self-convergence: the change in Z0 between successive refinements, and the change from doubling the enclosure.
+
+**Compared.** Z0.
+
+**Tolerance.** Successive changes decrease and the last is below 0.1 %; the enclosure changes Z0 by under 0.05 %.
+
+**Result.** Not yet in the evidence catalog; run `evidence_report`.

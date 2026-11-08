@@ -229,6 +229,17 @@ fn trace_impedance_example_waits_for_the_line_parameters_procedure() {
         "{path} now checks: list it with the canonical examples and land the ledger rows\n{text}"
     );
     assert!(!text.trim().is_empty(), "{path}: check failed without a diagnostic");
+    // Each rejection names the ledger row that owns it.
+    for id in [
+        "pending:electromagnetic.cross_section_geometry",
+        "pending:electromagnetic.line_parameters.impedance",
+        "pending:electromagnetic.line_parameters.differential_pair",
+    ] {
+        assert!(
+            text.contains(id),
+            "{path}: diagnostics do not name {id}\n{text}"
+        );
+    }
 }
 
 #[test]
