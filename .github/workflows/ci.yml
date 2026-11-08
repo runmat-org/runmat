@@ -41,12 +41,6 @@ jobs:
   distribution-contracts:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
-    env:
-      # The current metadata exporter is a small host tool, but its catalog
-      # dependency is large. Keep its compilation bounded on the cheap runner.
-      CARGO_BUILD_JOBS: '2'
-      CARGO_INCREMENTAL: '0'
-      CARGO_PROFILE_DEV_DEBUG: '0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,18 +56,6 @@ jobs:
           scripts/runtime/builtin-example-verifier/protocol.test.mjs
           scripts/development/check-reviewed-architecture.test.mjs
           scripts/development/verify-fea-lint-debt.test.mjs
-
-      - name: Validate current builtin example metadata and plan
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="${RUNNER_TEMP}/builtin-example-metadata"
-          mkdir -p "$root"
-          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/inventory.json"
-          node scripts/runtime/verify-builtin-examples.mjs plan \
-            --inventory "$root/inventory.json" --product public-products \
-            --topology scripts/runtime/builtin-example-topology.c00.json --output "$root/plan.json"
-
 
   build-and-test:
     name: ${{ matrix.name }}
@@ -358,6 +340,27 @@ jobs:
           set -o pipefail
           xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
             python3 scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" --reclaim-completed-test-binaries 2>&1 | tee test.log
+
+      - name: Validate current builtin example metadata and plan
+        if: matrix.name == 'linux-tests-language'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reuse the language lane's complete package/feature graph. Selecting
+          # only the exporter would create a second dependency feature graph.
+          python3 -c '
+          import runpy, subprocess
+          groups = runpy.run_path("scripts/development/run-workspace-test-group.py")["GROUPS"]
+          packages = [argument for package in groups["language"] for argument in ("--package", package)]
+          subprocess.run(["cargo", "build", "--all-features", *packages, "--bin", "export_builtin_documentation"], check=True)
+          '
+          export RUNMAT_EXAMPLE_DOCUMENTATION_BINARY="${CARGO_TARGET_DIR}/debug/export_builtin_documentation"
+          root="${RUNNER_TEMP}/builtin-example-metadata"
+          mkdir -p "$root"
+          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/inventory.json"
+          node scripts/runtime/verify-builtin-examples.mjs plan \
+            --inventory "$root/inventory.json" --product public-products \
+            --topology scripts/runtime/builtin-example-topology.c00.json --output "$root/plan.json"
 
       - name: Test (macOS)
         if: matrix.task == 'test' && runner.os == 'macOS'
