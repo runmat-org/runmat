@@ -20,7 +20,8 @@ pub(super) use boundary_sources::{BoundaryExactEdges, BoundarySurfaceUses};
 mod completion;
 mod evaluation;
 use evaluation::{
-    curve_parameter, evaluate_surface_point, midpoint_geometry, pcurve_uvs, require_matching_curve_points,
+    curve_parameter, evaluate_curve_point, evaluate_surface_point, midpoint_geometry, pcurve_uvs,
+    require_matching_curve_points, require_node_near_curve,
 };
 pub(super) use evaluation::{
     edge_geometry, surface_geometry, surface_parameters, EdgeGeometryRequest,

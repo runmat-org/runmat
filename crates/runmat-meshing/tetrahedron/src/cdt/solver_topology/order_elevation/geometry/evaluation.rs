@@ -634,7 +634,10 @@ fn squared_parameter_distance(left: [f64; 2], right: [f64; 2]) -> f64 {
 }
 
 /// A curve point and its pcurve image's surface point agree within the request tolerance or
-/// the source edge's own tolerance, the gap its STEP edge admits between curve and pcurves.
+/// the source edge's own tolerance. Import sets that edge tolerance: it rebuilds the pcurves of
+/// an edge whose curve/pcurve gap exceeds the written tolerance and admits the remaining gap up
+/// to the request's geometric tolerance (its requested deviation). A larger gap is a geometry
+/// defect, reported here with the edge, the gap and that bound.
 pub(super) fn require_matching_curve_points(
     input: &ProjectionInput<'_>,
     edge: &runmat_geometry_core::ExactEdge,
@@ -645,9 +648,71 @@ pub(super) fn require_matching_curve_points(
     if !points_match_within(curve, surface, tolerance) {
         return Err(invalid(format!(
             "exact curve and surface evaluations disagree beyond tolerance: edge {} curve \
-             point {curve:?}, surface point {surface:?}, distance {:e} m, admitted {tolerance:e} m",
+             point {curve:?}, surface point {surface:?}, distance {:e} m, admitted {tolerance:e} m \
+             (edge tolerance {:e} m; import admits curve/pcurve gaps up to the request's \
+             geometric tolerance {:e} m)",
             edge.id.source_topology_id,
-            squared_point_distance(curve, surface).sqrt()
+            squared_point_distance(curve, surface).sqrt(),
+            edge.tolerance_m.canonical_value(),
+            input.request.tolerance.requested_deviation_m.canonical_value()
+        )));
+    }
+    Ok(())
+}
+
+/// The world point of an exact edge's curve at `parameter`.
+pub(super) fn evaluate_curve_point(
+    edge_id: &PersistentEntityId,
+    parameter: f64,
+    evaluation: PreparedEvaluation<'_, '_>,
+) -> Result<[f64; 3], DelaunaySolverTopologyError> {
+    let edge = evaluation.sources.edge(edge_id)?;
+    let local = ExactCurveEvaluator::point(
+        evaluation.evaluator,
+        &edge.curve_evaluator_id,
+        parameter,
+        evaluation.control,
+    )
+    .map_err(error::geometry)?;
+    let transform = evaluation
+        .sources
+        .transforms
+        .world_transform_for(edge_id)
+        .map_err(error::geometry)?;
+    let point = transform.transform_point(local.canonical_value());
+    if point.iter().any(|value| !value.is_finite()) {
+        return Err(invalid("exact curve evaluation is not finite"));
+    }
+    Ok(point)
+}
+
+/// A linear boundary node lies within the request's chordal deviation of its curve point.
+///
+/// Surface nodes lie on the curve, but a node the volume stage inserted on a boundary segment
+/// (a segment split during facet recovery) lies on the segment's chord, at most the segment's
+/// sagitta off the curve. The surface stage bounds that sagitta by the chordal deviation, and the
+/// published linear boundary keeps the node where it is.
+pub(super) fn require_node_near_curve(
+    input: &ProjectionInput<'_>,
+    edge: &runmat_geometry_core::ExactEdge,
+    parameter: f64,
+    node: [f64; 3],
+    curve: [f64; 3],
+) -> Result<(), DelaunaySolverTopologyError> {
+    let tolerance = input
+        .request
+        .quality
+        .surface
+        .maximum_chordal_deviation_m
+        .canonical_value()
+        .max(curve_match_tolerance_m(input, edge));
+    if !points_match_within(node, curve, tolerance) {
+        return Err(invalid(format!(
+            "boundary node lies off its exact curve beyond the chordal deviation: edge {} \
+             parameter {parameter}, node {node:?}, curve point {curve:?}, distance {:e} m, \
+             admitted {tolerance:e} m",
+            edge.id.source_topology_id,
+            squared_point_distance(node, curve).sqrt()
         )));
     }
     Ok(())
