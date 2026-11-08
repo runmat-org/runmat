@@ -1,6 +1,6 @@
 //! Worker-side transport adapter for the existing parent FEA admission protocol.
 //! Only typed calls and replies cross the authenticated remote attempt route.
-use crate::fea_proxy::{Call, Operation, Reply};
+use crate::fea_proxy::{parent_reply_timeout, Call, Operation, Reply};
 use runmat_execution::cancellation::CancellationToken;
 use runmat_execution::ProgramExecutionAssignment;
 use runmat_runtime::analysis::fea_run_admission::{
@@ -10,7 +10,6 @@ use runmat_simulation_usage::OperationCount;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-const REPLY_TIMEOUT: Duration = Duration::from_secs(35);
 const CANCELLATION_POLL: Duration = Duration::from_millis(100);
 
 struct Pending {
@@ -52,7 +51,12 @@ impl WorkerControl {
         )
     }
 
-    fn call(&self, calls: &mut Calls, operation: Operation) -> Result<Reply, FeaRunDenied> {
+    fn call(
+        &self,
+        calls: &mut Calls,
+        operation: Operation,
+        timeout: Duration,
+    ) -> Result<Reply, FeaRunDenied> {
         let settling = matches!(&operation, Operation::Settle { .. });
         if !settling && self.cancellation.is_cancelled() {
             return Err(FeaRunDenied::LeaseExpired);
@@ -85,7 +89,7 @@ impl WorkerControl {
                 .take();
             return Err(FeaRunDenied::ServerUnreachable);
         }
-        let deadline = std::time::Instant::now() + REPLY_TIMEOUT;
+        let deadline = std::time::Instant::now() + timeout;
         let result = loop {
             if !settling && self.cancellation.is_cancelled() {
                 break Err(FeaRunDenied::LeaseExpired);
@@ -149,6 +153,7 @@ impl WorkerControl {
             Operation::Start {
                 request: request.clone(),
             },
+            parent_reply_timeout(None),
         )?
         else {
             return Err(FeaRunDenied::LicenseInvalid);
@@ -179,7 +184,10 @@ impl WorkerPermit {
         if calls.active != Some(self.root) {
             return Err(FeaRunDenied::LicenseInvalid);
         }
-        match self.control.call(&mut calls, operation)? {
+        match self
+            .control
+            .call(&mut calls, operation, parent_reply_timeout(Some(&self.budget)))?
+        {
             Reply::Budget { budget } => Ok(budget),
             _ => Err(FeaRunDenied::LicenseInvalid),
         }
@@ -226,6 +234,7 @@ impl FeaRunPermit for WorkerPermit {
                 outcome,
                 usage: usage.clone(),
             },
+            parent_reply_timeout(Some(&self.budget)),
         );
         calls.active = None;
         match result? {
