@@ -117,7 +117,8 @@ export type AnalysisProcedure = "static"
   | "modal_response_spectrum"
   | "random_response"
   | "nonlinear"
-  | "adaptive";
+  | "adaptive"
+  | "line_parameters";
 
 export interface AnalysisSequence {
   sequence_id: string;

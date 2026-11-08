@@ -44,6 +44,7 @@ const rustCoreOutputPath = path.resolve(
   "crates/runmat-analysis/core/src/study/output/quantity.rs"
 );
 const rustFieldLocationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/study/output.rs");
+const rustCoreFieldPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/field.rs");
 const rustSignalPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/signal.rs");
 const rustExcitationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/excitation.rs");
 const rustGeometryUnitsPath = path.resolve(
@@ -222,11 +223,8 @@ function rustTypeToTs(type) {
       };
     case "runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation":
       return { type: '"real" | "complex_interleaved"', nullable: false };
-    case "AnalysisFieldStatistic":
-      return {
-        type: '"component_magnitude_envelope" | "root_mean_square" | "variance"',
-        nullable: false,
-      };
+    case "runmat_analysis_core::FieldStatistic":
+      return { type: "FeaFieldStatistic", nullable: false };
     case "runmat_analysis_core::SpectrumDirection":
       return {
         type: "{ frame: FeaCoordinateFrame; vector: [number, number, number] }",
@@ -470,6 +468,7 @@ function main() {
   const coreFormulationSource = fs.readFileSync(rustCoreFormulationPath, "utf8");
   const coreOutputSource = fs.readFileSync(rustCoreOutputPath, "utf8");
   const fieldLocationSource = fs.readFileSync(rustFieldLocationPath, "utf8");
+  const coreFieldSource = fs.readFileSync(rustCoreFieldPath, "utf8");
   const signalSource = fs.readFileSync(rustSignalPath, "utf8");
   const excitationSource = fs.readFileSync(rustExcitationPath, "utf8");
   const geometryUnitsSource = fs.readFileSync(rustGeometryUnitsPath, "utf8");
@@ -577,7 +576,8 @@ ${formatTypeUnion("FeaFieldLocationContract", readEnumValues(fieldLocationSource
 export type FeaObservationValueShape = "scalar" | "vector3" | "symmetric_tensor3" | { tensor: { extents: number[] } };
 ${formatTypeUnion("FeaComplexRepresentation", readEnumValues(fieldLocationSource, "ComplexRepresentation"))}
 export type FeaFieldOrdinal = { kind: "single" } | { kind: "step"; index: number } | { kind: "mode"; index: number };
-export interface FeaFieldLayout { quantity: FeaObservationQuantity; location: FeaFieldLocationContract; value_shape: FeaObservationValueShape; representation?: FeaComplexRepresentation; ordinal: FeaFieldOrdinal; }
+${formatTypeUnion("FeaFieldStatistic", readEnumValues(coreFieldSource, "FieldStatistic"))}
+export interface FeaFieldLayout { quantity: FeaObservationQuantity; location: FeaFieldLocationContract; value_shape: FeaObservationValueShape; representation?: FeaComplexRepresentation; ordinal: FeaFieldOrdinal; statistic?: FeaFieldStatistic; }
 export type FeaObservationTarget = { spatial: FeaExcitationTarget } | { point: { position: FeaPosition } } | { path: { positions: FeaPosition[] } } | { connector: { connector_id: string } } | { constraint: { constraint_id: string } } | "whole_model";
 export interface FeaReductionPolicy { spatial: "none" | "integral" | "average" | "root_mean_square" | "euclidean_norm" | "minimum" | "maximum" | "resultant" | "moment"; series: "none" | "minimum" | "maximum" | "absolute_maximum" | "root_mean_square" | "mean" | "variance" | "envelope"; extrema_ties: "first_canonical" | "all_locations"; }
 export interface FeaObservationStoragePolicy { precision: FeaSignalPrecision; compression: "lossless" | { error_bounded: { maximum_relative_error: number } } | "none"; retention: FeaRetentionPolicy; partial_access: "manifest_and_chunks" | "whole_artifact"; }
