@@ -141,6 +141,16 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
+      - name: Prepare bounded Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
+            -TargetDirectory "$env:GITHUB_WORKSPACE/target" `
+            -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch"
+          "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+          "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+
       - name: Setup Node.js for product evidence
         uses: actions/setup-node@v4
         with:

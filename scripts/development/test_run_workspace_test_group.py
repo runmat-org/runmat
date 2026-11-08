@@ -1,6 +1,7 @@
 """Check scientific routing without invoking Cargo or numerical workloads."""
 
 import importlib.util
+from collections import Counter
 import json
 import os
 from pathlib import Path
@@ -37,6 +38,14 @@ class ScientificRoutingTests(unittest.TestCase):
             {"name": "demo", "kind": ["example"]},
         ]} for name in members]}
         commands = runner.test_commands("language", True, metadata)
+        shards = [runner.shard_commands(commands, index, 2) for index in range(2)]
+        self.assertEqual(Counter(tuple(command) for command in commands),
+                         Counter(tuple(command) for shard in shards for command in shard))
+        self.assertFalse(set(map(tuple, shards[0])) & set(map(tuple, shards[1])))
+        self.assertEqual(runner.shard_commands(commands, 0, 1), commands)
+        for index, count in ((-1, 2), (2, 2), (0, 0), (0, len(commands) + 1)):
+            with self.assertRaises(ValueError):
+                runner.shard_commands(commands, index, count)
         roots = [(flag, command[index + 1]) for command in commands
                  for index, flag in enumerate(command) if flag in ("--test", "--example")]
         self.assertEqual(len(roots), 12)

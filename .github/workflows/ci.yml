@@ -58,6 +58,9 @@ jobs:
           scripts/development/verify-fea-lint-debt.test.mjs
           infra/scripts/bootstrap-vcpkg-tool.test.mjs
 
+      - name: Verify ordinary test routing and shard coverage
+        run: python3 -m unittest discover -s scripts/development -p 'test_run_workspace_test_group.py'
+
   build-and-test:
     name: ${{ matrix.name }}
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
@@ -135,6 +138,19 @@ jobs:
             task: test
             test_group: tooling-distributed
             needs_occt: true
+            # Disjoint root batches bound disk use; both retain the original
+            # package/feature union and restore the same compiled libraries.
+            shard_index: 0
+            shard_count: 2
+            cache_name: windows-tests-tooling-distributed
+          - runner: warp-windows-latest-x64-8x
+            name: windows-tests-tooling-distributed-tail
+            task: test
+            test_group: tooling-distributed
+            needs_occt: true
+            shard_index: 1
+            shard_count: 2
+            cache_name: windows-tests-tooling-distributed
     runs-on: ${{ matrix.runner }}
     env:
       # Enable backtraces on CI to aid debugging of panics/segfaults
@@ -176,11 +192,21 @@ jobs:
           'CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=off' >> $env:GITHUB_ENV
           '_LINK_=/DEBUG:NONE' >> $env:GITHUB_ENV
 
+      - name: Prepare bounded Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
+            -TargetDirectory $env:CARGO_TARGET_DIR `
+            -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch"
+          "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+          "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Completed root test binaries are reclaimed after each batch.
           # Keep the remaining libraries at a stable, lane-specific path.
-          shared-key: ordinary-0.7-v1-${{ matrix.name }}
+          shared-key: ordinary-0.7-v1-${{ matrix.cache_name || matrix.name }}
           cache-workspace-crates: true
           cache-on-failure: true
 
@@ -457,7 +483,7 @@ jobs:
           RUST_TEST_THREADS: 1
         run: |
           $ErrorActionPreference = 'Stop'
-          python scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" --reclaim-completed-test-binaries 2>&1 | Tee-Object -FilePath test.log
+          python scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" --shard-index "${{ matrix.shard_index || 0 }}" --shard-count "${{ matrix.shard_count || 1 }}" --reclaim-completed-test-binaries 2>&1 | Tee-Object -FilePath test.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 
@@ -550,6 +576,16 @@ jobs:
         uses: actions/checkout@v5
         with:
           ref: ${{ inputs.source_ref || github.sha }}
+
+      - name: Prepare bounded Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
+            -TargetDirectory "$env:GITHUB_WORKSPACE/target" `
+            -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch"
+          "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+          "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
 
       - name: Resolve branch artifact identity
         if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one complete, non-overlapping group of workspace package tests."""
+"""Run workspace package-test groups or their explicit, disjoint command shards."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -260,11 +261,36 @@ def test_commands(group: str, include_extended: bool, metadata: dict | None = No
     return commands
 
 
+def shard_commands(commands: list[list[str]], index: int, count: int) -> list[list[str]]:
+    """Partition complete Cargo invocations; preserve every package/feature union."""
+    if count < 1 or not 0 <= index < count:
+        raise ValueError("shard index must be in [0, shard count), with a positive count")
+    if count > len(commands):
+        raise ValueError("shard count exceeds the number of Cargo invocations")
+    return commands[index::count]
+
+
 def run_batch(command: list[str], repo_root: Path, target_directory: Path, reclaim: bool,
               environment: dict[str, str] | None = None) -> int:
     """Retain dependencies; release only completed root test executables in CI."""
     command = [*command[:2], "--message-format=json-render-diagnostics", *command[2:]]
     print("+ " + " ".join(command), flush=True)
+    if reclaim and os.name == "nt":
+        checked_volumes: set[str] = set()
+        for directory in (repo_root, target_directory):
+            existing = directory.resolve()
+            while not existing.exists():
+                if existing.parent == existing:
+                    raise RuntimeError(f"build storage is unavailable: {directory}")
+                existing = existing.parent
+            if existing.anchor in checked_volumes:
+                continue
+            checked_volumes.add(existing.anchor)
+            storage = shutil.disk_usage(existing)
+            print(f"Windows build storage {existing.anchor}: {storage.free // (1024 ** 3)} GiB free "
+                  f"of {storage.total // (1024 ** 3)} GiB", flush=True)
+            if storage.free < 10 * 1024 ** 3:
+                raise RuntimeError("less than 10 GiB remains for the next build batch and runner logs")
     executables: set[Path] = set()
     with subprocess.Popen(command, cwd=repo_root, env=environment if environment is not None else test_environment(), encoding="utf-8", errors="replace",
                           stdout=subprocess.PIPE) as process:
@@ -302,6 +328,8 @@ def run_batch(command: list[str], repo_root: Path, target_directory: Path, recla
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group", nargs="?", choices=GROUPS)
+    parser.add_argument("--shard-index", type=int, default=0, help="zero-based whole-command shard")
+    parser.add_argument("--shard-count", type=int, default=1, help="number of disjoint command shards")
     parser.add_argument(
         "--reclaim-completed-test-binaries", action="store_true",
         help="remove completed root test executables from this exclusive CI target directory",
@@ -321,6 +349,8 @@ def main() -> int:
         help="validate that every workspace package belongs to exactly one group",
     )
     args = parser.parse_args()
+    if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        parser.error("shard index must be in [0, shard count), with a positive count")
     if not args.check and args.group is None:
         parser.error("group is required unless --check is used")
 
@@ -335,6 +365,7 @@ def main() -> int:
     commands = test_commands(args.group, args.include_extended, metadata)
     if args.benchmark_smokes:
         commands.extend(benchmark_commands(args.group))
+    commands = shard_commands(commands, args.shard_index, args.shard_count)
     with test_runtime_environment() as environment:
         for command in commands:
             code = run_batch(command, repo_root, Path(metadata["target_directory"]),
