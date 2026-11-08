@@ -41,6 +41,12 @@ jobs:
   distribution-contracts:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
+    env:
+      # The current metadata exporter is a small host tool, but its catalog
+      # dependency is large. Keep its compilation bounded on the cheap runner.
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -453,6 +459,11 @@ jobs:
       # Each whole-crate release producer is large. Serializing them on the
       # smaller Mac/Windows builders avoids swap contention between producers.
       CARGO_BUILD_JOBS: ${{ matrix.platform.target == 'x86_64-unknown-linux-gnu' && '8' || '1' }}
+      # Archive packaging executes a host-side Cargo tool in the dev profile.
+      # Bound that tool's artifacts as well as the final release executable.
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_DEV_SPLIT_DEBUGINFO: 'off'
     steps:
       - name: Checkout
         uses: actions/checkout@v5
