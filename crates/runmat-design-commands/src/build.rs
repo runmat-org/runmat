@@ -153,6 +153,17 @@ impl Field {
     pub fn if_checked(self, field: &str) -> Self {
         self.shown(field, &["true"])
     }
+    /// A dropdown or radio field that starts on `value` instead of its first option.
+    pub fn default_choice(mut self, value: &str) -> Self {
+        match &mut self.kind {
+            FieldKind::Choice { options, default, .. } => {
+                assert!(options.iter().any(|o| o.value == value), "{} has no option {value}", self.id);
+                *default = Some(value.to_owned());
+            }
+            _ => panic!("{} is not a choice field", self.id),
+        }
+        self
+    }
     pub fn drag(mut self, manipulator: Manipulator) -> Self {
         self.manipulator = Some(manipulator);
         self

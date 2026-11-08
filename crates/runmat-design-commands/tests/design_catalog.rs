@@ -67,3 +67,18 @@ fn design_commands_json_is_current() {
         );
     }
 }
+
+/// Ticking Section view's Second plane cuts a corner at once: the second plane starts on a
+/// plane other than the first plane's default.
+#[test]
+fn section_second_plane_starts_off_the_first_plane() {
+    use runmat_design_commands::FieldKind;
+    let c = design_catalog();
+    let section = c.command("view.section").expect("view.section");
+    let default_of = |id: &str| match &section.inputs.iter().find(|f| f.id == id).expect(id).kind {
+        FieldKind::Choice { default, .. } => default.clone(),
+        other => panic!("{id} is {other:?}"),
+    };
+    assert_eq!(default_of("plane").as_deref(), Some("front"));
+    assert_eq!(default_of("second_plane").as_deref(), Some("top"));
+}

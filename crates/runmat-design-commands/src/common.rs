@@ -77,6 +77,8 @@ pub fn common() -> Catalog {
                 "Second",
                 &[("front", "Front"), ("top", "Top"), ("right", "Right")],
             )
+            // The first plane starts on Front; a second Front plane would cut nothing more.
+            .default_choice("top")
             .if_checked("second"),
             flag("cap", "Cap the cut", true),
         ])
