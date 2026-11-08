@@ -2522,15 +2522,15 @@
       "title": "Acoustic transmission loss output (`transmission_loss`) between inlet and outlet ports",
       "kind": "output",
       "area": "acoustic",
-      "status": "pending",
-      "acceptance": "`transmission_loss` is a cataloged output operation; the muffler study checks and runs with a receipt against a plane-wave reference.",
+      "status": "release",
+      "acceptance": "`transmission_loss` is a cataloged output operation; the two-fluid interface example runs with `runmat run` and publishes it, and the layer test matches the closed-form plane-wave transmission loss.",
       "owner": "q-fluid",
       "gaps": [
         "REG-ACOUSTIC"
       ],
       "witness": [
-        "evidence: runmat-build-mac:~/logs/q-site-examples/check/acoustics_muffler.fea.log",
-        "runmat check and runmat run on the page study (acoustics_muffler.fea.log)"
+        "cargo test -p runmat-analysis-fea --lib transmission_loss_of_a_layer_matches_the_plane_wave_reference (passed 2026-11-08, runmat-build-mac:~/logs/q-trace-impedance-2/fea_tl.log)",
+        "evidence: runmat-build-mac:~/logs/q-trace-impedance-2/tl_plain.log (runmat run docs/simulation/examples/acoustic-interface-transmission-loss.fea completed, 2026-11-08)"
       ],
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up.",
       "requirements": [],

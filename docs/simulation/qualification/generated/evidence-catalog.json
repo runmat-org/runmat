@@ -428,6 +428,62 @@
       ]
     },
     {
+      "id": "microstrip-hammerstad-jensen",
+      "tests": [
+        {
+          "line": 98,
+          "name": "physics::electrical::cross_section::tests::microstrip_matches_hammerstad_jensen",
+          "package": "runmat-analysis-fea",
+          "result": "passed",
+          "run_date": "2026-11-08",
+          "source": "crates/runmat-analysis/fea/src/physics/electrical/cross_section/tests.rs",
+          "target": "Library"
+        }
+      ]
+    },
+    {
+      "id": "stripline-cohn",
+      "tests": [
+        {
+          "line": 130,
+          "name": "physics::electrical::cross_section::tests::stripline_matches_cohn_exact_forms",
+          "package": "runmat-analysis-fea",
+          "result": "passed",
+          "run_date": "2026-11-08",
+          "source": "crates/runmat-analysis/fea/src/physics/electrical/cross_section/tests.rs",
+          "target": "Library"
+        }
+      ]
+    },
+    {
+      "id": "trace-impedance-ipc-2141a",
+      "tests": [
+        {
+          "line": 181,
+          "name": "physics::electrical::cross_section::tests::microstrip_and_stripline_agree_with_ipc_2141a_inside_their_ranges",
+          "package": "runmat-analysis-fea",
+          "result": "passed",
+          "run_date": "2026-11-08",
+          "source": "crates/runmat-analysis/fea/src/physics/electrical/cross_section/tests.rs",
+          "target": "Library"
+        }
+      ]
+    },
+    {
+      "id": "trace-impedance-mesh-convergence",
+      "tests": [
+        {
+          "line": 216,
+          "name": "physics::electrical::cross_section::tests::microstrip_impedance_converges_with_the_mesh_and_enclosure",
+          "package": "runmat-analysis-fea",
+          "result": "passed",
+          "run_date": "2026-11-08",
+          "source": "crates/runmat-analysis/fea/src/physics/electrical/cross_section/tests.rs",
+          "target": "Library"
+        }
+      ]
+    },
+    {
       "id": "rigid-cavity-modes",
       "tests": [
         {

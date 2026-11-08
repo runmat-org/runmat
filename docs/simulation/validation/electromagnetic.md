@@ -140,7 +140,9 @@ Tests: `voltage_drive_and_low_frequency_limit_match_dc_resistance_and_inductance
 
 **Tolerance.** 0.5 % on Z0 and εeff; the delay follows from εeff.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `microstrip_matches_hammerstad_jensen`.
 
 ### Stripline and coupled stripline against Cohn's exact forms
 
@@ -152,7 +154,9 @@ Tests: `voltage_drive_and_low_frequency_limit_match_dc_resistance_and_inductance
 
 **Tolerance.** 0.3 % on each impedance; the identities hold to 1e-9.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `stripline_matches_cohn_exact_forms`.
 
 ### Microstrip and stripline against IPC-2141A
 
@@ -164,7 +168,9 @@ Tests: `voltage_drive_and_low_frequency_limit_match_dc_resistance_and_inductance
 
 **Tolerance.** 5 %: the IPC-2141A forms are empirical fits, so this check bounds agreement with the board-industry forms; Hammerstad–Jensen and Cohn are the tight references.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `microstrip_and_stripline_agree_with_ipc_2141a_inside_their_ranges`.
 
 ### Mesh and enclosure convergence of Z0
 
@@ -176,4 +182,6 @@ Tests: `voltage_drive_and_low_frequency_limit_match_dc_resistance_and_inductance
 
 **Tolerance.** Successive changes decrease and the last is below 0.1 %; the enclosure changes Z0 by under 0.05 %.
 
-**Result.** Not yet in the evidence catalog; run `evidence_report`.
+**Result.** Passed (1 test) in the evidence run of 2026-11-08.
+
+Tests: `microstrip_impedance_converges_with_the_mesh_and_enclosure`.
