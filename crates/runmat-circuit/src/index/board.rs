@@ -63,6 +63,12 @@ pub struct BoardIndex {
     /// Each net on the board, in board order: routed length, rules and its pair.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nets: Vec<NetRow>,
+    /// Net classes with an impedance target: their solved width and gap per copper layer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controlled: Vec<super::high_speed::ControlledClassRow>,
+    /// Matched-length groups, each member against the group's target.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub length_groups: Vec<super::high_speed::LengthGroupRow>,
 }
 
 /// A board net: its routed length (tracks and via spans), the track width and clearance its
@@ -656,6 +662,8 @@ pub fn add_board_reusing(
             _ => crate::display::unrouted(board),
         },
         nets: net_rows(board, rules, &graph, drc.diff_pairs()),
+        controlled: super::high_speed::controlled_rows(board),
+        length_groups: super::high_speed::group_rows(board, rules, &graph),
     });
 }
 
@@ -723,6 +731,7 @@ fn rule_value_display(v: &RuleValue) -> String {
         RuleValue::Int(i) => i.to_string(),
         RuleValue::Bool(b) => b.to_string(),
         RuleValue::Text(t) => t.clone(),
+        RuleValue::Time(ps) => format!("{} ps", trim(*ps)),
         RuleValue::ViaKinds(kinds) => kinds
             .iter()
             .map(|k| format!("{k:?}").to_lowercase())

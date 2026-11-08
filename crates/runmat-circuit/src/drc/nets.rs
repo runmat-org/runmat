@@ -93,7 +93,7 @@ impl Drc {
                     ),
                 });
             }
-            if let Some(RuleValue::Num(z)) = rules.value(g, net_item, props::IMPEDANCE) {
+            if let Some(z) = rules.value(g, net_item, props::IMPEDANCE).as_ref().and_then(crate::high_speed::controlled::ohms) {
                 self.impedance_targets
                     .insert(board.net_name(n).to_string(), z);
                 self.check_impedance(board, rules, g, n, z);
@@ -139,6 +139,48 @@ impl Drc {
                         ),
                     });
                 }
+            }
+        }
+        // Groups with a target or tolerance: each member against the target, in length or
+        // delay, through series parts where its rules say so.
+        let timing = crate::high_speed::delay::net_timing(board);
+        for group in crate::high_speed::groups::groups(board, rules, g, &timing) {
+            let checked = group.members.iter().any(|m| nets.contains(&m.net))
+                && group.members.iter().any(|m| {
+                    let it = BItem::Net(m.net.0);
+                    rules.value(g, it, props::MATCH_TARGET).is_some() || rules.value(g, it, props::MATCH_TOLERANCE).is_some()
+                });
+            if !checked {
+                continue;
+            }
+            let unit = group.basis.unit();
+            for m in &group.members {
+                use crate::high_speed::groups::Status;
+                if matches!(m.status, Status::Matched | Status::Unrouted) {
+                    continue;
+                }
+                self.put(DrcFinding {
+                    code: "length-match".into(),
+                    severity: Severity::Error,
+                    items: vec![BItem::Net(m.net.0)],
+                    layer: None,
+                    at: Point::ORIGIN,
+                    actual: Some(m.value),
+                    required: Some(group.target),
+                    rule: group.rule.clone(),
+                    source: group.source.clone(),
+                    message: format!(
+                        "net `{}` in group `{}` is {:.3} {unit}, {} the {}target {:.3} {unit} by {:.3} {unit} (tolerance {:.3} {unit})",
+                        m.name,
+                        group.name,
+                        m.value,
+                        if m.deviation < 0.0 { "short of" } else { "over" },
+                        if group.written { "" } else { "longest member's " },
+                        group.target,
+                        m.deviation.abs(),
+                        group.tolerance
+                    ),
+                });
             }
         }
         // Differential pairs.
@@ -203,9 +245,14 @@ impl Drc {
         let tn: Vec<_> = board.tracks.values().filter(|t| t.net == Some(n)).collect();
         let mut coupled = 0.0;
         let total: f64 = tp.iter().map(|t| t.length()).sum();
-        let mut worst_gap: Option<(f64, Point, crate::layout::ItemId, crate::layout::ItemId, CopperIndex)> =
+        let mut worst_gap: Option<(f64, f64, Point, crate::layout::ItemId, crate::layout::ItemId, CopperIndex)> =
             None;
+        // Coupled runs by layer, width and gap (1 µm), for the differential impedance check.
+        let mut runs: BTreeMap<(CopperIndex, crate::geom::Coord, i64), Vec<(crate::layout::ItemId, crate::layout::ItemId, Point)>> =
+            BTreeMap::new();
         for a in &tp {
+            // A class's per-layer impedance gap applies on the track's own layer.
+            let gap_rule = rules.len(g, BItem::Track(a.id), props::DIFF_GAP).or(gap_rule);
             let (a0, a1) = a.endpoints();
             let (ax, ay) = ((a1.x - a0.x) as f64, (a1.y - a0.y) as f64);
             let la = ax.hypot(ay);
@@ -228,7 +275,9 @@ impl Drc {
                 let d = ((b0.x - a0.x) as f64 * -uy + (b0.y - a0.y) as f64 * ux).abs();
                 let gap = d - (a.width + b.width) as f64 / 2.0;
                 let reference = gap_rule.map(|x| x as f64).unwrap_or(a.width as f64);
-                if gap > reference * 3.0 || gap < 0.0 {
+                // Coupled within half again the pair's gap; farther apart (a breakout to the
+                // pads) the run counts as uncoupled length, not a gap or impedance error.
+                if gap > reference * 1.5 || gap < 0.0 {
                     continue;
                 }
                 let s0 = (b0.x - a0.x) as f64 * ux + (b0.y - a0.y) as f64 * uy;
@@ -238,18 +287,19 @@ impl Drc {
                     continue;
                 }
                 best = best.max(hi - lo);
+                runs.entry((a.layer, a.width, (gap / 1000.0).round() as i64)).or_default().push((a.id, b.id, a0));
                 if let Some(r) = gap_rule {
                     let dev = (gap - r as f64).abs();
                     if dev > 0.1 * r as f64 + 1.0
-                        && worst_gap.is_none_or(|w| dev > (w.0 - r as f64).abs())
+                        && worst_gap.is_none_or(|w| dev > (w.0 - w.1).abs())
                     {
-                        worst_gap = Some((gap, a0, a.id, b.id, a.layer));
+                        worst_gap = Some((gap, r as f64, a0, a.id, b.id, a.layer));
                     }
                 }
             }
             coupled += best.min(la);
         }
-        if let (Some((gap, at, ta, tb, layer)), Some(r)) = (worst_gap, gap_rule) {
+        if let Some((gap, r, at, ta, tb, layer)) = worst_gap {
             let (rule, source) = rules.single_origin(g, pi, props::DIFF_GAP);
             self.put(DrcFinding {
                 code: "diff-pair-gap".into(),
@@ -263,15 +313,19 @@ impl Drc {
                 layer: Some(layer),
                 at,
                 actual: Some(gap),
-                required: Some(r as f64),
+                required: Some(r),
                 rule,
                 source,
                 message: format!(
                     "differential gap {:.4} mm, rule {:.4} mm",
                     gap * 1e-6,
-                    r as f64 * 1e-6
+                    r * 1e-6
                 ),
             });
+        }
+        if let Some(target) = rules.value(g, pi, props::DIFF_IMPEDANCE).as_ref().and_then(crate::high_speed::controlled::ohms) {
+            self.impedance_targets.insert(format!("{}/{}", board.net_name(p), board.net_name(n)), target);
+            self.check_diff_impedance(board, rules, g, (p, n), target, &runs);
         }
         let uncoupled = (total - coupled).max(0.0);
         if let Some(m) = unc_max {
@@ -288,6 +342,27 @@ impl Drc {
                     rule,
                     source,
                     message: format!("uncoupled length {:.3} mm", uncoupled * 1e-6),
+                });
+            }
+        }
+        if let Some(max_ps) = rules.value(g, pi, props::SKEW_MAX).and_then(|v| v.as_time()) {
+            // In-pair skew as a delay: each net's delay from its layers' propagation velocity.
+            let t = crate::high_speed::delay::net_timing(board);
+            let d = |x: NetId| t.get(&x).map_or(0.0, |t| t.delay);
+            let skew = (d(p) - d(n)).abs();
+            if skew > max_ps {
+                let (rule, source) = rules.single_origin(g, pi, props::SKEW_MAX);
+                self.put(DrcFinding {
+                    code: "skew".into(),
+                    severity: Severity::Error,
+                    items: key_items(vec![pi, BItem::Net(n.0)]),
+                    layer: None,
+                    at: Point::ORIGIN,
+                    actual: Some(skew),
+                    required: Some(max_ps),
+                    rule,
+                    source,
+                    message: format!("pair skew {skew:.2} ps, limit {max_ps:.2} ps"),
                 });
             }
         }
@@ -356,6 +431,58 @@ impl Drc {
                     board.net_name(n),
                     crate::layout::copper_name(layer, board.copper_count()),
                     width as f64 * 1e-6,
+                    IMPEDANCE_TOLERANCE * 100.0
+                ),
+            });
+        }
+    }
+
+    /// A pair's coupled runs against its differential target: one finding per layer, width
+    /// and gap whose closed-form differential impedance is off by more than
+    /// [`IMPEDANCE_TOLERANCE`].
+    #[allow(clippy::type_complexity)]
+    fn check_diff_impedance(
+        &mut self,
+        board: &Board,
+        rules: &BoardRules,
+        g: &BoardGraph,
+        (p, n): (NetId, NetId),
+        target: f64,
+        runs: &BTreeMap<(CopperIndex, crate::geom::Coord, i64), Vec<(crate::layout::ItemId, crate::layout::ItemId, Point)>>,
+    ) {
+        let (rule, source) = rules.single_origin(g, BItem::Net(p.0), props::DIFF_IMPEDANCE);
+        for (&(layer, width, gap_um), segs) in runs {
+            let Some(geometry) = crate::impedance::TraceGeometry::of(&board.stackup, layer) else { continue };
+            let (w, s) = (width as f64 * 1e-9, gap_um as f64 * 1e-6);
+            let z = geometry.differential(w, s);
+            if (z - target).abs() <= IMPEDANCE_TOLERANCE * target {
+                continue;
+            }
+            let fit = geometry
+                .width_for_diff(target, s)
+                .map(|w| format!("; {:.3} mm at this gap gives {target:.0} Ω", w as f64 * 1e-6))
+                .unwrap_or_default();
+            let mut items: Vec<BItem> = segs.iter().flat_map(|(a, b, _)| [BItem::Track(*a), BItem::Track(*b)]).collect();
+            items.extend([BItem::Net(p.0), BItem::Net(n.0)]);
+            items.sort();
+            items.dedup();
+            self.put(DrcFinding {
+                code: "diff-impedance".into(),
+                severity: Severity::Error,
+                items,
+                layer: Some(layer),
+                at: segs[0].2,
+                actual: Some(z),
+                required: Some(target),
+                rule: rule.clone(),
+                source: source.clone(),
+                message: format!(
+                    "pair `{}`/`{}` differential impedance {z:.1} Ω on {} at {:.3} mm width, {:.3} mm gap, target {target:.0} Ω ±{:.0} %{fit}",
+                    board.net_name(p),
+                    board.net_name(n),
+                    crate::layout::copper_name(layer, board.copper_count()),
+                    w * 1e3,
+                    s * 1e3,
                     IMPEDANCE_TOLERANCE * 100.0
                 ),
             });

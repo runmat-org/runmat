@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 
 mod board;
 mod eco;
+mod high_speed;
+pub use high_speed::{ControlledClassRow, ControlledLayerRow, LengthGroupRow, LengthMemberRow};
 
 pub use board::*;
 pub use eco::*;

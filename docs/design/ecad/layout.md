@@ -161,9 +161,85 @@ DRC runs incrementally as the board is edited, and in full in a check:
 | `keepout` | an item inside a keepout that forbids it |
 | `layer-not-in-region`, `via-in-bend` | copper on a layer a flex region lacks; a via in a bend |
 | `unrouted` | a net whose copper is in more than one piece |
-| `length`, `skew` | a net outside its length range; a match group or pair with too much skew |
-| `diff-pair-gap`, `diff-pair-uncoupled` | a pair's gap off target; too much uncoupled length |
+| `length`, `skew` | a net outside its length range; a match group or pair with too much skew, in length or in ps |
+| `length-match` | a match-group member outside its group's target by more than the tolerance, in mm or ps |
+| `impedance`, `diff-impedance` | a track, or a coupled pair run, more than 10 % off its class's target impedance on its layer |
+| `diff-pair-gap`, `diff-pair-uncoupled` | a pair's gap off target (a class's solved gap on that layer); too much uncoupled length |
 | `min-spokes` | a thermal relief with too few spokes |
+
+## High-speed design
+
+### Impedance-driven widths
+
+Give a net class a target impedance in ohms, and RunMat solves its track width, and for a pair its gap, on each copper layer from the stackup:
+
+```circuit.layout fragment
+net_class rf = { impedance = 50 }
+net_class usb = { diff_impedance = 90 }
+net_class ddr_clk = { impedance = 40, diff_impedance = 80 }
+net_class pcie = { diff_impedance = 85, diff_gap = 0.15 mm }
+```
+
+| Written | Solved per layer |
+|---|---|
+| `impedance` | the width that meets it |
+| `diff_impedance` | the width and gap that meet it, with the gap equal to the width and at least the board's minimum clearance |
+| `diff_impedance` and `impedance` | the width for the single-ended target, then the gap for the differential one |
+| `diff_impedance` and `diff_gap` | the width that meets the target at the written gap |
+
+Outer layers are surface microstrip over the nearest plane (Hammerstad–Jensen); inner layers are stripline between the planes above and below (IPC-2141A), with the dielectric's thickness-weighted Dk. Widths and gaps round to 1 µm. A layer whose solved width or gap is below the board's limits keeps the solved value and says so, and DRC flags tracks there against the minimum-track and clearance rules.
+
+The solved values become the class's rules on each layer (`:net-class(usb):layer(In1.Cu)`), so they take precedence over the class's own `track_width`. They reach:
+
+- **Route**, which draws at the net's width for the layer when you leave Width empty;
+- **Diff pair**, which routes at the pair's solved width and gap for the layer when you leave them empty;
+- **Autoroute**, which draws each layer's run at that layer's width;
+- **DRC**, which checks each track against `impedance` and each coupled pair run against `diff_impedance` (both ±10 %, the tolerance board houses hold controlled impedance to), and the pair's gap against the layer's solved gap.
+
+The outline lists each impedance class's width, gap and impedance per layer, and the **Layer stack** command reports them for the stackup you set.
+
+### Matched-length groups and skew
+
+Nets with the same `match_group` form a group. Set the group's target and tolerance on its rules; a delay unit (`ps`, `ns`) makes it a delay group, compared in picoseconds:
+
+```circuit.layout fragment
+rule byte0 = { select = ":net(DQ0, DQ1, DQ2, DQ3, DQ4, DQ5, DQ6, DQ7, DM0)", match_group = byte0, match_target = 420 ps, match_tolerance = 5 ps }
+rule addr = { select = ":net(A*)", match_group = addr, match_tolerance = 0.5 mm }
+rule clk = { select = ":net(CLK_P)", skew_max = 1 ps }
+```
+
+- With no `match_target`, the group matches its longest member (in a delay group, its slowest).
+- With no `match_tolerance`, the tolerance is 0.1 mm, or 1 ps in a delay group.
+- `skew_max` on a pair limits the difference between its two nets, as a length or a delay.
+
+Each track's delay comes from its layer's propagation velocity: `√εeff / c`, where `εeff` is the stripline's Dk or the microstrip's effective permittivity at that width. A via adds its span at the Dk of the dielectric it crosses. A member routed on an inner layer reaches a delay target with less copper than one on an outer layer.
+
+The outline's **Length groups** folder lists each member's length or delay against the target: matched, short (needs tuning) or long (needs a shorter route). DRC reports each member outside the tolerance (`length-match`).
+
+**Tune length** adds meanders to a net's longest straight track until it reaches a target length or delay, in one of three patterns:
+
+| Pattern | Shape |
+|---|---|
+| Trombone | rectangular bumps to one side of the run |
+| Accordion | rectangular bumps alternating sides, centered on the run |
+| Sawtooth | triangular teeth to one side, for a run with little room beside it |
+
+**Tune group** tunes every short member of a group to the group's target with the chosen pattern, and reports any member it could not bring in.
+
+### Lengths through series parts
+
+A signal that runs through a series resistor, a ferrite or another two-pin part is tuned as one signal when its rules set `through_parts`. The signal follows each two-pad part whose far net goes on to exactly one more pad, adds that net's copper, and adds the part's `through_delay`:
+
+```circuit.layout fragment
+rule dq = { select = ":net(DQ*)", match_group = byte0, through_parts = true }
+rule series = { select = "footprint#R21", through_delay = 8 ps }
+```
+
+A part's body adds no length. Groups, DRC and Tune length use the signal's total.
+
+### Cross-sections for field-solved impedance
+
+The closed forms hold to a few percent inside their stated ranges. For a field-solved value, the board study's `pcb` source carries a cross-section for each controlled line: each net or declared pair in an impedance class, per copper layer and width it is routed at. A cross-section holds the conductor width, the pair gap, the copper thickness, the class's `etch_factor` when written, the reference planes above and below, and every stack row between them (solder mask over an outer layer included) with its thickness, Dk and Df. Its region is `pcb/<board>/line/<net>/<layer>` (a pair: `pcb/<board>/line/<p>+<n>/<layer>`). A 2D electrostatic study solves Z0, Zdiff, delay and the per-length L and C, and the layer-stack view shows the solved value beside the closed form [not yet in the current release](pending:design.ecad.field-solved-impedance).
 
 ## In the assembly
 

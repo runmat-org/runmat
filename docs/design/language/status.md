@@ -58,6 +58,10 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 **Shared part libraries.** A circuit writes use library &lt;name&gt; to read part declarations from a shared library package, and part declarations propagate through circuits it uses.
 
+### design.ecad.field-solved-impedance
+
+**Field-solved trace impedance beside the closed form.** A board study solves each controlled line's cross-section (from the pcb source's lines) for Z0, Zdiff, delay and per-length L and C, and the layer-stack view shows the solved value beside the closed form.
+
 ## Tools
 
 ### design.tools.cli-check-mcad

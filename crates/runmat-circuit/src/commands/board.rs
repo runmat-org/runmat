@@ -15,6 +15,9 @@ fn add_to(item: &str, section: Section) -> ModelEdit {
     edit(EditOp::Add, section).item(item)
 }
 
+/// Meander patterns for Tune length and Tune group.
+const PATTERNS: &[(&str, &str)] = &[("trombone", "Trombone"), ("accordion", "Accordion"), ("sawtooth", "Sawtooth")];
+
 const RULES: &[(&str, &str)] = &[
     ("clearance", "Clearance"),
     ("width", "Width"),
@@ -82,15 +85,32 @@ pub(super) fn add(c: &mut Catalog) {
             .preview()
             .edit(add_to("track", Section::Copper)),
         brd("board.diff-pair", "Diff pair", "diff-pair", "Route a differential pair together, at its gap from pad to pad.")
-            .inputs(vec![pick("pair", "Pair", &[K::Net]), qty("width", "Width", "length", Some(0.12)), qty("gap", "Gap", "length", Some(0.15)), layer().optional().help("Empty: the top layer.")])
+            .inputs(vec![
+                pick("pair", "Pair", &[K::Net]),
+                qty("width", "Width", "length", None).optional().help("Empty: the pair's width on this layer from its net class (its impedance target), else 0.12 mm."),
+                qty("gap", "Gap", "length", None).optional().help("Empty: the pair's gap on this layer from its net class, else 0.15 mm."),
+                layer().optional().help("Empty: the top layer."),
+            ])
             .preview()
             .edit(add_to("track_pair", Section::Copper)),
         brd("board.multi-route", "Multi-route", "multi-route", "Route several nets as a bus.")
             .inputs(vec![picks("nets", "Nets", &[K::Net, K::Pad]), qty("width", "Width", "length", Some(0.15)), qty("spacing", "Spacing", "length", Some(0.15)), layer()])
             .preview()
             .edit(add_to("track_bus", Section::Copper)),
-        brd("board.tune-length", "Tune length", "tune-length", "Add trombone meanders to a net's longest straight track until it meets its target length.")
-            .inputs(vec![pick("net", "Net", &[K::Net, K::Track]), qty("target", "Target length", "length", Some(50.0)), qty("tolerance", "Tolerance", "length", Some(0.1))])
+        brd("board.tune-length", "Tune length", "tune-length", "Add meanders to a net's longest straight track until it meets its target length or delay.")
+            .inputs(vec![
+                pick("net", "Net", &[K::Net, K::Track]),
+                radio("basis", "Target in", &[("length", "Length"), ("delay", "Delay")]),
+                qty("target", "Target length", "length", Some(50.0)).shown("basis", &["length"]),
+                qty("tolerance", "Tolerance", "length", Some(0.1)).shown("basis", &["length"]),
+                qty("target_delay", "Target delay", "time", None).shown("basis", &["delay"]).help("For example 300 ps."),
+                qty("tolerance_delay", "Tolerance", "time", None).optional().shown("basis", &["delay"]).help("Empty: 1 ps."),
+                choice("pattern", "Pattern", PATTERNS),
+            ])
+            .preview()
+            .edit(edit(EditOp::Edit, Section::Copper).item("tuning")),
+        brd("board.tune-group", "Tune group", "tune-length", "Tune every short member of a matched-length group to the group's target length or delay.")
+            .inputs(vec![text("group", "Group", None).help("The match_group name its rules give."), choice("pattern", "Pattern", PATTERNS)])
             .preview()
             .edit(edit(EditOp::Edit, Section::Copper).item("tuning")),
         brd("board.place-via", "Via", "via", "Place a via.")
@@ -278,6 +298,7 @@ pub(super) fn tab() -> DomainTab {
                     c("board.diff-pair"),
                     c("board.multi-route"),
                     c("board.tune-length"),
+                    c("board.tune-group"),
                 ],
             ),
             group(

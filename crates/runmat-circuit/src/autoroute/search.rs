@@ -18,7 +18,10 @@ pub(super) type Node = (i64, i64, CopperIndex);
 /// indices) and the costs.
 pub(super) struct Query<'a> {
     pub net: NetId,
+    /// The width the search keeps clear: the widest layer's when widths differ by layer.
     pub width: Coord,
+    /// Width per copper layer (by copper index), if the net's widths differ by layer.
+    pub layer_width: Option<&'a [Coord]>,
     pub via: (Coord, Coord),
     /// Copper layers the via spans (through: every layer).
     pub via_mask: LayerSet,
@@ -69,6 +72,16 @@ impl Query<'_> {
             self.neck
         } else {
             self.width
+        }
+    }
+
+    /// The width drawn on copper layer `layer` at `p`: [`Query::width_at`], no wider than the
+    /// layer's own width.
+    pub fn width_on(&self, layer: CopperIndex, p: Point) -> Coord {
+        let w = self.width_at(p);
+        match self.layer_width.and_then(|lw| lw.get(layer as usize)) {
+            Some(&lw) => w.min(lw),
+            None => w,
         }
     }
 }

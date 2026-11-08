@@ -976,6 +976,10 @@ impl Board {
     /// board's own rules ([`crate::board_rules::NET_CLASS_PRIORITY`]), so a written rule of
     /// the same specificity overrides a class. Each rule is named `net_class.<name>` and
     /// keeps its class's source.
+    ///
+    /// A class with an `impedance` or `diff_impedance` target also compiles to one rule per
+    /// copper layer on `:net-class(<name>):layer(<layer>)`, setting the width (and a pair's
+    /// `diff_width` and `diff_gap`) solved from the stackup ([`crate::high_speed::controlled`]).
     pub fn rule_specs(&self) -> Vec<crate::board_rules::RuleSpec> {
         use crate::board_rules::{is_pair_property, RuleSpec, NET_CLASS_PRIORITY};
         let id = |class: &str| format!("net_class.{class}");
@@ -995,6 +999,19 @@ impl Board {
                         .priority(NET_CLASS_PRIORITY)
                         .at(c.source.clone(), c.order)
                 });
+            }
+            // A class with an impedance target: its solved width (and pair gap) per layer, more
+            // specific than the class's own `track_width`.
+            if let Some(target) = crate::high_speed::ImpedanceTarget::of(&c.decls) {
+                let layers = crate::high_speed::controlled_layers(&self.stackup, &target, &self.limits);
+                for (layer, decls) in crate::high_speed::controlled::layer_rule_decls(&layers) {
+                    specs.push(RuleSpec {
+                        decls,
+                        ..RuleSpec::single(&id(class), &format!(":net-class({class}):layer({layer})"))
+                            .priority(NET_CLASS_PRIORITY)
+                            .at(c.source.clone(), c.order)
+                    });
+                }
             }
         }
         let mut pairs: Vec<(&str, &str, &crate::board_rules::RuleValue, &NetClassRules)> = self

@@ -110,10 +110,72 @@ impl TraceGeometry {
         }
         Some(((lo + hi) / 2.0 * 1e9).round() as Coord)
     }
+    /// The effective permittivity a `w` wide track's wave sees: the dielectric's own on a
+    /// stripline, Hammerstad–Jensen's (part air, part dielectric) on a microstrip.
+    pub fn effective_dk(&self, w: f64) -> f64 {
+        match *self {
+            TraceGeometry::Microstrip { h, t, er } => microstrip_parts(w, h, t, er).1,
+            TraceGeometry::Stripline { er, .. } => er,
+        }
+    }
+
+    /// Propagation delay of a `w` wide track, in ps per mm: `√εeff / c`.
+    pub fn delay_ps_per_mm(&self, w: f64) -> f64 {
+        self.effective_dk(w).sqrt() / SPEED_OF_LIGHT * 1e-3 * 1e12
+    }
+
+    /// The track width (nm) whose pair, `gap` apart (m), has the differential impedance
+    /// `target` ohms, between 10 µm and 10 mm.
+    pub fn width_for_diff(&self, target: f64, gap: f64) -> Option<Coord> {
+        bisect(|w| self.differential(w, gap), target, true)
+    }
+
+    /// The gap (nm) at which a pair of `w` wide tracks (m) has the differential impedance
+    /// `target` ohms, between 10 µm and 10 mm.
+    pub fn gap_for_diff(&self, w: f64, target: f64) -> Option<Coord> {
+        bisect(|s| self.differential(w, s), target, false)
+    }
+
+    /// The layer's kind as a word: `microstrip` or `stripline`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            TraceGeometry::Microstrip { .. } => "microstrip",
+            TraceGeometry::Stripline { .. } => "stripline",
+        }
+    }
+}
+
+/// The speed of light in vacuum, m/s.
+pub const SPEED_OF_LIGHT: f64 = 299_792_458.0;
+
+/// The size (nm) between 10 µm and 10 mm at which `z` meets `target`, by bisection on a log
+/// scale; `falling` when `z` falls as the size grows.
+fn bisect(z: impl Fn(f64) -> f64, target: f64, falling: bool) -> Option<Coord> {
+    let (mut lo, mut hi) = (10e-6, 10e-3);
+    let (zlo, zhi) = (z(lo), z(hi));
+    let reaches = if falling { zlo >= target && zhi <= target } else { zlo <= target && zhi >= target };
+    if !reaches {
+        return None;
+    }
+    for _ in 0..80 {
+        let mid = (lo * hi).sqrt();
+        if (z(mid) > target) == falling {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Some(((lo + hi) / 2.0 * 1e9).round() as Coord)
 }
 
 /// Hammerstad–Jensen microstrip with the copper thickness's effective width.
 fn microstrip(w: f64, h: f64, t: f64, er: f64) -> f64 {
+    let (z_air, e_eff) = microstrip_parts(w, h, t, er);
+    z_air / e_eff.sqrt()
+}
+
+/// A microstrip's impedance in air and its effective permittivity (Hammerstad–Jensen).
+fn microstrip_parts(w: f64, h: f64, t: f64, er: f64) -> (f64, f64) {
     let u0 = w / h;
     let du = if t > 0.0 {
         let coth = 1.0 / (6.517 * u0).sqrt().tanh();
@@ -130,7 +192,7 @@ fn microstrip(w: f64, h: f64, t: f64, er: f64) -> f64 {
         + ((1.0 + (u / 18.1).powi(3)).ln()) / 18.7;
     let b = 0.564 * ((er - 0.9) / (er + 3.0)).powf(0.053);
     let e_eff = (er + 1.0) / 2.0 + (er - 1.0) / 2.0 * (1.0 + 10.0 / u).powf(-a * b);
-    z_air / e_eff.sqrt()
+    (z_air, e_eff)
 }
 
 /// IPC-2141A stripline, centred or off-centre between its planes.

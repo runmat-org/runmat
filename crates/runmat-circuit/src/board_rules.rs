@@ -51,6 +51,8 @@ pub enum RuleValue {
     Bool(bool),
     Text(String),
     ViaKinds(Vec<ViaKind>),
+    /// A delay, in picoseconds (`300 ps`, `0.3 ns`).
+    Time(f64),
 }
 
 impl RuleValue {
@@ -65,6 +67,14 @@ impl RuleValue {
             RuleValue::Num(v) => Some(*v),
             RuleValue::Int(v) => Some(*v as f64),
             RuleValue::Len(v) => Some(*v as f64),
+            RuleValue::Time(v) => Some(*v),
+            _ => None,
+        }
+    }
+    /// A delay in ps, if the value is one.
+    pub fn as_time(&self) -> Option<f64> {
+        match self {
+            RuleValue::Time(v) => Some(*v),
             _ => None,
         }
     }
@@ -99,7 +109,18 @@ pub mod props {
     pub const LENGTH_MAX: &str = "length_max";
     pub const SKEW_MAX: &str = "skew_max";
     pub const MATCH_GROUP: &str = "match_group";
+    /// A match group's target, a length or a delay (see [`crate::high_speed::groups`]).
+    pub const MATCH_TARGET: &str = "match_target";
+    /// How far a member may sit from its group's target, a length or a delay.
+    pub const MATCH_TOLERANCE: &str = "match_tolerance";
+    /// Whether a net's signal continues through two-pin series parts
+    /// ([`crate::high_speed::signals`]).
+    pub const THROUGH_PARTS: &str = "through_parts";
+    /// A series part's own delay, counted in the signal through it.
+    pub const THROUGH_DELAY: &str = "through_delay";
     pub const IMPEDANCE: &str = "impedance";
+    /// A pair's differential impedance target, Ω (see [`crate::high_speed::controlled`]).
+    pub const DIFF_IMPEDANCE: &str = "diff_impedance";
     pub const THERMAL_GAP: &str = "thermal_gap";
     pub const SPOKE_WIDTH: &str = "spoke_width";
     pub const SPOKE_MIN: &str = "spoke_min";
@@ -697,7 +718,12 @@ impl BoardRules {
         single.register_property(props::LENGTH_MAX, false, None);
         single.register_property(props::SKEW_MAX, false, None);
         single.register_property(props::MATCH_GROUP, false, None);
+        single.register_property(props::MATCH_TARGET, false, None);
+        single.register_property(props::MATCH_TOLERANCE, false, None);
+        single.register_property(props::THROUGH_PARTS, false, None);
+        single.register_property(props::THROUGH_DELAY, false, None);
         single.register_property(props::IMPEDANCE, false, None);
+        single.register_property(props::DIFF_IMPEDANCE, false, None);
         single.register_property(props::THERMAL_GAP, true, None);
         single.register_property(props::SPOKE_WIDTH, true, None);
         single.register_property(props::SPOKE_MIN, true, Some(RuleValue::Int(2)));
@@ -797,6 +823,35 @@ impl BoardRules {
             &BoardGraph::new(board, &[]).probe(p),
             BItem::Track(PROBE_TRACK),
         )
+    }
+    /// The value of `prop` on a track about to be placed: the best rule whose selector the
+    /// probe matches (by specificity, then priority, then source order), as the cascade ranks
+    /// them. A class's per-layer impedance widths reach routers this way.
+    pub fn probe_value(&self, board: &Board, p: TrackProbe, prop: &str) -> Option<RuleValue> {
+        let g = BoardGraph::new(board, &[]).probe(p);
+        let it = BItem::Track(PROBE_TRACK);
+        self.single
+            .rules()
+            .filter_map(|(h, r)| {
+                let d = r.declared(prop)?;
+                let s = r.selector.matches(&g, it)?;
+                Some(((s, r.priority, r.order, h), d.value.clone()))
+            })
+            .max_by(|a, b| a.0.cmp(&b.0))
+            .map(|(_, v)| v)
+    }
+    /// The track width `net` takes on `layer`: its rules' `track_width` there (a class's
+    /// impedance width on that layer, else its class or board width), else `fallback`.
+    pub fn width_on(&self, board: &Board, net: Option<NetId>, layer: CopperIndex, fallback: Coord) -> Coord {
+        self.probe_value(board, TrackProbe { net, layer, width: fallback }, props::TRACK_WIDTH)
+            .and_then(|v| v.as_len())
+            .unwrap_or(fallback)
+    }
+    /// A pair's width and gap on `layer`, from its rules (`diff_width`, `diff_gap`), if set.
+    pub fn pair_on(&self, board: &Board, net: NetId, layer: CopperIndex) -> (Option<Coord>, Option<Coord>) {
+        let probe = TrackProbe { net: Some(net), layer, width: 0 };
+        let get = |p| self.probe_value(board, probe, p).and_then(|v| v.as_len());
+        (get(props::DIFF_WIDTH), get(props::DIFF_GAP))
     }
     /// A pair length between a probed track and an item.
     pub fn probe_len(&self, p: &runmat_rules::Probe, other: BItem, prop: &str) -> Coord {

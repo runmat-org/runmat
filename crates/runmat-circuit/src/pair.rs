@@ -202,19 +202,76 @@ pub struct Tuning {
     pub amplitude: f64,
 }
 
-/// Trombone points on `a`→`b`: `bumps` bumps of `amp` to the left (`side` 1) or right (-1),
-/// each `pitch` wide with `pitch` between, centred on the run.
-fn trombone(a: Point, b: Point, bumps: usize, pitch: f64, amp: f64, side: f64) -> Vec<Point> {
+/// The meander shape a tuning adds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pattern {
+    /// Rectangular bumps, all to one side of the run.
+    #[default]
+    Trombone,
+    /// Rectangular bumps alternating sides, so the meander stays centred on the run.
+    Accordion,
+    /// Triangular teeth to one side, for a run with little room beside it.
+    Sawtooth,
+}
+
+impl Pattern {
+    /// `trombone`, `accordion` or `sawtooth` (any case); `None` for anything else.
+    pub fn parse(word: &str) -> Option<Pattern> {
+        match word.trim().to_ascii_lowercase().as_str() {
+            "trombone" => Some(Pattern::Trombone),
+            "accordion" => Some(Pattern::Accordion),
+            "sawtooth" => Some(Pattern::Sawtooth),
+            _ => None,
+        }
+    }
+    pub fn word(self) -> &'static str {
+        match self {
+            Pattern::Trombone => "trombone",
+            Pattern::Accordion => "accordion",
+            Pattern::Sawtooth => "sawtooth",
+        }
+    }
+    /// The bump height that adds `missing` (nm) with `bumps` bumps `pitch` wide.
+    fn amplitude(self, missing: f64, bumps: usize, pitch: f64) -> f64 {
+        let each = missing / bumps as f64;
+        match self {
+            // Two sides of `amp` per bump.
+            Pattern::Trombone | Pattern::Accordion => each / 2.0,
+            // A tooth replaces 2·pitch of run with two slopes of √(pitch² + amp²).
+            Pattern::Sawtooth => ((pitch + each / 2.0).powi(2) - pitch * pitch).sqrt(),
+        }
+    }
+}
+
+/// Meander points on `a`→`b`: `bumps` bumps (or teeth) of `amp`, starting to the left (`side`
+/// 1) or right (-1), each `pitch` wide, centred on the run.
+fn meander(a: Point, b: Point, pattern: Pattern, bumps: usize, pitch: f64, amp: f64, side: f64) -> Vec<Point> {
     let l = a.dist(b);
     let (ux, uy) = ((b.x - a.x) as f64 / l, (b.y - a.y) as f64 / l);
-    let (nx, ny) = (-uy * side, ux * side);
-    let used = (2 * bumps - 1) as f64 * pitch;
+    let (nx, ny) = (-uy, ux);
+    let used = match pattern {
+        Pattern::Sawtooth => 2.0 * bumps as f64 * pitch,
+        _ => (2 * bumps - 1) as f64 * pitch,
+    };
     let start = (l - used) / 2.0;
     let at = |s: f64, h: f64| Point::new(a.x + (ux * s + nx * h).round() as Coord, a.y + (uy * s + ny * h).round() as Coord);
     let mut out = vec![a];
     for k in 0..bumps {
-        let s = start + 2.0 * k as f64 * pitch;
-        out.extend([at(s, 0.0), at(s, amp), at(s + pitch, amp), at(s + pitch, 0.0)]);
+        match pattern {
+            Pattern::Trombone | Pattern::Accordion => {
+                let flip = if pattern == Pattern::Accordion && k % 2 == 1 { -1.0 } else { 1.0 };
+                let h = amp * side * flip;
+                let s = start + 2.0 * k as f64 * pitch;
+                out.extend([at(s, 0.0), at(s, h), at(s + pitch, h), at(s + pitch, 0.0)]);
+            }
+            Pattern::Sawtooth => {
+                let s = start + 2.0 * k as f64 * pitch;
+                if k == 0 {
+                    out.push(at(s, 0.0));
+                }
+                out.extend([at(s + pitch, amp * side), at(s + 2.0 * pitch, 0.0)]);
+            }
+        }
     }
     out.push(b);
     out
@@ -223,16 +280,12 @@ fn trombone(a: Point, b: Point, bumps: usize, pitch: f64, amp: f64, side: f64) -
 /// Tunes `net` to `target` mm within `tolerance` with trombone meanders on its longest
 /// straight track.
 pub fn tune_length(board: &mut Board, net: NetId, target: f64, tolerance: f64, pairs: &[(NetId, NetId)]) -> Result<Tuning, String> {
-    let before = net_track_length(board, net);
-    let name = board.nets[net.0 as usize].name.clone();
-    let missing = target - before;
-    if missing.abs() <= tolerance {
-        return Err(format!("{name} is {before:.3} mm, already within {tolerance} mm of {target} mm"));
-    }
-    if missing < 0.0 {
-        return Err(format!("{name} is {before:.3} mm, longer than {target} mm; meanders only add length, so shorten its route"));
-    }
-    let run = board
+    tune(board, net, target, tolerance, pairs, Pattern::Trombone, 0.0)
+}
+
+/// The longest straight track of `net`, where meanders go.
+pub fn longest_run(board: &Board, net: NetId) -> Option<crate::layout::Track> {
+    board
         .tracks
         .values()
         .filter(|t| t.net == Some(net) && matches!(t.geom, TrackGeom::Segment { .. }))
@@ -241,14 +294,29 @@ pub fn tune_length(board: &mut Board, net: NetId, target: f64, tolerance: f64, p
             a.dist(b) as i64
         })
         .cloned()
-        .ok_or_else(|| format!("{name} has no straight track to meander"))?;
+}
+
+/// Tunes `net` with `pattern` meanders on its longest straight track until its length is
+/// `target` mm within `tolerance`. `outside` (mm) is length the tuned signal has beyond this
+/// net (through series parts), counted toward the target.
+pub fn tune(board: &mut Board, net: NetId, target: f64, tolerance: f64, pairs: &[(NetId, NetId)], pattern: Pattern, outside: f64) -> Result<Tuning, String> {
+    let before = net_track_length(board, net) + outside;
+    let name = board.nets[net.0 as usize].name.clone();
+    let missing = target - before;
+    if missing.abs() <= tolerance {
+        return Err(format!("{name} is {before:.3} mm, already within {tolerance} mm of {target} mm"));
+    }
+    if missing < 0.0 {
+        return Err(format!("{name} is {before:.3} mm, longer than {target} mm; meanders only add length, so shorten its route"));
+    }
+    let run = longest_run(board, net).ok_or_else(|| format!("{name} has no straight track to meander"))?;
     let (a, b) = run.endpoints();
     let (mut rules, _) = BoardRules::for_board(board);
     rules.rebuild(&BoardGraph::new(board, pairs));
     let clearance = rules.max_clearance().max(board.limits.min_clearance);
     let pitch = (run.width + 2 * clearance) as f64;
     let l = a.dist(b);
-    // A bump uses two pitches of the run; a pitch is kept clear at each end.
+    // A bump (or tooth) uses two pitches of the run; a pitch is kept clear at each end.
     let most = ((l - 2.0 * pitch) / (2.0 * pitch)).floor().max(0.0) as usize;
     if most == 0 {
         return Err(format!("{name}'s longest straight track is {:.3} mm, too short to meander at this width and clearance", l / 1e6));
@@ -256,7 +324,7 @@ pub fn tune_length(board: &mut Board, net: NetId, target: f64, tolerance: f64, p
     let mut last = String::new();
     // Fewer, taller bumps first; then more, lower ones.
     for bumps in 1..=most {
-        let amp = missing * 1e6 / (2.0 * bumps as f64);
+        let amp = pattern.amplitude(missing * 1e6, bumps, pitch);
         if amp < pitch / 2.0 && bumps > 1 {
             break;
         }
@@ -265,10 +333,10 @@ pub fn tune_length(board: &mut Board, net: NetId, target: f64, tolerance: f64, p
         }
         for side in [1.0, -1.0] {
             board.tracks.remove(&run.id);
-            let path = trombone(a, b, bumps, pitch, amp, side);
+            let path = meander(a, b, pattern, bumps, pitch, amp, side);
             match add_checked(board, pairs, run.layer, run.width, &[(net, path)]) {
                 Ok(_) => {
-                    let after = net_track_length(board, net);
+                    let after = net_track_length(board, net) + outside;
                     return Ok(Tuning { before, after, bumps, amplitude: amp / 1e6 });
                 }
                 Err(e) => {

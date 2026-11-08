@@ -68,6 +68,7 @@ pub mod fea;
 pub mod fixture;
 pub mod font;
 pub mod geom;
+pub mod high_speed;
 pub mod ids;
 pub mod impedance;
 pub mod index;

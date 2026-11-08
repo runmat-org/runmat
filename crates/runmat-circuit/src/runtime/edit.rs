@@ -69,6 +69,7 @@ pub(super) fn needs_project(command: &str) -> bool {
             | "board.teardrops"
             | "board.diff-pair"
             | "board.tune-length"
+            | "board.tune-group"
     )
 }
 
@@ -97,6 +98,7 @@ pub fn edit(
         "board.teardrops" => super::teardrops::run(&project, request),
         "board.diff-pair" => super::coupled::diff_pair(&project, request),
         "board.tune-length" => super::coupled::tune_length(&project, request),
+        "board.tune-group" => super::coupled::tune_group(&project, request),
         "schematic.annotate" => super::annotate::run(&project, request),
         "schematic.move" => super::annotate::move_items(&project, request),
         "library.place" => super::library_edit::place(&project, request),
@@ -110,11 +112,24 @@ pub fn edit(
             let change =
                 board_edit::board_command(&layout.path, &layout.text, &edit).map_err(failure)?;
             let mut summary = format!("{} on {}", edit.command(), layout.path);
-            if let (BoardEdit::LayerStack { layers, thickness, dielectric }, Some(target)) =
-                (&edit, number(&request.values, "target_z"))
-            {
+            if let BoardEdit::LayerStack { layers, thickness, dielectric } = &edit {
                 let stackup = board_edit::standard_stackup(*layers, *thickness, dielectric.as_ref());
-                summary.push_str(&format!("; {}", widths_for(&stackup, target)));
+                if let Some(target) = number(&request.values, "target_z") {
+                    summary.push_str(&format!("; {}", widths_for(&stackup, target)));
+                }
+                // Each impedance class's width and gap per layer on the new stack.
+                for (class, c) in &board.net_class_rules {
+                    let Some(t) = crate::high_speed::ImpedanceTarget::of(&c.decls) else { continue };
+                    let rows: Vec<String> = crate::high_speed::controlled_layers(&stackup, &t, &board.limits)
+                        .iter()
+                        .map(|l| match (l.width, l.gap) {
+                            (Some(w), Some(g)) => format!("{} {:.3}/{:.3} mm", l.name, w as f64 / MM, g as f64 / MM),
+                            (Some(w), None) => format!("{} {:.3} mm", l.name, w as f64 / MM),
+                            _ => format!("{} {}", l.name, l.note.as_deref().unwrap_or("none")),
+                        })
+                        .collect();
+                    summary.push_str(&format!("; class {class}: {}", rows.join(", ")));
+                }
             }
             Ok(EditOutput {
                 summary,

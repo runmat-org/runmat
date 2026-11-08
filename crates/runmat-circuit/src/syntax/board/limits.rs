@@ -95,6 +95,13 @@ pub(super) const VIA_KINDS: [(ViaKind, &str); 4] = [
 /// `[through, micro]` via kinds, anything else text.
 pub(super) fn rule_value(v: &Val) -> Read<RuleValue> {
     Ok(match &v.v {
+        V::Qty(t, unit) if time_scale(unit).is_some() => RuleValue::Time(
+            t.parse::<f64>().map_err(|_| diagnostic(v.span, "expected a delay: `300 ps`, `0.3 ns`"))?
+                * time_scale(unit).unwrap_or(1.0),
+        ),
+        V::Qty(t, unit) if matches!(unit.as_str(), "ohm" | "ohms" | "Ω") => RuleValue::Num(
+            t.parse::<f64>().map_err(|_| diagnostic(v.span, "expected an impedance: `50 ohm`"))?,
+        ),
         V::Qty(..) => RuleValue::Len(len(v)?),
         V::Num(t) if t.contains(['.', 'e', 'E']) => RuleValue::Num(num(v)?),
         V::Num(_) => RuleValue::Int(whole(v)?),
@@ -122,8 +129,19 @@ pub(super) fn rule_value(v: &Val) -> Read<RuleValue> {
     })
 }
 
+/// ps per unit for the delay units a rule takes.
+fn time_scale(unit: &str) -> Option<f64> {
+    Some(match unit {
+        "fs" => 1e-3,
+        "ps" => 1.0,
+        "ns" => 1e3,
+        _ => return None,
+    })
+}
+
 pub(super) fn rule_value_text(v: &RuleValue) -> String {
     match v {
+        RuleValue::Time(ps) => format!("{} ps", f64_text(*ps)),
         RuleValue::Len(l) => format!("{} mm", mm_text(*l)),
         RuleValue::Num(n) => {
             let t = f64_text(*n);

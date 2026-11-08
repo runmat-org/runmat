@@ -39,6 +39,10 @@ pub struct RouteOptions {
     pub layers: Vec<CopperIndex>,
     /// Track width per net; nets not listed use `default_width`.
     pub widths: BTreeMap<NetId, Coord>,
+    /// Track width per net and copper layer (by copper index), where it differs by layer: a
+    /// net class with an impedance target. The search keeps the widest layer's clearance; each
+    /// run is drawn at its own layer's width.
+    pub layer_widths: BTreeMap<NetId, Vec<Coord>>,
     pub default_width: Coord,
     /// Via diameter and drill.
     pub via: (Coord, Coord),
@@ -54,6 +58,7 @@ impl RouteOptions {
             nets,
             layers,
             widths: BTreeMap::new(),
+            layer_widths: BTreeMap::new(),
             default_width: mm(0.2),
             via: (mm(0.45), mm(0.2)),
             clearance,
@@ -153,11 +158,11 @@ pub fn autoroute_in(
                 (false, false) => Some((*r, None)),
             })
             .collect();
-        let width = opts
-            .widths
-            .get(&w.net)
-            .copied()
-            .unwrap_or(opts.default_width);
+        let layer_width = opts.layer_widths.get(&w.net).map(Vec::as_slice);
+        let width = match layer_width {
+            Some(lw) => opts.layers.iter().filter_map(|l| lw.get(*l as usize)).copied().max().unwrap_or(opts.default_width),
+            None => opts.widths.get(&w.net).copied().unwrap_or(opts.default_width),
+        };
         let neck = [w.a, w.b]
             .iter()
             .filter_map(|p| pad_width(&pads, w.net, *p))
@@ -166,6 +171,7 @@ pub fn autoroute_in(
         let q = Query {
             net: w.net,
             width,
+            layer_width,
             via: opts.via,
             via_mask: layer_mask(0..n),
             layers: &opts.layers,
@@ -356,7 +362,7 @@ fn geometry(s: &Search, space: &Space, nodes: &[Node], a: Point, b: Point) -> Ro
     let mut vias = Vec::new();
     for n in nodes {
         let p = search::point(q, *n);
-        let w = q.width_at(p);
+        let w = q.width_on(q.layers[n.2 as usize], p);
         match runs.last_mut() {
             Some((l, rw, pts)) if *l == n.2 && *rw == w => pts.push(p),
             Some((l, rw, pts)) if *l == n.2 => {
@@ -378,7 +384,10 @@ fn geometry(s: &Search, space: &Space, nodes: &[Node], a: Point, b: Point) -> Ro
     }
     // The stubs to the anchors are drawn at the anchor's width (the neck on a pad), as the
     // ends were checked.
-    let (wa, wb) = (q.width_at(a), q.width_at(b));
+    let (wa, wb) = (
+        q.width_on(q.layers[runs[0].0 as usize], a),
+        q.width_on(q.layers[runs[runs.len() - 1].0 as usize], b),
+    );
     if wa < runs[0].1 {
         let (l, start) = (runs[0].0, runs[0].2[0]);
         runs.insert(0, (l, wa, vec![a, start]));

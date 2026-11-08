@@ -150,6 +150,14 @@
       "area": "ecad",
       "status": "pending",
       "acceptance": "A circuit writes use library <name> to read part declarations from a shared library package, and part declarations propagate through circuits it uses."
+    },
+    {
+      "id": "design.ecad.field-solved-impedance",
+      "title": "Field-solved trace impedance beside the closed form",
+      "kind": "feature",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "A board study solves each controlled line's cross-section (from the pcb source's lines) for Z0, Zdiff, delay and per-length L and C, and the layer-stack view shows the solved value beside the closed form."
     }
   ]
 }

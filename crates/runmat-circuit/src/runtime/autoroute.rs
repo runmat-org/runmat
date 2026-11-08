@@ -93,6 +93,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                     _ => routing_layers(board),
                 };
                 let mut opts = RouteOptions::new(nets, layers, clearance);
+                opts.layer_widths = layer_widths(board, &widths, default_width);
                 opts.widths = widths;
                 opts.default_width = default_width;
                 opts.via = via;
@@ -172,6 +173,32 @@ fn widths(board: &Board) -> BTreeMap<NetId, Coord> {
         if let Some(w) = width {
             out.insert(NetId(i as u32), w);
         }
+    }
+    out
+}
+
+/// Per-layer track widths of the nets whose class has an impedance target: each copper
+/// layer's width from the board's rules ([`BoardRules::width_on`]), where it differs by layer.
+fn layer_widths(board: &Board, widths: &BTreeMap<NetId, Coord>, default_width: Coord) -> BTreeMap<NetId, Vec<Coord>> {
+    let classes: BTreeSet<&str> = board
+        .net_class_rules
+        .iter()
+        .filter(|(_, c)| crate::high_speed::ImpedanceTarget::of(&c.decls).is_some())
+        .map(|(k, _)| k.as_str())
+        .collect();
+    if classes.is_empty() {
+        return BTreeMap::new();
+    }
+    let (rules, _) = BoardRules::for_board(board);
+    let n = board.copper_count();
+    let mut out = BTreeMap::new();
+    for (i, net) in board.nets.iter().enumerate() {
+        if !net.class.as_deref().is_some_and(|c| classes.contains(c)) {
+            continue;
+        }
+        let id = NetId(i as u32);
+        let fallback = widths.get(&id).copied().unwrap_or(default_width);
+        out.insert(id, (0..n).map(|l| rules.width_on(board, Some(id), l, fallback)).collect());
     }
     out
 }

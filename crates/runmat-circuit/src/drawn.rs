@@ -208,12 +208,24 @@ pub fn drawn_edit(
                     "click the route's start and at least one more point in the board view".into(),
                 );
             }
-            Ok(BoardEdit::Route {
-                net: net(board, values, selection),
-                layer: layer_value(board, values)?,
-                width: length(values, "width").unwrap_or(mm(0.15)),
-                points: pts,
-            })
+            let net = net(board, values, selection);
+            let layer = layer_value(board, values)?;
+            // No width written: the net's width on this layer from its rules (an impedance
+            // class's solved width, else its class or board width).
+            let width = match length(values, "width") {
+                Some(w) => w,
+                None => {
+                    let n = board.copper_count();
+                    let names = board.stackup.copper_names();
+                    let index = (0..n).find(|i| copper_name(*i, n) == layer || names.get(*i as usize) == Some(&layer));
+                    let (rules, _) = crate::board_rules::BoardRules::for_board(board);
+                    match index {
+                        Some(l) => rules.width_on(board, net.as_deref().and_then(|x| board.net(x)), l, mm(0.15)),
+                        None => mm(0.15),
+                    }
+                }
+            };
+            Ok(BoardEdit::Route { net, layer, width, points: pts })
         }
         "board.place-via" => {
             let at = *pts.first().ok_or("click where the via goes")?;

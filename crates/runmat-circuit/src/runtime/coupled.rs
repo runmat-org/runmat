@@ -57,8 +57,8 @@ pub(super) fn diff_pair(project: &Project, request: &EditRequest) -> Result<Edit
     let layout = project.layout_or_err()?;
     let values = &request.values;
     let net = picked(request, "pair").ok_or_else(|| EditError::new("pick a net of the pair"))?;
-    let width = values.get("width").and_then(Value::as_f64).map(mm).unwrap_or(mm(0.12));
-    let gap = values.get("gap").and_then(Value::as_f64).map(mm).unwrap_or(mm(0.15));
+    let width = values.get("width").and_then(Value::as_f64).map(mm);
+    let gap = values.get("gap").and_then(Value::as_f64).map(mm);
     let mut summary = String::new();
     let (change, ()) = board_edit::edit_board(&layout.path, &layout.text, |board| {
         let (name, p, n) = pairs(project, board)
@@ -66,10 +66,17 @@ pub(super) fn diff_pair(project: &Project, request: &EditRequest) -> Result<Edit
             .find(|(name, p, n)| *name == net || [p, n].iter().any(|id| board.nets[id.0 as usize].name == net))
             .ok_or_else(|| format!("`{net}` is in no differential pair; declare the pair in the circuit with diff_pair"))?;
         let layer = layer_of(board, values.get("layer").and_then(Value::as_str))?;
+        // Empty fields: the pair's width and gap on this layer from its rules (a class's
+        // impedance target solves them per layer).
+        let (rule_w, rule_s) = crate::board_rules::BoardRules::for_board(board).0.pair_on(board, p, layer);
+        let width = width.or(rule_w).unwrap_or(mm(0.12));
+        let gap = gap.or(rule_s).unwrap_or(mm(0.15));
         let r = crate::pair::route_pair(board, p, n, layer, width, gap)?;
         summary = format!(
-            "Routed {name} on {}: {} {:.3} mm, {} {:.3} mm, skew {:.3} mm",
+            "Routed {name} on {} at {:.3} mm width, {:.3} mm gap: {} {:.3} mm, {} {:.3} mm, skew {:.3} mm",
             board.stackup.copper_names()[layer as usize],
+            width as f64 / 1e6,
+            gap as f64 / 1e6,
             board.nets[p.0 as usize].name,
             r.p_length,
             board.nets[n.0 as usize].name,
@@ -82,22 +89,77 @@ pub(super) fn diff_pair(project: &Project, request: &EditRequest) -> Result<Edit
     Ok(EditOutput { summary, files: vec![file_change(&layout.path, &layout.text, change)] })
 }
 
-/// Runs `board.tune-length`.
+/// The meander pattern a tuning command asks for (trombone when empty).
+fn pattern_of(values: &serde_json::Map<String, Value>) -> Result<crate::pair::Pattern, EditError> {
+    match values.get("pattern").and_then(Value::as_str).filter(|p| !p.is_empty()) {
+        None => Ok(crate::pair::Pattern::Trombone),
+        Some(p) => crate::pair::Pattern::parse(p).ok_or_else(|| EditError::new(format!("`{p}` is not a pattern; use trombone, accordion or sawtooth"))),
+    }
+}
+
+/// A tuning's summary line.
+fn tuned_text(t: &crate::high_speed::tuning::Tuned, pattern: crate::pair::Pattern) -> String {
+    let unit = t.basis.unit();
+    format!(
+        "Tuned {} from {:.3} {unit} to {:.3} {unit} with {} {} meander(s) {:.3} mm tall",
+        t.net,
+        t.before,
+        t.after,
+        t.tuning.bumps,
+        pattern.word(),
+        t.tuning.amplitude
+    )
+}
+
+/// Runs `board.tune-length`: a length target in mm, or a delay target (the time field, in
+/// seconds) in ps.
 pub(super) fn tune_length(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
+    use crate::high_speed::tuning::{tune_net, Target};
     let layout = project.layout_or_err()?;
     let values = &request.values;
     let net = picked(request, "net").ok_or_else(|| EditError::new("pick the net to tune"))?;
-    let target = values.get("target").and_then(Value::as_f64).ok_or_else(|| EditError::new("give the target length"))?;
-    let tolerance = values.get("tolerance").and_then(Value::as_f64).unwrap_or(0.1);
+    let pattern = pattern_of(values)?;
+    let delay = values.get("basis").and_then(Value::as_str) == Some("delay");
+    let (target, tolerance) = if delay {
+        let ps = values.get("target_delay").and_then(Value::as_f64).ok_or_else(|| EditError::new("give the target delay"))? * 1e12;
+        let tol = values.get("tolerance_delay").and_then(Value::as_f64).map_or(1.0, |s| s * 1e12);
+        (Target::Delay(ps), tol)
+    } else {
+        let mm = values.get("target").and_then(Value::as_f64).ok_or_else(|| EditError::new("give the target length"))?;
+        (Target::Length(mm), values.get("tolerance").and_then(Value::as_f64).unwrap_or(0.1))
+    };
     let mut summary = String::new();
     let (change, ()) = board_edit::edit_board(&layout.path, &layout.text, |board| {
         let id = board.net(&net).ok_or_else(|| format!("`{net}` is not a net on the board"))?;
         let pairs = pair_nets(project, board);
-        let t = crate::pair::tune_length(board, id, target, tolerance, &pairs)?;
-        summary = format!(
-            "Tuned {net} from {:.3} mm to {:.3} mm with {} meander(s) {:.3} mm tall",
-            t.before, t.after, t.bumps, t.amplitude
-        );
+        let t = tune_net(board, id, target, tolerance, pattern, &pairs)?;
+        summary = tuned_text(&t, pattern);
+        Ok(())
+    })
+    .map_err(failure)?;
+    Ok(EditOutput { summary, files: vec![file_change(&layout.path, &layout.text, change)] })
+}
+
+/// Runs `board.tune-group`: every short member of a match group to the group's target.
+pub(super) fn tune_group(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
+    let layout = project.layout_or_err()?;
+    let values = &request.values;
+    let group = values.get("group").and_then(Value::as_str).map(str::trim).filter(|g| !g.is_empty()).ok_or_else(|| EditError::new("name the match group to tune"))?.to_owned();
+    let pattern = pattern_of(values)?;
+    let mut summary = String::new();
+    let (change, ()) = board_edit::edit_board(&layout.path, &layout.text, |board| {
+        let pairs = pair_nets(project, board);
+        let results = crate::high_speed::tuning::tune_group(board, &group, pattern, &pairs)?;
+        if results.is_empty() {
+            return Err(format!("no member of {group} is short of its target"));
+        }
+        let (done, failed): (Vec<_>, Vec<_>) = results.into_iter().partition(Result::is_ok);
+        if done.is_empty() {
+            return Err(failed.into_iter().filter_map(Result::err).collect::<Vec<_>>().join("; "));
+        }
+        let mut lines: Vec<String> = done.into_iter().filter_map(Result::ok).map(|t| tuned_text(&t, pattern)).collect();
+        lines.extend(failed.into_iter().filter_map(Result::err).map(|e| format!("not tuned: {e}")));
+        summary = format!("Tuned {group}: {}", lines.join("; "));
         Ok(())
     })
     .map_err(failure)?;

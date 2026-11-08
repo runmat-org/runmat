@@ -142,7 +142,7 @@ fn diff_pair_routes_the_usb_pair_at_its_gap_and_tune_length_meanders_it() {
     assert!(drc.iter().all(|f| f.starts_with("unrouted")), "{drc:?}");
     assert!(!open.is_empty() && open.iter().all(|n| n == "USB_DP" || n == "USB_DN"), "{open:?}");
     let summary = run(&mut files, LAYOUT, "board.diff-pair", json!({ "pair": "net:USB_DP", "width": 0.12, "gap": 0.15 }), &[]);
-    assert!(summary.starts_with("Routed USB on F.Cu: USB_DP"), "{summary}");
+    assert!(summary.starts_with("Routed USB on F.Cu at 0.120 mm width, 0.150 mm gap: USB_DP"), "{summary}");
     let (drc, open) = findings(&files);
     assert!(drc.is_empty(), "{drc:?}");
     assert!(open.is_empty(), "{open:?}");
