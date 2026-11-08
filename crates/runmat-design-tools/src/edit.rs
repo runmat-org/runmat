@@ -14,7 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProposeEditInput {
-    /// Workspace path of the design file to change.
+    /// Workspace path of the design file to change, or of a new design file to create (then
+    /// give its whole `text`).
     pub path: String,
     /// The file's new source text. Give this or `command`.
     #[serde(default)]
@@ -242,11 +243,19 @@ fn calls_for(files: &[StagedFile], before: &Files) -> (Vec<ProjectCall>, Vec<Pro
     (keep, undo)
 }
 
-/// The feature and dimension diff of a part between two texts.
-fn part_diff(path: &str, before: &str, after: &str) -> ChangeDiff {
+/// The feature and dimension diff of a part between two texts; a new part (`before` is `None`)
+/// adds every feature and input.
+fn part_diff(path: &str, before: Option<&str>, after: &str) -> ChangeDiff {
     let compile = |t: &str| runmat_cad_wasm::runtime::regenerate_part(path, t).ok();
-    let (Some(a), Some(b)) = (compile(before), compile(after)) else {
+    let Some(b) = compile(after) else {
         return ChangeDiff::default();
+    };
+    let a = match before {
+        Some(t) => match compile(t) {
+            Some(a) => Some(a),
+            None => return ChangeDiff::default(),
+        },
+        None => None,
     };
     let features = |p: &runmat_cad_wasm::runtime::RegeneratedPart| -> BTreeMap<String, Value> {
         serde_json::to_value(&p.document)
@@ -276,7 +285,7 @@ fn part_diff(path: &str, before: &str, after: &str) -> ChangeDiff {
             .or_else(|| f["feature"].as_str())
             .map(str::to_owned)
     };
-    let (fa, fb) = (features(&a), features(&b));
+    let (fa, fb) = (a.as_ref().map(features).unwrap_or_default(), features(&b));
     let mut out = ChangeDiff::default();
     let ids: BTreeSet<&String> = fa.keys().chain(fb.keys()).collect();
     for id in ids {
@@ -322,7 +331,7 @@ fn part_diff(path: &str, before: &str, after: &str) -> ChangeDiff {
             })
             .collect()
     };
-    let (ia, ib) = (inputs(&a), inputs(&b));
+    let (ia, ib) = (a.as_ref().map(inputs).unwrap_or_default(), inputs(&b));
     for name in ia.keys().chain(ib.keys()).collect::<BTreeSet<_>>() {
         let (x, y) = (ia.get(name), ib.get(name));
         if x != y {
@@ -371,7 +380,16 @@ fn assembly_diff(before: &Files, after: &Files, path: &str) -> ChangeDiff {
             .ok()
             .map(|(i, _, _)| i)
     };
-    let (Some(a), Some(b)) = (index(before), index(after)) else {
+    // A new assembly (nothing before) adds every occurrence and mate.
+    let a = if before.contains_key(path) {
+        match index(before) {
+            Some(a) => a,
+            None => return ChangeDiff::default(),
+        }
+    } else {
+        Value::Null
+    };
+    let Some(b) = index(after) else {
         return ChangeDiff::default();
     };
     let rows = |v: &Value, key: &str, id: &str| -> BTreeMap<String, Value> {
@@ -485,7 +503,7 @@ pub fn stage(
     }
     let diff = match crate::DesignKind::of(primary) {
         Some(DesignKind::Part) => match (files.get(primary), after.get(primary)) {
-            (Some(a), Some(b)) => part_diff(primary, a, b),
+            (a, Some(b)) => part_diff(primary, a.map(String::as_str), b),
             _ => ChangeDiff::default(),
         },
         Some(DesignKind::Assembly) => assembly_diff(files, &after, primary),
@@ -540,6 +558,21 @@ fn known_command(id: &str, kind: DesignKind) -> Result<(), ToolError> {
 
 pub fn propose(input: &ProposeEditInput, files: &Files) -> Result<StagedChange, ToolError> {
     let kind = kind_of(&input.path)?;
+    if !files.contains_key(&input.path) {
+        // A new design file: its whole text, staged as a file to create.
+        return match (&input.text, &input.command, &input.replace) {
+            (Some(new), None, None) => Ok(stage(
+                format!("Create {} ({} bytes)", input.path, new.len()),
+                vec![(input.path.clone(), new.clone())],
+                files,
+                &input.path,
+            )),
+            _ => Err(ToolError::new(
+                "file_missing",
+                format!("{} isn't in the workspace; to create it, give its whole `text`", input.path),
+            )),
+        };
+    }
     let text = text_of(files, &input.path)?;
     let from_replace = match &input.replace {
         Some(replace) if input.text.is_none() && input.command.is_none() => Some(replaced(text, replace)?),

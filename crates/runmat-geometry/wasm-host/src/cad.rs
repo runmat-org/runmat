@@ -5,7 +5,8 @@
 //! The browser and Desktop worker call [`runmat_cad_call`] with one JSON request,
 //! `{ "fn": "dependencies" | "compile" | "edit" | "analyze" | "export", "args": [..strings] }`, whose arguments are
 //! the ones `runmat-cad-wasm`'s wasm-bindgen entry points take, and get back the same JSON text
-//! those entry points return. Native callers use [`call`] (the same function, for host-parity
+//! those entry points return. `designTool` runs one call of the design tool layer
+//! (`runmat_design_tools::call_json`) here, for the agent's tools on parts, assemblies and drawings. Native callers use [`call`] (the same function, for host-parity
 //! tests).
 //!
 //! The per-part cache travels too (`runmat_cad_wasm::runtime::part_cache`): `probe` is `compile`
@@ -147,6 +148,18 @@ pub fn call(request: &str) -> String {
                 }
                 Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
             }
+        }
+        "designTool" => {
+            // One call of the design tool layer (`design.overview`, `check`, `inspect`,
+            // `propose_edit`, `export`, …) on a part, assembly or drawing: the agent's design
+            // tools in the browser, regenerating on this host's OCCT and its part cache, so they
+            // answer as the editor and the server do. Arguments: the tool's name, its input and
+            // the files (JSON); the answer is `{ data }` or `{ error: { code, message } }`.
+            let (name, input, files) = (arg(a, 0), arg(a, 1), arg(a, 2));
+            if let Ok(parsed) = runtime::parse_files(files) {
+                set_imports(&parsed);
+            }
+            runmat_design_tools::call_json(name, input, files).to_string()
         }
         other => error(&format!("unknown CAD function {other:?}")),
     }

@@ -33,7 +33,9 @@ pub struct InspectInput {
     /// case-insensitive substring).
     #[serde(default)]
     pub filter: Option<String>,
-    /// Density for mass properties, kg/m³ (default 7850, steel).
+    /// Density for mass properties, kg/m³. Without it a part's mass uses 7850 (steel) and an
+    /// assembly's uses each part's own material, as the Evaluate tab does; with it, every body
+    /// takes this density.
     #[serde(default)]
     pub density: Option<f64>,
     /// Input values for this run, by input name (`{"thickness": "3.5 mm"}`): the part or
@@ -65,6 +67,13 @@ struct Sections<'a> {
 }
 
 impl Sections<'_> {
+    /// The caller named this section (an expensive one isn't part of "every section").
+    fn named(&self, name: &str) -> bool {
+        self.input
+            .sections
+            .as_ref()
+            .is_some_and(|s| s.iter().any(|x| x == name))
+    }
     fn wants(&self, name: &str) -> bool {
         self.input
             .sections
@@ -373,7 +382,23 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
         &["item", "file", "part_number", "description"],
     );
     s.add("fasteners", rows(&index["fasteners"]), &["name"]);
-    if s.wants("mass") {
+    // Interference: occurrences whose exact bodies share material, the Evaluate tab's check.
+    // Only when asked for by name: it intersects every pair of bodies.
+    if s.named("interference") {
+        let value = evaluated(path, text, files, "evaluate.interference").unwrap_or_else(|e| {
+            s.out.notes.push(format!("interference: {e}"));
+            Value::Null
+        });
+        s.value("interference", value);
+    }
+    if s.wants("mass") && s.input.density.is_none() {
+        // Each part's own material (or density property), as the Evaluate tab's mass properties.
+        let value = evaluated(path, text, files, "evaluate.mass-properties").unwrap_or_else(|e| {
+            s.out.notes.push(format!("mass properties: {e}"));
+            Value::Null
+        });
+        s.value("mass", value);
+    } else if s.wants("mass") {
         // The assembly's mass: each occurrence's part mass at the given density.
         let density = s.input.density.unwrap_or(7850.0);
         let mut total = 0.0;
@@ -443,6 +468,17 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
         );
     }
     Ok(())
+}
+
+/// An Evaluate command's result on an assembly: its one-line summary, the typed result and what
+/// it couldn't evaluate.
+fn evaluated(path: &str, text: &str, files: &Files, command: &str) -> Result<Value, String> {
+    let request = runmat_cad_wasm::analyze::AnalyzeRequest {
+        command: command.to_owned(),
+        values: Default::default(),
+    };
+    let a = runmat_cad_wasm::analyze::analyze(path, text, files, &request)?;
+    Ok(json!({ "summary": a.summary, "result": a.data, "problems": a.problems }))
 }
 
 fn drawing(s: &mut Sections, path: &str, text: &str, files: &Files) {

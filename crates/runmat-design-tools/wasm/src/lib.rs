@@ -15,19 +15,20 @@
 //! object of workspace path → text holding the file, what it needs and, for `design.overview`,
 //! the project's other design files ([`runmat_design_tools::overview::related_candidates`]).
 //!
-//! The module answers for ECAD files only (`.circuit`, `.circuit.layout`). Parts, assemblies and
-//! drawings regenerate on the OCCT kernel, which the tool layer reaches natively on the server;
-//! here they answer `not_in_browser` with a plain message (no internals), so no answer comes from
-//! the test kernel.
+//! The module answers for ECAD files (`.circuit`, `.circuit.layout`). Parts, assemblies and
+//! drawings regenerate on OCCT, so the page runs their tools in the CAD host the editor compiles
+//! them in (`runmat-geometry-wasm-host`, its `designTool` call: the same
+//! [`runmat_design_tools::call_json`] on the kernel that host installs). Asked for one here, the
+//! module answers `geometry_host`, so no answer comes from the grid test kernel.
 
 use runmat_design_tools::{call, DesignKind, Files};
 use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
 
-/// What the agent says for a part, assembly or drawing in the browser: a capability, no internals.
-const MCAD_IN_BROWSER: &str = "The agent's design tools for parts, assemblies and drawings aren't available in the browser yet. The model still regenerates in the editor.";
+/// The answer for a part, assembly or drawing, which the page sends to the CAD host instead.
+const MCAD_HERE: &str = "Parts, assemblies and drawings are checked in the editor's geometry host, not in this module.";
 /// The same for a STEP import.
-const STEP_IN_BROWSER: &str = "STEP import isn't available in the browser yet.";
+const STEP_HERE: &str = "STEP files are imported in the editor's geometry host, not in this module.";
 
 /// The tools this host runs on ECAD files: the read-only ones, and `design.export`, which
 /// answers the exported files for the page to write (the Desktop's Fabrication outputs).
@@ -89,7 +90,7 @@ fn run(name: &str, input: &str, files: &str) -> Result<Value, (String, String)> 
     let files: Files = serde_json::from_str(files).map_err(|e| ("invalid_arguments".to_owned(), format!("the files aren't a JSON object of path to text: {e}")))?;
     if name == "design.import" {
         return match input.get("format").and_then(Value::as_str) {
-            Some("step") => Err(("not_in_browser".into(), STEP_IN_BROWSER.into())),
+            Some("step") => Err(("geometry_host".into(), STEP_HERE.into())),
             _ => call(name, input, &files).map_err(|e| (e.code, e.message)),
         };
     }
@@ -97,10 +98,7 @@ fn run(name: &str, input: &str, files: &str) -> Result<Value, (String, String)> 
     match DesignKind::of(path) {
         Some(DesignKind::Circuit | DesignKind::Layout) => {}
         Some(_) => {
-            return Err((
-                "not_in_browser".into(),
-                MCAD_IN_BROWSER.into(),
-            ))
+            return Err(("geometry_host".into(), MCAD_HERE.into()))
         }
         None => return Err(("invalid_arguments".into(), format!("{path} isn't a circuit or a board"))),
     }
@@ -150,13 +148,13 @@ mod tests {
         assert_eq!(data["report"]["format"], ".sch / .brd");
         assert_eq!(data["report"]["carried"]["components"], 3);
         let step = answer("design.import", r#"{"format":"step","target":"/p/a.part","files":[]}"#, "{}");
-        assert_eq!(step["error"]["code"], "not_in_browser");
+        assert_eq!(step["error"]["code"], "geometry_host");
     }
 
     #[test]
-    fn mcad_files_and_other_tools_refuse_with_their_reason() {
+    fn mcad_files_go_to_the_geometry_host_and_other_tools_refuse_with_their_reason() {
         let part = answer("design.overview", r#"{"path":"/p/a.part"}"#, r#"{"/p/a.part":""}"#);
-        assert_eq!(part["error"]["code"], "not_in_browser");
+        assert_eq!(part["error"]["code"], "geometry_host");
         // The message names a capability, never an internal (kernel, wasm, server project).
         let said = part["error"]["message"].as_str().unwrap().to_lowercase();
         for internal in ["occt", "kernel", "wasm", "server project"] {
@@ -169,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn a_circuit_change_stages_here_and_a_part_change_waits() {
+    fn a_circuit_change_stages_here_and_a_part_change_goes_to_the_geometry_host() {
         let files = daq_files();
         let text = files["/p/daq.circuit"].as_str().unwrap();
         // A second copy of the gain resistor, wired to nothing new: the change stages with the file's new text.
@@ -181,9 +179,9 @@ mod tests {
         let data = out.get("data").unwrap_or_else(|| panic!("a staged change, not {out}"));
         assert_eq!(data["files"][0]["path"], "/p/daq.circuit", "{data}");
         assert!(data["files"][0]["text"].as_str().unwrap().contains("R900"), "{data}");
-        // A part still refuses: its change needs the model regenerated.
+        // A part's change regenerates the model: the page sends it to the geometry host.
         let part = answer("design.propose_edit", r#"{"path":"/p/a.part","text":"part a {}"}"#, r#"{"/p/a.part":""}"#);
-        assert_eq!(part["error"]["code"], "not_in_browser");
+        assert_eq!(part["error"]["code"], "geometry_host");
     }
 
     #[test]

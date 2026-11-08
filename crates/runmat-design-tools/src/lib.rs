@@ -98,8 +98,8 @@ pub fn is_design_path(path: &str) -> bool {
 /// read until nothing is new ([`dependency_closure`] does this over a reader).
 pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     match DesignKind::of(path) {
-        Some(DesignKind::Part) => Vec::new(),
-        Some(DesignKind::Assembly) => runmat_cad_wasm::runtime::dependencies(path, text),
+        // A part needs the STEP files its imports read and the folders of its `.m` values.
+        Some(DesignKind::Part | DesignKind::Assembly) => runmat_cad_wasm::runtime::dependencies(path, text),
         Some(DesignKind::Drawing) => runmat_cad_wasm::drawing::dependencies(path, text),
         Some(DesignKind::Circuit | DesignKind::Layout) => {
             runmat_circuit::runtime::dependencies(path, text)
@@ -245,7 +245,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         definition::<inspect::InspectInput, inspect::InspectOutput>(
             "design.inspect",
             "Inspect design",
-            "Use this to read a design's structure by name: named faces and regions, published values, inputs, features, occurrences, mates, the BOM and mass properties of parts and assemblies; components, nets, net classes, rooms and the BOM of circuits; sheets and views of drawings. Filter by name or path (`*` matches any run).",
+            "Use this to read a design's structure by name: named faces and regions, published values, inputs, features, occurrences, mates, the BOM and mass properties of parts and assemblies (an assembly's from each part's material), and an assembly's interference when the `interference` section is named; components, nets, net classes, rooms and the BOM of circuits; sheets and views of drawings. Filter by name or path (`*` matches any run).",
         ),
         definition::<rules::RulesInput, rules::RulesOutput>(
             "design.drc",
@@ -280,7 +280,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         definition::<edit::ProposeEditInput, edit::StagedChange>(
             "design.propose_edit",
             "Propose design edit",
-            "Use this to change a design: give the new source text, or a catalog command (for example part.extrude, part.fillet, board.route) with its values and selection. Returns a staged change: the feature and dimension diff or the schematic-to-board change rows, the diagnostics after it, and the patch that keeps it and the patch that undoes it.",
+            "Use this to change a design or add a design file: give the new source text (a path that doesn't exist yet creates that file), replacements on the current text, or a catalog command (for example part.extrude, part.fillet, board.route) with its values and selection. Returns a staged change: the feature and dimension diff or the schematic-to-board change rows, the diagnostics after it, and the patch that keeps it and the patch that undoes it.",
         ),
     ];
     let render = definition::<scene::RenderInput, scene::RenderOutput>(
@@ -316,6 +316,27 @@ pub fn call(name: &str, input: Value, files: &Files) -> ToolResult {
             "unknown_tool",
             format!("{other} isn't a design tool"),
         )),
+    }
+}
+
+/// [`call`] with JSON text in and out, the shape every host entry answers (the server's
+/// design-tools route, `runmat-design-tools-wasm` and the CAD host's `designTool`):
+/// `{ "data": … }` or `{ "error": { "code", "message" } }`. `input` is the tool's input and
+/// `files` a JSON object of workspace path → text. Parts, assemblies and drawings regenerate on
+/// the kernel the host installed (`runmat_cad_wasm::kernel`): OCCT in the CAD host and on the
+/// server, the grid test double in this crate's tests.
+pub fn call_json(name: &str, input: &str, files: &str) -> Value {
+    let parsed = serde_json::from_str::<Value>(input)
+        .map_err(|e| ToolError::invalid(format!("the input isn't valid JSON: {e}")))
+        .and_then(|input| {
+            let files: Files = serde_json::from_str(files).map_err(|e| {
+                ToolError::invalid(format!("the files aren't a JSON object of path to text: {e}"))
+            })?;
+            call(name, input, &files)
+        });
+    match parsed {
+        Ok(data) => serde_json::json!({ "data": data }),
+        Err(e) => serde_json::json!({ "error": { "code": e.code, "message": e.message } }),
     }
 }
 

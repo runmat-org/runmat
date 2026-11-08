@@ -485,3 +485,77 @@ drawing sheet {
     assert!(board.contains(&"/b/main.circuit".to_owned()), "{board:?}");
     assert!(board.iter().all(|p| !p.ends_with('/')), "{board:?}");
 }
+
+const TUBE: &str = r#"runmat 0.7
+std 1
+
+part tube {
+    sketch s on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [10 mm, 0 mm])
+        l2 = line(start = l1.end, end = [10 mm, 10 mm])
+        l3 = line(start = l2.end, end = [0 mm, 10 mm])
+        l4 = line(start = l3.end, end = l1.start)
+    }
+    feature body = extrude(profile = sketch.s, distance = 200 mm)
+}
+"#;
+
+#[test]
+fn propose_edit_creates_a_new_part_and_an_assembly_that_places_it() {
+    let files = part_files();
+    let out = ok("design.propose_edit", json!({ "path": "/p/tube.part", "text": TUBE }), &files);
+    assert_eq!(out["files"][0]["created"], true, "{out:#}");
+    assert_eq!(out["keep"][0]["tool"], "runmat.write_file");
+    assert_eq!(out["undo"][0]["tool"], "runmat.delete_file");
+    assert_eq!(out["ok"], true, "{:#}", out["diagnostics"]);
+    // Every feature of a new part is added.
+    let added: Vec<&str> = out["diff"]["features"].as_array().unwrap().iter().filter(|f| f["change"] == "added").filter_map(|f| f["id"].as_str()).collect();
+    assert!(added.contains(&"body"), "{out:#}");
+
+    // Kept, the tube is a file an assembly can place.
+    let mut kept = files.clone();
+    kept.insert("/p/tube.part".into(), TUBE.into());
+    let assembly = "runmat 0.7\nstd 1\n\nassembly skid {\n    use part tube as left\n    use part tube as right {\n        placement = { placement = offset, offset = { translation = [40 mm, 0 mm, 0 mm] } }\n    }\n}\n";
+    let out = ok("design.propose_edit", json!({ "path": "/p/skid.assembly", "text": assembly }), &kept);
+    assert_eq!(out["ok"], true, "{:#}", out["diagnostics"]);
+    let occurrences: Vec<&str> = out["diff"]["features"].as_array().unwrap().iter().filter(|f| f["change"] == "added").filter_map(|f| f["id"].as_str()).collect();
+    assert!(occurrences.contains(&"occurrence.left") && occurrences.contains(&"occurrence.right"), "{out:#}");
+
+    // A missing file takes its whole text: a replacement or command has nothing to apply to.
+    let err = call("design.propose_edit", json!({ "path": "/p/clamp.part", "replace": [{ "old": "a", "new": "b" }] }), &files).unwrap_err();
+    assert_eq!(err.code, "file_missing");
+}
+
+#[test]
+fn a_call_as_json_answers_data_or_a_coded_error() {
+    let files = serde_json::to_string(&part_files()).unwrap();
+    let out = runmat_design_tools::call_json("design.check", r#"{"path":"/p/bracket.part"}"#, &files);
+    assert_eq!(out["data"]["path"], "/p/bracket.part", "{out}");
+    assert_eq!(runmat_design_tools::call_json("design.check", "{", &files)["error"]["code"], "invalid_arguments");
+    assert_eq!(runmat_design_tools::call_json("design.check", r#"{"path":"/p/none.part"}"#, &files)["error"]["code"], "file_missing");
+}
+
+#[test]
+fn an_assembly_reports_interference_by_name_and_mass_from_its_materials() {
+    let plate = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = l1.end, end = [80 mm, 50 mm])\n        l3 = line(start = l2.end, end = [0 mm, 50 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature body = extrude(profile = sketch.s, distance = 10 mm)\n    output plate = { body = feature.body.body, material = \"material.aluminum_6061\" }\n}\n";
+    // The upper plate sinks 5 mm into the lower one.
+    let pair = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part plate as lower\n    use part plate as upper {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 5 mm] } }\n    }\n}\n";
+    let files: Files = [("/p/plate.part", plate), ("/p/pair.assembly", pair)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
+    let out = ok("design.inspect", json!({ "path": "/p/pair.assembly", "sections": ["interference", "mass"] }), &files);
+    // The Evaluate tab's check runs on the pair. The grid test kernel has no exact proximity, so
+    // it says so per pair rather than reporting a clean result (OCCT finds the overlap: the CAD
+    // host's cad_design_tools test).
+    let interference = &out["sections"]["interference"];
+    assert_eq!(interference["result"]["parts"], 2, "{out:#}");
+    assert!(interference["problems"][0].as_str().unwrap().contains("lower / upper"), "{out:#}");
+    // Two 40 cm³ aluminium plates: 108 g each from their material, not steel's 314 g.
+    let mass = out["sections"]["mass"]["result"]["parts"].as_array().unwrap();
+    assert_eq!(mass.len(), 2, "{out:#}");
+    for part in mass {
+        assert_eq!(part["density_source"], "material");
+        assert!((part["mass"].as_f64().unwrap() - 0.108).abs() < 1e-9, "{part}");
+    }
+    // Unnamed, the costly check doesn't run.
+    let all = ok("design.inspect", json!({ "path": "/p/pair.assembly" }), &files);
+    assert!(all["sections"].get("interference").is_none(), "{all:#}");
+}
