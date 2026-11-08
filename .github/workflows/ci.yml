@@ -302,7 +302,7 @@ jobs:
           cargo clippy --workspace --exclude runmat-clarabel --exclude runmat-analysis-fea --all-targets --all-features --keep-going --no-deps -- -D warnings
 
       - name: Verify reviewed FEA lint debt
-        if: always() && matrix.task == 'quality'
+        if: ${{ !cancelled() && matrix.task == 'quality' }}
         shell: bash
         run: |
           set -euo pipefail
