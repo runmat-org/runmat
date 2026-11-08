@@ -54,7 +54,10 @@ pub fn closest_point_on_triangle(point: Point3, triangle: Triangle3) -> Point3 {
 
     let normal = cross(ab, ac);
     let normal_dot = dot(normal, normal);
-    if normal_dot <= f64::EPSILON {
+    // Degenerate only when the edges are parallel to rounding: |ab x ac|^2 = |ab|^2 |ac|^2 sin^2.
+    // An absolute bound would call every triangle with edges under about 0.1 mm degenerate in
+    // metres and return a vertex instead of the projection.
+    if normal_dot <= f64::EPSILON * dot(ab, ab) * dot(ac, ac) {
         return [a, b, c]
             .into_iter()
             .min_by(|left, right| distance(point, *left).total_cmp(&distance(point, *right)))

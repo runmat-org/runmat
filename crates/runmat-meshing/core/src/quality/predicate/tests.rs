@@ -202,3 +202,26 @@ fn cube_triangles() -> Vec<Triangle3> {
     ]
     .to_vec()
 }
+
+/// A 0.137 mm by 2.4 um needle on the docs heat sink's fin root (q-mesh-regress): a point inside
+/// it projects onto it. The degeneracy test is relative to the edge lengths, so small triangles
+/// in metres are not treated as collinear.
+#[test]
+fn closest_point_projects_onto_a_small_needle_triangle() {
+    let triangle = [
+        [0.06224886, 0.00246126, 0.02583984375],
+        [0.06224886, 0.00246126, 0.025703125],
+        [0.062246427569715664, 0.0024612718337142497, 0.025768943772598276],
+    ];
+    let point = [0.06224806975105429, 0.002461263844541926, 0.02576892547318599];
+    let closest = closest_point_on_triangle(point, triangle);
+    let gap = (0..3)
+        .map(|axis| (closest[axis] - point[axis]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(gap < 1.0e-15, "{gap}");
+    // A collinear triangle gives the closest point of its segment.
+    let collinear = [[0.0, 0.0, 0.0], [1.0e-4, 0.0, 0.0], [2.0e-4, 0.0, 0.0]];
+    let on_segment = closest_point_on_triangle([1.9e-4, 1.0e-5, 0.0], collinear);
+    assert!((on_segment[0] - 1.9e-4).abs() < 1.0e-18 && on_segment[1] == 0.0);
+}
