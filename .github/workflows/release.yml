@@ -148,7 +148,8 @@ jobs:
         run: |
           $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
             -TargetDirectory "$env:GITHUB_WORKSPACE/target" `
-            -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch"
+            -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch" `
+            -ReclaimUnusedRunnerTools
           "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
           "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
 

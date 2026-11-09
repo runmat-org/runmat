@@ -1,9 +1,52 @@
 #Requires -Version 5.1
 param(
     [Parameter(Mandatory = $true)][string]$TargetDirectory,
-    [Parameter(Mandatory = $true)][string]$ScratchDirectory
+    [Parameter(Mandatory = $true)][string]$ScratchDirectory,
+    [switch]$ReclaimUnusedRunnerTools
 )
 $ErrorActionPreference = 'Stop'
+
+if ($ReclaimUnusedRunnerTools) {
+    if ($env:GITHUB_ACTIONS -ne 'true') {
+        throw 'Runner image cleanup is restricted to the isolated GitHub Actions job'
+    }
+    # These hosted-image tools are unused by RunMat's Rust/native jobs. Preserve
+    # Visual Studio, Windows SDKs, LLVM, Rust, Python, Java, Node and CMake.
+    $unused = @(
+        'C:\Android\android-sdk',
+        'C:\ghcup',
+        'C:\Miniconda',
+        'C:\hostedtoolcache\windows\CodeQL',
+        'C:\hostedtoolcache\windows\go',
+        'C:\hostedtoolcache\windows\PyPy',
+        'C:\hostedtoolcache\windows\Ruby'
+    )
+    foreach ($path in $unused) {
+        if (!(Test-Path -LiteralPath $path)) { continue }
+        $item = Get-Item -LiteralPath $path -Force
+        if (!$item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Runner tool cleanup refuses a redirected/non-directory target: $path"
+        }
+        for ($parent = $item.Parent; $null -ne $parent; $parent = $parent.Parent) {
+            if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Runner tool cleanup refuses a redirected parent: $path"
+            }
+        }
+        Write-Host "Removing unused ephemeral runner tool: $path"
+        Remove-Item -LiteralPath $path -Recurse -Force
+    }
+    # The job never uses containers. Docker owns removal of its unused image
+    # layers; do not traverse or remove Docker's internal storage ourselves.
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        $containers = & docker ps --all --quiet 2>&1
+        if ($LASTEXITCODE -eq 0 -and !$containers) {
+            & docker image prune --all --force
+            if ($LASTEXITCODE -ne 0) { throw 'Unused runner Docker image cleanup failed' }
+        } else {
+            Write-Host 'Docker image cleanup skipped: containers exist or daemon is unavailable'
+        }
+    }
+}
 
 function Enable-BuildCompression([string]$Path) {
     $fullPath = [IO.Path]::GetFullPath($Path)
@@ -33,4 +76,11 @@ function Enable-BuildCompression([string]$Path) {
 
 $target = Enable-BuildCompression $TargetDirectory
 $scratch = Enable-BuildCompression $ScratchDirectory
+if ($ReclaimUnusedRunnerTools) {
+    $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($target))
+    if ($drive.AvailableFreeSpace -lt 128GB) {
+        throw ('Isolated Windows build needs 128 GiB free before cache restore; {0:N1} GiB available' -f
+            ($drive.AvailableFreeSpace / 1GB))
+    }
+}
 [pscustomobject]@{TargetDirectory=$target; ScratchDirectory=$scratch}
