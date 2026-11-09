@@ -173,7 +173,10 @@ jobs:
             shard_count: 2
             cache_name: windows-tests-tooling-distributed
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ startsWith(matrix.name, 'windows-tests-') && 480 || 360 }}
+    # The macOS tooling cohort reached six hours while compiling a later
+    # batch after successful preceding tests. Keep the existing cohort intact
+    # and use the same bounded window as the Windows test lanes.
+    timeout-minutes: ${{ (startsWith(matrix.name, 'windows-tests-') || matrix.name == 'macos-tests-tooling-distributed') && 480 || 360 }}
     env:
       # Enable backtraces on CI to aid debugging of panics/segfaults
       RUST_BACKTRACE: 1
