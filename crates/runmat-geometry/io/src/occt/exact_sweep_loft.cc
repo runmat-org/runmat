@@ -290,9 +290,9 @@ Tracked split_keep(const Tracked& src, const KInstr& in, const Body& operand) {
 Tracked prism_to_body(const Profile& p, const KInstr& in, const Body& operand) {
   const std::uint32_t sl = lab(in.ints[1]);
   const std::uint32_t el = lab(in.ints[2]);
-  const double start = in.reals[0], far = in.reals[1], offset = in.reals[2];
-  const double dir = far >= start ? 1.0 : -1.0;
-  Tracked probe = build_prism(p, start, far, kNoLabel, kNoLabel);
+  const double start = in.reals[0], end_limit = in.reals[1], offset = in.reals[2];
+  const double dir = end_limit >= start ? 1.0 : -1.0;
+  Tracked probe = build_prism(p, start, end_limit, kNoLabel, kNoLabel);
   BRepAlgoAPI_Common common(probe.shape, operand.shape);
   if (!common.IsDone()) fail("the extrude cannot be intersected with its end body");
   gp_Trsf to_local;
