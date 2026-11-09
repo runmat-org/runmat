@@ -196,6 +196,8 @@ pub fn import_maxwell_study_root(
         ANALYSIS_MANIFEST_MEDIA_TYPE,
         ANALYSIS_MANIFEST_VALUE_SCHEMA,
     )?;
+    let admitted_source = crate::study_closure::CallerBoundedImport::new(source, limits)?;
+    let source = &admitted_source;
     let manifest = AnalysisObjectManifest::from_canonical_bytes(&read(source, root, limits)?)?;
     let objects = import_analysis_objects(
         source,
@@ -215,14 +217,6 @@ pub fn import_maxwell_study_root(
     if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported maxwell completion schema"));
     }
-    if wire.preparation.max_objects > limits.max_objects
-        || wire.preparation.max_object_bytes > limits.max_object_bytes
-        || wire.preparation.max_total_bytes > limits.max_total_bytes
-    {
-        return Err(invalid(
-            "maxwell replay policy exceeds caller import limits",
-        ));
-    }
     wire.descendants.validate()?;
     let mut all = wire.descendants.objects.clone();
     all.extend(objects.unique_references(access, ValueRefKind::ResultObject)?);
@@ -232,6 +226,8 @@ pub fn import_maxwell_study_root(
         read(source, reference, limits)?;
     }
     let expected_descendants = wire.descendants;
+    let closed_source = admitted_source.close(&expected_descendants.objects, access)?;
+    let source = &closed_source;
     let preparation = wire.preparation.into_preparation(access.clone())?;
     let completed = import_maxwell_study_completion(source, preparation, wire.closures)?;
     if descendant_catalog(&completed, access)? != expected_descendants {
@@ -331,7 +327,7 @@ fn read(
         return Err(invalid("maxwell object byte limit exceeded"));
     }
     let bytes = source
-        .read_verified(reference.logical_digest)?
+        .read_verified_bounded(reference.logical_digest, reference.encoded_length)?
         .ok_or_else(|| invalid("maxwell closure child is missing"))?;
     if bytes.len() as u64 != reference.encoded_length
         || Digest::sha256(&bytes) != reference.logical_digest

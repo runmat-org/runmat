@@ -3,25 +3,8 @@ use super::*;
 use runmat_analysis_fea::execution::{
     AnalysisObjectManifest, ANALYSIS_CHUNK_MEDIA_TYPE, ANALYSIS_MANIFEST_MEDIA_TYPE,
 };
-use runmat_execution_artifact::{ArtifactError, ArtifactResult};
-
-struct PhaseSource<'a, S> {
-    source: &'a S,
-    references: &'a [ValueRef],
-}
-impl<S: CacheImport> CacheImport for PhaseSource<'_, S> {
-    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        let reference = self
-            .references
-            .iter()
-            .find(|r| r.logical_digest == digest)
-            .ok_or_else(|| {
-                ArtifactError::Identity("profile read outside original phase inventory".into())
-            })?;
-        self.source
-            .read_verified_bounded(digest, reference.encoded_length)
-    }
-}
+#[cfg(test)]
+use runmat_execution_artifact::ArtifactResult;
 
 fn limit(message: &'static str) -> AnalysisBridgeError {
     runmat_analysis_fea::execution::AnalysisExecutionError::Limit(message).into()
@@ -50,7 +33,7 @@ pub(crate) fn profile_import_workspace_phases(
     let mut peak = 0;
     for references in phases {
         let references = unique(references.to_vec())?;
-        check_inventory(&references, access, limits)?;
+        let bounded = CallerBoundedImport::new(source, limits)?.close(&references, access)?;
         let encoded = references.iter().try_fold(0_u64, |total, r| {
             total
                 .checked_add(r.encoded_length)
@@ -69,10 +52,7 @@ pub(crate) fn profile_import_workspace_phases(
             .and_then(|n| n.checked_add(fixed))
             .ok_or_else(|| limit("profile raw inventory overflow"))?;
         admit(bytes, maximum)?; // before any payload read or typed materialization
-        let bounded = PhaseSource {
-            source,
-            references: &references,
-        };
+        let references = bounded.references();
         for reference in references
             .iter()
             .filter(|r| r.media_type != ANALYSIS_CHUNK_MEDIA_TYPE)
