@@ -5,6 +5,7 @@
 #include <BRepAlgo_Image.hxx>
 #include <IntCurveSurface_TransitionOnCurve.hxx>
 #include <TColgp_Array1OfPnt2d.hxx>
+#include <TColgp_Array1OfPnt.hxx>
 #include <TopTools_MapOfShape.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <NCollection_DataMap.hxx>
@@ -2810,7 +2811,11 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
     return std::move(x.result);
   } catch (const Standard_Failure& e) {
     release_partial();
+#if OCC_VERSION_HEX >= 0x080000
+    fail(std::string("OCCT raised ") + e.ExceptionType() + ": " + e.what());
+#else
     fail(std::string("OCCT raised ") + e.DynamicType()->Name() + ": " + e.GetMessageString());
+#endif
   } catch (...) {
     release_partial();
     throw;
