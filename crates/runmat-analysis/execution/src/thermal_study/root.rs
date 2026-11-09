@@ -5,6 +5,7 @@
 //! qualification or a replacement for scheduler attestation of response/accounting pairs.
 use std::collections::BTreeMap;
 
+use crate::study_closure::completion_codec_limits;
 use runmat_analysis_fea::{
     execution::{
         AnalysisNumericalObjectKind, AnalysisObjectManifest, RetainedJouleHeatSource,
@@ -12,7 +13,7 @@ use runmat_analysis_fea::{
     },
     study::{CompiledAnalysisStudy, ThermalStudyProduct},
 };
-use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::{
     value::{ValuePayload, ValueRef, ValueRefKind},
     Digest, ProgramRevision,
@@ -34,7 +35,6 @@ use crate::{
 };
 
 const PREFIX: &[u8] = b"runmat-thermal-study-completion\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
 
 #[cfg(test)]
 mod tests;
@@ -182,7 +182,12 @@ pub fn prepare_thermal_study_root(
         closures: completed.result_closures().to_vec(),
         descendants,
     };
-    let bytes = encode_contract(PREFIX, "thermal-study-completion", &wire, LIMITS)?;
+    let bytes = encode_contract(
+        PREFIX,
+        "thermal-study-completion",
+        &wire,
+        completion_codec_limits(policy.inventory_limits()),
+    )?;
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ThermalStudyCompletion,
         Digest::sha256(&bytes),
@@ -249,8 +254,12 @@ pub fn import_thermal_study_root(
     if manifest.logical_identity != Digest::sha256(&payload) {
         return Err(invalid("thermal completion payload identity differs"));
     }
-    let wire: CompletionWire =
-        decode_contract(PREFIX, "thermal-study-completion", &payload, LIMITS)?;
+    let wire: CompletionWire = decode_contract(
+        PREFIX,
+        "thermal-study-completion",
+        &payload,
+        completion_codec_limits(limits),
+    )?;
     if wire.schema_version != 4 {
         return Err(invalid("unsupported thermal completion schema"));
     }
