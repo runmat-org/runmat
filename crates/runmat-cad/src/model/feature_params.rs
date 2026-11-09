@@ -10,6 +10,7 @@ fn extent<'a>(v: &mut Visit<'a>, prefix: &str, e: &'a Extent) {
         Extent::Blind { distance } | Extent::Symmetric { distance } => v.value(distance),
         Extent::ThroughAll | Extent::UpToNext => {}
         Extent::UpTo { face } => v.reference(format!("{}up_to", prefix), face),
+        Extent::UpToPlane { plane } => v.plane(&format!("{}up_to", prefix), plane),
         Extent::UpToVertex { vertex } => v.point(&format!("{}up_to", prefix), vertex),
         Extent::OffsetFromFace { face, offset, .. } => {
             v.reference(format!("{}up_to", prefix), face);
@@ -70,7 +71,7 @@ fn profile<'a>(v: &mut Visit<'a>, p: &'a FilletProfile) {
 
 impl Params for Extrude {
     fn visit<'a>(&'a self, v: &mut Visit<'a>) {
-        v.profile(&self.profile);
+        v.profile_source(&self.profile);
         extent(v, "", &self.extent);
         if let Some(s) = &self.second {
             extent(v, "second.", s);

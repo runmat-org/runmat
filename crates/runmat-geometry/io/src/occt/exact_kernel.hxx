@@ -178,6 +178,9 @@ rust::Vec<double> kernel_ray_hits(rust::Slice<const std::uint64_t> bodies,
                                   rust::Slice<const double> ray);
 rust::Vec<double> kernel_extent(rust::Slice<const std::uint64_t> bodies,
                                 rust::Slice<const double> axis);
+// exact_sketch_profile.cc: a planar face's loops in a frame, as profile segments.
+rust::Vec<double> kernel_face_loops(std::uint64_t body, std::uint32_t face,
+                                    rust::Slice<const double> frame);
 
 KResult kernel_execute(rust::Slice<const KInstr> program,
                        rust::Slice<const std::uint64_t> operands);

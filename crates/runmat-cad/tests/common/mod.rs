@@ -88,7 +88,7 @@ pub fn extrude(id: &str, sketch: &str, distance: ValueExpr, mode: BodyMode) -> F
     Feature::new(
         id,
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch(sketch),
+            profile: ProfileRef::sketch(sketch).into(),
             extent: Extent::Blind { distance },
             reverse: false,
             mode,
@@ -104,7 +104,7 @@ pub fn extrude_reverse(id: &str, sketch: &str, distance: ValueExpr, mode: BodyMo
     Feature::new(
         id,
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch(sketch),
+            profile: ProfileRef::sketch(sketch).into(),
             extent: Extent::Blind { distance },
             reverse: true,
             mode,

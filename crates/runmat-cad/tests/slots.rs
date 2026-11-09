@@ -178,7 +178,7 @@ fn a_body_remade_by_other_features_drifts() {
     redo.features.push(Feature::new(
         "tab2",
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch("s2"),
+            profile: ProfileRef::sketch("s2").into(),
             extent: Extent::Blind {
                 distance: ValueExpr::mm(20.0),
             },

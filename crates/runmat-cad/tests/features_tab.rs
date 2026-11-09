@@ -1044,3 +1044,130 @@ fn curve_sketch_fill_and_variable_patterns() {
     assert_clean(&r);
     assert!(near(pockets(&env, &r), 6.0, 1e-6));
 }
+
+// ================================================================== profiles from faces and regions
+
+fn face_ext(face: Reference, extent: Extent, mode: BodyMode) -> Extrude {
+    Extrude::new(ProfileSource::Face(face), extent, mode)
+}
+
+/// A 20 x 20 x 10 mm boss on the 80 x 50 x 10 mm block.
+fn bossed() -> PartDocument {
+    let mut d = block();
+    d.features
+        .push(sketch("s2", square(top(), 10.0, 10.0, 30.0, 30.0)));
+    d.features.push(feature(
+        "boss",
+        FeatureKind::Extrude(ext("s2", blind(10.0), BodyMode::add())),
+    ));
+    d
+}
+
+#[test]
+fn a_face_extrudes_as_a_prism_of_its_boundary() {
+    let env = Env::new();
+    // The block's top face up 10 mm, added: the block twice as thick.
+    let mut d = block();
+    d.features.push(feature(
+        "up",
+        FeatureKind::Extrude(face_ext(Reference::end_cap("body"), blind(10.0), BodyMode::add())),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert!(near(volume(&env, &r), 80_000.0 * MM3, 1e-9));
+    assert_eq!(r.state.bodies.len(), 1);
+    // As a new body 5 mm thick: a second body.
+    let mut d = block();
+    d.features.push(feature(
+        "slab",
+        FeatureKind::Extrude(face_ext(Reference::end_cap("body"), blind(5.0), BodyMode::New)),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 2);
+    assert!(near(volume(&env, &r), 60_000.0 * MM3, 1e-9));
+    // The boss's top face removed through all: a 20 x 20 hole through boss and block.
+    let mut d = bossed();
+    d.features.push(feature(
+        "pocket",
+        FeatureKind::Extrude(face_ext(Reference::end_cap("boss"), Extent::ThroughAll, BodyMode::cut())),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert!(near(volume(&env, &r), (40_000.0 + 4_000.0 - 8_000.0) * MM3, 1e-9));
+    // Removed 4 mm deep: into the boss only.
+    let mut d = bossed();
+    d.features.push(feature(
+        "pocket",
+        FeatureKind::Extrude(face_ext(Reference::end_cap("boss"), blind(4.0), BodyMode::cut())),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert!(near(volume(&env, &r), (40_000.0 + 4_000.0 - 1_600.0) * MM3, 1e-9));
+    // The text form reads back.
+    let src = runmat_cad::syntax::print_part(&d, &[]).unwrap();
+    assert!(src.contains("profile = feature.boss.face.end"), "{src}");
+    let back = runmat_cad::syntax::parse_part(d.path.as_str(), &src);
+    assert_eq!(
+        back.document.as_ref().map(|b| &b.features),
+        Some(&d.features),
+        "{src}\n{:?}",
+        back.diagnostics
+    );
+}
+
+#[test]
+fn an_extrude_ends_at_a_parallel_plane() {
+    let env = Env::new();
+    let mut d = block();
+    d.features.push(feature(
+        "level",
+        FeatureKind::Plane(PlaneDef::Offset { base: PlaneRef::origin_xy(), distance: mm(25.0) }),
+    ));
+    d.features
+        .push(sketch("s2", square(top(), 10.0, 10.0, 30.0, 30.0)));
+    d.features.push(feature(
+        "post",
+        FeatureKind::Extrude(ext(
+            "s2",
+            Extent::UpToPlane {
+                plane: PlaneRef::Datum { datum: DatumRef::Feature { feature: fid("level") } },
+            },
+            BodyMode::add(),
+        )),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert!(near(volume(&env, &r), (40_000.0 + 6_000.0) * MM3, 1e-9));
+}
+
+#[test]
+fn a_region_extrudes_its_own_loops() {
+    let env = Env::new();
+    // A 40 mm square with a 10 mm square inside it, on the block's top.
+    let mut s = rect_names(top(), 10.0, 10.0, 50.0, 40.0, ["a1", "a2", "a3", "a4"]);
+    let inner = rect_names(top(), 25.0, 20.0, 35.0, 30.0, ["b1", "b2", "b3", "b4"]);
+    s.entities.extend(inner.entities);
+    s.constraints.extend(inner.constraints);
+    let loops = |ls: &[&[&str]]| -> Vec<Vec<SketchEntityId>> {
+        ls.iter().map(|l| l.iter().map(|c| SketchEntityId::new(*c)).collect()).collect()
+    };
+    for (picked, added) in [
+        // The inner square alone, its curves listed out of order.
+        (loops(&[&["b3", "b1", "b4", "b2"]]), 100.0),
+        // The frame between them: the outer square with the inner one as its hole.
+        (loops(&[&["a1", "a2", "a3", "a4"], &["b1", "b2", "b3", "b4"]]), 1_200.0 - 100.0),
+    ] {
+        let mut d = block();
+        d.features.push(sketch("s2", s.clone()));
+        let mut profile = ProfileRef::sketch("s2");
+        profile.loops = picked;
+        d.features.push(feature(
+            "boss",
+            FeatureKind::Extrude(Extrude::new(profile, blind(10.0), BodyMode::add())),
+        ));
+        let r = env.regen(&d);
+        assert_clean(&r);
+        assert!(near(volume(&env, &r), (40_000.0 + added * 10.0) * MM3, 1e-9), "{}", volume(&env, &r) / MM3);
+    }
+}

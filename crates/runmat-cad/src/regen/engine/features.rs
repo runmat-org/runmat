@@ -112,6 +112,34 @@ impl<'a, 'b> Run<'a, 'b> {
                 let o = if *beyond { o } else { -o };
                 self.up_to_face(i, id, &p("up_to"), face, o, frame, dir, ops)?
             }
+            Extent::UpToPlane { plane } => {
+                let at = self.plane(i, id, &p("up_to"), plane)?;
+                if dot(at.z, frame.z).abs() < 1.0 - 1e-9 {
+                    return Err(self.error(
+                        id,
+                        Some(&p("up_to")),
+                        DiagCode::RegenInvalid,
+                        "the plane is not parallel to the profile: end at a face for a slanted \
+                         end"
+                            .into(),
+                        Vec::new(),
+                    ));
+                }
+                let at = dot(sub(at.origin, frame.origin), frame.z);
+                if (at - base) * dir <= 0.0 {
+                    return Err(self.error(
+                        id,
+                        Some(&p("up_to")),
+                        DiagCode::RegenInvalid,
+                        "the plane is behind the start of the extrude in this direction".into(),
+                        Vec::new(),
+                    ));
+                }
+                End {
+                    at,
+                    bound: PrismBound::Blind,
+                }
+            }
             Extent::UpToVertex { vertex } => {
                 let w = self.point(i, id, &p("up_to"), vertex)?;
                 let at = dot(sub(w, frame.origin), frame.z);
@@ -180,15 +208,64 @@ impl<'a, 'b> Run<'a, 'b> {
         })
     }
 
+    /// A profile's loops and, for a face profile, the face: its frame lies in the face's plane
+    /// (origin at the centroid, z along the outward normal) and the kernel reads its loops.
+    pub(super) fn profile_source(
+        &mut self,
+        i: usize,
+        id: &FeatureId,
+        param: &str,
+        p: &ProfileSource,
+    ) -> Result<(CanonicalProfile, Option<EntityHandle>), Halt> {
+        let face = match p {
+            ProfileSource::Sketch(s) => return Ok((self.profile(i, id, param, s)?, None)),
+            ProfileSource::Face(face) => face,
+        };
+        let h = self.face_entity(i, id, param, face)?;
+        let g = self.st.bodies[h.body as usize].topology.faces[h.index as usize].geom;
+        let SurfaceKind::Plane { normal } = g.surface else {
+            return Err(self.error(
+                id,
+                Some(param),
+                DiagCode::RefKindMismatch,
+                "a face profile must be flat: pick a planar face, or sketch on a plane".into(),
+                Vec::new(),
+            ));
+        };
+        let z = normalize(normal);
+        let pick = if z[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+        let x = normalize(sub(pick, scale(z, dot(pick, z))));
+        let frame = Frame {
+            origin: g.centroid,
+            x,
+            y: cross(z, x),
+            z,
+        };
+        let profile = CanonicalProfile {
+            frame,
+            loops: Vec::new(),
+            merge_collinear: false,
+        };
+        Ok((profile, Some(h)))
+    }
+
+    /// The names a profile's side faces take: by its sketch, or by the feature for a face.
+    pub(super) fn profile_naming(id: &FeatureId, p: &ProfileSource) -> FeatureId {
+        p.sketch().map(|s| s.sketch.clone()).unwrap_or_else(|| id.clone())
+    }
+
     pub(super) fn extrude(
         &mut self,
         i: usize,
         id: &FeatureId,
         e: &Extrude,
     ) -> Result<Compiled, Halt> {
-        let mut profile = self.profile(i, id, "profile", &e.profile)?;
-        let dir = if e.reverse { -1.0 } else { 1.0 };
+        let (mut profile, face) = self.profile_source(i, id, "profile", &e.profile)?;
         let (combine, combine_ops) = self.mode_operands(i, id, &e.mode)?;
+        // A face extrudes out of its body to add or make a body, and into it to remove or
+        // intersect.
+        let inward = face.is_some() && matches!(combine, Combine::Cut | Combine::Intersect);
+        let dir = if e.reverse != inward { -1.0 } else { 1.0 };
         let mut ops = Operands {
             combine: combine_ops,
             refs: Vec::new(),
@@ -284,8 +361,13 @@ impl<'a, 'b> Run<'a, 'b> {
             // Up to next on a new body reads every body there is.
             ops.refs = (0..self.st.bodies.len()).collect();
         }
+        let profile_face = face.map(|h| OperandEntity {
+            operand: ops.index(h.body as usize),
+            entity: h.index,
+        });
         let references = ops.refs.len() as u32;
         let tool = ToolOp {
+            profile_face,
             shape: ToolShape::Prism {
                 profile,
                 start,
@@ -299,11 +381,11 @@ impl<'a, 'b> Run<'a, 'b> {
             references,
         };
         // A tool addressing operand faces or bodies cannot be re-applied elsewhere.
-        let reusable = !addressed;
+        let reusable = !addressed && face.is_none();
         Ok(Compiled::Op {
             op: KernelOp::Tool(tool.clone()),
             operands: ops.all(),
-            naming: NamingContext::simple(id, vec![e.profile.sketch.clone()]),
+            naming: NamingContext::simple(id, vec![Self::profile_naming(id, &e.profile)]),
             import: false,
             instances: None,
             tools: reusable.then(|| {
@@ -626,6 +708,7 @@ impl<'a, 'b> Run<'a, 'b> {
             },
             combine: Combine::Cut,
             references: ops.refs.len() as u32,
+            profile_face: None,
         };
         // The holes, for drawings and the hole table.
         let instances = positions

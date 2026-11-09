@@ -213,6 +213,27 @@ fn part_edit(
             if let Some(result) = manage::edit(path, text, request, &picks) {
                 return result;
             }
+            // Extrude, revolve and sweep add one feature per profile picked.
+            if let Some(kinds) = crate::features::profile_features(command, &request.values, &picks)? {
+                let kinds: Vec<(&str, runmat_cad::model::FeatureKind)> = kinds
+                    .into_iter()
+                    .map(|(stem, kind)| {
+                        serde_json::from_value(kind)
+                            .map(|k| (stem, k))
+                            .map_err(|e| model(format!("the {stem}: {e}")))
+                    })
+                    .collect::<Result<_, _>>()?;
+                let mut added: Vec<String> = Vec::new();
+                let change = edit_part(text, path, |document| {
+                    for (stem, kind) in &kinds {
+                        let id = fresh_id(document, stem);
+                        document.features.push(Feature::new(&id, kind.clone()));
+                        added.push(id);
+                    }
+                    Ok(())
+                })?;
+                return Ok((change, format!("Added {}", added.join(", "))));
+            }
             let lowered = match crate::direct_edits::direct_kind(command, &request.values, &picks)? {
                 Some(kind) => Some(kind),
                 None => match crate::surface_edits::surface_kind(command, &request.values, &picks)? {

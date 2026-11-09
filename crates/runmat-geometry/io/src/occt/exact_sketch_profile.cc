@@ -30,6 +30,10 @@
 #include <BRepLib.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepTools.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <GeomConvert.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
@@ -340,6 +344,103 @@ Profile build_profile(const KInstr& in) {
     p.tracked.sheet = true;
   }
   return p;
+}
+
+// ------------------------------------------------------------------ a face as a profile
+
+// A planar face's boundary in a frame lying in its plane (frame: origin, x, y, z, 12 reals), for
+// a prism, revolve or sweep of the face. Returns the loop count, then per loop (the outer wire
+// first, then the inner ones) its edge count and each edge in wire order as the PROFILE
+// segment encoding above: kind then reals. Lines, circular arcs and whole circles keep their
+// kind; any other curve becomes its exact B-spline (kind 6, not periodic).
+rust::Vec<double> kernel_face_loops(std::uint64_t body, std::uint32_t face,
+                                    rust::Slice<const double> frame) {
+  const auto guard = kernel_lock();
+  try {
+    auto b = registry_get(body);
+    if (face >= b->faces.size()) fail("the profile face is not a face of its body");
+    if (frame.size() < 12) fail("a face profile needs its frame");
+    const TopoDS_Face& f = b->faces[face];
+    const gp_XYZ o(frame[0], frame[1], frame[2]);
+    const gp_XYZ x(frame[3], frame[4], frame[5]);
+    const gp_XYZ y(frame[6], frame[7], frame[8]);
+    const gp_XYZ z(frame[9], frame[10], frame[11]);
+    BRepAdaptor_Surface surface(f, Standard_False);
+    if (surface.GetType() != GeomAbs_Plane) fail("the profile face is not planar");
+    const gp_Pln pln = surface.Plane();
+    if (std::abs(pln.Axis().Direction().XYZ().Dot(z)) < 1.0 - 1e-9 ||
+        std::abs((pln.Location().XYZ() - o).Dot(z)) > 1e-7)
+      fail("the profile frame is not in the face's plane");
+    auto uv = [&](const gp_Pnt& p, rust::Vec<double>& out) {
+      const gp_XYZ d = p.XYZ() - o;
+      out.push_back(d.Dot(x));
+      out.push_back(d.Dot(y));
+    };
+    std::vector<TopoDS_Wire> wires;
+    const TopoDS_Wire outer = BRepTools::OuterWire(f);
+    if (outer.IsNull()) fail("the profile face has no outer boundary");
+    wires.push_back(outer);
+    for (TopExp_Explorer it(f, TopAbs_WIRE); it.More(); it.Next()) {
+      const TopoDS_Wire w = TopoDS::Wire(it.Current());
+      if (!w.IsSame(outer)) wires.push_back(w);
+    }
+    rust::Vec<double> out;
+    out.push_back(static_cast<double>(wires.size()));
+    for (const TopoDS_Wire& w : wires) {
+      rust::Vec<double> loop;
+      int count = 0;
+      for (BRepTools_WireExplorer ex(w, f); ex.More(); ex.Next()) {
+        const TopoDS_Edge& e = ex.Current();
+        if (BRep_Tool::Degenerated(e)) continue;
+        const bool reversed = e.Orientation() == TopAbs_REVERSED;
+        const gp_Pnt ps = BRep_Tool::Pnt(TopExp::FirstVertex(e, Standard_True));
+        const gp_Pnt pe = BRep_Tool::Pnt(TopExp::LastVertex(e, Standard_True));
+        BRepAdaptor_Curve c(e);
+        ++count;
+        if (c.GetType() == GeomAbs_Line) {
+          loop.push_back(0);
+          uv(ps, loop);
+          uv(pe, loop);
+        } else if (c.GetType() == GeomAbs_Circle) {
+          const gp_Circ circ = c.Circle();
+          const double span = c.LastParameter() - c.FirstParameter();
+          if (span > 2.0 * M_PI - 1e-9) {
+            loop.push_back(3);
+            uv(circ.Location(), loop);
+            loop.push_back(circ.Radius());
+          } else {
+            const bool ccw = (circ.Axis().Direction().XYZ().Dot(z) > 0) != reversed;
+            loop.push_back(ccw ? 1 : 2);
+            uv(ps, loop);
+            uv(pe, loop);
+            uv(circ.Location(), loop);
+          }
+        } else {
+          Standard_Real first = 0, last = 0;
+          Handle(Geom_Curve) gc = BRep_Tool::Curve(e, first, last);
+          if (gc.IsNull()) fail("a profile face edge has no curve");
+          Handle(Geom_BSplineCurve) bs =
+              GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(gc, first, last));
+          if (bs->IsPeriodic()) bs->SetNotPeriodic();
+          if (reversed) bs->Reverse();
+          loop.push_back(6);
+          loop.push_back(bs->Degree());
+          loop.push_back(bs->NbPoles());
+          for (int i = 1; i <= bs->NbPoles(); ++i) uv(bs->Pole(i), loop);
+          for (int i = 1; i <= bs->NbPoles(); ++i) loop.push_back(bs->Weight(i));
+          loop.push_back(bs->NbKnots());
+          for (int i = 1; i <= bs->NbKnots(); ++i) loop.push_back(bs->Knot(i));
+          for (int i = 1; i <= bs->NbKnots(); ++i) loop.push_back(bs->Multiplicity(i));
+          loop.push_back(0);
+        }
+      }
+      out.push_back(count);
+      for (double v : loop) out.push_back(v);
+    }
+    return out;
+  } catch (const Standard_Failure& e) {
+    fail(std::string("OCCT raised ") + e.GetMessageString());
+  }
 }
 
 }  // namespace occt_kernel

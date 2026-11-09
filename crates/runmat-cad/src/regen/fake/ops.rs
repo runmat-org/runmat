@@ -20,7 +20,15 @@ impl CadKernel for FakeKernel {
             .collect::<Result<_, _>>()?;
         let ids: Vec<u32> = (0..operands.len() as u32).collect();
         match op {
-            KernelOp::Tool(t) => self.tool_op(t, &solids),
+            KernelOp::Tool(t) => {
+                let t = t.with_face_loops(|face, frame| {
+                    let s = solids.get(face.operand as usize).ok_or(KernelError::Failed {
+                        message: "the profile face's operand is out of range".into(),
+                    })?;
+                    face_profile::face_loops(s, face.entity, frame)
+                })?;
+                self.tool_op(&t, &solids)
+            }
             KernelOp::PatternTools {
                 seeds,
                 instances,

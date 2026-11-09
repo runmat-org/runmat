@@ -104,6 +104,31 @@ impl ProfileRef {
     }
 }
 
+/// What extrude, revolve and sweep shape: closed loops of a sketch (`sketch.s1`), or a planar
+/// face of the part (`feature.base.face.end`), its outer boundary with its holes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ProfileSource {
+    Sketch(ProfileRef),
+    Face(Reference),
+}
+
+impl ProfileSource {
+    /// The sketch profile, when it is one.
+    pub fn sketch(&self) -> Option<&ProfileRef> {
+        match self {
+            ProfileSource::Sketch(p) => Some(p),
+            ProfileSource::Face(_) => None,
+        }
+    }
+}
+
+impl From<ProfileRef> for ProfileSource {
+    fn from(p: ProfileRef) -> Self {
+        ProfileSource::Sketch(p)
+    }
+}
+
 /// An extrude's end condition in one direction.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "extent")]
@@ -125,6 +150,10 @@ pub enum Extent {
     /// Up to the next face the extrude meets past its start, which must intercept the whole
     /// profile.
     UpToNext,
+    /// Up to a plane (a datum plane or a planar face) parallel to the profile plane.
+    UpToPlane {
+        plane: PlaneRef,
+    },
     /// Up to the plane through a vertex (or point), parallel to the profile plane.
     UpToVertex {
         vertex: PointRef,
@@ -209,7 +238,7 @@ pub struct ThinWall {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Extrude {
-    pub profile: ProfileRef,
+    pub profile: ProfileSource,
     pub extent: Extent,
     /// Extrude against the sketch normal.
     #[serde(default)]
@@ -229,9 +258,9 @@ pub struct Extrude {
 
 impl Extrude {
     /// A plain extrude: from the sketch plane, one direction, no draft, not thin.
-    pub fn new(profile: ProfileRef, extent: Extent, mode: BodyMode) -> Self {
+    pub fn new(profile: impl Into<ProfileSource>, extent: Extent, mode: BodyMode) -> Self {
         Extrude {
-            profile,
+            profile: profile.into(),
             extent,
             reverse: false,
             mode,
@@ -245,7 +274,7 @@ impl Extrude {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Revolve {
-    pub profile: ProfileRef,
+    pub profile: ProfileSource,
     pub axis: AxisRef,
     pub angle: ValueExpr,
     #[serde(default)]
@@ -254,7 +283,7 @@ pub struct Revolve {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sweep {
-    pub profile: ProfileRef,
+    pub profile: ProfileSource,
     /// The path: a sketch's open chain.
     pub path: ProfileRef,
     #[serde(default)]
@@ -1091,10 +1120,18 @@ impl FeatureKind {
                 FrameDef::OnFace { face } => out.push(("face".into(), face)),
             },
             FeatureKind::Revolve(r) => {
+                if let ProfileSource::Face(face) = &r.profile {
+                    out.push(("profile".into(), face));
+                }
                 axis(&mut out, "axis", &r.axis);
                 mode(&mut out, &r.mode);
             }
-            FeatureKind::Sweep(s) => mode(&mut out, &s.mode),
+            FeatureKind::Sweep(s) => {
+                if let ProfileSource::Face(face) = &s.profile {
+                    out.push(("profile".into(), face));
+                }
+                mode(&mut out, &s.mode);
+            }
             FeatureKind::Loft(l) => {
                 list(&mut out, "guides", &l.guides);
                 mode(&mut out, &l.mode);
@@ -1159,6 +1196,11 @@ impl FeatureKind {
         fn profile(out: &mut Vec<FeatureId>, p: &ProfileRef) {
             out.push(p.sketch.clone());
         }
+        fn source(out: &mut Vec<FeatureId>, p: &ProfileSource) {
+            if let ProfileSource::Sketch(p) = p {
+                out.push(p.sketch.clone());
+            }
+        }
         fn seeds(out: &mut Vec<FeatureId>, s: &PatternSeeds) {
             if let PatternSeeds::Features { features } = s {
                 out.extend(features.iter().cloned());
@@ -1190,11 +1232,11 @@ impl FeatureKind {
             }
             FeatureKind::Frame(_) => {}
             FeatureKind::Revolve(r) => {
-                profile(&mut out, &r.profile);
+                source(&mut out, &r.profile);
                 axis(&mut out, &r.axis);
             }
             FeatureKind::Sweep(s) => {
-                profile(&mut out, &s.profile);
+                source(&mut out, &s.profile);
                 profile(&mut out, &s.path);
             }
             FeatureKind::Loft(l) => l.profiles.iter().for_each(|p| profile(&mut out, p)),

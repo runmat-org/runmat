@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub mod references;
+pub mod regions;
 pub mod wire;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -252,6 +253,9 @@ pub struct SketchDisplay {
     pub redundant: Vec<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conflicting: Vec<usize>,
+    /// The sketch's closed regions, pickable as profiles in the model view.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<regions::SketchRegionDisplay>,
 }
 
 fn flat(points: &[[f64; 3]]) -> Vec<f32> {
@@ -815,6 +819,7 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                     .collect(),
                 redundant: solved.redundant.clone(),
                 conflicting: solved.conflicting.clone(),
+                regions: regions::sketch_regions(sketch, solved),
             })
         })
         .collect()

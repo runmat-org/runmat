@@ -5,7 +5,7 @@
 
 use crate::ids::FeatureId;
 use crate::model::datum::{AxisRef, DatumRef, PlaneRef, PointRef};
-use crate::model::feature::ProfileRef;
+use crate::model::feature::{ProfileRef, ProfileSource};
 use crate::refs::Reference;
 use crate::value::ValueExpr;
 
@@ -38,6 +38,13 @@ impl<'a> Visit<'a> {
     }
     pub fn profile(&mut self, p: &ProfileRef) {
         self.features.push(p.sketch.clone());
+    }
+    /// A sketch profile names its sketch; a face profile is a reference.
+    pub fn profile_source(&mut self, p: &'a ProfileSource) {
+        match p {
+            ProfileSource::Sketch(p) => self.profile(p),
+            ProfileSource::Face(face) => self.reference("profile", face),
+        }
     }
     fn datum(&mut self, d: &DatumRef) {
         if let DatumRef::Feature { feature } = d {

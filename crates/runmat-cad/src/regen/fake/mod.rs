@@ -46,12 +46,19 @@ mod display;
 mod exact;
 mod queries;
 mod extra;
+mod face_profile;
 mod features;
 mod mesh;
 mod sampled;
 mod sheet;
 
 pub use sheet::FakeSheet;
+
+/// Triangles covering a polygon with holes (`loops[0]` counter-clockwise, the rest clockwise,
+/// as indices into `pts`); `None` when it could not be bridged.
+pub(crate) fn triangulate_polygon(pts: &[[f64; 2]], loops: &[Vec<usize>]) -> Option<Vec<[usize; 3]>> {
+    cdt::triangulate(pts, loops, &[])
+}
 
 use crate::model::datum::Frame;
 use crate::refs::history::*;

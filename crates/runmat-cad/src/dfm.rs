@@ -280,7 +280,10 @@ impl DfmGraph {
             let mut attrs = BTreeMap::new();
             let kind = match &f.kind {
                 FeatureKind::Extrude(e) if matches!(e.mode, BodyMode::Cut { .. }) => {
-                    let Some((solved, _)) = r.state.sketches.get(&e.profile.sketch) else {
+                    let Some(sketch) = e.profile.sketch().map(|p| &p.sketch) else {
+                        continue;
+                    };
+                    let Some((solved, _)) = r.state.sketches.get(sketch) else {
                         continue;
                     };
                     let pts: Vec<[f64; 2]> = solved.points.values().copied().collect();
@@ -303,7 +306,7 @@ impl DfmGraph {
                     attrs.insert("width", len(width));
                     // Corners where two straight profile curves meet leave a sharp internal
                     // vertical corner no rotating tool can cut.
-                    let sharp = match doc.feature(&e.profile.sketch).map(|s| &s.kind) {
+                    let sharp = match doc.feature(sketch).map(|s| &s.kind) {
                         Some(FeatureKind::Sketch(s)) => {
                             use crate::model::sketch::{PointRole, SketchGeometry};
                             let ends: Vec<[f64; 2]> = s

@@ -110,6 +110,7 @@ pub(crate) mod bridge {
         fn kernel_live_bodies() -> u64;
         fn kernel_ray_hits(bodies: &[u64], face_filter: &[i64], ray: &[f64]) -> Result<Vec<f64>>;
         fn kernel_extent(bodies: &[u64], axis: &[f64]) -> Result<Vec<f64>>;
+        fn kernel_face_loops(body: u64, face: u32, frame: &[f64]) -> Result<Vec<f64>>;
         fn kernel_analyze(kind: u32, reals: &[f64], bodies: &[u64]) -> Result<Vec<f64>>;
         fn kernel_project(
             bodies: &[u64],

@@ -521,6 +521,7 @@ fn bounded(
         },
         combine: Combine::New,
         references: 1,
+        profile_face: None,
     })
 }
 

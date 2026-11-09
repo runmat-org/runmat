@@ -359,7 +359,7 @@ fn published_reads_enter_the_dependency_graph_and_change_impact() {
     d.features.push(Feature::new(
         "deep",
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch("s1"),
+            profile: ProfileRef::sketch("s1").into(),
             extent: Extent::Blind {
                 distance: ValueExpr::let_("pitch"),
             },
