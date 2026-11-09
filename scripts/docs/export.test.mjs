@@ -156,13 +156,17 @@ test("saved projects bind original inputs and result identity into immutable ass
         writeFileSync(join(project, ".artifacts/runs/docs-example.json"), "{}");
         writeFileSync(join(project, ".snapshot/view.scene.json"), "saved geometry"); writeFileSync(join(project, ".snapshot/view.png"), "poster fixture");
         const initial_camera = { activeAxes: 0, axes: [{ position: [1, -1, 1], target: [0, 0, 0], up: [0, 0, 1], zoom: 1, aspectRatio: 1.6, projection: { kind: "perspective", fov: 0.8, near: 0.01, far: 100 } }] };
-        writeFileSync(join(project, ".snapshot/snapshot.json"), JSON.stringify({ schema_version: 1, run_id: "fixture", publication: { numerically_acceptable: true }, views: [{ initial_camera, id: "geometry", label: "Solver mesh", unit: "m", minimum: null, maximum: null, deformation_scale: 1, scene: "view.scene.json", poster: "view.png" }] }));
+        writeFileSync(join(project, ".snapshot/snapshot.json"), JSON.stringify({ schema_version: 1, run_id: "fixture", publication: { numerically_acceptable: true }, views: [{ initial_camera, id: "geometry", label: "Solver mesh", output: null, unit: "m", minimum: null, maximum: null, deformation_scale: 1, scene: "view.scene.json", poster: "view.png" },
+            { initial_camera, id: "mode-1", label: "Mode 1 relative amplitude", output: "shapes", mode: 1, unit: "relative", minimum: 0, maximum: 1, deformation_scale: 1, scene: "view.scene.json", poster: "view.png" }] }));
         const graphicsRoot = join(root, "graphics"); mkdirSync(graphicsRoot); writeFileSync(join(graphicsRoot, "runmat_wasm_web.js"), "export function importGeometryScene(scene) { return scene; }"); writeFileSync(join(graphicsRoot, "runmat_wasm_web_bg.wasm"), "wasm fixture");
         const exportOptions = { ...options, snapshotsRoot, graphicsRoot };
         buildSourceDocs(exportOptions);
         const first = JSON.parse(readFileSync(join(options.output, "examples/catalog.json"))).examples[0];
         assert.ok(first.playback.project.sha256); assert.ok(first.playback.views[0].scene.sha256);
         assert.deepEqual(first.playback.views[0].initial_camera, initial_camera);
+        // Each view names the study output it draws, and a mode shape its 1-based mode.
+        assert.equal(first.playback.views[0].output, null); assert.equal(first.playback.views[0].mode, undefined);
+        assert.equal(first.playback.views[1].output, "shapes"); assert.equal(first.playback.views[1].mode, 1);
         const captured = JSON.parse(readFileSync(join(project, ".snapshot/snapshot.json")));
         captured.views[0].initial_camera.axes[0].projection.near = -1;
         writeFileSync(join(project, ".snapshot/snapshot.json"), JSON.stringify(captured));
@@ -174,6 +178,13 @@ test("saved projects bind original inputs and result identity into immutable ass
         assert.throws(() => buildSourceDocs(exportOptions), /Invalid saved-view metadata/);
         verifyArtifact(options.output);
         captured.views[0].scalar_scale = 2;
+        captured.views[1].mode = 0;
+        writeFileSync(join(project, ".snapshot/snapshot.json"), JSON.stringify(captured));
+        assert.throws(() => buildSourceDocs(exportOptions), /Invalid saved-view metadata/);
+        captured.views[1].mode = 1; captured.views[1].output = "";
+        writeFileSync(join(project, ".snapshot/snapshot.json"), JSON.stringify(captured));
+        assert.throws(() => buildSourceDocs(exportOptions), /Invalid saved-view metadata/);
+        captured.views[1].output = "shapes";
         writeFileSync(join(project, ".snapshot/snapshot.json"), JSON.stringify(captured));
         writeFileSync(join(project, ".snapshot/view.scene.json"), "new saved geometry"); buildSourceDocs(exportOptions);
         const second = JSON.parse(readFileSync(join(options.output, "examples/catalog.json"))).examples[0];

@@ -21,6 +21,9 @@ struct SavedSnapshot {
 #[derive(Deserialize)]
 struct SavedView {
     id: String,
+    /// The study output the view draws, when the capture named one.
+    #[serde(default)]
+    output: Option<String>,
 }
 
 /// Check one saved run against its authenticated publication manifest and original results.
@@ -93,6 +96,14 @@ pub(in crate::commands::fea) async fn render_saved(
     for run in &runs {
         authenticate(run)?;
     }
+    // A redraw keeps the output names the capture gave its views; it has no study source.
+    let outputs = super::views::OutputNames::Saved(
+        saved
+            .views
+            .iter()
+            .filter_map(|view| Some((view.id.clone(), view.output.clone()?)))
+            .collect(),
+    );
     let saved_views: Vec<String> = saved.views.into_iter().map(|view| view.id).collect();
     for view in selected {
         ensure!(
@@ -107,5 +118,13 @@ pub(in crate::commands::fea) async fn render_saved(
         selected.to_vec()
     };
     let presentation = super::views::Presentation::from_args(presentation)?;
-    super::write_snapshot(&runs, &views, output, &presentation, &saved.display_units).await
+    super::write_snapshot(
+        &runs,
+        &views,
+        output,
+        &presentation,
+        &saved.display_units,
+        &outputs,
+    )
+    .await
 }
