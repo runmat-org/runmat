@@ -1,4 +1,21 @@
-# FEA style debt for the 0.7.0 qualification
+# Reviewed FEA architecture and style debt
+
+## Architecture inventory
+
+`fea-architecture-debt-0.7.json` records 107 approved diagnostic identities under
+RM-1287. The November 9 integration review found 108 diagnostics against the
+previous 89-entry inventory: 58 matched exactly, 50 were added or changed, and
+31 were removed or replaced. Lowering the stale `contracts.rs` size ceiling
+from 2,828 to its current 2,623 lines removed one diagnostic.
+
+The exception covers module concentration, module-size debt and existing
+suppression sites in the listed FEA domains. The checker requires the exact
+diagnostic multiset, an ancestor review commit, its Git input identity and the
+pinned compiler. The language surface ledger runs independently. Numerical
+failures, compiler errors and findings outside the declared domains fail their
+gates.
+
+## Clippy inventory
 
 CI runs a fresh FEA Clippy census and compares its diagnostic source anchors and
 emission counts with `fea-lint-debt-0.7.json`. The ledger comes from the approved
@@ -85,10 +102,11 @@ its independent build, execution and physical-hardware results.
 
 ## CI policy and closure
 
-CI enforces strict Clippy for every other first-party crate. The FEA exception
-requires the exact FEA tree, complete compiler-input inventory and compiler
-version above. A changed input restores strict workspace linting. A separate
-FEA lint step retains its full diagnostics and expected failure as an artifact.
+CI enforces strict Clippy for every other first-party crate. The FEA Clippy
+exception requires the exact reviewed diagnostic source anchors and emission
+counts. A changed diagnostic fails the gate. The historical input identities
+above preserve the original measurement; they do not waive new findings.
+A separate FEA lint step retains its full diagnostics and expected failure as an artifact.
 Cargo checks and numerical test selection retain their existing behavior.
 
 [RM-1287](https://linear.app/dystr/issue/RM-1287), under RM-1280, owns this debt.
