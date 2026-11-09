@@ -236,7 +236,8 @@ pub use study::accuracy::{
 };
 pub use study::output::{
     sound_pressure_level_db, AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy,
-    DiagnosticKind, DiagnosticObservation, ExtremaTiePolicy, FieldLocation, MonitorCadence,
+    DiagnosticKind, DiagnosticObservation, ExtremaTiePolicy, FieldLocation, LineParameterScope,
+    MonitorCadence,
     MonitorObservation, MonitorStopCondition, ObservationComponent, ObservationCostEstimate,
     ObservationCostPolicy, ObservationEvent, ObservationId, ObservationPurpose,
     ObservationQuantity, ObservationRequest, ObservationResultQuantity, ObservationSpec,

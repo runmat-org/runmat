@@ -19,13 +19,6 @@ pub const SIGNAL_HARMONIC_NONCONSTANT_VALUE: &str = "signal.harmonic-nonconstant
 pub const UNIT_SIEMENS: &str = "language.unit.siemens";
 pub const PLASTIC_LAW_IDENTIFIER: &str = "language.plastic-law-identifier";
 pub const OUTPUT_MODE_LOCATION: &str = "output.mode-location";
-pub const LINE_IMPEDANCE: &str = "electromagnetic.line_parameters.impedance";
-pub const LINE_EFFECTIVE_PERMITTIVITY: &str = "electromagnetic.line_parameters.effective_permittivity";
-pub const LINE_DELAY: &str = "electromagnetic.line_parameters.delay";
-pub const LINE_CAPACITANCE: &str = "electromagnetic.line_parameters.capacitance";
-pub const LINE_INDUCTANCE: &str = "electromagnetic.line_parameters.inductance";
-pub const LINE_DIFFERENTIAL_PAIR: &str = "electromagnetic.line_parameters.differential_pair";
-pub const LINE_COUPLING: &str = "electromagnetic.line_parameters.coupling";
 
 /// ` [pending:<id>]`, appended to a diagnostic message.
 pub fn marker(id: &str) -> String {
@@ -57,12 +50,6 @@ pub fn reference(path: &[String]) -> Option<&'static str> {
     let first = path.first()?.as_str();
     if first == "species" {
         return Some(FLUID_SPECIES_TRANSPORT);
-    }
-    // `analysis.<step>.<line parameter>[.<trace>]` of an `electromagnetic line_parameters` step.
-    if first == "analysis" {
-        if let Some(id) = path.get(2).and_then(|name| line_parameter(name)) {
-            return Some(id);
-        }
     }
     let last = path.last()?.as_str();
     match last {
@@ -114,23 +101,6 @@ pub fn definition_member(name: &str) -> Option<&'static str> {
         "species" | "transport" => Some(FLUID_SPECIES_TRANSPORT),
         _ => None,
     }
-}
-
-/// Planned line-parameter results of an `electromagnetic line_parameters` analysis.
-fn line_parameter(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "impedance" => LINE_IMPEDANCE,
-        "effective_permittivity" => LINE_EFFECTIVE_PERMITTIVITY,
-        "delay" => LINE_DELAY,
-        "capacitance" | "vacuum_capacitance" => LINE_CAPACITANCE,
-        "inductance" => LINE_INDUCTANCE,
-        "differential_impedance"
-        | "common_mode_impedance"
-        | "odd_mode_impedance"
-        | "even_mode_impedance" => LINE_DIFFERENTIAL_PAIR,
-        "near_end_coupling" | "far_end_coupling" => LINE_COUPLING,
-        _ => return None,
-    })
 }
 
 /// Planned procedure members: `buoyancy` and `gravity` (Boussinesq CHT), `transport` (species).

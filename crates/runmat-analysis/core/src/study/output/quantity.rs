@@ -118,6 +118,43 @@ pub enum ObservationQuantity {
     Time,
     /// A sampled frequency coordinate, Hz.
     Frequency,
+    // Per-length transmission-line parameters of a cross-section (`line_parameters`). Each is
+    // published as a reduction of the section's potential solves, never as a field.
+    /// Characteristic impedance of one signal conductor with the others at 0 V, Ω.
+    LineImpedance,
+    /// Effective relative permittivity of one signal conductor, C_ii / C0_ii.
+    LineEffectivePermittivity,
+    /// Propagation delay per length of one signal conductor, s/m.
+    LineDelay,
+    /// Maxwell capacitance matrix per length with the dielectrics, F/m.
+    LineCapacitance,
+    /// Maxwell capacitance matrix per length with every dielectric replaced by vacuum, F/m.
+    LineVacuumCapacitance,
+    /// Inductance matrix per length, H/m.
+    LineInductance,
+    /// Differential impedance of a pair, Ω.
+    DifferentialImpedance,
+    /// Common-mode impedance of a pair, Ω.
+    CommonModeImpedance,
+    /// Odd-mode impedance of a pair, Ω.
+    OddModeImpedance,
+    /// Even-mode impedance of a pair, Ω.
+    EvenModeImpedance,
+    /// Backward (near-end) coupling coefficient K_b of a pair.
+    NearEndCoupling,
+    /// Forward (far-end) coupling coefficient K_f of a pair.
+    FarEndCoupling,
+}
+
+/// What a line parameter describes, which fixes how an output names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineParameterScope {
+    /// One value per signal conductor: the output names the conductor.
+    Conductor,
+    /// One value of a two-conductor pair.
+    Pair,
+    /// One n x n matrix over the n signal conductors.
+    Matrix,
 }
 
 impl ObservationQuantity {
@@ -140,7 +177,32 @@ impl ObservationQuantity {
             | Self::Eigenvalue
             | Self::Residual
             | Self::Balance
-            | Self::ConstraintViolation => D::DIMENSIONLESS,
+            | Self::ConstraintViolation
+            | Self::LineEffectivePermittivity
+            | Self::NearEndCoupling
+            | Self::FarEndCoupling => D::DIMENSIONLESS,
+            Self::LineImpedance
+            | Self::DifferentialImpedance
+            | Self::CommonModeImpedance
+            | Self::OddModeImpedance
+            | Self::EvenModeImpedance => D::ELECTRIC_POTENTIAL
+                .divide(D::ELECTRIC_CURRENT)
+                .expect("static dimension"),
+            Self::LineDelay => D::TIME.divide(D::LENGTH).expect("static dimension"),
+            Self::LineCapacitance | Self::LineVacuumCapacitance => D::ELECTRIC_CURRENT
+                .multiply(D::TIME)
+                .expect("static dimension")
+                .divide(D::ELECTRIC_POTENTIAL)
+                .expect("static dimension")
+                .divide(D::LENGTH)
+                .expect("static dimension"),
+            Self::LineInductance => D::ELECTRIC_POTENTIAL
+                .multiply(D::TIME)
+                .expect("static dimension")
+                .divide(D::ELECTRIC_CURRENT)
+                .expect("static dimension")
+                .divide(D::LENGTH)
+                .expect("static dimension"),
             Self::Velocity | Self::AcousticParticleVelocity | Self::FluidVelocity => D::VELOCITY,
             Self::AcousticIntensity | Self::AcousticPortIntensity => {
                 D::POWER.divide(D::AREA).expect("static dimension")
@@ -346,11 +408,65 @@ impl ObservationQuantity {
         })
     }
 
+    /// The line parameter an `electromagnetic line_parameters` analysis publishes under the
+    /// source name `name` (`analysis.<step>.<name>[.<conductor>]`).
+    pub fn from_line_parameter_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "impedance" => Self::LineImpedance,
+            "effective_permittivity" => Self::LineEffectivePermittivity,
+            "delay" => Self::LineDelay,
+            "capacitance" => Self::LineCapacitance,
+            "vacuum_capacitance" => Self::LineVacuumCapacitance,
+            "inductance" => Self::LineInductance,
+            "differential_impedance" => Self::DifferentialImpedance,
+            "common_mode_impedance" => Self::CommonModeImpedance,
+            "odd_mode_impedance" => Self::OddModeImpedance,
+            "even_mode_impedance" => Self::EvenModeImpedance,
+            "near_end_coupling" => Self::NearEndCoupling,
+            "far_end_coupling" => Self::FarEndCoupling,
+            _ => return None,
+        })
+    }
+
+    /// `Some` exactly for the per-length line parameters of a cross-section.
+    pub fn line_parameter_scope(self) -> Option<LineParameterScope> {
+        Some(match self {
+            Self::LineImpedance | Self::LineEffectivePermittivity | Self::LineDelay => {
+                LineParameterScope::Conductor
+            }
+            Self::DifferentialImpedance
+            | Self::CommonModeImpedance
+            | Self::OddModeImpedance
+            | Self::EvenModeImpedance
+            | Self::NearEndCoupling
+            | Self::FarEndCoupling => LineParameterScope::Pair,
+            Self::LineCapacitance | Self::LineVacuumCapacitance | Self::LineInductance => {
+                LineParameterScope::Matrix
+            }
+            _ => return None,
+        })
+    }
+
+    /// Value shape of a line parameter on a section with `conductors` signal conductors:
+    /// an n x n tensor for the matrices and a scalar otherwise. `None` for other quantities.
+    pub fn line_parameter_shape(self, conductors: usize) -> Option<ObservationValueShape> {
+        Some(match self.line_parameter_scope()? {
+            LineParameterScope::Matrix => ObservationValueShape::Tensor {
+                extents: vec![conductors, conductors],
+            },
+            LineParameterScope::Conductor | LineParameterScope::Pair => {
+                ObservationValueShape::Scalar
+            }
+        })
+    }
+
     /// Canonical component shape of this physical quantity.
     ///
     /// This is the shared authority used by authored-output validation, physics recovery, and
     /// observation evaluation. Storage may use an equivalent explicit tensor extent, but it must
-    /// not redefine the quantity's semantics.
+    /// not redefine the quantity's semantics. The line capacitance and inductance matrices have
+    /// one row per signal conductor of their section, so their shape comes from
+    /// [`Self::line_parameter_shape`]; this returns the 1 x 1 shape of a single line.
     pub fn canonical_value_shape(self) -> ObservationValueShape {
         match self {
             Self::Displacement
@@ -385,6 +501,11 @@ impl ObservationQuantity {
             | Self::ShellTransverseShear => ObservationValueShape::Tensor { extents: vec![2] },
             Self::ShellMembraneForce | Self::ShellBendingMoment => {
                 ObservationValueShape::Tensor { extents: vec![3] }
+            }
+            Self::LineCapacitance | Self::LineVacuumCapacitance | Self::LineInductance => {
+                ObservationValueShape::Tensor {
+                    extents: vec![1, 1],
+                }
             }
             _ => ObservationValueShape::Scalar,
         }

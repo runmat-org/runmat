@@ -32,7 +32,7 @@ The study below sizes a single-ended microstrip and an edge-coupled differential
 top layer of a four-layer board. The top copper is 35 µm (1 oz) under 20 µm of solder mask,
 on 0.2 mm of prepreg (Dk 4.1) over the ground plane on `In1.Cu`. The etch leaves 60° sidewalls.
 
-```fea pending=electromagnetic.line_parameters
+```fea
 geometry single_ended {
     cross_section {
         layer "F.Mask" : solder_mask { thickness = 20 um; permittivity = 3.8 }

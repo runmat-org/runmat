@@ -236,21 +236,22 @@ fn canonical_fea_documentation_examples_check_cleanly() {
         "acoustic-cavity-harmonic.fea",
         "acoustic-duct-modes.fea",
         "acoustic-duct-pulse.fea",
+        "trace-impedance.fea",
     ] {
         let path = format!("docs/simulation/examples/{name}");
         assert_fea_checks(&temp, &path);
     }
 }
 
-// The trace-impedance example is written in its final form. Its `cross_section` geometries,
-// triangle meshes and model-less studies lower; `runmat check` rejects it until the
-// line-parameter outputs land (ledger rows electromagnetic.line_parameters.*). When it starts
-// checking, move it into `canonical_fea_documentation_examples_check_cleanly`.
+// The trace-impedance example checks, and its line-parameter outputs lower to reductions of the
+// section. `runmat run` admits `electromagnetic line_parameters` once the cross-section solve
+// publishes (ledger row electromagnetic.line_parameters). When this run succeeds, replace this
+// test with the FEA-EM-LINE-001/public_study witness on Z0 and Zdiff.
 #[test]
-fn trace_impedance_example_waits_for_the_line_parameters_procedure() {
+fn trace_impedance_example_run_waits_for_the_line_parameters_procedure() {
     let temp = TempDir::new().unwrap();
     let path = "docs/simulation/examples/trace-impedance.fea";
-    let output = runmat_from_repository(&temp, &["check", path, "--json"]);
+    let output = runmat_from_repository(&temp, &["run", path, "--study", "microstrip", "--json"]);
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
@@ -258,23 +259,12 @@ fn trace_impedance_example_waits_for_the_line_parameters_procedure() {
     );
     assert!(
         !output.status.success(),
-        "{path} now checks: list it with the canonical examples and land the ledger rows\n{text}"
+        "{path} now runs: add the Z0 and Zdiff witness and land the ledger rows\n{text}"
     );
-    assert!(!text.trim().is_empty(), "{path}: check failed without a diagnostic");
-    // Each rejection names the ledger row that owns it.
     assert!(
-        !text.contains("cross_section_geometry") && !text.contains("fea.semantic.mesh"),
-        "{path}: the cross-section geometry should lower\n{text}"
+        text.contains("electromagnetic.line_parameters"),
+        "{path}: the run rejection does not name the pending procedure\n{text}"
     );
-    for id in [
-        "pending:electromagnetic.line_parameters.impedance",
-        "pending:electromagnetic.line_parameters.differential_pair",
-    ] {
-        assert!(
-            text.contains(id),
-            "{path}: diagnostics do not name {id}\n{text}"
-        );
-    }
 }
 
 #[test]
