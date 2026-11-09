@@ -159,7 +159,7 @@ struct Basis {
 impl Basis {
     fn new(direction: [f32; 3], fov: f32, aspect_ratio: f32) -> Self {
         let back = V3::from_f32(direction).normalize();
-        let hint = if back.cross(V3([0.0, 0.0, 1.0])).length_squared() > 1e-8 {
+        let hint = if back.cross(V3([0.0, 0.0, 1.0])).length() > 1e-4 {
             V3([0.0, 0.0, 1.0])
         } else {
             V3([0.0, 1.0, 0.0])

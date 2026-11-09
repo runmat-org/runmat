@@ -117,10 +117,9 @@ impl Presentation {
         let context = args
             .context
             .iter()
-            .enumerate()
-            .map(|(index, spec)| {
+            .map(|spec| {
                 let (file, opacity) = parse_context(spec)?;
-                load_context(index, Path::new(file), opacity, units)
+                load_context(Path::new(file), opacity, units)
             })
             .collect::<Result<Vec<_>>>()?;
         let frame = parse_frame(&args.frame)?;
@@ -224,7 +223,6 @@ impl Presentation {
 }
 
 fn load_context(
-    index: usize,
     path: &Path,
     opacity: f32,
     units: LengthUnit,
