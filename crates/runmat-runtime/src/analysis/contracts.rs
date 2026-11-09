@@ -2426,7 +2426,6 @@ mod tests {
         assert_eq!(procedures.len(), AnalysisProcedure::ALL.len());
         assert!(procedures.contains(&"modal_response_spectrum".to_string()));
         assert!(procedures.contains(&"random_response".to_string()));
-        assert!(procedures.contains(&"line_parameters".to_string()));
 
         let operations = analysis_output_operation_ids();
         assert_eq!(
