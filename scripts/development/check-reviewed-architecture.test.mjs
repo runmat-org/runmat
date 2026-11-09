@@ -5,9 +5,9 @@ import { matchesReviewedDebt } from "./check-reviewed-architecture.mjs";
 test("reviewed architecture matching preserves exact multiplicity and scope", () => {
   const a = "architecture boundary check failed: crates/runmat-analysis/fea/src/a.rs has existing debt";
   const b = "architecture boundary check failed: crates/runmat-runtime/src/analysis/b.rs has existing debt";
-  const expected = [...Array(88).fill(a), b];
-  assert(matchesReviewedDebt([b, ...Array(88).fill(a)], expected));
-  assert(!matchesReviewedDebt(Array(89).fill(a), expected));
+  const expected = [...Array(106).fill(a), b];
+  assert(matchesReviewedDebt([b, ...Array(106).fill(a)], expected));
+  assert(!matchesReviewedDebt(Array(107).fill(a), expected));
   assert(!matchesReviewedDebt(expected.slice(1), expected));
   assert(!matchesReviewedDebt([...expected, a], expected));
   assert(!matchesReviewedDebt([], expected));
