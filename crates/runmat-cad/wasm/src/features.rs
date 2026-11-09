@@ -141,6 +141,65 @@ fn extent(values: &Values, prefix: &str, picks: &Picks) -> Result<Value, EditFai
     })
 }
 
+/// Faces picked as an extrude's profile extrude press-pull style: each face moves along its
+/// normal by the depth (out for Add, in for Remove, the other way with Flip), and the faces
+/// around it follow, so the material joins the face's own body. `None` when the profile is a
+/// sketch or a region. A face profile takes a blind depth from the face itself; the start
+/// offset, end conditions, second direction, draft, thin wall and new or intersected bodies
+/// apply to sketch profiles.
+fn face_pull(values: &Values, picks: &Picks) -> Result<Option<Value>, EditFailure> {
+    let all = picks_of(values, "profile");
+    let faces: Vec<&String> = all
+        .iter()
+        .filter(|p| picks.sketch(p).is_err() && picks.body_of_face(p).is_some())
+        .collect();
+    if faces.is_empty() {
+        return Ok(None);
+    }
+    if faces.len() != all.len() {
+        return Err(model(
+            "extrude faces or sketches: pick only faces, or only sketches and regions",
+        ));
+    }
+    let sign = match text(values, "op", "add") {
+        "add" => 1.0,
+        "remove" => -1.0,
+        _ => {
+            return Err(model(
+                "a face extrudes into its own body: use Add to pull it out or Remove to push it in; for a new or intersected body, extrude a sketch",
+            ))
+        }
+    };
+    let sign = if flag(values, "flip") { -sign } else { sign };
+    if text(values, "from", "sketch_plane") != "sketch_plane" {
+        return Err(model("a face extrudes from the face itself; start from the sketch plane"));
+    }
+    if text(values, "end", "blind") != "blind" {
+        return Err(model("a face extrudes a blind depth; for an end condition, extrude a sketch on the face"));
+    }
+    for (field, what) in [("second_direction", "a second direction"), ("draft", "draft"), ("thin", "a thin wall")] {
+        if flag(values, field) {
+            return Err(model(format!("a face extrudes without {what}; extrude a sketch on the face for it")));
+        }
+    }
+    let mut distance = value(values, "distance", "mm")?;
+    if sign < 0.0 {
+        let n = distance
+            .get("value")
+            .and_then(Value::as_f64)
+            .filter(|_| distance["form"] == "quantity")
+            .ok_or_else(|| model("pushing a face in takes a depth in mm"))?;
+        distance["value"] = json!(-n);
+    }
+    let faces: Vec<String> = faces.into_iter().cloned().collect();
+    Ok(Some(json!({
+        "feature": "direct",
+        "direct": "move_faces",
+        "faces": picks.references(&faces)?,
+        "motion": { "motion": "offset", "distance": distance },
+    })))
+}
+
 fn extrude(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
     let mut kind = json!({
         "feature": "extrude",
@@ -399,7 +458,10 @@ pub fn feature_kind(
     picks: &Picks,
 ) -> Result<Option<(&'static str, Value)>, EditFailure> {
     Ok(Some(match command {
-        "part.extrude" => ("extrude", extrude(values, picks)?),
+        "part.extrude" => match face_pull(values, picks)? {
+            Some(pull) => ("pull", pull),
+            None => ("extrude", extrude(values, picks)?),
+        },
         "part.revolve" => {
             match text(values, "type", "one") {
                 "one" => {}
@@ -813,6 +875,30 @@ mod tests {
             "{command}"
         );
         text
+    }
+
+    /// A face picked as the profile extrudes press-pull style into its own body: the plate gets
+    /// thicker by the depth (Add), thinner (Remove).
+    #[test]
+    fn a_face_profile_extrudes_into_its_own_body() {
+        let height = |text: &str| -> f64 {
+            let compiled: Value = serde_json::from_str(&compile_json("/p/plate.part", text, &Files::new())).unwrap();
+            let b = &compiled["display"]["data"]["bounds"];
+            (b["max"][2].as_f64().unwrap() - b["min"][2].as_f64().unwrap()) * 1e3
+        };
+        let t = added("part.extrude", json!({ "profile": [END], "op": "add", "from": "sketch_plane", "end": "blind", "distance": 5 }));
+        assert!(t.contains("feature pull1 = direct.move_faces(") && t.contains("distance = 5 mm"), "{t}");
+        assert!((height(&t) - 15.0).abs() < 1e-6, "{t}");
+        let t = added("part.extrude", json!({ "profile": [END], "op": "remove", "distance": 4 }));
+        assert!((height(&t) - 6.0).abs() < 1e-6, "{t}");
+        let refused = |values: Value| -> String {
+            let request = json!({ "command": "part.extrude", "values": values });
+            let out: Value = serde_json::from_str(&edit_json("/p/plate.part", PLATE, &Files::new(), &request.to_string())).unwrap();
+            assert_eq!(out["ok"], false, "{out}");
+            out.to_string()
+        };
+        assert!(refused(json!({ "profile": [END], "op": "new", "distance": 5 })).contains("own body"));
+        assert!(refused(json!({ "profile": [END, "sketch:s1"], "distance": 5 })).contains("only faces"));
     }
 
     /// A closed sketch's base flange is a flat plate even though the form sends its depth; an
