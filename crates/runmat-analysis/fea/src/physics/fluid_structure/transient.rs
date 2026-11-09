@@ -217,6 +217,10 @@ impl FluidStructureProblem<'_> {
             let mut relaxation = self.input.policy.initial_relaxation;
             let mut residuals = Vec::new();
             let mut accepted = None;
+            // The fluid solve of each coupling iteration after the first starts from the
+            // previous iteration's flow: the interface moves little between them.
+            let mut previous_flow: Option<crate::physics::cfd::canonical::CanonicalFluidResult> =
+                None;
             for iteration in 1..=self.input.policy.maximum_coupling_iterations {
                 if crate::is_fea_cancelled() {
                     return Err(Error::Cancelled);
@@ -252,7 +256,11 @@ impl FluidStructureProblem<'_> {
                         face_mesh_flux_m3_per_s: &mesh_flux,
                     },
                 )?;
-                let result = step.solve()?;
+                let result = match &previous_flow {
+                    Some(previous) => step.solve_from(previous.original_fields())?,
+                    None => step.solve()?,
+                };
+                previous_flow = Some(result.clone());
                 let arrival_load = self.interface_load(&arrival.topology, &result)?;
                 let response = self.structure.newmark_step(
                     newmark,
