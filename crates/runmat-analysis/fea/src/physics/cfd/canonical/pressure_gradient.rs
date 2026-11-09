@@ -133,8 +133,7 @@ pub(super) fn derive(
 
 /// Reconstruct the gradient of original component-relative pressure.
 pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[f64]) -> Result<Vec<V>, Error> {
-    let mut result = Vec::with_capacity(values.len());
-    for c in 0..p.pressure_stencils.offsets.len() - 1 {
+    super::geometry_ops::indexed(p.pressure_stencils.offsets.len() - 1, |c| {
         let mut gradient = [0.0; 3];
         for (sample, weight) in p.pressure_stencils.cell(c) {
             let value = match *sample {
@@ -151,9 +150,8 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[f64]) -> Result<
         if gradient.iter().any(|x| !x.is_finite()) {
             return Err(Error::Invalid("nonfinite pressure reconstruction"));
         }
-        result.push(gradient);
-    }
-    Ok(result)
+        Ok(gradient)
+    })
 }
 
 #[cfg(test)]
