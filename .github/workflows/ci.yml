@@ -567,9 +567,9 @@ jobs:
     # Build all release targets so failures are caught before tagging
     if: ${{ !inputs.release_validation && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)) }}
     name: Cross build ${{ matrix.platform.release_for }}
-    # Cold archive, host-packager and final-CLI compilation exceeded six hours
-    # on the self-hosted Mac runners while still making compiler progress.
-    timeout-minutes: 480
+    # The Windows cold build used nearly eight hours, leaving no time to
+    # retain its checkpoint after acceptance. Other native lanes retain 8h.
+    timeout-minutes: ${{ matrix.platform.target == 'x86_64-pc-windows-msvc' && 600 || 480 }}
     strategy:
       fail-fast: false
       max-parallel: 12
@@ -593,9 +593,9 @@ jobs:
             bin: runmat
     runs-on: ${{ matrix.platform.os }}
     env:
-      # Each whole-crate release producer is large. Serializing them on the
-      # smaller Mac/Windows builders avoids swap contention between producers.
-      CARGO_BUILD_JOBS: ${{ matrix.platform.target == 'x86_64-unknown-linux-gnu' && '8' || '1' }}
+      # Keep one Cargo producer per job. Windows has 64 GiB; its two compiler
+      # slots can overlap dependencies. Smaller Mac builders retain one slot.
+      CARGO_BUILD_JOBS: ${{ matrix.platform.target == 'x86_64-unknown-linux-gnu' && '8' || (matrix.platform.target == 'x86_64-pc-windows-msvc' && '2' || '1') }}
       # Archive packaging executes a host-side Cargo tool in the dev profile.
       # Bound that tool's artifacts as well as the final release executable.
       CARGO_INCREMENTAL: '0'
