@@ -981,6 +981,80 @@
           }
         }
       ]
+    },
+    {
+      "id": "trace-impedance",
+      "title": "Size a 50 \u03a9 microstrip and a 100 \u03a9 pair",
+      "description": "Build a four-layer board's top-layer cross-section from its stackup and read the impedance, effective permittivity and delay of a single-ended microstrip and an edge-coupled differential pair.",
+      "entry": "trace-impedance.fea",
+      "files": [
+        "trace-impedance.fea"
+      ],
+      "expected_outputs": [
+        "Microstrip Z0, in ohms, with \u03b5eff and delay",
+        "Pair Zdiff and Zcommon, in ohms, with near- and far-end coupling and the per-length C and L matrices"
+      ],
+      "host_note": "Open the complete project in RunMat Desktop to edit the stackup or trace widths and run it.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "snapshot": false,
+      "receipts": [
+        {
+          "id": "microstrip-z0",
+          "quantity": "Characteristic impedance of the single-ended microstrip (0.36 mm trace)",
+          "output": "z0",
+          "value": 50.2205,
+          "unit": "\u03a9",
+          "mesh": {
+            "order": "linear",
+            "target_size": "graded from the copper edges to 0.4 mm",
+            "nodes": 165435,
+            "elements": 329104
+          },
+          "reference": {
+            "value": 50,
+            "unit": "\u03a9",
+            "source": "design target of the example stackup"
+          },
+          "run": {
+            "cli": "runmat debug build of q-trace-impedance-5",
+            "commit": "e5ddae3e92",
+            "date": "2026-11-09",
+            "study": "trace-impedance.fea --study microstrip",
+            "result": "run_remote_b2b5ebdcbb46d0673b762f727a577d475b2bec6dc9c9ed76396da0137217dc40_a18e662da11203b9805ad9000"
+          }
+        },
+        {
+          "id": "pair-zdiff",
+          "quantity": "Differential impedance of the edge-coupled pair (0.23 mm traces, 0.4 mm pitch)",
+          "output": "z_diff",
+          "value": 99.6884,
+          "unit": "\u03a9",
+          "mesh": {
+            "order": "linear",
+            "target_size": "graded from the copper edges to 0.4 mm",
+            "nodes": 231071,
+            "elements": 459888
+          },
+          "reference": {
+            "value": 100,
+            "unit": "\u03a9",
+            "source": "design target of the example stackup"
+          },
+          "run": {
+            "cli": "runmat debug build of q-trace-impedance-5",
+            "commit": "e5ddae3e92",
+            "date": "2026-11-09",
+            "study": "trace-impedance.fea --study differential_pair",
+            "result": "run_remote_a869751f3ddf9d348a4f7305d4837b01eceee6d62b7fad9057bdf29e3a44d889_a18e662e126e2e91005b0b000"
+          }
+        }
+      ]
     }
   ]
 }
