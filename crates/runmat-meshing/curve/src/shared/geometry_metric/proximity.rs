@@ -23,6 +23,9 @@ pub(super) struct EdgeWitness {
     /// Solids bounded by the edge's faces; empty for sheet geometry.
     pub solid_ids: BTreeSet<PersistentEntityId>,
     pub points_m: Vec<[f64; 3]>,
+    /// Per face the edge bounds, the unit surface normal at each of `points_m` (sign as
+    /// evaluated). Empty when no normals were sampled.
+    pub face_normals: BTreeMap<PersistentEntityId, Vec<[f64; 3]>>,
 }
 
 /// Whether the space between features bounding the solids `left` and `right` lies outside
@@ -56,18 +59,20 @@ pub(super) struct ContactProximityPairs {
 /// The size depends on what lies between the two edges:
 /// - Edges with no face in common face each other across a gap, which gets `cells_across_gap`
 ///   cells across the separation.
-/// - Edges that bound a common face measure that face's width `w`: a chamfer, a narrow step,
-///   the end strip of a thin wall. Its own two edges already put one triangle across it, so the
-///   width needs no cells of its own. What a narrow face does bound is the length of its
-///   elements along it: a triangle that spans the face with length `h` along it has a
-///   circumradius of at least `h / 2` and an edge of at most `w`, and so does every
-///   tetrahedron standing on it. Each edge is therefore sized `rho * w` (`rho` the volume's
-///   maximum radius-edge ratio, `narrow_face_aspect`), which keeps the face's own triangles at
-///   a radius-edge ratio of about `rho / 2` and leaves the tetrahedra on them room inside the
-///   bound. A 0.25 mm chamfer along a 35 mm fin edge then takes 3.5 mm elements, where two
-///   cells across its 0.35 mm width took 0.18 mm elements and 200 segments per edge.
-///   The material behind a narrow face is sized by face proximity: the two sides of a thin
-///   wall, the walls of a slot, and the sides of a ligament face each other across it.
+/// - Edges that bound a common face measure that face's width `w`. When their other faces face
+///   each other (normals within `FACING_COSINE`, up to sign), the face spans a material
+///   thickness: the side strip of a plate or a box, the end ring of a tube wall. The width is
+///   then the thickness, and it gets `cells_across_gap` cells as before.
+/// - Otherwise the face is a narrow face on thicker material: a chamfer, a narrow step, a
+///   blend strip. Its own two edges already put one triangle across it, so its width needs no
+///   cells of its own. What it does bound is the length of its elements along it: a triangle
+///   that spans the face with length `h` along it has a circumradius of at least `h / 2` and
+///   an edge of at most `w`, and so does every tetrahedron standing on it. Each edge is
+///   therefore sized `rho * w` (`rho` the volume's maximum radius-edge ratio,
+///   `narrow_face_aspect`), which keeps the face's own triangles at a radius-edge ratio of
+///   about `rho / 2` and leaves the tetrahedra on them room inside the bound. A 0.25 mm chamfer
+///   along a 35 mm fin edge then takes 3.5 mm elements, where two cells across its 0.35 mm
+///   width took 0.18 mm elements and 200 segments per edge.
 pub(super) fn derive_proximity_contributions(
     mut witnesses: Vec<EdgeWitness>,
     contact_pairs: &ContactProximityPairs,
@@ -162,6 +167,7 @@ pub(super) fn derive_proximity_contributions(
             }
             let mut minimum = f64::INFINITY;
             let mut separation_direction = [0.0; 3];
+            let mut closest = (0, 0);
             // Each sample's own separation from the other edge, to tell a gap that spans the
             // edge from one that closes only at an endpoint.
             let mut left_separations = vec![f64::INFINITY; left.points_m.len()];
@@ -182,6 +188,7 @@ pub(super) fn derive_proximity_contributions(
                         right_separations[right_sample].min(separation);
                     if separation < minimum {
                         minimum = separation;
+                        closest = (left_sample, right_sample);
                         separation_direction =
                             std::array::from_fn(|axis| right_point[axis] - left_point[axis]);
                     }
@@ -204,7 +211,7 @@ pub(super) fn derive_proximity_contributions(
                 .for_edge(&left.edge_id));
             }
             let narrow_face = source == MetricSourceKind::Proximity
-                && !left.face_ids.is_disjoint(&right.face_ids);
+                && is_narrow_face(left, right, closest);
             let metric = if narrow_face {
                 if minimum * narrow_face_aspect >= base_length_m {
                     continue;
@@ -254,6 +261,38 @@ pub(super) fn derive_proximity_contributions(
     }
     // The parent request performs the one authoritative canonical ordering.
     Ok(located)
+}
+
+/// Whether two edges are the two sides of a narrow face on thicker material: they bound a
+/// common face, and none of their other faces face each other at the closest samples (see
+/// `derive_proximity_contributions`). Edges without sampled normals keep the gap law.
+fn is_narrow_face(left: &EdgeWitness, right: &EdgeWitness, closest: (usize, usize)) -> bool {
+    let shared = left
+        .face_ids
+        .intersection(&right.face_ids)
+        .collect::<BTreeSet<_>>();
+    if shared.is_empty() {
+        return false;
+    }
+    let other_normals = |witness: &EdgeWitness, sample: usize| {
+        witness
+            .face_normals
+            .iter()
+            .filter(|(face, _)| !shared.contains(face))
+            .filter_map(|(_, normals)| normals.get(sample).copied())
+            .collect::<Vec<_>>()
+    };
+    let left_normals = other_normals(left, closest.0);
+    let right_normals = other_normals(right, closest.1);
+    if left_normals.is_empty() || right_normals.is_empty() {
+        return false;
+    }
+    !left_normals.iter().any(|left| {
+        right_normals.iter().any(|right| {
+            let dot = left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+            dot.abs() >= FACING_COSINE
+        })
+    })
 }
 
 /// Located samples along a polyline with the gap measured at each sample: each sample's size is
@@ -702,17 +741,28 @@ mod tests {
     const TEN_RADIUS_EDGE: f64 = 10.0;
 
     /// The two long edges of a 0.25 mm chamfer (0.354 mm wide) along a 35 mm fin edge, at a
-    /// 10 mm target. They bound the chamfer face, so the separation is that face's width: each
-    /// edge is sized rho * w = 3.54 mm along its length, not w / 2 = 0.18 mm.
+    /// 10 mm target. They bound the chamfer face, and their other faces (the fin's top and side)
+    /// meet at a right angle, so the separation is the width of a narrow face on thick material:
+    /// each edge is sized rho * w = 3.54 mm along its length, not w / 2 = 0.18 mm. When the
+    /// other faces are parallel the strip spans a material thickness (the side of a plate) and
+    /// keeps two cells across.
     #[test]
     fn a_narrow_face_sizes_its_edges_along_it_from_its_width() {
         let width = 0.25e-3 * std::f64::consts::SQRT_2;
         let chamfer = id(PersistentEntityKind::Face, 30);
+        let top = id(PersistentEntityKind::Face, 32);
+        let side = id(PersistentEntityKind::Face, 33);
         let mut left = witness(1, 0.0);
         let mut right = witness(2, width);
-        for (edge, x) in [(&mut left, 0.0), (&mut right, width)] {
+        for (edge, x, other, normal) in [
+            (&mut left, 0.0, &top, [0.0, 0.0, 1.0]),
+            (&mut right, width, &side, [1.0, 0.0, 0.0]),
+        ] {
             edge.points_m = (0..9).map(|i| [x, i as f64 * 35.0e-3 / 8.0, 0.0]).collect();
             edge.face_ids.insert(chamfer.clone());
+            edge.face_ids.insert(other.clone());
+            edge.face_normals.insert(chamfer.clone(), vec![[-0.7, 0.0, 0.7]; 9]);
+            edge.face_normals.insert(other.clone(), vec![normal; 9]);
         }
         let size = |left: EdgeWitness, right: EdgeWitness| {
             derive_proximity_contributions(
@@ -734,6 +784,16 @@ mod tests {
             .iter()
             .flat_map(|source| &source.samples)
             .all(|sample| (sample.size_scale - 1.0).abs() < 1.0e-12));
+
+        // The side strip of a plate as thick as the chamfer is wide: the strip's edges bound the
+        // plate's two faces, which face each other, so the width is a thickness with
+        // cells_across_gap cells across it.
+        let mut strip = right.clone();
+        strip.face_normals.insert(side.clone(), vec![[0.0, 0.0, -1.0]; 9]);
+        let thickness = size(left.clone(), strip);
+        assert_eq!(thickness.len(), 2);
+        let across = thickness[0].metric.xx;
+        assert!((across - 1.0 / (0.5 * width).powi(2)).abs() < 1.0e-9 * across);
 
         // The same separation between edges of different faces is a gap across which the mesh
         // puts cells_across_gap cells.
@@ -1463,6 +1523,7 @@ mod tests {
             face_ids: BTreeSet::new(),
             solid_ids: BTreeSet::new(),
             points_m: vec![[x, 0.0, 0.0]],
+            face_normals: BTreeMap::new(),
         }
     }
 

@@ -175,6 +175,15 @@ pub fn derive_curve_geometry_metric(
                     .push((sample.point_m, sample.normal));
             }
         }
+        let face_normals = face_boundaries
+            .iter()
+            .map(|(face_id, samples)| {
+                (
+                    face_id.clone(),
+                    samples.iter().map(|(_, normal)| *normal).collect(),
+                )
+            })
+            .collect::<BTreeMap<_, Vec<[f64; 3]>>>();
         for (face_id, boundary) in face_boundaries {
             face_witnesses
                 .entry(face_id.clone())
@@ -240,6 +249,7 @@ pub fn derive_curve_geometry_metric(
                 .cloned()
                 .collect(),
             points_m: witness_points,
+            face_normals,
         });
     }
     contributions.extend(face_metrics.into_contributions()?);
