@@ -23,6 +23,7 @@ mod frames;
 mod mate;
 mod mate_edits;
 mod mirror;
+mod path_picks;
 mod place;
 mod structure;
 #[cfg(test)]
@@ -88,6 +89,11 @@ impl Compiled {
                     .unwrap_or_default();
                 (prototype, transform)
             })
+    }
+
+    /// The design file prototype `prototype` is made from.
+    fn prototype_file(&self, prototype: usize) -> Option<String> {
+        self.display["prototypes"][prototype]["file"].as_str().map(str::to_owned)
     }
 
     /// A body of prototype `prototype`'s part display.
@@ -306,9 +312,15 @@ pub(super) fn edit(
             let names = selected_names(&compiled, request)?;
             mirror::mirror(&mut document, &compiled, files, &names, &request.values)?
         }
-        "assembly.mate" => mate::mate(&mut document, &compiled, &request.values)?,
+        "assembly.mate" => {
+            let values = path_picks::publish_picked_path(&compiled, files, &request.values, &mut others)?;
+            mate::mate(&mut document, &compiled, &values)?
+        }
         "assembly.flip-mate" => mate_edits::flip(&mut document, &compiled, &request.selection)?,
-        "assembly.edit-mate" => mate_edits::edit(&mut document, &compiled, &request.selection, &request.values)?,
+        "assembly.edit-mate" => {
+            let values = path_picks::publish_picked_path(&compiled, files, &request.values, &mut others)?;
+            mate_edits::edit(&mut document, &compiled, &request.selection, &values)?
+        }
         "assembly.smart-mate" => mate_edits::smart(&mut document, &compiled, &request.values)?,
         "assembly.replace" => {
             let names = selected_names(&compiled, request)?;

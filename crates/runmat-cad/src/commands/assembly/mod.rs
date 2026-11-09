@@ -72,7 +72,7 @@ pub(super) const MATE_TYPES: &[(&str, &str)] = &[
 pub(super) const CONNECTOR_PICKS: &[SelectKind] = &[K::MateConnector, K::Face, K::Edge, K::Vertex, K::Occurrence];
 
 /// The fields the advanced mates add to Mate and Edit mate: width's two other faces, the
-/// symmetry plane, the cam's profile and the path's name, and the universal joint's point. In
+/// symmetry plane, the cam's profile, the path's edges and the universal joint's point. In
 /// Edit mate the picks are optional (a mate that already has them keeps them).
 pub(super) fn advanced_mate_fields(conn: &[SelectKind], required: bool) -> Vec<Field> {
     let need = |f: Field| if required { f } else { f.optional() };
@@ -81,7 +81,9 @@ pub(super) fn advanced_mate_fields(conn: &[SelectKind], required: bool) -> Vec<F
         need(pick("second2", "Tab's other face", conn).shown("type", &["width"])),
         need(pick("plane", "Symmetry plane", conn).shown("type", &["symmetric"])),
         text("profile", "Profile", Some("lobe")).shown("type", &["cam"]),
-        text("path", "Path", Some("rail")).shown("type", &["path"]),
+        // The path: edges of the first pick's component, picked in the view or the tree; the
+        // applier publishes them from its part.
+        need(picks("path", "Path", &[K::Edge]).shown("type", &["path"])),
         flag("joint_point", "Joint point", true).shown("type", &["universal_joint"]),
     ]
 }
