@@ -8,7 +8,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "c7154386741dfac8468bc0c9aaf658ddee0dca30335f0217641ff7d3c1827a72",
+    "sha256": "085845bf6235b2c61104951f5b3da02ca2a39560663618c9e92c00f83eab0872",
     "files": 25998,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -41,8 +41,8 @@
     {
       "path": "crates/runmat-runtime/src/analysis/contracts.rs",
       "before": ["100644", "blob", "f3fe000c21a9b7f3e5fabef93b15e0531c970d16"],
-      "after": ["100644", "blob", "048b50d6744ce6952892b2129131ea7b54dd7556"],
-      "reason": "Inside the cfg(test) module, derive the procedure count from AnalysisProcedure::ALL and assert the added line_parameters public identity. Both scientific commands link runmat-runtime as a dependency without its unit-test module. Executable runtime source is unchanged. The ordinary cross-platform runtime library tests qualify the assertion repair."
+      "after": ["100644", "blob", "8432a5be7f351e1a9e099805e138634a20c0aed6"],
+      "reason": "Inside the cfg(test) module, derive the procedure count from AnalysisProcedure::ALL. Both scientific commands link runmat-runtime as a dependency without its unit-test module. Executable runtime source is unchanged. The ordinary cross-platform runtime library tests qualify the assertion repair."
     },
     {
       "path": "crates/runmat-core/tests/fea_workspace.rs",
