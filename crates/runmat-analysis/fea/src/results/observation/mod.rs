@@ -14,6 +14,11 @@ mod entity;
 mod evaluate;
 mod extrema;
 mod history;
+mod line_parameters;
+pub use line_parameters::{
+    evaluate_line_parameter_observations, line_parameter_plan_identity,
+    line_parameter_topology_digest, validate_line_parameter_observations,
+};
 mod partition;
 mod publication;
 mod publish;

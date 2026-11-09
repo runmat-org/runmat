@@ -29,6 +29,11 @@ impl RecoveredFieldPartitionIdentity {
         Self(Digest::from_bytes([0; 32]))
     }
 
+    /// The single partition of solver output that is not a recovered field.
+    pub(crate) const fn derived(digest: Digest) -> Self {
+        Self(digest)
+    }
+
     pub const fn digest(self) -> Digest {
         self.0
     }

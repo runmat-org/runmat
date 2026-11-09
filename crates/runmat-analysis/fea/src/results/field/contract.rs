@@ -54,6 +54,12 @@ impl RecoveredFieldIdentity {
     pub const fn digest(self) -> Digest {
         self.0
     }
+
+    /// The identity of solver output that is not a recovered field (a cross-section's line
+    /// parameters): its digest is the digest of that numerical result.
+    pub(crate) const fn derived(digest: Digest) -> Self {
+        Self(digest)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
