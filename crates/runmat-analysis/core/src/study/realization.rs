@@ -304,8 +304,8 @@ fn bind_model_inputs(
 ) -> Result<BTreeMap<String, AuthoredInputValue>, AuthoredStudyRealizationError> {
     let arguments = study
         .model
-        .arguments
         .iter()
+        .flat_map(|model| &model.arguments)
         .map(|argument| (argument.input_id.as_str(), &argument.value))
         .collect::<BTreeMap<_, _>>();
     let mut values = BTreeMap::new();

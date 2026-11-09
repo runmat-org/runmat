@@ -124,7 +124,7 @@ study response {{
             if value.dimension() == runmat_types::PhysicalDimension::FORCE && value.canonical_value() == 1000.0
     ));
     assert!(matches!(
-        &study.model.arguments[0].value,
+        &study.model.as_ref().unwrap().arguments[0].value,
         runmat_analysis_core::AuthoredModelArgumentValue::StudyInput(reference)
             if reference.input_id == "commanded_load"
     ));
@@ -285,7 +285,7 @@ study response {
     assert_eq!(study.module_path, "project/main.fea");
     assert_eq!(study.geometry.definition.module_path, "project/library.fea");
     assert_eq!(study.mesh.module_path, "project/library.fea");
-    assert_eq!(study.model.model.module_path, "project/library.fea");
+    assert_eq!(study.model.as_ref().unwrap().model.module_path, "project/library.fea");
 }
 
 // witness: FEA-AUTHORING-COMPILER-002/study_and_sweep_lowering @
