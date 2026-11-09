@@ -207,10 +207,18 @@ const VISCOUS_SCHUR_WEIGHT: f64 = 0.5;
 ///
 /// Also returns the outlet couplings `(owner, rf α)`: the viscous term breaks SIMPLE's cellwise
 /// continuity exactness, and the sweep restores the global mass balance through them.
+///
+/// Where convection dominates the momentum block (`convective`) and the domain has an outlet,
+/// the viscous term is left out: `S` then behaves like SIMPLE's `D diag(F)⁻¹ G`, and the term
+/// overweights the pressure diagonal. On the uniform-inlet square duct at 0.2122 m/s (11 520
+/// cells, skew 0.48) the coupled FGMRES needs 120 to 127 iterations per Picard step without it
+/// and 300 to 670 with weights 0.5 and 1, for the same 10 Picard steps (47 s against 125 s).
+/// A closed domain keeps the term, which is what makes its operator definite.
 fn pressure_schur(
     p: &CanonicalFluidProblem<'_>,
     rf: &[f64],
     rau: &[f64],
+    convective: bool,
 ) -> Result<(RealSparseMatrix, Vec<(usize, f64)>), Error> {
     let mut a = linear::assembler(p, "coupled-pressure-preconditioner")?;
     // Σ_f α_f per cell (the geometric Laplacian diagonal).
@@ -235,9 +243,11 @@ fn pressure_schur(
         }
     }
     // The viscous Schur term (also makes closed domains definite), weighted by
-    // VISCOUS_SCHUR_WEIGHT.
-    for (c, g) in geometric.iter().enumerate() {
-        a.add(c, c, VISCOUS_SCHUR_WEIGHT * rau[c] * g);
+    // VISCOUS_SCHUR_WEIGHT unless convection dominates an open domain.
+    if !(convective && !outlets.is_empty()) {
+        for (c, g) in geometric.iter().enumerate() {
+            a.add(c, c, VISCOUS_SCHUR_WEIGHT * rau[c] * g);
+        }
     }
     let matrix = a.finish().map_err(|e| Error::Operator(e.to_string()))?;
     Ok((matrix, outlets))
@@ -602,12 +612,12 @@ pub(super) fn solve_with_time(
         let base_residual = residual(p, &frozen, &u, &pressure_values)?;
         let base_gradient = pressure_gradient(p, &pressure_values)?;
         let base_force = pressure_force(p, &pressure_values, &base_gradient)?;
-        let (laplacian, outlets) = pressure_schur(p, &frozen.rf, &frozen.rau)?;
-        let pressure_arrays = CsrArrays::of(&laplacian);
         let blocks =
             super::jacobian::component_operators(p, &frozen.matrix, &frozen.viscosity_gradients)?;
         let skew = skew_fraction(&blocks[0].view());
         let convective = convection_dominated(skew);
+        let (laplacian, outlets) = pressure_schur(p, &frozen.rf, &frozen.rau, convective)?;
+        let pressure_arrays = CsrArrays::of(&laplacian);
         let planned = PreconditionerEnvelope::for_counts(n as u64, p.reservation.sparse_entries)
             .ok_or(Error::Resource("planned preconditioner envelope"))?;
         let mut setup_seconds = 0.0;
@@ -832,7 +842,7 @@ pub(super) fn schur_rayleigh_quotients(
     let n = u.len();
     let frozen = freeze(p, u, pressure_values, q, None)?;
     let base_residual = residual(p, &frozen, u, pressure_values)?;
-    let (laplacian, _) = pressure_schur(p, &frozen.rf, &frozen.rau)?;
+    let (laplacian, _) = pressure_schur(p, &frozen.rf, &frozen.rau, false)?;
     let blocks =
         super::jacobian::component_operators(p, &frozen.matrix, &frozen.viscosity_gradients)?;
     let operator_error = |e: SolverError| Error::Operator(e.to_string());
