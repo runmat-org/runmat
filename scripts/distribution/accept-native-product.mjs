@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { resolveArtifactPath, validateArtifactManifest } from "../runtime/builtin-example-verifier/artifacts.mjs";
 import { runNativeEmbeddedAotProbe } from "../runtime/builtin-example-verifier/product-probe.mjs";
+import { nativeFirstLaunch } from "./native-first-launch.mjs";
 
 const manifestPath = resolve(process.argv[2]);
 const output = resolve(process.argv[3]);
@@ -43,6 +44,11 @@ try {
     assert(paths.length && paths.every(path => existsSync(path)), "HDF5 development linker directories are required");
     environment.LIBRARY_PATH = [...paths, environment.LIBRARY_PATH].filter(Boolean).join(delimiter);
   }
+  const launch = nativeFirstLaunch(binary, { cwd: directory, environment });
+  results.push(launch);
+  assert(!launch.error && !launch.signal, JSON.stringify(launch));
+  assert.equal(launch.exitCode, 0, JSON.stringify(launch));
+  assert.match(launch.stdout, /^runmat \d+\.\d+\.\d+\S*\s*$/m);
   const cases = [
     ["scalar-division", 'x=[1 2 4]; assert(isequal(x/2,[0.5 1 2])); disp("accepted");', 0],
     ["callback", 'f=@(x) x.*x; assert(isequal(arrayfun(f,[1 2 3]),[1 4 9])); disp("accepted");', 0],
@@ -51,9 +57,11 @@ try {
   for (const [name, source, failure] of cases) {
     const file = join(directory, `${name}.m`);
     writeFileSync(file, source);
+    const started = performance.now();
     const execution = spawnSync(binary, [file], { cwd: directory, env: environment,
       encoding: "utf8", timeout: 45000, maxBuffer: 1024 * 1024 });
-    results.push({ name, exitCode: execution.status, signal: execution.signal,
+    results.push({ name, elapsedMs: performance.now() - started, timeoutMs: 45000,
+      exitCode: execution.status, signal: execution.signal,
       error: execution.error?.message, stdout: execution.stdout, stderr: execution.stderr });
     assert(!execution.error && !execution.signal, JSON.stringify(results.at(-1)));
     if (failure) {
@@ -71,7 +79,7 @@ try {
   assert.equal(probe.result.status, "passed", JSON.stringify(probe));
   validateArtifactManifest(manifest, { verifyFiles: true, manifestPath });
   status = "passed";
-  console.log("Three staged CLI cases and native-image compile/execute passed.");
+  console.log("Cold launch, three staged CLI cases and native-image compile/execute passed.");
 } finally {
   writeFileSync(output, JSON.stringify({ status, artifactManifestDigest: manifest.artifactManifestDigest, results }, null, 2) + "\n");
   rmSync(directory, { recursive: true, force: true });

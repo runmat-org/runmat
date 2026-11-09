@@ -52,6 +52,7 @@ jobs:
         run: >-
           node --test
           scripts/distribution/third-party-notices.test.cjs
+          scripts/distribution/native-first-launch.test.mjs
           bindings/ts/scripts/sync-wasm-artifacts.test.cjs
           scripts/runtime/builtin-example-verifier/protocol.test.mjs
           scripts/development/check-reviewed-architecture.test.mjs
