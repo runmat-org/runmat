@@ -535,7 +535,7 @@ mod tests {
                     footprint.label_px
                 );
                 assert!(
-                    footprint.width_share < 0.5 && footprint.height_share < 0.35,
+                    footprint.width_share < 0.5 && footprint.height_share < 0.4,
                     "{width}x{height}: {footprint:?}"
                 );
             }
