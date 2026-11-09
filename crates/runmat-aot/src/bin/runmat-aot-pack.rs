@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-#[cfg(target_os = "windows")]
-use runmat_aot::archive::prepare_msvc_runtime_archive;
 use runmat_aot::archive::{
     build_runtime_archive, RuntimeArchiveCapabilities, RuntimeArchiveEncoding,
     RuntimeArchiveManifest,
 };
+#[cfg(target_os = "windows")]
+use runmat_aot::archive::{prepare_msvc_runtime_archive, MsvcImportLibrary};
 
 struct Arguments {
     archive: PathBuf,
@@ -13,6 +13,7 @@ struct Arguments {
     manifest_out: PathBuf,
     notices_out: PathBuf,
     native_link_tokens: Vec<String>,
+    msvc_import_libraries: Vec<PathBuf>,
 }
 
 fn main() {
@@ -37,6 +38,9 @@ fn run() -> Result<(), String> {
         _ => {}
     }
     let arguments = parse_arguments(std::env::args_os().skip(1))?;
+    if !cfg!(target_os = "windows") && !arguments.msvc_import_libraries.is_empty() {
+        return Err("MSVC import libraries require the Windows archive packer".into());
+    }
     if arguments.archive == arguments.payload_out
         || arguments.archive == arguments.manifest_out
         || arguments.archive == arguments.notices_out
@@ -54,7 +58,28 @@ fn run() -> Result<(), String> {
     let native_link_tokens = arguments.native_link_tokens;
     #[cfg(target_os = "windows")]
     let (bytes, native_link_tokens) = {
-        let prepared = prepare_msvc_runtime_archive(&bytes, native_link_tokens)
+        let imports = arguments
+            .msvc_import_libraries
+            .iter()
+            .map(|path| {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| {
+                        format!("import library has no UTF-8 basename: {}", path.display())
+                    })?;
+                let bytes = read_bounded(
+                    path,
+                    runmat_execution_artifact::target_pack::MAX_COMPONENT_BYTES,
+                )?;
+                Ok((name, bytes))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let libraries = imports
+            .iter()
+            .map(|(name, archive)| MsvcImportLibrary { name, archive })
+            .collect::<Vec<_>>();
+        let prepared = prepare_msvc_runtime_archive(&bytes, native_link_tokens, &libraries)
             .map_err(|error| error.to_string())?;
         eprintln!(
             "runmat-aot-pack: normalized MSVC archive ({} duplicate members and {} bundled link tokens removed)",
@@ -634,6 +659,7 @@ fn parse_arguments(
     let mut manifest_out = None;
     let mut notices_out = None;
     let mut native_link_tokens = Vec::new();
+    let mut msvc_import_libraries = Vec::new();
     while let Some(argument) = arguments.next() {
         let argument = argument
             .into_string()
@@ -643,7 +669,8 @@ fn parse_arguments(
             | "--payload-out"
             | "--manifest-out"
             | "--notices-out"
-            | "--native-link-token" => arguments
+            | "--native-link-token"
+            | "--msvc-import-library" => arguments
                 .next()
                 .ok_or_else(|| format!("{argument} requires a value"))?,
             _ => return Err(format!("unknown argument `{argument}`")),
@@ -653,6 +680,7 @@ fn parse_arguments(
             "--payload-out" => payload_out = Some(PathBuf::from(value)),
             "--manifest-out" => manifest_out = Some(PathBuf::from(value)),
             "--notices-out" => notices_out = Some(PathBuf::from(value)),
+            "--msvc-import-library" => msvc_import_libraries.push(PathBuf::from(value)),
             "--native-link-token" => native_link_tokens.push(
                 value
                     .into_string()
@@ -667,6 +695,7 @@ fn parse_arguments(
         manifest_out: manifest_out.ok_or_else(|| "--manifest-out is required".to_string())?,
         notices_out: notices_out.ok_or_else(|| "--notices-out is required".to_string())?,
         native_link_tokens,
+        msvc_import_libraries,
     })
 }
 
@@ -726,10 +755,17 @@ mod tests {
                 .map(|argument| std::ffi::OsString::from(*argument))
         )
         .is_err());
-        let complete = options
-            .into_iter()
-            .chain(["--notices-out", "THIRD_PARTY_NOTICES.txt"]);
+        let complete = options.into_iter().chain([
+            "--notices-out",
+            "THIRD_PARTY_NOTICES.txt",
+            "--msvc-import-library",
+            "native imports/windows.lib",
+        ]);
         let parsed = parse_arguments(complete.map(std::ffi::OsString::from)).unwrap();
         assert_eq!(parsed.notices_out, PathBuf::from("THIRD_PARTY_NOTICES.txt"));
+        assert_eq!(
+            parsed.msvc_import_libraries,
+            vec![PathBuf::from("native imports/windows.lib")]
+        );
     }
 }

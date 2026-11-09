@@ -160,6 +160,23 @@ try {
   foreach ($token in $nativeTokens) {
     $packArgs += @("--native-link-token", $token)
   }
+  if ($effectiveTarget.EndsWith('-windows-msvc')) {
+    # Older Rust Windows bindings reference import libraries held in Cargo's
+    # registry. Resolve them from this runtime dependency graph and bundle them.
+    . (Join-Path $PSScriptRoot 'distribution/resolve-cargo-native-import-libraries.ps1')
+    $runtimeManifest = Join-Path $PSScriptRoot '../crates/runmat-aot-runtime/Cargo.toml'
+    $metadataArgs = @('metadata', '--format-version', '1', '--manifest-path', $runtimeManifest,
+      '--filter-platform', $effectiveTarget) + $lockedArgs
+    if ($runtimeNoDefault) { $metadataArgs += '--no-default-features' }
+    $metadataFeatures = @($runtimeFeatures | ForEach-Object { "runmat-aot-runtime/$_" })
+    $metadataArgs += @('--features', ($metadataFeatures -join ','))
+    $metadataOutput = & cargo @metadataArgs
+    if ($LASTEXITCODE -ne 0) { throw 'failed to resolve runtime import-library provenance' }
+    $metadata = ($metadataOutput -join "`n") | ConvertFrom-Json -Depth 100
+    $importLibraries = @(Resolve-CargoNativeImportLibraries -Metadata $metadata `
+      -RuntimeManifestPath $runtimeManifest -NativeLinkTokens $nativeTokens)
+    foreach ($library in $importLibraries) { $packArgs += @('--msvc-import-library', $library) }
+  }
   # Select the host-tool policy independently from the deployment policy.
   if ($darwinPolicyNeeded) {
     [System.Environment]::SetEnvironmentVariable('MACOSX_DEPLOYMENT_TARGET',

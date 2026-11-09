@@ -660,7 +660,9 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
+        run: |
+          & ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
+          & ./scripts/distribution/resolve-cargo-native-import-libraries.test.ps1
 
       - name: Install Rust release target
         shell: bash
