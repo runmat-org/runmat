@@ -1,5 +1,6 @@
 pub mod boundary;
 pub mod boundary_face;
+pub mod element_rigidity;
 pub mod predicate;
 pub mod spatial_index;
 pub mod tet10_element;

@@ -223,7 +223,12 @@ pub fn resolve_meshing_request(
             },
             volume: VolumeQualityTargets {
                 maximum_radius_edge_ratio: 10.0,
-                minimum_scaled_jacobian: 0.001,
+                // The volume's shape floor, raised to what assembly's element rigidity test
+                // needs for the requested order (Tet10 slivers lose their stiffness margin
+                // near s ≈ 3e-3; Tet4 keeps it far below 1e-3).
+                minimum_scaled_jacobian: 0.001_f64.max(crate::assembly_minimum_scaled_jacobian(
+                    settings.element_order,
+                )),
                 maximum_metric_edge_length: 1.0,
             },
         },
