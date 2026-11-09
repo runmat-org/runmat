@@ -87,14 +87,16 @@ pub fn plan_fluid_study(
 
 #[derive(Debug, Error)]
 pub enum FluidStudyPlanningError {
-    #[error("steady fluid planning requires a standalone singleton step")]
+    #[error("fluid planning requires a standalone singleton step")]
     UnsupportedSequence,
-    #[error("steady fluid requires an authored relative algebraic accuracy target")]
+    #[error("a fluid analysis requires an authored relative algebraic accuracy target")]
     MissingRelativeAlgebraicTarget,
     #[error(
-        "steady fluid relative algebraic accuracy target must lie strictly between zero and one"
+        "a fluid analysis's relative algebraic accuracy target must lie strictly between zero and one"
     )]
     InvalidRelativeAlgebraicTarget,
-    #[error("unsupported authored steady fluid intent: {0}")]
+    /// The authored steady or transient flow, conjugate heat transfer or fluid–structure
+    /// study failed workload admission; the message is the workload's own.
+    #[error("{0}")]
     UnsupportedIntent(String),
 }

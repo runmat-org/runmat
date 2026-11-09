@@ -102,6 +102,7 @@ pub use resolve::{
     resolve_observation_plan, resolve_structural_observation_plan,
     resolve_structural_observation_plan_with_connectors,
 };
+pub(crate) use resolve::bind_request_field;
 pub(crate) use topology::ObservationTopology;
 
 #[cfg(test)]
