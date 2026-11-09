@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "status": "Scientific source conservation across corpus inventory registration",
+  "measured_source_revision": "878baa910e7806296fee33c672272f90af5d3d24",
+  "measured_inputs": {
+    "sha256": "1ad763993fe86d2f2d3dd9e089257a7eca9dd188dca98d76d059f2b7f775995d",
+    "files": 25998,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "e2b8b430d8f126284810cbb90f4caea40f0ea8e985e08968f9bb26f67f752a26",
+    "files": 25998,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": ["authored-cli-physics", "driver-recovery-physics"],
+  "changed_inputs": [
+    {
+      "path": "verification/meshing/corpus.json",
+      "before": ["100644", "blob", "04de4141e4bd6d1e3c2c8017eff9e69398094485"],
+      "after": ["100644", "blob", "e3138991e63da273ae0d5a0fede81f5ccdd94cdc"],
+      "reason": "Register two already-present geometry files with their SHA-256 identities, original import-test anchors and explicit import-only expectations. The required authored CLI and recovery tests do not load this inventory. All executable source and fixture bytes are conserved."
+    },
+    {
+      "path": "verification/meshing/integration.json",
+      "before": ["100644", "blob", "e4cd89aa7c3a878c6c662115c10e6ac721b8ad3e"],
+      "after": ["100644", "blob", "9feef86f74fd48574cf45276ec2da6792a9be4c0"],
+      "reason": "Declare the matching import scenarios for the separate governed meshing runner, with no new volume-meshing scenarios or changed numerical thresholds. Neither required scientific cohort loads this recipe. Their actual measurements and binary identities remain at 878baa910e."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/corpus-inventory-20261109.json",
+      "sha256": "1dda9a4b72331a42e23037cfe3b5fd9f491c5767ec7a9a9c98db5935098a912f"
+    }
+  ]
+}
