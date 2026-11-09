@@ -332,3 +332,30 @@ fn dense_poster_scene_draws_boundary_triangles_and_feature_edges_only() {
         "only the cube's 12 crease edges are drawn"
     );
 }
+
+/// A result view of a coarse mesh draws its field with feature edges only: the full wireframe
+/// (one line per mesh edge) reads as dots over the field at poster size. The mesh view keeps it.
+#[test]
+fn result_views_swap_the_full_wireframe_for_feature_edges() {
+    let n = 4;
+    let topology = dense_cube_topology(n);
+    let (mut scene, _) =
+        scene_from_topology("run", &topology, None, None, "undeformed", 1.0, false).unwrap();
+    let segments = |scene: &GeometryScene, label: &str| {
+        scene
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.render_data.pipeline_type == PipelineType::Lines)
+            .filter(|chunk| chunk.label.as_deref() == Some(label))
+            .map(|chunk| chunk.vertices.len() / 2)
+            .sum::<usize>()
+    };
+    assert!(segments(&scene, "Solver mesh edges") > 12 * n);
+    use_result_view_edges(&mut scene);
+    assert_eq!(segments(&scene, "Solver mesh edges"), 0);
+    assert_eq!(segments(&scene, "Feature edges"), 12 * n);
+    // Applying it again changes nothing.
+    let chunks = scene.chunks.len();
+    use_result_view_edges(&mut scene);
+    assert_eq!(scene.chunks.len(), chunks);
+}

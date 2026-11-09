@@ -613,6 +613,44 @@ mod tests {
         assert!(near > 0.0 && near >= far / 5000.0 * 0.999);
     }
 
+    /// A millimeter part (the fuse link, 10 x 1 x 0.25 mm) a few millimeters from the camera:
+    /// the clip planes come from the fit, so every corner lies between them and the part is
+    /// drawn whole.
+    #[test]
+    fn clip_planes_follow_the_fit_for_a_millimeter_part() {
+        let link = bounds([0.0, 0.0, 0.0], [0.010, 0.001, 0.00025]);
+        let state = shared_camera(
+            std::iter::once(link),
+            std::iter::once(link),
+            1.0,
+            None,
+            1.6,
+            &Layout {
+                legend: Some((0.36, 0.17)),
+                ..Layout::default()
+            },
+        );
+        let camera = &state.axes[0];
+        let PlotCameraProjection::Perspective { near, far, .. } = camera.projection else {
+            panic!("snapshot cameras are perspective");
+        };
+        let forward = unit(sub(camera.target, camera.position));
+        let distance = dot(sub(camera.target, camera.position), forward);
+        assert!(
+            distance < 0.05,
+            "the camera sits close to a small part: {distance} m"
+        );
+        for point in corners(link) {
+            let depth = dot(sub(point.to_f32(), camera.position), forward);
+            assert!(near < depth && depth < far, "{near} < {depth} < {far}");
+        }
+        assert!(near > 0.0 && far < 1.0);
+        let (left, right, bottom, top) = extent(&projected(&state, &[link]));
+        for side in [-left, right, -bottom, top] {
+            assert!(side <= EDGE + 1e-4);
+        }
+    }
+
     /// MATLAB's view convention: view(0, 0) looks along +y from -y, view(90, 0) along -x
     /// from +x, view(az, 90) straight down; the camera keeps the poster's aspect.
     #[test]

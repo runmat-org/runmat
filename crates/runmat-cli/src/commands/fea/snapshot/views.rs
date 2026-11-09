@@ -262,6 +262,11 @@ pub(super) async fn capture(
                             detail.surface,
                         )
                         .map_err(anyhow::Error::msg)?;
+                    let mut scene = scene;
+                    // A result view shows its field with feature edges, not the whole mesh.
+                    if spec.field.is_some() {
+                        runmat_runtime::analysis::field_scene::use_result_view_edges(&mut scene);
+                    }
                     (scene, deformation_scale, Some(surface), None)
                 }
             };
