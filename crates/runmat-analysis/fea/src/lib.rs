@@ -84,6 +84,10 @@ pub use signal_processing::{construct_shock_response_spectrum, ShockResponseSpec
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+#[path = "../support/process_memory.rs"]
+mod process_memory;
+
 /// `2^bits` as a size bound, saturated to the address space on 32-bit targets (wasm32), where a
 /// larger structural codec bound is unreachable anyway.
 pub(crate) const fn address_space_power_of_two(bits: u32) -> usize {

@@ -606,16 +606,11 @@ fn diagnostic_thermal_components_at_scale() {
         facts.reservation_bytes().unwrap().0
     );
     if std::env::var("RM_DIAG_SOLVE").is_ok() {
-        let peak = || {
-            let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-            unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
-            unsafe { usage.assume_init() }.ru_maxrss
-        };
-        let before = peak();
+        let before = crate::process_memory::process_peak_rss_bytes();
         let result = workload.execute(&mesh).unwrap();
         println!(
-            "rss_peak_before_solve {before} rss_peak_after_solve {} temperatures {}",
-            peak(),
+            "rss_peak_bytes_before_solve {before:?} rss_peak_bytes_after_solve {:?} temperatures {}",
+            crate::process_memory::process_peak_rss_bytes(),
             result.temperature_snapshots.len()
         );
     }
