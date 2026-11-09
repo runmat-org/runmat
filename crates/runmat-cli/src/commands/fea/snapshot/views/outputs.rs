@@ -261,6 +261,8 @@ mod tests {
             [
                 ("geometry".to_string(), None),
                 ("temperature".to_string(), Some("t".to_string())),
+                // Names are kept by view id: a view the capture saved without a name has none.
+                ("temperature-section".to_string(), None),
             ]
         );
     }
