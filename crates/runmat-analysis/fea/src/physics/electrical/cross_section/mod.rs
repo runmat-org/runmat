@@ -20,6 +20,7 @@
 //! factored once per dielectric set by the shared sparse Cholesky on the admitted CPU plan.
 //! The first version is lossless: conductor and dielectric loss (R and G per length) are a
 //! separate capability.
+mod artifact;
 mod authored;
 mod geometry;
 mod lines;
@@ -28,6 +29,10 @@ mod solve;
 #[cfg(test)]
 mod tests;
 
+pub use artifact::{
+    cross_section_digest, cross_section_geometry, cross_section_geometry_revision,
+    cross_section_meshing_evidence,
+};
 pub use lines::{DifferentialPairParameters, LineParameters};
 pub use mesh::CrossSectionMeshSummary;
 use thiserror::Error;
@@ -176,4 +181,41 @@ pub fn solve_cross_section(section: &CrossSection) -> Result<LineParameters, Cro
         mesh.summary(),
         capacitance.relative_residual,
     )
+}
+
+/// A solved section and the canonical artifact of the mesh its potential solves ran on.
+#[derive(Debug, Clone)]
+pub struct SolvedCrossSection {
+    pub parameters: LineParameters,
+    pub mesh: runmat_meshing_core::SolverMeshArtifact,
+    /// Wall time of building the mesh and its artifact, milliseconds.
+    pub meshing_time_ms: u64,
+}
+
+/// Solve the section and publish its mesh as one canonical solver mesh. `section_digest`
+/// (see [`cross_section_digest`]) is the geometry identity; `request` is the study's resolved
+/// meshing request, whose size limits come from the admitted run budget.
+pub fn solve_cross_section_with_mesh(
+    section: &CrossSection,
+    section_digest: runmat_meshing_core::StableDigest,
+    request: runmat_meshing_core::MeshingRequest,
+) -> Result<SolvedCrossSection, CrossSectionError> {
+    let start = std::time::Instant::now();
+    let geometry = geometry::Geometry::build(section)?;
+    let mesh = mesh::CrossSectionMesh::build(&geometry, &section.mesh)?;
+    let artifact = artifact::solver_mesh_artifact(&geometry, &mesh, section_digest, request)?;
+    let meshing_time_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let capacitance = solve::capacitance_matrices(&geometry, &mesh)?;
+    let parameters = lines::LineParameters::from_capacitance(
+        geometry.signal_names(),
+        capacitance.dielectric,
+        capacitance.vacuum,
+        mesh.summary(),
+        capacitance.relative_residual,
+    )?;
+    Ok(SolvedCrossSection {
+        parameters,
+        mesh: artifact,
+        meshing_time_ms,
+    })
 }

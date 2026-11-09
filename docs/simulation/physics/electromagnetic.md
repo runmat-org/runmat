@@ -15,8 +15,7 @@ Four electromagnetic analyses run from a `.fea` study with `runmat run`:
 | Time-harmonic fields | `electromagnetic harmonic { frequencies = [...] }` | electric field phasor $\mathbf E$ | lowest-order Nédélec edges |
 
 A fifth analysis computes the impedance, delay and coupling of board traces from a 2D
-cross-section of the stackup: `electromagnetic line_parameters {}`
-[not yet in the current release](pending:electromagnetic.line_parameters). See
+cross-section of the stackup: `electromagnetic line_parameters {}`. See
 [trace impedance](./trace-impedance.md).
 
 The loss of a steady-current or harmonic analysis can heat a thermal analysis of the same parts

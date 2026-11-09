@@ -18,7 +18,7 @@ use runmat_analysis_core::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use electrical::admit_canonical_electrical_static;
+pub use electrical::{admit_canonical_electrical_static, admit_cross_section_line_parameters};
 pub(crate) use electrical::realization as canonical_electrical_realization;
 pub use fluid::{
     admit_canonical_conjugate_heat_steady, admit_canonical_conjugate_heat_transient,

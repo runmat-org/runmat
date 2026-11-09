@@ -28,6 +28,7 @@ pub use retention::semantic_state_retained_storage_bytes;
 mod acoustic;
 mod electrical;
 mod fluid;
+mod line_parameters;
 mod magnetic;
 mod maxwell;
 mod nonlinear;
@@ -37,6 +38,7 @@ pub use fluid::{
     fluid_state_publication_workspace_bytes, CanonicalFluidStatePayload,
     CanonicalFluidStatePayloadContents,
 };
+pub use line_parameters::CanonicalLineParametersStatePayload;
 pub use magnetic::CanonicalMagnetostaticStatePayload;
 pub use maxwell::CanonicalMaxwellStatePayload;
 pub use nonlinear::{
@@ -203,6 +205,17 @@ impl CanonicalSemanticState {
                     ));
                 }
                 state.validate_for(self.topology_digest, self.source_result, self.producer)?;
+            }
+            CanonicalSemanticStatePayload::LineParameters { state } => {
+                if self.kind != StateKind::ElectromagneticStatic
+                    || self.completeness != StateCompleteness::Complete
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "line-parameter payload requires complete electromagnetic-static state"
+                            .into(),
+                    ));
+                }
+                state.validate_for(self.source_result, self.producer)?;
             }
             CanonicalSemanticStatePayload::Magnetostatic { state } => {
                 if self.kind != StateKind::ElectromagneticStatic

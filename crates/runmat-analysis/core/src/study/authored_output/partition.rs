@@ -9,6 +9,9 @@ impl AuthoredOutputExpression {
         match self {
             Self::AnalysisField {
                 step_id, quantity, ..
+            }
+            | Self::LineParameter {
+                step_id, quantity, ..
             } => Ok((step_id, *quantity)),
             Self::OutputReference { output_id } => Err(output_id),
             Self::Projection { source, .. }

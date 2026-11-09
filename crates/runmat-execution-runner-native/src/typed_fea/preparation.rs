@@ -201,6 +201,12 @@ pub async fn prepare_study_with_role(
                 },
             )
         }
+        admission::AdmittedFamily::LineParameters => {
+            return Err(
+                "a line-parameter study solves its cross-section in place; it has no prepared root"
+                    .into(),
+            )
+        }
         admission::AdmittedFamily::Magnetic => crate::StudyRootPlanning::Magnetic(
             runmat_analysis_fea::study::MagneticStudyPlanningPolicy {},
         ),

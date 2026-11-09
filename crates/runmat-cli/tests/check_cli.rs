@@ -236,44 +236,57 @@ fn canonical_fea_documentation_examples_check_cleanly() {
         "acoustic-cavity-harmonic.fea",
         "acoustic-duct-modes.fea",
         "acoustic-duct-pulse.fea",
+        "trace-impedance.fea",
     ] {
         let path = format!("docs/simulation/examples/{name}");
         assert_fea_checks(&temp, &path);
     }
 }
 
-// The trace-impedance example is written in its final form. Its `cross_section` geometries,
-// triangle meshes and model-less studies lower; `runmat check` rejects it until the
-// line-parameter outputs land (ledger rows electromagnetic.line_parameters.*). When it starts
-// checking, move it into `canonical_fea_documentation_examples_check_cleanly`.
+// witness: FEA-EM-LINE-001/public_study @ quasi_static_tem/tri3/public_study; coverage: partial;
+//   boundary: The page's trace-impedance example runs both studies through `runmat run`: the
+//   single-ended microstrip publishes Z0 within [49.7, 50.7] Ω and the edge-coupled pair Zdiff
+//   within [98.7, 100.7] Ω on the default graded mesh, inline stackup; the layout-file stackup
+//   is covered at check time only.
 #[test]
-fn trace_impedance_example_waits_for_the_line_parameters_procedure() {
+fn trace_impedance_example_publishes_the_microstrip_and_pair_impedances() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/simulation/examples/trace-impedance.fea";
-    let output = runmat_from_repository(&temp, &["check", path, "--json"]);
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        !output.status.success(),
-        "{path} now checks: list it with the canonical examples and land the ledger rows\n{text}"
-    );
-    assert!(!text.trim().is_empty(), "{path}: check failed without a diagnostic");
-    // Each rejection names the ledger row that owns it.
-    assert!(
-        !text.contains("cross_section_geometry") && !text.contains("fea.semantic.mesh"),
-        "{path}: the cross-section geometry should lower\n{text}"
-    );
-    for id in [
-        "pending:electromagnetic.line_parameters.impedance",
-        "pending:electromagnetic.line_parameters.differential_pair",
-    ] {
-        assert!(
-            text.contains(id),
-            "{path}: diagnostics do not name {id}\n{text}"
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("trace-impedance.fea")).unwrap();
+    let anchor_single = "    output delay = analysis.line.delay.line\n";
+    let anchor_pair = "    output l = analysis.lines.inductance\n";
+    assert!(source.contains(anchor_single) && source.contains(anchor_pair));
+    let witness = source
+        .replace(
+            anchor_single,
+            &format!("{anchor_single}    assessment z0_band {{ value = output.z0; minimum = 49.7 V/A; maximum = 50.7 V/A; evidence = authored_samples }}\n"),
+        )
+        .replace(
+            anchor_pair,
+            &format!("{anchor_pair}    assessment zdiff_band {{ value = output.z_diff; minimum = 98.7 V/A; maximum = 100.7 V/A; evidence = authored_samples }}\n"),
         );
+    fs::write(examples.join("trace-impedance.witness.fea"), witness).unwrap();
+    let path = "docs/simulation/examples/trace-impedance.witness.fea";
+    for (study, assessment, label) in [
+        ("microstrip", "z0_band", "Z0"),
+        ("differential_pair", "zdiff_band", "Zdiff"),
+    ] {
+        let output = runmat_from_repository(&temp, &["run", path, "--study", study, "--json"]);
+        assert!(
+            output.status.success(),
+            "{path} --study {study} failed:\nstdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let manifest_path = payload["result_manifest_artifact_path"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{study}: no manifest path in {payload}"));
+        let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+        assert_eq!(manifest["public_run"]["run_status"], "completed", "{study}");
+        assert_eq!(manifest["public_run"]["numerically_acceptable"], true, "{study}");
+        let value = passed_assessment(&payload, assessment);
+        eprintln!("trace-impedance {study}: {label} = {value} Ω");
     }
 }
 

@@ -301,7 +301,8 @@ pub use typed_fea::{
     CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy,
     CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy,
     CompletedAuthoredMaxwellStudy, CompletedAuthoredNonlinearSolidStudy,
-    CompletedAuthoredThermalStudy, CompletedFeaStudyResult, CompletedLocalFeaCase,
+    CompletedAuthoredThermalStudy, CompletedFeaStudyResult, CompletedLineParametersStudy,
+    CompletedLocalFeaCase,
     FamilyResultImportLimits, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,
     LocalFeaProgressObserver, LocalSweepCase,
 };

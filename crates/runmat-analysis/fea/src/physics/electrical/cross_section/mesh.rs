@@ -19,7 +19,7 @@ pub(super) const EDGE_DIVISIONS: f64 = 1000.0;
 pub(super) const MAX_SIZE_HEIGHTS: f64 = 2.0;
 /// Resident bytes per mesh node before factorization (coordinates, connectivity, operator
 /// rows); the factor itself is quoted by the symbolic analysis.
-const BYTES_PER_NODE: u64 = 256;
+pub(super) const BYTES_PER_NODE: u64 = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CrossSectionMeshSummary {

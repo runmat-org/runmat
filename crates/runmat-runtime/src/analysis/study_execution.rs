@@ -120,7 +120,7 @@ async fn execute_admitted_study_step(
             "acoustic cavity-mode and transient studies run through their governed typed execution path",
             std::collections::BTreeMap::new(),
         )),
-        AnalysisSolverOptions::ElectricalStatic(_) | AnalysisSolverOptions::Magnetostatic(_) | AnalysisSolverOptions::MaxwellHarmonic(_) => Err(operation_error(
+        AnalysisSolverOptions::ElectricalStatic(_) | AnalysisSolverOptions::Magnetostatic(_) | AnalysisSolverOptions::MaxwellHarmonic(_) | AnalysisSolverOptions::LineParameters(_) => Err(operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
             context,
