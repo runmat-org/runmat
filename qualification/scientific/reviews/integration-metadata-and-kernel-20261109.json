@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Scientific source conservation across corpus inventory registration",
+  "status": "Scientific source conservation across corpus metadata and disabled OCCT kernel repairs",
   "measured_source_revision": "878baa910e7806296fee33c672272f90af5d3d24",
   "measured_inputs": {
     "sha256": "1ad763993fe86d2f2d3dd9e089257a7eca9dd188dca98d76d059f2b7f775995d",
@@ -8,7 +8,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "e2b8b430d8f126284810cbb90f4caea40f0ea8e985e08968f9bb26f67f752a26",
+    "sha256": "032b8beff18d86a2437018603cd5451d36d66ee2243df686f33d7db922344bbb",
     "files": 25998,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -25,12 +25,28 @@
       "before": ["100644", "blob", "e4cd89aa7c3a878c6c662115c10e6ac721b8ad3e"],
       "after": ["100644", "blob", "9feef86f74fd48574cf45276ec2da6792a9be4c0"],
       "reason": "Declare the matching import scenarios for the separate governed meshing runner, with no new volume-meshing scenarios or changed numerical thresholds. Neither required scientific cohort loads this recipe. Their actual measurements and binary identities remain at 878baa910e."
+    },
+    {
+      "path": "crates/runmat-geometry/io/src/occt/exact_kernel.cc",
+      "before": ["100644", "blob", "914295a5e1b24842679b5ce808e9d7b26f68ba7a"],
+      "after": ["100644", "blob", "1f26e40306278350ec291ab2e37a6384bbe2da25"],
+      "reason": "Add an explicit point-array include and preserve the native exception type and message using OCCT 8's typed API. The unchanged build script compiles this file only with occt-kernel, which both measured scientific feature graphs exclude. The separate OCCT-enabled kernel CI gates still qualify this repair."
+    },
+    {
+      "path": "crates/runmat-geometry/io/src/occt/exact_kernel_display.cc",
+      "before": ["100644", "blob", "ec7ff1102eb48f4420aef13b3a3f4e8782b2591b"],
+      "after": ["100644", "blob", "1a9b49e88f7c81db3fbee61a94e1072b2768cce0"],
+      "reason": "Include the integer-array declaration directly. This file is also compiled only with occt-kernel, disabled in both scientific commands. Their compiled geometry implementation is unchanged. OCCT-enabled kernel builds and tests retain their original gates."
     }
   ],
   "qualification_evidence": [
     {
       "path": "qualification/scientific/evidence/corpus-inventory-20261109.json",
       "sha256": "1dda9a4b72331a42e23037cfe3b5fd9f491c5767ec7a9a9c98db5935098a912f"
+    },
+    {
+      "path": "qualification/scientific/evidence/occt-kernel-feature-conservation-20261109.json",
+      "sha256": "33a7bb44d21dcc1ebd4664d44e70127e6738ecbddf6dbd9f059cf3c6d3222f0f"
     }
   ]
 }
