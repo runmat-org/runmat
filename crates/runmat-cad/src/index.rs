@@ -142,6 +142,12 @@ pub struct PartRow {
     pub part_number: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<MaterialRef>,
+    /// The material as people read it (`Steel 1018` for `material.steel_1018`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_label: Option<String>,
+    /// The part's display color, sRGB hex, when it sets one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     pub properties: Vec<Property>,
     pub body: Vec<Vec<EntityName>>,
     pub ok: bool,
@@ -325,6 +331,12 @@ pub fn build_index(
                 uuid: uuid(ItemPath::part(&doc.path, &p.name)),
                 part_number: p.part_number.clone(),
                 material: p.material.clone(),
+                material_label: p.material.as_ref().map(|m| {
+                    crate::model::materials::library_label(m.as_str())
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| crate::drawing::bom_table::material_name(m.as_str()))
+                }),
+                color: p.color.clone(),
                 properties: p.properties.clone(),
                 body,
                 ok,

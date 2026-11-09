@@ -66,6 +66,42 @@ const DENSITIES: &[(&[&str], f64)] = &[
     (&["plywood", "birch"], 650.0),
 ];
 
+/// The material library a part or body picks from: `(name, label)`, the name as the Source
+/// writes it (`material = "material.steel_1018"`). Every entry has a density here and a display family in
+/// [`crate::appearance`], so mass properties and the canvas color follow the pick.
+pub const LIBRARY: &[(&str, &str)] = &[
+    ("material.aluminum_6061_t6", "Aluminum 6061-T6"),
+    ("material.aluminum_7075_t6", "Aluminum 7075-T6"),
+    ("material.aluminum_2024_t3", "Aluminum 2024-T3"),
+    ("material.steel_1018", "Steel 1018"),
+    ("material.steel_4140", "Steel 4140"),
+    ("material.stainless_304", "Stainless steel 304"),
+    ("material.stainless_316", "Stainless steel 316"),
+    ("material.titanium_ti_6al_4v", "Titanium Ti-6Al-4V"),
+    ("material.copper_c110", "Copper C110"),
+    ("material.brass_c360", "Brass C360"),
+    ("material.abs", "ABS"),
+    ("material.nylon_pa12", "Nylon PA12"),
+    ("material.glass_filled_nylon", "Nylon PA66 GF30"),
+    ("material.pom_acetal", "Acetal (POM)"),
+    ("material.peek", "PEEK"),
+    ("material.polycarbonate", "Polycarbonate"),
+    ("material.acrylic", "Acrylic (PMMA)"),
+    ("material.carbon_fiber", "Carbon fiber laminate"),
+    ("material.fr4", "FR-4"),
+    ("material.silicone_rubber", "Silicone rubber"),
+    ("material.oak", "Oak"),
+];
+
+/// A library material's label (`material.steel_1018` → `Steel 1018`), when it is in [`LIBRARY`].
+pub fn library_label(material: &str) -> Option<&'static str> {
+    let name = material.strip_prefix("material.").unwrap_or(material);
+    LIBRARY
+        .iter()
+        .find(|(n, _)| n.strip_prefix("material.") == Some(name))
+        .map(|(_, label)| *label)
+}
+
 /// The density (kg/m³) of a material by its name, when this table knows it.
 pub fn material_density(material: &str) -> Option<f64> {
     let name = material
@@ -141,5 +177,17 @@ mod tests {
         assert_eq!(material_density("glass"), Some(2500.0));
         assert_eq!(material_density("S235"), Some(7850.0));
         assert_eq!(material_density("material.unobtainium"), None);
+    }
+
+    #[test]
+    fn every_library_material_has_a_density_and_a_color() {
+        for (name, label) in LIBRARY {
+            let written = name.to_string();
+            assert!(material_density(&written).is_some(), "{name} has no density");
+            assert_ne!(crate::appearance::material_appearance(Some(&written)).0, "default", "{name} has no color");
+            assert_eq!(library_label(&written), Some(*label));
+        }
+        assert_eq!(material_density("material.stainless_304"), Some(7950.0));
+        assert_eq!(library_label("unobtainium"), None);
     }
 }
