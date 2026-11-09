@@ -56,7 +56,7 @@ export function runNativeEmbeddedAotProbe(fields) {
         const source = join(directory, "embedded-aot-probe.m");
         const output = join(directory, process.platform === "win32" ? "embedded-aot-probe.exe" : "embedded-aot-probe");
         writeFileSync(source, NATIVE_VECTOR_SOURCE, "utf8");
-        const environment = { ...process.env, ...fields.environment, NO_COLOR: "1" };
+        const environment = { ...(fields.environment ?? process.env), NO_COLOR: "1" };
         const compilation = spawnSync(runmat, ["compile", source, "-o", output], {
             cwd: directory,
             env: environment,

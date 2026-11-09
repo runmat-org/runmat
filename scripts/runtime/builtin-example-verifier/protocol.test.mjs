@@ -430,6 +430,10 @@ test("product probes bind the fixed vector, product bytes, and successful proces
 
 test("native product probes execute the manifested entrypoint and reject bytes changed during the probe", { skip: process.platform === "win32" }, () => {
     const directory = mkdtempSync(join(tmpdir(), "runmat-product-probe-test-"));
+    const previousArchive = process.env.RUNMAT_AOT_RUNTIME_ARCHIVE;
+    const environment = { ...process.env };
+    delete environment.RUNMAT_AOT_RUNTIME_ARCHIVE;
+    process.env.RUNMAT_AOT_RUNTIME_ARCHIVE = "ambient-build-archive-must-not-enter-staged-probe";
     try {
         const product = join(directory, "product");
         mkdirSync(product);
@@ -443,7 +447,7 @@ test("native product probes execute the manifested entrypoint and reject bytes c
             manifestPath, root: product, entrypoints: { "runmat-binary": "runmat" }
         });
         writeFileSync(manifestPath, JSON.stringify(manifest));
-        const passed = runNativeEmbeddedAotProbe({ artifactManifest: manifest, artifactManifestPath: manifestPath, sourceRevision: SOURCE });
+        const passed = runNativeEmbeddedAotProbe({ artifactManifest: manifest, artifactManifestPath: manifestPath, sourceRevision: SOURCE, environment });
         assert.equal(passed.result.status, "passed");
 
         writeFileSync(binary, "#!/bin/sh\necho 'original linker diagnostic' >&2\nexit 7\n", { mode: 0o755 });
@@ -470,9 +474,12 @@ test("native product probes execute the manifested entrypoint and reject bytes c
         assert.throws(() => runNativeEmbeddedAotProbe({
             artifactManifest: mutatingManifest,
             artifactManifestPath: manifestPath,
-            sourceRevision: SOURCE
+            sourceRevision: SOURCE,
+            environment
         }), /recursive tree/);
     } finally {
+        if (previousArchive === undefined) delete process.env.RUNMAT_AOT_RUNTIME_ARCHIVE;
+        else process.env.RUNMAT_AOT_RUNTIME_ARCHIVE = previousArchive;
         rmSync(directory, { recursive: true, force: true });
     }
 });
@@ -748,7 +755,7 @@ function successfulNativeProbe(artifact) {
 
 function writeFakeCompiler(path, mutateAdjacentDependency) {
     const mutation = mutateAdjacentDependency ? "printf changed > \"$0.runtime\"\n" : "";
-    writeFileSync(path, `#!/bin/sh\nset -eu\n${mutation}output=\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = -o ]; then output=$2; shift 2; else shift; fi\ndone\nprintf '#!/bin/sh\\nprintf \"5\\\\n\"\\n' > \"$output\"\nchmod +x \"$output\"\n`, "utf8");
+    writeFileSync(path, `#!/bin/sh\nset -eu\ntest -z "\${RUNMAT_AOT_RUNTIME_ARCHIVE-}"\n${mutation}output=\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = -o ]; then output=$2; shift 2; else shift; fi\ndone\nprintf '#!/bin/sh\\nprintf \"5\\\\n\"\\n' > \"$output\"\nchmod +x \"$output\"\n`, "utf8");
     chmodSync(path, 0o700);
 }
 
