@@ -365,3 +365,149 @@ fn structural_contact_interface_is_not_a_fluid_structure_interface() {
         Err(FluidStructureError::Unsupported(_))
     ));
 }
+
+/// The compliant channel closed above by a second solid, the lid, instead of an exterior wall.
+/// The lid's face on the channel carries the authored fluid wall `lid_wall` unless `wall` is
+/// false; the plate's face keeps the declared interface `wetted_wall`.
+fn lidded_case(youngs_modulus: f64, wall: bool) -> Case {
+    const LID: f64 = 2.0 * HEIGHT / 9.0;
+    let mut c = case(youngs_modulus);
+    c.mesh = layered_box_mesh(
+        [20, 11, 1],
+        [LENGTH, HEIGHT + LID, DEPTH],
+        &[(PLATE, "plate"), (HEIGHT, "channel"), (HEIGHT + 1.0, "lid")],
+    );
+    let mesh = &c.mesh;
+    let mut lid = c.model.material_assignments[0].clone();
+    lid.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("lid"));
+    c.model.material_assignments.push(lid);
+    // Rebind every target on the new mesh.
+    for constraint in &mut c.model.constraints {
+        if let AnalysisConstraint::Structural(s) = constraint {
+            match &mut s.kind {
+                StructuralConstraintKind::Fixed { target }
+                | StructuralConstraintKind::Symmetry { target } => {
+                    *target = target(mesh, &target.region_id.clone());
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+    c.model
+        .constraints
+        .push(AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "lid_fixed".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Fixed {
+                target: target(mesh, "lid_y_max"),
+            },
+        }));
+    c.model.interfaces[0].primary = target(mesh, "interface_channel_plate");
+    c.model.interfaces[0].secondary = target(mesh, "interface_channel_plate");
+    let lid_wall = FluidConstraint {
+        constraint_id: "lid_wall".into(),
+        kind: FluidConstraintKind::NoSlipWall {
+            target: target(mesh, "interface_channel_lid"),
+        },
+    };
+    if wall {
+        c.model
+            .constraints
+            .push(AnalysisConstraint::Fluid(lid_wall.clone()));
+    }
+    // The exterior lid becomes the authored wall on the lid solid.
+    c.constraints.retain(|c| c.constraint_id != "lid");
+    for constraint in &mut c.constraints {
+        let target = match &mut constraint.kind {
+            FluidConstraintKind::PrescribedVelocity { target, .. }
+            | FluidConstraintKind::NoSlipWall { target }
+            | FluidConstraintKind::Symmetry { target } => target,
+            _ => unreachable!(),
+        };
+        *target = target(mesh, &target.region_id.clone());
+    }
+    c.constraints.push(lid_wall);
+    for boundary in &mut c.boundaries {
+        boundary.target = target(mesh, &boundary.target.region_id.clone());
+    }
+    c
+}
+
+fn lid_nodes(c: &Case) -> Vec<usize> {
+    c.mesh
+        .topology
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.coordinates_m.canonical_value()[1] >= HEIGHT - 1e-12)
+        .map(|(i, _)| i)
+        .collect()
+}
+
+// G14: a fluid–solid face with a fluid wall condition and no fluid–structure interface is a
+// rigid, uncoupled wall: the fluid sees no slip, the wall stays in place and no fluid load
+// enters the solid. The plate's declared interface still couples, so the channel matches the
+// one closed by an exterior wall.
+#[test]
+fn a_fluid_wall_on_a_solid_without_an_interface_is_a_rigid_uncoupled_wall() {
+    let youngs_modulus = 10.0;
+    let lidded = lidded_case(youngs_modulus, true);
+    let p = prepared(&lidded);
+    let problem = problem(&lidded, &p, 1e-6);
+    let lid = lid_nodes(&lidded);
+    assert!(!problem.rigid_wall_nodes.is_empty());
+    assert!(problem
+        .rigid_wall_nodes
+        .iter()
+        .all(|n| lid.binary_search(n).is_ok()));
+    assert!(problem
+        .interface_nodes
+        .iter()
+        .all(|n| lid.binary_search(n).is_err()));
+    let (result, inlet, _) = run(&lidded);
+    // No load into the lid: its structural response is exactly zero, and its wall stays put.
+    for (ordinal, &node) in problem.structure.nodes.iter().enumerate() {
+        if lid.binary_search(&node).is_ok() {
+            assert_eq!(result.structural_response_m[ordinal], [0.0; 3]);
+            assert_eq!(result.displacement_m[node], [0.0; 3]);
+        }
+    }
+    // The plate's interface still couples, and the channel matches the exterior-lid channel.
+    assert!(result.coupling_iterations > 1);
+    assert!(result.evidence.interface_force_n[1] < 0.0);
+    let (_, open_inlet, _) = run(&case(youngs_modulus));
+    assert!(
+        (inlet - open_inlet).abs() < 1e-4 * open_inlet.abs(),
+        "lidded {inlet} vs exterior-lid {open_inlet}"
+    );
+}
+
+// G14: a fluid–solid face with neither an interface nor a fluid wall condition is the shared
+// admission error (`runmat check` reports the same code on the CAD's shared faces).
+#[test]
+fn a_fluid_solid_face_with_neither_an_interface_nor_a_wall_is_an_admission_error() {
+    let lidded = lidded_case(1e9, false);
+    let p = prepared(&lidded);
+    let Err(FluidStructureError::Admission(issue)) = try_problem(&lidded, &p, 1e-6) else {
+        panic!("an undeclared fluid–solid face must fail admission");
+    };
+    assert_eq!(issue.code, crate::admission::FLUID_SOLID_FACE_CODE);
+    assert!(issue.message.contains("interface_channel_lid"), "{issue}");
+}
+
+// A face selected by the interface and an authored wall is ambiguous.
+#[test]
+fn a_fluid_solid_face_with_an_interface_and_a_wall_is_an_admission_error() {
+    let mut c = case(1e9);
+    c.model.constraints.push(AnalysisConstraint::Fluid(FluidConstraint {
+        constraint_id: "extra_wall".into(),
+        kind: FluidConstraintKind::NoSlipWall {
+            target: target(&c.mesh, "interface_channel_plate"),
+        },
+    }));
+    let p = prepared(&c);
+    assert!(matches!(
+        try_problem(&c, &p, 1e-6),
+        Err(FluidStructureError::Admission(_))
+    ));
+}
