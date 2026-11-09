@@ -124,7 +124,7 @@ jobs:
             task: test
             test_group: language
             needs_occt: false
-          - runner: warp-windows-latest-x64-8x
+          - runner: warp-windows-latest-x64-16x
             name: windows-tests-runtime
             task: test
             test_group: runtime
@@ -134,7 +134,7 @@ jobs:
             task: test
             test_group: geometry-analysis
             needs_occt: true
-          - runner: warp-windows-latest-x64-8x
+          - runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed
             task: test
             test_group: tooling-distributed
@@ -144,7 +144,7 @@ jobs:
             shard_index: 0
             shard_count: 2
             cache_name: windows-tests-tooling-distributed
-          - runner: warp-windows-latest-x64-8x
+          - runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed-tail
             task: test
             test_group: tooling-distributed
@@ -153,6 +153,7 @@ jobs:
             shard_count: 2
             cache_name: windows-tests-tooling-distributed
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ startsWith(matrix.name, 'windows-tests-') && 480 || 360 }}
     env:
       # Enable backtraces on CI to aid debugging of panics/segfaults
       RUST_BACKTRACE: 1
@@ -162,10 +163,11 @@ jobs:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
-      # Bound concurrent compiler/linker working sets on the smaller Windows
-      # runner. Linux's 16-core lane has more memory for parallel compilation.
+      # Each Builtins compiler can retain 24 GiB. Heavy Windows lanes have
+      # 64 GiB for two compilers; 28-GiB Mac workers compile one at a time.
+      # Linux's 16-core lane has more memory for parallel compilation.
       # All-target quality checks can type-check several large roots together.
-      CARGO_BUILD_JOBS: ${{ matrix.task == 'quality' && '2' || startsWith(matrix.name, 'windows-') && '2' || startsWith(matrix.name, 'macos-') && '4' || '8' }}
+      CARGO_BUILD_JOBS: ${{ matrix.task == 'quality' && '2' || startsWith(matrix.name, 'windows-') && '2' || startsWith(matrix.name, 'macos-') && '1' || '8' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -551,7 +553,7 @@ jobs:
       matrix:
         platform:
           - release_for: windows-x86_64
-            os: warp-windows-latest-x64-8x
+            os: warp-windows-latest-x64-16x
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
           - release_for: macos-x86_64

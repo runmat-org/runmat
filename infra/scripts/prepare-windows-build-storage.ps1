@@ -78,8 +78,9 @@ $target = Enable-BuildCompression $TargetDirectory
 $scratch = Enable-BuildCompression $ScratchDirectory
 if ($ReclaimUnusedRunnerTools) {
     $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($target))
-    if ($drive.AvailableFreeSpace -lt 128GB) {
-        throw ('Isolated Windows build needs 128 GiB free before cache restore; {0:N1} GiB available' -f
+    # Reserve twice the largest observed 48-GiB batch before restoring caches.
+    if ($drive.AvailableFreeSpace -lt 96GB) {
+        throw ('Isolated Windows build needs 96 GiB free before cache restore; {0:N1} GiB available' -f
             ($drive.AvailableFreeSpace / 1GB))
     }
 }
