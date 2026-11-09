@@ -1,10 +1,8 @@
 use super::*;
 
-/// The Desktop's showcase bracket: an 80 x 50 x 10 plate, a 20 x 10 through-cut at
+/// The public bracket fixture: an 80 x 50 x 10 plate, a 20 x 10 through-cut at
 /// (20..40, 20..30) and a 4 mm through-hole at (60, 10).
-pub(super) const BRACKET: &str = include_str!(
-    "../../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/bracket.part"
-);
+pub(super) const BRACKET: &str = include_str!("../../../tests/fixtures/drawing/bracket.part");
 
 fn lines(orientation: &str) -> ViewLines {
     let part = crate::runtime::compile_part("/p/bracket.part", BRACKET)

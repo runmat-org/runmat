@@ -5,29 +5,14 @@ use super::*;
 const BRACKET: &str = include_str!("../../../tests/corpus/documents/bracket.part");
 pub(crate) const DRAWING: &str = "runmat 0.7\nstd 1\n\ndrawing bracket {\n    format a3 = {\n        size = { size = iso, name = A3 },\n        title_block = [\n            { label = \"Part number\", source = { source = property, name = part_number } }\n        ]\n    }\n\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n\n    view front = standard(\n        orientation = front,\n        sheet = \"1\",\n        model = { part = bracket },\n        at = [100, 100],\n        display = hidden_lines\n    )\n    view top = projected(\n        from = front,\n        direction = up,\n        sheet = \"1\",\n        model = { part = bracket },\n        at = [100, 200],\n        display = hidden_lines\n    )\n}\n";
 
-/// The Desktop's sheet tests read what the worker gets for its fixtures. Set
-/// `RUNMAT_DESKTOP_FIXTURES` to the Desktop's fixtures folder to write it, as runmat-cad's
-/// `desktop_fixtures` test reads it; otherwise the sibling checkout's copy must be current.
+/// Export compiled fixture data only when the caller selects a destination.
+/// Public tests use repository-owned designs and require no sibling checkout.
 fn desktop_fixture(name: &str, json: &str) {
     if let Ok(dir) = std::env::var("RUNMAT_DESKTOP_FIXTURES") {
         let dir = std::path::PathBuf::from(dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(name), json).unwrap();
-        return;
     }
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures");
-    if !dir.exists() {
-        return;
-    }
-    let path = dir.join(name);
-    let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
-    assert!(
-        checked_in == json,
-        "{} is stale; regenerate with RUNMAT_DESKTOP_FIXTURES={} cargo test -p runmat-cad-wasm --lib",
-        path.display(),
-        dir.display()
-    );
 }
 
 #[test]
@@ -69,17 +54,13 @@ fn a_drawing_compiles_from_its_text_with_the_displays_of_its_models() {
     );
 }
 
-/// The Desktop's standard drawing of the showcase bracket: three views at 2:1, section
+/// A standard drawing of the public bracket fixture: three views at 2:1, section
 /// A–A through the hole, detail B of the round, model dimensions, a hole callout and a
 /// GD&T frame from the part's PMI.
 #[test]
 fn the_standard_drawing_measures_its_model_and_cuts_its_section() {
-    const PART: &str = include_str!(
-        "../../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/bracket.part"
-    );
-    const STANDARD: &str = include_str!(
-        "../../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/standard.drawing"
-    );
+    const PART: &str = include_str!("../../../tests/fixtures/drawing/bracket.part");
+    const STANDARD: &str = include_str!("../../../tests/fixtures/drawing/standard.drawing");
     let files: Files = [("/p/bracket.part".to_owned(), PART.to_owned())]
         .into_iter()
         .collect();
@@ -190,9 +171,7 @@ fn syntax_errors_are_diagnostics() {
 
 #[test]
 fn auto_drawing_lays_out_views_a_section_and_hole_callouts() {
-    const PART: &str = include_str!(
-        "../../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/bracket.part"
-    );
+    const PART: &str = include_str!("../../../tests/fixtures/drawing/bracket.part");
     let files: Files = [("/p/bracket.part".to_owned(), PART.to_owned())]
         .into_iter()
         .collect();
