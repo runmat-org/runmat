@@ -594,6 +594,33 @@ fn line_parameter_outputs_publish_one_observation_result_each() {
     assert_eq!(value(2).len(), 4);
     let scalar = crate::results::assessment::scalar_observation_evidence(&results[1]).unwrap();
     assert!((scalar.value - 100.0).abs() < 5.0);
+    // The step's declared state carries the solved parameters under the step's solver result.
+    let sequence_identity =
+        crate::execution::SequenceIdentity::from_solver_contract(&sequence).unwrap();
+    let producer =
+        crate::execution::StepIdentity::from_solver_contract(sequence_identity, step).unwrap();
+    let state = crate::execution::CanonicalSemanticState::from_line_parameters(
+        producer,
+        &step.state_outputs[0],
+        &solved.mesh,
+        &solved.parameters,
+    )
+    .unwrap();
+    assert_eq!(
+        state.source_result,
+        crate::execution::SolverResultIdentity::from_step_result(
+            producer,
+            solved.parameters.numerical_digest().unwrap()
+        )
+        .unwrap()
+    );
+    let mut altered = state.clone();
+    if let crate::execution::CanonicalSemanticStatePayload::LineParameters { state } =
+        &mut altered.payload
+    {
+        state.parameters.impedance_ohm[0] += 1.0;
+    }
+    assert!(altered.validate().is_err());
     // A result from another mesh does not satisfy this plan.
     let mut moved = solved.mesh.clone();
     moved.canonical_digest = StableDigest::from_bytes([3; 32]);

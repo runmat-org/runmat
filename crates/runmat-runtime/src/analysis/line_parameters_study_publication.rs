@@ -86,12 +86,29 @@ pub fn prepare_line_parameters_study_publication(
     let step_identity =
         runmat_analysis_fea::execution::StepIdentity::from_solver_contract(sequence, step)
             .map_err(|error| invalid(error.to_string()))?;
-    let numerical = numerical_digest(&completed.parameters).map_err(invalid)?;
+    let numerical = completed
+        .parameters
+        .numerical_digest()
+        .map_err(|error| invalid(error.to_string()))?;
     let solver_result_identity =
         runmat_analysis_fea::execution::SolverResultIdentity::from_step_result(
             step_identity,
             numerical,
         )
+        .map_err(|error| invalid(error.to_string()))?;
+    // The step's declared states hold the solved parameters; they name the same solver result.
+    let states = step
+        .state_outputs
+        .iter()
+        .map(|declaration| {
+            runmat_analysis_fea::execution::CanonicalSemanticState::from_line_parameters(
+                step_identity,
+                declaration,
+                mesh,
+                &completed.parameters,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|error| invalid(error.to_string()))?;
     let run_id = publication_identity.local_run_id(
         runmat_analysis_core::PhysicsFamily::Electromagnetic,
@@ -129,7 +146,7 @@ pub fn prepare_line_parameters_study_publication(
         crate::analysis::structural_study::publication::complete_study_run_prepared(
             prepared,
             vec![completed_step],
-            Vec::new(),
+            states,
             completed.frozen_project_digest,
             preparation,
         )?;
@@ -159,12 +176,6 @@ pub fn prepare_line_parameters_study_publication(
     crate::analysis::PreparedStudyPublication::new(published, manifest).map_err(|error| {
         crate::analysis::prepared_study_publication::publication_failure(error, &context, invalid)
     })
-}
-
-fn numerical_digest(parameters: &LineParameters) -> Result<Digest, String> {
-    serde_json::to_vec(parameters)
-        .map(Digest::sha256)
-        .map_err(|error| error.to_string())
 }
 
 /// The mesh is the compiled study's mesh, the evidence closes over it, the solve met its

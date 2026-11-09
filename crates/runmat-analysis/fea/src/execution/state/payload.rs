@@ -33,6 +33,9 @@ pub enum CanonicalSemanticStatePayload {
     Magnetostatic {
         state: Box<CanonicalMagnetostaticStatePayload>,
     },
+    LineParameters {
+        state: Box<super::CanonicalLineParametersStatePayload>,
+    },
     MaxwellHarmonic {
         state: Box<CanonicalMaxwellStatePayload>,
     },
@@ -76,6 +79,12 @@ impl CanonicalSemanticStatePayload {
     pub fn electrical_static(&self) -> Option<&CanonicalElectricalStaticStatePayload> {
         match self {
             Self::ElectricalStatic { state } => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+    pub fn line_parameters(&self) -> Option<&super::CanonicalLineParametersStatePayload> {
+        match self {
+            Self::LineParameters { state } => Some(state.as_ref()),
             _ => None,
         }
     }
