@@ -33,4 +33,5 @@ libc = "0.2"
 rayon = "1.11"
 runmat-geometry-fixtures = { workspace = true }
 serde_json = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry"] }
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }
