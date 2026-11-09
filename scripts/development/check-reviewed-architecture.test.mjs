@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchesReviewedDebt } from "./check-reviewed-architecture.mjs";
+import { gitBlobDigest, matchesReviewedDebt } from "./check-reviewed-architecture.mjs";
 
 test("reviewed architecture matching preserves exact multiplicity and scope", () => {
+  assert.equal(gitBlobDigest("abc"), "f2ba8f84ab5c1bce84a7b441cb1959cfc7093b7f");
   const a = "architecture boundary check failed: crates/runmat-analysis/fea/src/a.rs has existing debt";
   const b = "architecture boundary check failed: crates/runmat-runtime/src/analysis/b.rs has existing debt";
   const expected = [...Array(106).fill(a), b];

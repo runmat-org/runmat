@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const prefix = "architecture boundary check failed: ";
 const feaRoots = [
@@ -12,6 +13,13 @@ const feaRoots = [
   "crates/runmat-analysis/fea/",
   "crates/runmat-runtime/src/analysis/",
 ];
+
+// Git's blob identity for the exact UTF-8 ls-tree output. Hashing in-process
+// avoids a large synchronous stdin transfer to a second Git process.
+export function gitBlobDigest(text) {
+  const bytes = Buffer.from(text, "utf8");
+  return createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+}
 
 // Counts matter: duplicate diagnostics from independent rules remain visible.
 export function matchesReviewedDebt(actual, expected) {
@@ -56,7 +64,7 @@ function main() {
   const validCommit = /^[0-9a-f]{40}$/.test(reviewed.reviewed_commit ?? "");
   const ancestor = validCommit ? git(["merge-base", "--is-ancestor", reviewed.reviewed_commit, "HEAD"]) : null;
   const reviewedTree = validCommit ? git(["ls-tree", "-r", reviewed.reviewed_commit, "--", ...inputs]) : null;
-  const reviewedDigest = reviewedTree?.status === 0 ? git(["hash-object", "--stdin"], { input: reviewedTree.stdout }) : null;
+  const reviewedDigest = reviewedTree?.status === 0 ? gitBlobDigest(reviewedTree.stdout) : null;
   const clean = git(["diff", "--quiet", "HEAD", "--", ...inputs]);
   const untracked = git(["ls-files", "--others", "--exclude-standard", "--", ...inputs]);
   const rustc = run("rustc", ["--version"]);
@@ -64,7 +72,7 @@ function main() {
   const pinsMatch = reviewed.schema_version === 1 && reviewed.issue === "RM-1287"
     && validCommit && ancestor?.status === 0
     && /^[0-9a-f]{40}$/.test(reviewed.architecture_inputs ?? "")
-    && reviewedDigest?.status === 0 && reviewedDigest.stdout.trim() === reviewed.architecture_inputs
+    && reviewedDigest === reviewed.architecture_inputs
     && clean.status === 0 && untracked.status === 0 && !untracked.stdout.trim()
     && rustc.status === 0 && rustc.stdout.trim() === reviewed.rustc_version;
   if (!pinsMatch || !matchesReviewedDebt(lines, reviewed.diagnostics)) {
