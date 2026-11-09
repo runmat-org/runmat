@@ -18,6 +18,7 @@
 //! `occurrence:<uuid>/face:<body>:<face>` or `occurrence:<uuid>/edge:<body>:<edge>` for a face
 //! or edge of one, indexed into the compiled display of its definition.
 
+mod configure;
 mod explode;
 mod frames;
 mod mate;
@@ -26,6 +27,8 @@ mod mirror;
 mod path_picks;
 mod place;
 mod structure;
+#[cfg(test)]
+mod configure_tests;
 #[cfg(test)]
 mod explode_tests;
 #[cfg(test)]
@@ -332,6 +335,15 @@ pub(super) fn edit(
             )
         }
         "assembly.insert" => place::insert(&mut document, files, &request.values)?,
+        "assembly.component-configuration" => {
+            let names = selected_names(&compiled, request)?;
+            configure::configure(
+                &mut document,
+                files,
+                &names,
+                text_value(&request.values, "configuration"),
+            )?
+        }
         "assembly.move" => {
             let names = selected_names(&compiled, request)?;
             place::move_components(&mut document, &names, &request.values)?

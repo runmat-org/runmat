@@ -43,11 +43,10 @@ pub const UNBUILT: &[&str] = &[
     "sketch.dxf-import",
     "sketch.repair",
     // Part: projected curves and split lines (no projection onto faces in the kernel yet),
-    // wrap (no wrapping onto curved faces yet), bodies to parts and where-used.
+    // wrap (no wrapping onto curved faces yet), and where-used.
     "part.curve-projected",
     "part.curve-split-line",
     "part.wrap",
-    "part.body-promote",
     "part.where-used",
     // Surfaces: untrim has no kernel operation yet; replacing solid faces with a surface is
     // Direct's Replace face.
@@ -63,15 +62,11 @@ pub const UNBUILT: &[&str] = &[
     // Direct: relations kept while a face moves.
     "direct.live-relations",
     // Manage.
-    "manage.equations",
     "manage.find-references",
     "manage.freeze-bar",
-    "manage.material",
-    "manage.appearance",
     "manage.decal",
     "manage.import",
     "manage.heal",
-    "manage.split-to-files",
     "manage.pack-and-share",
     // Drawing: views the model doesn't draw yet (break, crop, alternate position), annotation
     // tools with no model (hatch, revision cloud, sheet sketch, stacked balloons), and settings

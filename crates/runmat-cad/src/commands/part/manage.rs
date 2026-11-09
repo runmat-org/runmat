@@ -2,14 +2,20 @@
 
 use super::*;
 
+/// The material library as choices: `material.<name>` and its label.
+fn material_library() -> Vec<(&'static str, &'static str)> {
+    crate::model::materials::LIBRARY.to_vec()
+}
+
 pub(super) fn manage() -> Vec<CommandDescriptor> {
     vec![
         cmd("manage.equations", "Equations and inputs", "equations", P)
-            .desc("Edit the part's inputs, equations and global values.")
-            .kw(&["parameters", "variables", "global"])
+            .desc("Set an input's value, or add or change a named value or equation.")
+            .kw(&["parameters", "variables", "global", "let"])
             .inputs(vec![
-                text("name", "Input", Some("width")),
-                text("value", "Value", Some("80 mm")),
+                text("name", "Name", Some("width")),
+                text("value", "Value or expression", Some("input.length / 2"))
+                    .help("A quantity (80 mm) or an expression of inputs and values"),
             ])
             .edit(edit(EditOp::Set, Section::Inputs).item("input")),
         cmd(
@@ -89,7 +95,7 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             .desc("Assign a material to the part or a body.")
             .kw(&["alloy", "density"])
             .inputs(vec![
-                text("material", "Material", Some("Al 2024-T3")),
+                choice("material", "Material", &material_library()),
                 picks("bodies", "Bodies", &[K::Body, K::Part])
                     .optional()
                     .help("Leave empty for the whole part"),
@@ -97,28 +103,16 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             .on(&[K::Body, K::Part])
             .edit(edit(EditOp::Set, Section::Materials).item("material")),
         cmd("manage.appearance", "Appearance", "appearance", P)
-            .desc("Set the color and finish of the part, a body or faces.")
+            .desc("Set the display color of the part or a body.")
             .kw(&["color", "colour", "texture", "render"])
             .inputs(vec![
-                text("color", "Color", Some("#9aa4b1")),
-                choice(
-                    "finish",
-                    "Finish",
-                    &[
-                        ("matte", "Matte"),
-                        ("satin", "Satin"),
-                        ("gloss", "Gloss"),
-                        ("metal", "Metal"),
-                    ],
-                ),
-                picks(
-                    "targets",
-                    "Applies to",
-                    &[K::Part, K::Body, K::Face, K::Feature],
-                )
-                .optional(),
+                text("color", "Color", Some("#9aa4b1"))
+                    .help("sRGB hex, #RRGGBB or #RRGGBBAA for a see-through part"),
+                picks("targets", "Applies to", &[K::Part, K::Body])
+                    .optional()
+                    .help("Leave empty for the whole part"),
             ])
-            .on(&[K::Body, K::Face, K::Feature, K::Part])
+            .on(&[K::Body, K::Part])
             .edit(edit(EditOp::Set, Section::Appearances).item("appearance")),
         cmd("manage.decal", "Decal", "decal", P)
             .desc("Place an image on faces.")
@@ -200,7 +194,9 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
         cmd("manage.split-to-files", "Split to files", "split-files", P)
             .desc("Save bodies as separate parts and an assembly.")
             .inputs(vec![
-                picks("bodies", "Bodies", &[K::Body]),
+                picks("bodies", "Bodies", &[K::Body])
+                    .optional()
+                    .help("Leave empty for every body"),
                 flag("assembly", "Create an assembly", true),
             ])
             .when(bodies_exist())

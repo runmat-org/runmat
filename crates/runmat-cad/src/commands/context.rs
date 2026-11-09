@@ -195,19 +195,21 @@ pub(super) fn add(catalog: &mut Catalog) {
             .edit(view_action("show_in_model")),
     ]);
 
+    // Appearance presets set a display color; the form takes any sRGB hex.
     let appearance = menu(
         "appearance",
         "Appearance",
         "appearance",
-        choice_pairs(
-            catalog.command("manage.appearance").expect("appearance"),
-            "finish",
-        )
-        .iter()
-        .map(|(value, label)| preset("manage.appearance", label, "finish", value))
-        .chain([labeled("manage.appearance", "Edit appearance…")])
-        .collect(),
+        vec![
+            preset("manage.appearance", "Light grey", "color", "#C8CDD3"),
+            preset("manage.appearance", "Dark grey", "color", "#4A4F57"),
+            preset("manage.appearance", "Black", "color", "#1E1F22"),
+            preset("manage.appearance", "Blue", "color", "#2F6DB5"),
+            preset("manage.appearance", "Red", "color", "#B83A3A"),
+            labeled("manage.appearance", "Edit appearance…"),
+        ],
     );
+    // Library materials (crate::model::materials::LIBRARY).
     let material = menu(
         "material",
         "Material",
@@ -217,11 +219,21 @@ pub(super) fn add(catalog: &mut Catalog) {
                 "manage.material",
                 "Aluminum 6061-T6",
                 "material",
-                "Al 6061-T6",
+                "material.aluminum_6061_t6",
             ),
-            preset("manage.material", "Steel 1018", "material", "Steel 1018"),
-            preset("manage.material", "Stainless 304", "material", "SS 304"),
-            preset("manage.material", "ABS", "material", "ABS"),
+            preset(
+                "manage.material",
+                "Steel 1018",
+                "material",
+                "material.steel_1018",
+            ),
+            preset(
+                "manage.material",
+                "Stainless steel 304",
+                "material",
+                "material.stainless_304",
+            ),
+            preset("manage.material", "ABS", "material", "material.abs"),
             labeled("manage.material", "Edit material…"),
         ],
     );
@@ -402,12 +414,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                     c("part.move-down"),
                 ],
                 vec![c("part.parents-children"), c("part.where-used")],
-                vec![
-                    c("part.hide"),
-                    c("part.isolate"),
-                    visibility(),
-                    appearance.clone(),
-                ],
+                vec![c("part.hide"), c("part.isolate"), visibility()],
                 look(),
                 vec![c("design.copy-reference")],
                 vec![c("part.delete")],

@@ -19,6 +19,7 @@
 
 mod assembly;
 mod configuration;
+mod manage;
 mod publish;
 mod sketch;
 
@@ -213,6 +214,9 @@ fn part_edit(
             {
                 return result;
             }
+            if let Some(result) = manage::edit(path, text, request, &picks) {
+                return result;
+            }
             let lowered = match crate::direct_edits::direct_kind(command, &request.values, &picks)?
             {
                 Some(kind) => Some(kind),
@@ -347,6 +351,20 @@ pub fn edit(
         );
         return Ok(EditOutput {
             files: out,
+            summary,
+        });
+    } else if request.command == "manage.split-to-files" {
+        // New part files and an assembly beside this part, which stays as it is.
+        let parsed = parse_part(path, text);
+        let document = parsed
+            .document
+            .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
+        let (created, summary) = manage::split::split(path, text, files, request, &document)?;
+        return Ok(EditOutput {
+            files: created
+                .into_iter()
+                .map(|(p, old, change)| file_change(&p, &old, change))
+                .collect(),
             summary,
         });
     } else if request.command == "repair.repair" {
