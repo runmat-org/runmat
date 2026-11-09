@@ -538,6 +538,18 @@
         }
       ],
       "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "battery-pack-perimeter-cable",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "drone-arm-study",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 2 } }],
+      "mesh_scenarios": []
     }
   ],
   "metamorphic_relations": [
