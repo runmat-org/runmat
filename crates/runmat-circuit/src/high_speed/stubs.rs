@@ -21,9 +21,9 @@
 //!
 //! Lengths are in nanometres; depths are measured from the outer copper's surface.
 
+use super::connections::ViaConnections;
 use super::delay::DelayModel;
 use crate::board_rules::{props, BItem, BoardGraph, BoardRules, RuleValue};
-use crate::geom::shape::Prim;
 use crate::geom::{mm, Coord};
 use crate::layer_set::CopperIndex;
 use crate::layout::{Board, ItemId, NetId, Via};
@@ -94,45 +94,10 @@ pub struct ViaStub {
 /// The copper layers in `v`'s span where its net's tracks or pads touch the barrel, or its pours
 /// cover it.
 pub fn connected_layers(board: &Board, v: &Via) -> Vec<CopperIndex> {
-    let Some(net) = v.net else { return vec![] };
-    let barrel = Prim::circle(v.at, v.diameter / 2);
-    let mut on = std::collections::BTreeSet::new();
-    for t in board.tracks.values() {
-        if t.net == Some(net)
-            && (v.from..=v.to).contains(&t.layer)
-            && t.prims().iter().any(|p| barrel.gap(p) <= 0.0)
-        {
-            on.insert(t.layer);
-        }
+    if v.net.is_none() {
+        return vec![];
     }
-    // A pour of the net over the via joins it there, solid or through thermal spokes.
-    for z in board.zones.values() {
-        if z.net == Some(net) && z.outline.contains(v.at).unwrap_or(true) {
-            on.extend(
-                z.layers
-                    .iter()
-                    .copied()
-                    .filter(|l| (v.from..=v.to).contains(l)),
-            );
-        }
-    }
-    let n = board.stackup.copper_count();
-    for fp in board.footprints.values() {
-        if !fp.pad_nets.values().any(|&x| x == net) {
-            continue;
-        }
-        for pad in fp.pads(n) {
-            if pad.net == Some(net) && barrel.gap(&pad.prim) <= 0.0 {
-                on.extend(
-                    pad.layers
-                        .iter()
-                        .copied()
-                        .filter(|l| (v.from..=v.to).contains(l)),
-                );
-            }
-        }
-    }
-    on.into_iter().collect()
+    ViaConnections::new(board).connected_layers(v)
 }
 
 fn len_rule(rules: &BoardRules, g: &BoardGraph, it: BItem, prop: &str, default: Coord) -> Coord {
@@ -141,6 +106,18 @@ fn len_rule(rules: &BoardRules, g: &BoardGraph, it: BItem, prop: &str, default: 
 
 /// Every via on the board with a stub, with its back-drill where the rules ask for one.
 pub fn via_stubs(board: &Board, rules: &BoardRules, g: &BoardGraph) -> Vec<ViaStub> {
+    if board.vias.is_empty() {
+        return vec![];
+    }
+    via_stubs_with_connections(board, rules, g, &ViaConnections::new(board))
+}
+
+pub(super) fn via_stubs_with_connections(
+    board: &Board,
+    rules: &BoardRules,
+    g: &BoardGraph,
+    connections: &ViaConnections<'_>,
+) -> Vec<ViaStub> {
     let model = DelayModel::new(&board.stackup);
     let s = &board.stackup;
     let n = s.copper_count();
@@ -162,7 +139,7 @@ pub fn via_stubs(board: &Board, rules: &BoardRules, g: &BoardGraph) -> Vec<ViaSt
     let mut out = vec![];
     for v in board.vias.values() {
         let Some(net) = v.net else { continue };
-        let on = connected_layers(board, v);
+        let on = connections.connected_layers(v);
         let (Some(&lo), Some(&hi)) = (on.first(), on.last()) else {
             continue;
         };

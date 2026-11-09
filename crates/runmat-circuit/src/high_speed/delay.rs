@@ -109,10 +109,6 @@ impl DelayModel {
 
 /// Every routed net's length and delay: its tracks, its vias' connected spans and their stubs.
 pub fn net_timing(board: &Board, rules: &BoardRules, g: &BoardGraph) -> BTreeMap<NetId, Timing> {
-    let stubs: BTreeMap<_, _> = super::stubs::via_stubs(board, rules, g)
-        .into_iter()
-        .map(|s| (s.via, s))
-        .collect();
     let model = DelayModel::new(&board.stackup);
     let mut out: BTreeMap<NetId, Timing> = BTreeMap::new();
     for t in board.tracks.values() {
@@ -123,9 +119,18 @@ pub fn net_timing(board: &Board, rules: &BoardRules, g: &BoardGraph) -> BTreeMap
             delay: model.track(t.layer, t.width, length),
         };
     }
+    if board.vias.is_empty() {
+        return out;
+    }
+    let connections = super::connections::ViaConnections::new(board);
+    let stubs: BTreeMap<_, _> =
+        super::stubs::via_stubs_with_connections(board, rules, g, &connections)
+            .into_iter()
+            .map(|s| (s.via, s))
+            .collect();
     for v in board.vias.values() {
         let Some(n) = v.net else { continue };
-        let on = super::stubs::connected_layers(board, v);
+        let on = connections.connected_layers(v);
         let mut t = match (on.first(), on.last()) {
             (Some(&a), Some(&b)) if a != b => model.via(a, b),
             _ => model.via(v.from, v.to),

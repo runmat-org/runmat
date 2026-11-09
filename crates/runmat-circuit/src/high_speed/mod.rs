@@ -16,6 +16,7 @@
 //! a layer's geometry is [`crate::impedance::TraceGeometry`], and a structure kind is one more
 //! variant of it, with its own closed form and its own cross-section for the field solver.
 
+mod connections;
 pub mod controlled;
 pub mod cross_section;
 pub mod delay;
