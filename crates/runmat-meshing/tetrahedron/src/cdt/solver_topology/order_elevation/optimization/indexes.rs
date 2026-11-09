@@ -39,6 +39,10 @@ impl<'a> OptimizationTopology<'a> {
             _storage: storage,
         })
     }
+    /// The elements that reference a node.
+    pub fn incident_elements(&self, id: u64) -> Result<&[usize], DelaunaySolverTopologyError> {
+        self.incidence.elements(id)
+    }
     pub fn is_boundary(&self, slot: usize) -> bool {
         self.boundary_nodes[slot]
     }
