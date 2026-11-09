@@ -2,8 +2,8 @@ runmat 0.7
 std 1
 
 // The camera drone's assembly drawing at 1:2 on A2, third-angle projection: the front view with
-// the plan view above it, an isometric at 1:1.6 beside them, balloons on the main items and the
-// parts list beside the title block.
+// the plan view above it, an isometric at 1:1.6 beside them, balloons on the main items, the
+// parts list beside the title block and the general notes above it.
 drawing drone {
     format a2 = {
         size = { size = iso, name = A2 },
@@ -32,4 +32,15 @@ drawing drone {
     annotation b8 = balloon(occurrence = [{ name = light_pipe }], table = parts, view = iso)
 
     table parts = bom(view = iso, sheet = "1", at = [228, 225.5])
+    table notes = notes(
+        rows = [
+            "DIMENSIONS IN MILLIMETERS. GENERAL TOLERANCES ISO 2768-mK UNLESS STATED.",
+            "THIRD-ANGLE PROJECTION: SEE THE PROJECTION SYMBOL LEFT OF THE TITLE BLOCK.",
+            "DEBURR ALL PARTS AND BREAK SHARP EDGES 0.2 TO 0.5 MM.",
+            "MATERIAL AND FINISH OF EACH ITEM PER THE PARTS LIST.",
+            "TOLERANCING TO ISO 8015. DRAWN TO ISO 128 AND ISO 5456-2."
+        ],
+        sheet = "1",
+        at = [0, 0]
+    )
 }

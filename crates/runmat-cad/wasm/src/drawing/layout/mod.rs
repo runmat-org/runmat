@@ -232,7 +232,11 @@ impl<'a> Ctx<'a> {
         let doc = &data["document"];
         let sheet_json = doc["sheets"].as_array().and_then(|s| s.iter().find(|s| s["name"] == sheet)).cloned().unwrap_or(Value::Null);
         let format = doc["formats"].as_array().and_then(|f| f.iter().find(|f| f["name"] == sheet_json["format"])).cloned().unwrap_or(Value::Null);
-        let size = runmat_cad::drawing::title_layout::sheet_size(format["size"]["name"].as_str().unwrap_or("A3"));
+        // The format's own size: a named sheet's, or a custom sheet's width and height (A3 when unreadable).
+        let size = serde_json::from_value::<runmat_cad::drawing::SheetSize>(format["size"].clone())
+            .ok()
+            .and_then(|size| size.mm())
+            .unwrap_or_else(|| runmat_cad::drawing::title_layout::sheet_size("A3"));
         let ratio = floats(&sheet_json["scale"]);
         let scale = if ratio.len() == 2 && ratio[1] != 0.0 { ratio[0] / ratio[1] } else { 1.0 };
         let std = Std::of(&data["styles"][sheet]);

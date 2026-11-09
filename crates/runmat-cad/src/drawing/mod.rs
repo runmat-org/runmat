@@ -452,6 +452,12 @@ pub enum TableKind {
         #[serde(default)]
         rows: Vec<revision_table::RevisionRow>,
     },
+    /// The drawing's general notes, numbered in order and laid out above the title block
+    /// (ISO 7200): `table notes = notes(rows = ["Dimensions in millimeters.", …], sheet = "1")`.
+    Notes {
+        #[serde(default)]
+        rows: Vec<String>,
+    },
     Bend {
         view: String,
     },
@@ -768,7 +774,7 @@ pub fn check_drawing_with(
             | TableKind::Bend { view }
             | TableKind::Weld { view }
             | TableKind::CutList { view } => Some(view),
-            TableKind::Revision { .. } => None,
+            TableKind::Revision { .. } | TableKind::Notes { .. } => None,
         };
         let Some(vn) = view_of else { continue };
         let Some(v) = doc.view(vn) else {

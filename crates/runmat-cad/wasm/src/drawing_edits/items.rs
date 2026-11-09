@@ -52,7 +52,7 @@ fn name(item: Item<'_>) -> &str {
 fn lists(k: &TableKind) -> Option<&str> {
     match k {
         TableKind::Bom { view, .. } | TableKind::Hole { view, .. } | TableKind::Bend { view } | TableKind::Weld { view } | TableKind::CutList { view } => Some(view.as_str()),
-        TableKind::Revision { .. } => None,
+        TableKind::Revision { .. } | TableKind::Notes { .. } => None,
     }
 }
 

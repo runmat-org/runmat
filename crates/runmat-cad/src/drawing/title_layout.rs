@@ -34,11 +34,38 @@ pub fn sheet_size(name: &str) -> [f64; 2] {
         "A1" => [841.0, 594.0],
         "A2" => [594.0, 420.0],
         "A4" => [297.0, 210.0],
+        "A" => [279.4, 215.9],
         "B" => [431.8, 279.4],
         "C" => [558.8, 431.8],
         "D" => [863.6, 558.8],
+        "E" => [1117.6, 863.6],
         _ => [420.0, 297.0],
     }
+}
+
+impl SheetSize {
+    /// The sheet's width and height in millimetres: a named size's, or a custom size's own width
+    /// and height (a length in any length unit; a bare number is millimetres). None when a custom
+    /// side isn't a positive length.
+    pub fn mm(&self) -> Option<[f64; 2]> {
+        match self {
+            SheetSize::Iso { name } | SheetSize::Ansi { name } => Some(sheet_size(name)),
+            SheetSize::Custom { width, height } => Some([side_mm(width)?, side_mm(height)?]),
+        }
+    }
+}
+
+fn side_mm(side: &crate::value::ValueExpr) -> Option<f64> {
+    use crate::units::{StubUnits, UnitAuthority};
+    let mm = match side {
+        crate::value::ValueExpr::Quantity { value, unit } => {
+            let info = StubUnits.unit(unit)?;
+            (info.dimension == crate::units::Dimension::LENGTH).then_some(value * info.scale * 1000.0)?
+        }
+        crate::value::ValueExpr::Number { value } => *value,
+        _ => return None,
+    };
+    (mm.is_finite() && mm > 0.0).then_some(mm)
 }
 
 /// A text line placed on the sheet: its baseline's left end and its height.
@@ -135,10 +162,7 @@ pub fn sheet_layouts<'a>(
         let Some(format) = document.formats.iter().find(|f| f.name == sheet.format) else {
             continue;
         };
-        let size = match &format.size {
-            SheetSize::Iso { name } | SheetSize::Ansi { name } => sheet_size(name),
-            SheetSize::Custom { .. } => sheet_size(""),
-        };
+        let size = format.size.mm().unwrap_or_else(|| sheet_size(""));
         let texts = rows.get(&sheet.name);
         let named = format.title_fields(&super::drawing_title(document.path.as_str()));
         let fields: Vec<(&str, TitleValue<'_>)> = named

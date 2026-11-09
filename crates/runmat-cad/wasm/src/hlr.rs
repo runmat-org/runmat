@@ -138,9 +138,11 @@ fn cross(a: P3, b: P3) -> P3 {
     ]
 }
 
-/// One face's triangles in model millimetres.
+/// One face's triangles in model millimetres, and the body it belongs to (an index unique in
+/// the model, so two occurrences of one part are two bodies).
 struct Face {
     tris: Vec<[P3; 3]>,
+    body: usize,
 }
 
 /// One edge: its polyline (model mm) and the faces it bounds (global face indices).
@@ -153,6 +155,8 @@ struct Model {
     faces: Vec<Face>,
     edges: Vec<Edge>,
     axes: Vec<Axis>,
+    /// How many bodies the faces belong to.
+    bodies: usize,
 }
 
 /// A number array of a display, inline or a mesh reference read in place
@@ -197,6 +201,8 @@ fn boundary(face: &Face) -> BTreeMap<EdgeKey, (P3, P3)> {
 fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64]) {
     for body in bodies.as_array().into_iter().flatten() {
         let base = model.faces.len();
+        let body_index = model.bodies;
+        model.bodies += 1;
         let faces: &[Value] = body["faces"].as_array().map(Vec::as_slice).unwrap_or_default();
         for f in faces {
             let pos = floats(&f["positions"]);
@@ -215,7 +221,7 @@ fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64]) {
             if let Some(axis) = cylinder_axis(&f["surface"], t, (0..pos.len() / 3).map(at)) {
                 model.axes.push(axis);
             }
-            model.faces.push(Face { tris });
+            model.faces.push(Face { tris, body: body_index });
         }
         for e in body["edges"].as_array().into_iter().flatten() {
             let fa = e["faces"][0].as_u64().unwrap_or(0) as usize + base;
@@ -391,6 +397,7 @@ fn model_of(display: &Value) -> Model {
         faces: Vec::new(),
         edges: Vec::new(),
         axes: Vec::new(),
+        bodies: 0,
     };
     let data = &display["data"];
     if display["kind"] == "assembly" {
@@ -417,7 +424,8 @@ fn model_of(display: &Value) -> Model {
                             transform(&t, p).map(|x| x * 1000.0)
                         };
                         let face = model.faces.len();
-                        model.faces.push(Face { tris: Vec::new() });
+                        model.faces.push(Face { tris: Vec::new(), body: model.bodies });
+                        model.bodies += 1;
                         for (i, j) in [
                             (0, 1),
                             (2, 3),
@@ -448,34 +456,52 @@ fn model_of(display: &Value) -> Model {
     model
 }
 
-/// The silhouette of each curved face under `depth`: mesh edges inside the face between a
-/// triangle facing the viewer and one that doesn't. A tessellation can put a facet exactly
-/// edge-on at the silhouette (a cylinder's facet whose normal is square to the view): the
-/// silhouette is then the edge between the facing triangle and that facet.
+/// The silhouette of each curved surface under `depth`: mesh edges between a triangle facing
+/// the viewer and one that doesn't, inside a face or where two faces of one body meet smoothly
+/// with no edge drawn between them (a closed loft's lateral surface split at its seam: the
+/// silhouette runs along the seam). A tessellation can put a facet exactly edge-on at the
+/// silhouette (a cylinder's facet whose normal is square to the view): the silhouette is then
+/// the edge between the facing triangle and that facet.
 fn silhouettes(model: &Model, depth: P3) -> Vec<Edge> {
-    let mut out = Vec::new();
+    // Two faces meet smoothly when their triangles at the shared mesh edge turn less than this.
+    let smooth = 30f64.to_radians().cos();
+    let mut by_body: Vec<Vec<usize>> = vec![Vec::new(); model.bodies];
     for (fi, face) in model.faces.iter().enumerate() {
-        let mut by_edge: BTreeMap<EdgeKey, Vec<(f64, P3, P3)>> = BTreeMap::new();
-        for t in &face.tris {
-            let n = cross(sub(t[1], t[0]), sub(t[2], t[0]));
-            let facing = dot(n, depth);
-            for k in 0..3 {
-                let (a, b) = (t[k], t[(k + 1) % 3]);
-                let (ka, kb) = (key(a), key(b));
-                let id = if ka <= kb { (ka, kb) } else { (kb, ka) };
-                by_edge.entry(id).or_default().push((facing, a, b));
+        if let Some(b) = by_body.get_mut(face.body) {
+            b.push(fi);
+        }
+    }
+    let mut out = Vec::new();
+    for faces in by_body {
+        let mut by_edge: BTreeMap<EdgeKey, Vec<(usize, f64, P3, P3, P3)>> = BTreeMap::new();
+        for &fi in &faces {
+            for t in &model.faces[fi].tris {
+                let n = cross(sub(t[1], t[0]), sub(t[2], t[0]));
+                let facing = dot(n, depth);
+                for k in 0..3 {
+                    let (a, b) = (t[k], t[(k + 1) % 3]);
+                    let (ka, kb) = (key(a), key(b));
+                    let id = if ka <= kb { (ka, kb) } else { (kb, ka) };
+                    by_edge.entry(id).or_default().push((fi, facing, a, b, n));
+                }
             }
         }
         for uses in by_edge.values() {
-            if let [(f1, a, b), (f2, _, _)] = uses.as_slice() {
-                let scale = 1e-9;
-                if (*f1 > scale) != (*f2 > scale) {
-                    out.push(Edge {
-                        points: vec![*a, *b],
-                        faces: [fi, fi],
-                    });
+            let [(f1, s1, a, b, n1), (f2, s2, _, _, n2)] = uses.as_slice() else { continue };
+            let scale = 1e-9;
+            if (*s1 > scale) == (*s2 > scale) {
+                continue;
+            }
+            if f1 != f2 {
+                let (l1, l2) = (dot(*n1, *n1).sqrt(), dot(*n2, *n2).sqrt());
+                if l1 < 1e-18 || l2 < 1e-18 || dot(*n1, *n2) / (l1 * l2) < smooth {
+                    continue;
                 }
             }
+            out.push(Edge {
+                points: vec![*a, *b],
+                faces: [*f1, *f2],
+            });
         }
     }
     out
@@ -619,7 +645,7 @@ pub fn section_lines(display: &Value, axes: &Axes, point: P3) -> ViewLines {
                     cut.push((*a, *b));
                 }
             }
-            Face { tris }
+            Face { tris, body: f.body }
         })
         .collect();
     let mut edges = Vec::new();
@@ -666,6 +692,7 @@ pub fn section_lines(display: &Value, axes: &Axes, point: P3) -> ViewLines {
         faces,
         edges,
         axes: model.axes.iter().map(|a| Axis { ..*a }).collect(),
+        bodies: model.bodies,
     };
     let mut out = lines_of(&clipped, axes);
     out.hidden.clear();

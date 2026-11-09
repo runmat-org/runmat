@@ -302,3 +302,62 @@ fn an_angular_dimension_draws_as_an_arc_between_its_faces_lines() {
     assert_eq!(p.iter().filter(|q| q.id == "annotation:angle" && q.style == "arrow").count(), 2);
     assert!(p.iter().any(|q| q.id == "annotation:angle" && matches!(&q.shape, Shape::Text { text, .. } if text.contains('°'))));
 }
+
+#[test]
+fn a_custom_sheet_lays_out_at_its_own_width_and_height() {
+    for (size, want) in [("width = 500 mm, height = 350 mm", [500.0, 350.0]), ("width = 17 in, height = 11 in", [431.8, 279.4])] {
+        let drawing = DRAWING.replace("size = { size = iso, name = A3 }", &format!("size = {{ size = custom, {size} }}"));
+        assert_ne!(drawing, DRAWING);
+        let files: Files = [("/p/bracket.part".to_owned(), PART.to_owned()), ("/p/bracket.drawing".to_owned(), drawing.clone())].into();
+        let out: Value = serde_json::from_str(&crate::drawing::compile_json("/p/bracket.drawing", &drawing, &files)).unwrap();
+        let layout = sheet(&out, "1");
+        let laid: Vec<f64> = layout["size"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        assert!((laid[0] - want[0]).abs() < 1e-6 && (laid[1] - want[1]).abs() < 1e-6, "{size}: laid out at {laid:?}");
+        // The frame and the title block follow the sheet: the block's right edge sits on the frame, 10 mm in.
+        let p = prims(&layout);
+        let right = p.iter().filter(|q| q.id == "title").filter_map(|q| match &q.shape { Shape::Rect { x, w, .. } => Some(x + w), _ => None }).fold(f64::MIN, f64::max);
+        assert!((right - (want[0] - 10.0)).abs() < 1e-6, "{size}: title block ends at {right}");
+    }
+}
+
+#[test]
+fn general_notes_number_and_wrap_above_the_title_block_clear_of_the_centring_marks() {
+    let long = "Deburr and break all sharp edges 0.2 to 0.5 mm unless stated, on every machined, laser-cut and molded part of the assembly, before finishing";
+    let notes = format!("    table notes = notes(rows = [\"Dimensions in millimeters.\", \"{long}\"], sheet = \"1\", at = [0, 0])\n}}");
+    let at = DRAWING.rfind('}').unwrap();
+    let drawing = format!("{}{notes}{}", &DRAWING[..at], &DRAWING[at + 1..]);
+    let files: Files = [("/p/bracket.part".to_owned(), PART.to_owned()), ("/p/bracket.drawing".to_owned(), drawing.clone())].into();
+    let out: Value = serde_json::from_str(&crate::drawing::compile_json("/p/bracket.drawing", &drawing, &files)).unwrap();
+    let layout = sheet(&out, "1");
+    let p = prims(&layout);
+    let cells: Vec<String> = p.iter().filter(|q| q.id == "table:notes").filter_map(|q| if let Shape::Text { text, .. } = &q.shape { Some(text.clone()) } else { None }).collect();
+    for want in ["GENERAL NOTES", "1", "2", "Dimensions in millimeters."] {
+        assert!(cells.iter().any(|t| t == want), "no {want:?} in {cells:?}");
+    }
+    // The long note wraps onto more lines; every word is drawn.
+    let words: Vec<&str> = cells.iter().flat_map(|c| c.split(' ')).collect();
+    assert!(long.split(' ').all(|w| words.contains(&w)), "{cells:?}");
+    assert!(!cells.iter().any(|c| c == long), "{cells:?}");
+    // As wide as the title block, its box clear of the centring marks and of everything else.
+    let rects: Vec<BoxR> = p
+        .iter()
+        .filter(|q| q.id == "table:notes")
+        .filter_map(|q| match &q.shape {
+            Shape::Rect { x, y, w, h } => Some(BoxR::new(*x, *y, x + w, y + h)),
+            Shape::Polyline { points, .. } => {
+                let (xs, ys): (Vec<f64>, Vec<f64>) = points.chunks(2).map(|c| (c[0], c[1])).unzip();
+                Some(BoxR::new(xs.iter().cloned().fold(f64::MAX, f64::min), ys.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max), ys.iter().cloned().fold(f64::MIN, f64::max)))
+            }
+            _ => None,
+        })
+        .collect();
+    let b = rects.iter().skip(1).fold(rects[0], |a, r| BoxR::new(a.x0.min(r.x0), a.y0.min(r.y0), a.x1.max(r.x1), a.y1.max(r.y1)));
+    assert!((b.x1 - b.x0 - runmat_cad::drawing::title_layout::BLOCK_WIDTH).abs() < 1e-6, "{b:?}");
+    let size = [420.0, 297.0];
+    let frame = super::border::frame_box(size, false);
+    for (a, c) in super::border::centring_marks(size, &frame) {
+        assert!(!b.crossed_by(a, c), "notes {b:?} cross the centring mark {a:?}-{c:?}");
+    }
+    let before = sheet(&compiled(), "1")["findings"].as_array().unwrap().len();
+    assert_eq!(layout["findings"].as_array().unwrap().len(), before, "{:#}", layout["findings"]);
+}

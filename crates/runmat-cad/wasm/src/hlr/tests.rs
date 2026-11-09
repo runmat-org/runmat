@@ -155,9 +155,47 @@ fn a_facet_edge_on_at_the_silhouette_still_draws_it() {
         tris.push([lo[k], lo[j], hi[j]]);
         tris.push([lo[k], hi[j], hi[k]]);
     }
-    let model = Model { faces: vec![Face { tris }], edges: Vec::new(), axes: Vec::new() };
+    let model = Model { faces: vec![Face { tris, body: 0 }], edges: Vec::new(), axes: Vec::new(), bodies: 1 };
     let front = axes("front");
     let xs: Vec<f64> = silhouettes(&model, front.depth).iter().map(|e| dot(e.points[0], front.u)).collect();
     let x = r * 22.5_f64.to_radians().cos();
     assert!(xs.iter().any(|u| (u - x).abs() < 1e-9) && xs.iter().any(|u| (u + x).abs() < 1e-9), "silhouettes at {xs:?}");
+}
+
+/// A closed loft's lateral surface split into two faces along its crest, with no edge drawn
+/// between them (the camera drone's body): the front view's outline runs along the split.
+#[test]
+fn a_silhouette_along_a_smooth_split_between_two_faces_still_draws() {
+    let r = 2.0;
+    // 15-degree facets, as a fine tessellation has them; the split runs through the top and bottom.
+    let ring = |x: f64| -> Vec<P3> {
+        (0..24)
+            .map(|k| {
+                let a = (90.0 + 15.0 * k as f64).to_radians();
+                [x, r * a.cos(), r * a.sin()]
+            })
+            .collect()
+    };
+    let (lo, hi) = (ring(0.0), ring(10.0));
+    let mut halves = [Vec::new(), Vec::new()];
+    for k in 0..24 {
+        let j = (k + 1) % 24;
+        halves[k / 12].push([lo[k], hi[j], lo[j]]);
+        halves[k / 12].push([lo[k], hi[k], hi[j]]);
+    }
+    let [a, b] = halves;
+    let front = axes("front");
+    // One body: the outline at the top and the bottom, along the split.
+    let model = Model { faces: vec![Face { tris: a.clone(), body: 0 }, Face { tris: b.clone(), body: 0 }], edges: Vec::new(), axes: Vec::new(), bodies: 1 };
+    let mut vs: Vec<f64> = silhouettes(&model, front.depth).iter().map(|e| dot(e.points[0], front.v)).collect();
+    vs.sort_by(f64::total_cmp);
+    vs.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
+    assert_eq!(vs.len(), 2, "silhouettes at {vs:?}");
+    assert!((vs[0] + r).abs() < 1e-9 && (vs[1] - r).abs() < 1e-9, "silhouettes at {vs:?}");
+    let lines = lines_of(&model, &front);
+    let top: f64 = segments(&lines.visible).iter().filter(|s| (s[1] - r).abs() < 1e-9 && (s[3] - r).abs() < 1e-9).map(|s| (s[2] - s[0]).abs()).sum();
+    assert!((top - 10.0).abs() < 1e-6, "the top outline draws {top} of 10 mm");
+    // Two bodies that touch: no outline between them.
+    let apart = Model { faces: vec![Face { tris: a, body: 0 }, Face { tris: b, body: 1 }], edges: Vec::new(), axes: Vec::new(), bodies: 2 };
+    assert!(silhouettes(&apart, front.depth).is_empty());
 }

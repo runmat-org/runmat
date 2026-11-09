@@ -1,6 +1,7 @@
 //! Tables on the sheet, snapped to its corners and zones the way the title block is: the
-//! revision table in the top right corner (ASME Y14.35), parts lists and cut lists on the title
-//! block's top edge, right-aligned (ISO 7573), hole and bend tables in the top left corner.
+//! revision table in the top right corner (ASME Y14.35), parts lists, cut lists and general notes
+//! on the title block's top edge, right-aligned (ISO 7573, ISO 7200), hole and bend tables in the
+//! top left corner.
 //! Tables in one corner stack away from it. A table placed by hand (`at`) stays there: its
 //! top-left corner, or a revision table's top-right corner. A table whose corner is taken goes
 //! to the free spot nearest it.
@@ -195,6 +196,17 @@ fn revision_grid(rows: &Value) -> Grid {
     Grid { title: Some("REVISIONS".into()), columns, rows, wrap: None }
 }
 
+/// General notes: numbered in order, each note wrapping in a column as wide as the title block.
+fn notes_grid(rows: &Value) -> Grid {
+    let note_width = runmat_cad::drawing::title_layout::BLOCK_WIDTH - NOTE_NUMBER_WIDTH;
+    let columns = vec![("NO.".into(), "middle", Some(NOTE_NUMBER_WIDTH)), ("NOTE".into(), "start", Some(note_width))];
+    let rows = rows.as_array().into_iter().flatten().filter_map(Value::as_str).enumerate().map(|(i, note)| Row::Cells(vec![(i + 1).to_string(), note.to_owned()])).collect();
+    Grid { title: Some("GENERAL NOTES".into()), columns, rows, wrap: Some(1) }
+}
+
+/// The notes table's number column.
+const NOTE_NUMBER_WIDTH: f64 = 10.0;
+
 fn fmt(v: f64, places: usize) -> String {
     runmat_cad::drawing::standard::metric_text(v, places)
 }
@@ -248,6 +260,7 @@ pub fn place(ctx: &mut Ctx<'_>) {
                 None => continue,
             },
             Some("revision") => (revision_grid(&t["kind"]["rows"]), Corner::TopRight),
+            Some("notes") => (notes_grid(&t["kind"]["rows"]), Corner::AboveTitle),
             Some("bend") => {
                 let view = t["kind"]["view"].as_str().unwrap_or("");
                 bend_views.push(view.to_owned());
