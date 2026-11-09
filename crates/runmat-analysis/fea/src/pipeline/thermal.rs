@@ -17,6 +17,7 @@ mod inline_history;
 mod physical;
 mod prepared;
 pub(crate) use prepared::ThermalObservationExecution;
+pub(crate) use prepared::ThermalPreparationAdmission;
 pub use prepared::{PreparedThermalPrimarySolve, PreparedThermalSolve};
 
 pub fn run_thermal_with_options(
@@ -56,7 +57,10 @@ pub(crate) fn prepare_selected<'a>(
         options,
         mesh,
         step,
-        ThermalObservationExecution::Inline,
+        ThermalPreparationAdmission {
+            observations: ThermalObservationExecution::Inline,
+            maximum_resident_bytes: step.accuracy.resources.resident_byte_budget(),
+        },
     )
 }
 
@@ -66,6 +70,7 @@ pub(crate) fn prepare_selected_primary<'a>(
     options: ThermalSolveOptions,
     mesh: &'a SolverMeshArtifact,
     step: &'a ProcedureStep,
+    maximum_resident_bytes: u64,
 ) -> Result<PreparedThermalPrimarySolve<'a>, FeaRunError> {
     validate_run(model, &options)?;
     Ok(PreparedThermalPrimarySolve::new(prepare_validated_model(
@@ -74,7 +79,10 @@ pub(crate) fn prepare_selected_primary<'a>(
         options,
         mesh,
         step,
-        ThermalObservationExecution::Deferred,
+        ThermalPreparationAdmission {
+            observations: ThermalObservationExecution::Deferred,
+            maximum_resident_bytes,
+        },
     )?))
 }
 
@@ -117,7 +125,10 @@ fn execute_validated_model(
         options,
         mesh,
         step,
-        ThermalObservationExecution::Inline,
+        ThermalPreparationAdmission {
+            observations: ThermalObservationExecution::Inline,
+            maximum_resident_bytes: step.accuracy.resources.resident_byte_budget(),
+        },
     )?
     .execute()
 }
@@ -128,8 +139,11 @@ fn prepare_validated_model<'a>(
     options: ThermalSolveOptions,
     mesh: &'a SolverMeshArtifact,
     step: &'a ProcedureStep,
-    observations: ThermalObservationExecution,
+    preparation_admission: ThermalPreparationAdmission,
 ) -> Result<PreparedThermalSolve<'a>, FeaRunError> {
+    let maximum_resident_bytes = preparation_admission
+        .maximum_resident_bytes
+        .min(step.accuracy.resources.resident_byte_budget());
     validate_step(step, options.procedure)?;
     let radiation = model.boundaries.iter().any(|boundary| {
         matches!(
@@ -148,7 +162,7 @@ fn prepare_validated_model<'a>(
     crate::planning::resource::require_initial_field_ceiling(
         &options.initial_fields,
         crate::execution::THERMAL_WORKLOAD_LIMITS,
-        step.accuracy.resources.resident_byte_budget(),
+        maximum_resident_bytes,
     )?;
     crate::physics::thermal::initial_state::fields::validate_selected(
         model,
@@ -178,7 +192,12 @@ fn prepare_validated_model<'a>(
         runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
         Some(temporal),
     )?;
-    let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;
+    let schedule = crate::execution::ThermalSolveSchedule::derive_admitted(
+        model,
+        step,
+        options.procedure,
+        maximum_resident_bytes,
+    )?;
     let facts =
         crate::planning::resource::ThermalPreassemblyResourceFacts::derive_with_observations(
             &options.initial_fields,
@@ -187,9 +206,12 @@ fn prepare_validated_model<'a>(
             mesh,
             &schedule,
             &identity,
-            observations,
+            ThermalPreparationAdmission {
+                maximum_resident_bytes,
+                ..preparation_admission
+            },
         )?;
-    facts.require_fits(step.accuracy.resources.resident_byte_budget())?;
+    facts.require_fits(maximum_resident_bytes)?;
     Ok(PreparedThermalSolve {
         model,
         backend: admission.effective,
@@ -199,6 +221,7 @@ fn prepare_validated_model<'a>(
         step,
         schedule,
         facts,
+        maximum_resident_bytes,
     })
 }
 

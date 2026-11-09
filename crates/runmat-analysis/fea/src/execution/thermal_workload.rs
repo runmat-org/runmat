@@ -238,6 +238,27 @@ impl ThermalWorkload {
         &'a self,
         mesh: &'a SolverMeshArtifact,
     ) -> Result<super::PreparedThermalPrimarySolve<'a>, FeaRunError> {
+        self.prepare_primary_fields_admitted(mesh, u64::MAX)
+    }
+
+    /// Select and reserve a numerical path under a placement budget without changing authored intent.
+    pub fn prepare_primary_fields_admitted<'a>(
+        &'a self,
+        mesh: &'a SolverMeshArtifact,
+        maximum_resident_bytes: u64,
+    ) -> Result<super::PreparedThermalPrimarySolve<'a>, FeaRunError> {
+        let maximum = self
+            .validated_step_with_dependency_graph_budget(maximum_resident_bytes)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?
+            .accuracy
+            .resources
+            .resident_byte_budget()
+            .min(maximum_resident_bytes);
+        crate::planning::resource::ThermalPreassemblyResourceFacts::require_input_fits(
+            &self.model,
+            &self.initial_fields,
+            maximum,
+        )?;
         let (step, options) = self.admitted_controls()?;
         crate::pipeline::thermal::prepare_selected_primary(
             &self.model,
@@ -245,6 +266,7 @@ impl ThermalWorkload {
             options,
             mesh,
             step,
+            maximum,
         )
     }
     fn admitted_controls(

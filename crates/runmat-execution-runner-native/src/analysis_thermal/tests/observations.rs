@@ -104,6 +104,7 @@ fn check_equilibrium_observations(order: ElementOrder, transient: bool) {
     let limits = setup.output_policy.inventory_limits();
     let chunk_bytes = setup.output_policy.chunk_bytes();
     let solve = prepare_thermal_task(ThermalTaskPreparation {
+        maximum_resident_bytes: u64::MAX,
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         field_source: None,
         authored_study_digest: Digest::sha256("thermal-observation-native-test"),

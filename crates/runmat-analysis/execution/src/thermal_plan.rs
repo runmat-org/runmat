@@ -54,7 +54,10 @@ pub fn rederive_thermal_resource_plan(
     let local_execution = LocalExecutionPlan::from_cpu_millicores(declared.request.cpu_millicores)
         .map_err(|error| crate::AnalysisBridgeError::Invalid(error.to_string()))?;
     let field_source = source::decode(workload, mesh, inputs, true)?;
-    let numerical = workload.prepare_primary_fields(mesh)?;
+    let numerical = workload.prepare_primary_fields_admitted(
+        mesh,
+        declared.input.accuracy_ceiling.resident_byte_budget(),
+    )?;
     let (result_output, receipt_output, state_profiles_output) =
         projected_thermal_outputs(workload, mesh, &numerical, policy)?;
     let facts = PreparedThermalResourceFacts {
@@ -82,7 +85,14 @@ pub fn prepare_thermal_inputs(
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<PreparedThermalInputs> {
-    prepare_thermal_inputs_with_source(workload, mesh, policy, None, LocalExecutionPlan::serial())
+    prepare_thermal_inputs_with_source(
+        workload,
+        mesh,
+        policy,
+        None,
+        LocalExecutionPlan::serial(),
+        u64::MAX,
+    )
 }
 
 pub(crate) fn prepare_thermal_inputs_with_source(
@@ -91,6 +101,7 @@ pub(crate) fn prepare_thermal_inputs_with_source(
     policy: AnalysisOutputPolicy,
     field_source: Option<&runmat_analysis_fea::execution::RetainedJouleHeatSource>,
     local_execution: LocalExecutionPlan,
+    maximum_resident_bytes: u64,
 ) -> AnalysisBridgeResult<PreparedThermalInputs> {
     if field_source.is_none()
         && runmat_analysis_fea::execution::RetainedJouleHeatSource::requires_binding(workload)
@@ -131,7 +142,7 @@ pub(crate) fn prepare_thermal_inputs_with_source(
         )?);
     }
     // One preassembly derivation serves the output projection and the resource plan.
-    let numerical = workload.prepare_primary_fields(mesh)?;
+    let numerical = workload.prepare_primary_fields_admitted(mesh, maximum_resident_bytes)?;
     let (result_output, receipt_output, state_profiles_output) =
         projected_thermal_outputs(workload, mesh, &numerical, policy)?;
     let facts = PreparedThermalResourceFacts {

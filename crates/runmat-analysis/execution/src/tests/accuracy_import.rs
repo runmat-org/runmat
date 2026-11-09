@@ -234,6 +234,7 @@ fn thermal_cold_import_rejects_rehashed_missing_spatial_certificate() {
         let result = workload.execute(&mesh).unwrap();
         let receipt = ThermalNumericalReceiptArtifact::new(&workload, &result).unwrap();
         let task = prepare_thermal_task(ThermalTaskPreparation {
+            maximum_resident_bytes: u64::MAX,
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             field_source: None,
             authored_study_digest: digest("cold-import"),

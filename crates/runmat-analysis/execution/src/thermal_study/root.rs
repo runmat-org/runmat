@@ -42,6 +42,7 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    maximum_resident_bytes: u64,
     #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
     local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     field_source: Option<FieldSourceWire>,
@@ -72,6 +73,7 @@ impl PreparationWire {
     fn new(preparation: ThermalStudyPreparation) -> Self {
         let limits = preparation.output_policy.inventory_limits();
         Self {
+            maximum_resident_bytes: preparation.maximum_resident_bytes,
             local_execution: preparation.local_execution,
             field_source: None,
             scope: preparation.scope,
@@ -122,6 +124,7 @@ impl PreparationWire {
             return Err(invalid("noncanonical thermal output chunk size"));
         }
         Ok(ThermalStudyPreparation {
+            maximum_resident_bytes: self.maximum_resident_bytes,
             local_execution: self.local_execution,
             field_source,
             scope: self.scope,
@@ -177,7 +180,7 @@ pub fn prepare_thermal_study_root(
         })
         .transpose()?;
     let wire = CompletionWire {
-        schema_version: 4,
+        schema_version: 5,
         preparation: preparation_wire,
         closures: completed.result_closures().to_vec(),
         descendants,
@@ -253,7 +256,7 @@ pub fn import_thermal_study_root(
     }
     let wire: CompletionWire =
         decode_contract(PREFIX, "thermal-study-completion", &payload, LIMITS)?;
-    if wire.schema_version != 4 {
+    if wire.schema_version != 5 {
         return Err(invalid("unsupported thermal completion schema"));
     }
     wire.descendants.validate()?;

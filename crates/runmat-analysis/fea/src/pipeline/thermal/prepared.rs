@@ -24,6 +24,7 @@ pub struct PreparedThermalSolve<'a> {
     pub(super) step: &'a ProcedureStep,
     pub(super) schedule: ThermalSolveSchedule,
     pub(super) facts: ThermalPreassemblyResourceFacts,
+    pub(super) maximum_resident_bytes: u64,
 }
 
 impl PreparedThermalSolve<'_> {
@@ -43,7 +44,7 @@ impl PreparedThermalSolve<'_> {
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal numerical and output residency",
             ))?;
-        let maximum = self.step.accuracy.resources.resident_byte_budget();
+        let maximum = self.maximum_resident_bytes;
         if required > maximum {
             return Err(ResourcePlanningError::AccuracyCeiling {
                 resource: "thermal numerical and output residency",
@@ -157,12 +158,22 @@ pub(crate) enum ThermalObservationExecution {
     Inline,
     Deferred,
 }
+
+#[derive(Clone, Copy)]
+pub(crate) struct ThermalPreparationAdmission {
+    pub observations: ThermalObservationExecution,
+    pub maximum_resident_bytes: u64,
+}
 /// Numerical fields with observations deferred to their separately admitted published-field tasks.
 /// This opaque carrier cannot execute an inline history under a fields-only reservation.
 pub struct PreparedThermalPrimarySolve<'a>(PreparedThermalSolve<'a>);
 impl<'a> PreparedThermalPrimarySolve<'a> {
     pub(super) fn new(prepared: PreparedThermalSolve<'a>) -> Self {
         Self(prepared)
+    }
+    /// Effective placement ceiling, bounded by the original authored resources.
+    pub fn maximum_resident_bytes(&self) -> u64 {
+        self.0.maximum_resident_bytes
     }
     pub fn numerical_reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
         self.0.numerical_reservation_bytes()

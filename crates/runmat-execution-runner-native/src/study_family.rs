@@ -210,15 +210,6 @@ pub(crate) fn plan_family_study(
             if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
                 compiled = electrothermal_heat_study(&compiled, context.mesh, policy)?;
             }
-            // The thermal plan selects its solve path (the proving factor, or the conduction
-            // multigrid when the factor does not fit) within the step's resident ceiling. Run it
-            // under the run's admitted budget, min(authored, the run's worker memory), so the
-            // plan, the worker's re-derivation and the worker envelope agree.
-            let machine = worker_memory()?;
-            for step in &mut compiled.model.sequence.steps {
-                let budget = step.accuracy.resources.resident_byte_budget().min(machine);
-                step.accuracy.resources.set_resident_byte_budget(budget);
-            }
             let product = plan_thermal_study_product_with_fields(
                 compiled,
                 context.mesh,
@@ -229,6 +220,7 @@ pub(crate) fn plan_family_study(
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Thermal(Box::new(ThermalStudyPreparation {
+                    maximum_resident_bytes: worker_memory()?,
                     local_execution: context.local_execution,
                     field_source: None,
                     scope: ThermalStudyScope::Standalone,

@@ -325,19 +325,16 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
         let multigrid_bytes = multigrid.solver_resident_bytes().unwrap().0;
         assert!(multigrid_bytes < factor, "{multigrid_bytes} vs {factor}");
         // Within the budget the factor needs, the plan keeps the factor.
-        let mut fitting = step.clone();
-        fitting
-            .accuracy
-            .resources
-            .set_resident_byte_budget(facts.numerical_reservation_bytes(&history).unwrap().0);
+        let fitting = facts.numerical_reservation_bytes(&history).unwrap().0;
         assert_eq!(
             super::super::thermal_preassembly::select_thermal_solve_path(
                 facts.clone(),
                 &history,
                 &model,
-                &fitting,
+                &step,
                 0,
                 0,
+                fitting,
             )
             .unwrap()
             .path(),
@@ -345,16 +342,15 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
         );
         // Below both totals the refusal names both requirements and the budget.
         let total = multigrid.numerical_reservation_bytes(&history).unwrap().0;
-        let mut small = step.clone();
-        small.accuracy.resources.set_resident_byte_budget(total - 1);
         assert!(matches!(
             super::super::thermal_preassembly::select_thermal_solve_path(
                 facts.clone(),
                 &history,
                 &model,
-                &small,
+                &step,
                 0,
                 0,
+                total - 1,
             ),
             Err(ResourcePlanningError::ThermalSolveCeiling { .. })
         ));

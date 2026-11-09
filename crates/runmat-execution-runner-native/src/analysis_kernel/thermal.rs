@@ -4,7 +4,7 @@ use super::{
     AnalysisKernelOutput,
 };
 use runmat_analysis_execution::{
-    execute_thermal_solver_result_objects, prepare_analysis_objects,
+    execute_thermal_solver_result_objects_admitted, prepare_analysis_objects,
     rederive_thermal_resource_plan, thermal_receipt_from_prepared_result,
     thermal_state_publication_profiles, validate_thermal_task_source,
 };
@@ -106,12 +106,13 @@ pub(super) fn execute(
     let result = runmat_cpu_execution::with_cpu_pool(cpu_threads, || {
         let _progress = runmat_analysis_fea::replace_fea_progress_context(progress);
         span.in_scope(|| {
-            execute_thermal_solver_result_objects(
+            execute_thermal_solver_result_objects_admitted(
                 &workload,
                 &mesh,
                 policy.chunk_bytes(),
                 ObjectNamespace::ResultValue,
                 policy.inventory_limits(),
+                resource_plan.input.accuracy_ceiling.resident_byte_budget(),
             )
         })
     })

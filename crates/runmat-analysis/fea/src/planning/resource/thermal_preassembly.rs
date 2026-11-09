@@ -86,7 +86,10 @@ impl ThermalPreassemblyResourceFacts {
             mesh,
             schedule,
             identity,
-            crate::pipeline::thermal::ThermalObservationExecution::Inline,
+            crate::pipeline::thermal::ThermalPreparationAdmission {
+                observations: crate::pipeline::thermal::ThermalObservationExecution::Inline,
+                maximum_resident_bytes: step.accuracy.resources.resident_byte_budget(),
+            },
         )
     }
 
@@ -97,8 +100,11 @@ impl ThermalPreassemblyResourceFacts {
         mesh: &SolverMeshArtifact,
         schedule: &ThermalSolveSchedule,
         identity: &crate::admission::AnalysisRunIdentity,
-        observations: crate::pipeline::thermal::ThermalObservationExecution,
+        admission: crate::pipeline::thermal::ThermalPreparationAdmission,
     ) -> Result<Self, ResourcePlanningError> {
+        let maximum = admission
+            .maximum_resident_bytes
+            .min(step.accuracy.resources.resident_byte_budget());
         if identity.family() != runmat_analysis_core::PhysicsFamily::Thermal
             || identity.procedure() != step.procedure
         {
@@ -107,14 +113,11 @@ impl ThermalPreassemblyResourceFacts {
             ));
         }
         let history = ThermalHistoryResourceFacts::derive(mesh, schedule, &model.interfaces)?;
-        history.require_fits(step.accuracy.resources.resident_byte_budget())?;
+        history.require_fits(maximum)?;
         // Reuse the workload's bounded input envelope; do not allocate canonical bytes or a
         // serde value tree to decide whether the model fits the authored resident ceiling.
         let model_materialization_bytes = Self::input_materialization_bytes(model, initial_fields)?;
-        require_ceiling(
-            model_materialization_bytes.0,
-            step.accuracy.resources.resident_byte_budget(),
-        )?;
+        require_ceiling(model_materialization_bytes.0, maximum)?;
         // Admit projection, canonical validation and support construction before deriving them.
         // Operator facts retain this estimate in the final composed numerical envelope. The
         // support-entry count that sizes it runs within the builder's entry-free floor, which
@@ -132,13 +135,10 @@ impl ThermalPreassemblyResourceFacts {
                 mesh,
                 Some(0),
             )?)?,
-            step.accuracy.resources.resident_byte_budget(),
+            maximum,
         )?;
         let planning = ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(mesh)?;
-        require_ceiling(
-            before_derivation(planning)?,
-            step.accuracy.resources.resident_byte_budget(),
-        )?;
+        require_ceiling(before_derivation(planning)?, maximum)?;
         let operators = ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?;
         let operators = if multigrid_admitted(model, step) {
             operators.for_steady_linear()?
@@ -146,7 +146,7 @@ impl ThermalPreassemblyResourceFacts {
             operators
         };
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
-        let observations = match observations {
+        let observations = match admission.observations {
             crate::pipeline::thermal::ThermalObservationExecution::Inline => {
                 ThermalObservationResourceFacts::derive(mesh, step)?
             }
@@ -197,7 +197,6 @@ impl ThermalPreassemblyResourceFacts {
             "thermal preassembly components",
         ))?;
         let post_solve = post_solve_bytes(&history, &field_construction, &manifest_metadata)?;
-        let maximum = step.accuracy.resources.resident_byte_budget();
         // The least numerical reservation any admitted path needs is admitted with the other
         // components before property compilation validates the mesh or profiles metadata.
         let factor_numerical = operators.numerical_reservation_bytes(&history)?.0;
@@ -245,8 +244,9 @@ impl ThermalPreassemblyResourceFacts {
                 "thermal property compilation",
             ))?;
         require_ceiling(alongside, maximum)?;
-        let operators =
-            select_thermal_solve_path(operators, &history, model, step, alongside, post_solve)?;
+        let operators = select_thermal_solve_path(
+            operators, &history, model, step, alongside, post_solve, maximum,
+        )?;
         let base = operators
             .numerical_reservation_bytes(&history)?
             .0
@@ -342,8 +342,8 @@ impl ThermalPreassemblyResourceFacts {
 /// The proving factorization when its preassembly total (numerical reservation plus `alongside`,
 /// the bytes of every other preassembly component) fits the run's resident budget; otherwise the
 /// conduction multigrid path for steady linear conduction (no radiation), whose total must fit the
-/// same budget. The budget is the step's resident ceiling, which a study run sets to
-/// min(authored, the memory the run is admitted to use), so the plan and every re-derivation
+/// same budget. The budget is min(authored, the memory the run is admitted to use),
+/// carried separately from the authored model, so the plan and every re-derivation
 /// select the same path. A refusal names both totals when the multigrid path needs less than the
 /// factor and still exceeds the budget.
 pub(crate) fn select_thermal_solve_path(
@@ -353,8 +353,9 @@ pub(crate) fn select_thermal_solve_path(
     step: &ProcedureStep,
     alongside: u64,
     post_solve: u64,
+    maximum: u64,
 ) -> Result<ThermalOperatorResourceFacts, ResourcePlanningError> {
-    let maximum = step.accuracy.resources.resident_byte_budget();
+    let maximum = maximum.min(step.accuracy.resources.resident_byte_budget());
     let total = |bytes: u64| {
         bytes
             .max(post_solve)

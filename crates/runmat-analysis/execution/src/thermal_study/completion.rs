@@ -56,6 +56,7 @@ impl ThermalStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ThermalStudyReplayContext {
+    pub maximum_resident_bytes: u64,
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub field_source: Option<runmat_analysis_fea::execution::RetainedJouleHeatSource>,
     pub scope: ThermalStudyScope,
@@ -88,6 +89,7 @@ impl CompletedThermalStudy {
     /// Original validated preparation, retained for durable artifact packaging.
     pub fn preparation(&self) -> ThermalStudyPreparation {
         ThermalStudyPreparation {
+            maximum_resident_bytes: self.replay.maximum_resident_bytes,
             local_execution: self.replay.local_execution,
             field_source: self.replay.field_source.clone(),
             scope: self.replay.scope,

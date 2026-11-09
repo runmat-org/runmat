@@ -63,6 +63,7 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
     )
     .unwrap();
     ThermalStudyPreparation {
+        maximum_resident_bytes: u64::MAX,
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         field_source: None,
         scope: ThermalStudyScope::Standalone,

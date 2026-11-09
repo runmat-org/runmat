@@ -13,7 +13,26 @@ pub fn execute_thermal_solver_result_objects(
     namespace: ObjectNamespace,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
-    let prepared = workload.prepare_primary_fields(mesh)?;
+    execute_thermal_solver_result_objects_admitted(
+        workload,
+        mesh,
+        chunk_bytes,
+        namespace,
+        limits,
+        u64::MAX,
+    )
+}
+
+/// Execute under the same placement ceiling used by the validated resource plan.
+pub fn execute_thermal_solver_result_objects_admitted(
+    workload: &ThermalWorkload,
+    mesh: &SolverMeshArtifact,
+    chunk_bytes: usize,
+    namespace: ObjectNamespace,
+    limits: ObjectInventoryLimits,
+    maximum_resident_bytes: u64,
+) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
+    let prepared = workload.prepare_primary_fields_admitted(mesh, maximum_resident_bytes)?;
     let transport = prepared.transport_profile(chunk_bytes)?;
     require_inventory(&transport, limits)?;
     let output = crate::projected_transport_output_resource_facts(&transport)?;

@@ -104,6 +104,8 @@ pub fn build_thermal_resource_plan_from(
             "thermal prepared envelopes do not cover canonical inputs and outputs".into(),
         ));
     }
+    let mut accuracy_ceiling = step.accuracy.resources;
+    accuracy_ceiling.set_resident_byte_budget(numerical.maximum_resident_bytes());
     let plan = build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::ThermalSolve(source),
@@ -135,7 +137,7 @@ pub fn build_thermal_resource_plan_from(
             required_capabilities: Default::default(),
             accelerators: Vec::new(),
         },
-        accuracy_ceiling: step.accuracy.resources,
+        accuracy_ceiling,
     })?;
     let breakdown = &plan.breakdown;
     tracing::info!(
