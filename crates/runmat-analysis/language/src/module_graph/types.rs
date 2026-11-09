@@ -29,6 +29,9 @@ pub struct FeaModuleGraph {
     pub catalog_fingerprint: [u8; 32],
     pub modules: BTreeMap<LogicalSourcePath, ParsedFeaModule>,
     pub edges: Vec<FeaModuleEdge>,
+    /// Non-FEA files a module reads at check time, by logical path: the board layout a
+    /// `cross_section { stackup = "<file>" }` takes its layers from.
+    pub resources: BTreeMap<LogicalSourcePath, SourceModule>,
     pub diagnostics: Vec<FeaDiagnostic>,
 }
 
@@ -36,6 +39,11 @@ impl FeaModuleGraph {
     /// Source invalidation includes unresolved import targets as well as loaded modules.
     pub fn source_dependencies(&self) -> Result<BTreeSet<LogicalSourcePath>, FunctionRequestError> {
         let mut paths = self.modules.keys().cloned().collect::<BTreeSet<_>>();
+        for (module_path, module) in &self.modules {
+            for (relative, _) in module.syntax.iter().flat_map(stackup_references) {
+                paths.insert(resolve_logical_path(&self.source_root, module_path, &relative)?);
+            }
+        }
         paths.extend(self.edges.iter().map(|edge| edge.target.clone()));
         paths.extend(
             self.function_requests()?
@@ -80,6 +88,11 @@ impl FeaModuleGraph {
         self.modules
             .iter()
             .map(|(path, module)| (path.clone(), module.source.source_digest))
+            .chain(
+                self.resources
+                    .iter()
+                    .map(|(path, resource)| (path.clone(), resource.source_digest)),
+            )
             .collect()
     }
 
@@ -132,4 +145,42 @@ pub struct ModuleGraphRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRequest {
     pub modules: ModuleGraphRequest,
+}
+
+/// The `stackup = "<file>"` paths of a module's `cross_section` geometry blocks, as authored,
+/// with the span of each path.
+pub fn stackup_references(syntax: &FeaSyntaxModule) -> Vec<(String, Span)> {
+    use runmat_fea_syntax::{FeaDeclarationKind, FeaExpressionKind, FeaStatementKind};
+    let mut found = Vec::new();
+    for item in &syntax.items {
+        let FeaModuleItem::Declaration(declaration) = item else {
+            continue;
+        };
+        if declaration.kind != FeaDeclarationKind::Geometry {
+            continue;
+        }
+        for statement in &declaration.body.statements {
+            let FeaStatementKind::Block { header, body } = &statement.kind else {
+                continue;
+            };
+            let text = syntax
+                .source()
+                .get(header.span.start..header.span.end)
+                .unwrap_or_default();
+            if text.trim() != "cross_section" {
+                continue;
+            }
+            for member in &body.statements {
+                let FeaStatementKind::Assignment { target, value, .. } = &member.kind else {
+                    continue;
+                };
+                if target.segments.len() == 1 && target.segments[0].text == "stackup" {
+                    if let FeaExpressionKind::String(path) = &value.kind {
+                        found.push((path.clone(), value.span));
+                    }
+                }
+            }
+        }
+    }
+    found
 }

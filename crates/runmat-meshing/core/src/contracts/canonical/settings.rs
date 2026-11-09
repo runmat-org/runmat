@@ -32,6 +32,58 @@ pub struct MeshingRequestSettings {
     /// Local sizing controls on named geometry regions, ordered by control name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub size_controls: Vec<MeshSizeControl>,
+    /// Graded triangles of a 2D board cross-section, meshed by the transmission-line solver.
+    /// Present exactly when the mesh is on a `cross_section` geometry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_section: Option<CrossSectionMeshSettings>,
+}
+
+/// Mesh controls of a board cross-section. `None` fields take the solver's defaults: the edge
+/// size from the smallest feature, the growth ratio 1.1, the largest size from the dielectric
+/// height.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrossSectionMeshSettings {
+    /// Element size at trace edges and corners, metres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_size_m: Option<f64>,
+    /// Size ratio between neighbouring elements, in (1, 2].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub growth: Option<f64>,
+    /// Largest element size, metres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_size_m: Option<f64>,
+}
+
+impl CrossSectionMeshSettings {
+    pub fn validate(&self) -> Result<(), MeshingContractError> {
+        for (field, value) in [
+            ("cross-section edge size", self.edge_size_m),
+            ("cross-section maximum size", self.max_size_m),
+        ] {
+            if value.is_some_and(|value| !(value.is_finite() && value > 0.0)) {
+                return Err(MeshingContractError::invalid(field, "must be positive"));
+            }
+        }
+        if self
+            .growth
+            .is_some_and(|growth| !(growth > 1.0 && growth <= 2.0))
+        {
+            return Err(MeshingContractError::invalid(
+                "cross-section growth",
+                "must be above 1 and at most 2",
+            ));
+        }
+        if let (Some(edge), Some(max)) = (self.edge_size_m, self.max_size_m) {
+            if edge > max {
+                return Err(MeshingContractError::invalid(
+                    "cross-section edge size",
+                    "must not exceed max_size",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for MeshingRequestSettings {
@@ -54,6 +106,7 @@ impl Default for MeshingRequestSettings {
             },
             cells_across_gap: None,
             size_controls: Vec::new(),
+            cross_section: None,
         }
     }
 }
@@ -99,6 +152,9 @@ impl MeshingRequestSettings {
             ));
         }
         super::validate_size_controls(&self.size_controls)?;
+        if let Some(section) = &self.cross_section {
+            section.validate()?;
+        }
         self.limits.validate()?;
         self.cancellation.validate()
     }

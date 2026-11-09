@@ -42,7 +42,7 @@ pub(super) fn lower_products<
     let geometries =
         super::lower_geometry_definitions(bound, declarations, &geometry_inspections, diagnostics);
     let materials = super::lower_materials(bound, declarations, &geometry_inspections, diagnostics);
-    let meshes = super::lower_mesh_definitions(bound, declarations, diagnostics);
+    let meshes = super::lower_mesh_definitions(bound, declarations, &geometries, diagnostics);
     let models = super::lower_models(bound, declarations, diagnostics);
     let execution_policies =
         super::execution_policy::lower_execution_policies(catalog, declarations, diagnostics);

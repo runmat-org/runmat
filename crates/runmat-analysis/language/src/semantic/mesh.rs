@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub fn lower_mesh_definitions(
     bound: &BoundFeaProgram,
     declarations: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
+    geometries: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> BTreeMap<(LogicalSourcePath, FeaSymbolKey), MeshDefinition> {
     let mut result = BTreeMap::new();
@@ -26,7 +27,7 @@ pub fn lower_mesh_definitions(
             continue;
         }
         let initial_errors = diagnostics.len();
-        let definition = definition(bound, declaration, diagnostics);
+        let definition = definition(bound, declaration, geometries, diagnostics);
         if diagnostics.len() != initial_errors {
             continue;
         }
@@ -51,9 +52,21 @@ pub fn lower_mesh_definitions(
 fn definition(
     bound: &BoundFeaProgram,
     declaration: &CheckedFeaDeclaration,
+    geometries: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<MeshDefinition> {
     let geometry = geometry_reference(bound, declaration, diagnostics)?;
+    let section = geometries.values().any(|definition| {
+        definition.module_path == geometry.module_path
+            && definition.geometry_id == geometry.geometry_id
+            && matches!(
+                definition.source,
+                runmat_geometry_core::GeometryDefinitionSource::CrossSection(_)
+            )
+    });
+    if section {
+        return cross_section_definition(declaration, geometry, diagnostics);
+    }
     let (block, dimension) = element_block(declaration, diagnostics)?;
     let (header, settings_block) = block;
     reject_unsupported_top_level(declaration, diagnostics);
@@ -157,6 +170,95 @@ fn definition(
         mesh_id: declaration.key.name.clone(),
         geometry,
         settings,
+    })
+}
+
+/// `mesh <name> on geometry.<section> { triangles { edge_size, growth, max_size } }`: the
+/// graded triangles of a board cross-section, meshed by the transmission-line solver.
+fn cross_section_definition(
+    declaration: &CheckedFeaDeclaration,
+    geometry: GeometryDefinitionRef,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<MeshDefinition> {
+    let blocks = declaration
+        .statements
+        .iter()
+        .map(|statement| match &statement.kind {
+            CheckedFeaStatementKind::Block {
+                header, statements, ..
+            } if header.trim() == "triangles" => Some(statements.as_slice()),
+            _ => {
+                diagnostic(
+                    declaration,
+                    statement.span,
+                    "a mesh on a cross_section accepts only its `triangles { edge_size, growth, max_size }` block",
+                    diagnostics,
+                );
+                None
+            }
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let statements: &[CheckedFeaStatement] = match blocks.as_slice() {
+        [] => &[],
+        [block] => block,
+        _ => {
+            diagnostic(
+                declaration,
+                declaration.span,
+                "mesh accepts one `triangles` block",
+                diagnostics,
+            );
+            return None;
+        }
+    };
+    let errors = diagnostics.len();
+    let mut seen = BTreeSet::new();
+    for statement in statements {
+        match &statement.kind {
+            CheckedFeaStatementKind::Assignment { target, .. }
+                if target.len() == 1
+                    && ["edge_size", "growth", "max_size"].contains(&target[0].as_str()) =>
+            {
+                if !seen.insert(target[0].as_str()) {
+                    diagnostic(
+                        declaration,
+                        statement.span,
+                        format!("duplicate triangles setting `{}`", target[0]),
+                        diagnostics,
+                    );
+                }
+            }
+            _ => diagnostic(
+                declaration,
+                statement.span,
+                "cross-section `triangles` accepts edge_size, growth and max_size",
+                diagnostics,
+            ),
+        }
+    }
+    let length = |name: &str, diagnostics: &mut Vec<FeaDiagnostic>| {
+        assignment(statements, name)
+            .is_some()
+            .then(|| required_length(declaration, statements, name, diagnostics))
+            .flatten()
+    };
+    let section = runmat_meshing_core::CrossSectionMeshSettings {
+        edge_size_m: length("edge_size", diagnostics),
+        growth: optional_scalar(declaration, statements, "growth", diagnostics),
+        max_size_m: length("max_size", diagnostics),
+    };
+    if diagnostics.len() != errors {
+        return None;
+    }
+    Some(MeshDefinition {
+        module_path: declaration.module.as_str().to_string(),
+        mesh_id: declaration.key.name.clone(),
+        geometry,
+        settings: MeshingRequestSettings {
+            dimension: MeshDimension::Surface,
+            cross_section: Some(section),
+            ..MeshingRequestSettings::default()
+        },
     })
 }
 
