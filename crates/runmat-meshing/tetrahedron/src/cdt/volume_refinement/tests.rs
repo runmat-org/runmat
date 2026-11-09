@@ -70,6 +70,7 @@ pub(super) fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProve
 pub(super) fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.5,
@@ -81,6 +82,7 @@ pub(super) fn metric() -> MetricFieldRequest {
 fn anisotropic_metric() -> MetricFieldRequest {
     MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3 {
             xx: 1.0,

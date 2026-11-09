@@ -40,6 +40,7 @@ fn publication_case(side: u32, thin: bool) {
     provenance.facets.sort_by_key(|face| face.node_identities);
     let metric = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(2.).unwrap(),
         maximum_grading_ratio: 1.5,

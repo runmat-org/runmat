@@ -37,6 +37,8 @@ const ARM_BOX_BEAM: &[u8] = include_bytes!("fixtures/boolean_step/arm_box_beam.s
 const ARM_ONLY: &[u8] = include_bytes!("fixtures/boolean_step/arm_only.step");
 const ARM_STUDY: &[u8] = include_bytes!("fixtures/boolean_step/arm_study.step");
 const ESC_THERMAL: &[u8] = include_bytes!("fixtures/boolean_step/esc_thermal.step");
+const HEATSINK: &[u8] =
+    include_bytes!("../../../docs/simulation/examples/geometry/electronics-heatsink.step");
 
 #[test]
 fn a_lofted_beam_alone_meshes() {
@@ -53,9 +55,33 @@ fn cylinders_unioned_with_a_lofted_beam_mesh() {
     assert_meshes("arm_only.step", ARM_ONLY, false, 3.0e-3, 1);
 }
 
+/// Tet4 elements of `arm_study.step` at a 3 mm target, measured on q-mesh-regress (a072b24d10):
+/// 44,279 nodes and 247,794 elements.
+const ARM_STUDY_MEASURED_ELEMENTS: usize = 247_794;
+
+/// The arm and its pod may mesh to at most half again their measured element count. Sizing a
+/// gap along a whole edge (the round-7 regression) refined every hinge and pad circle and
+/// multiplied the landing arm study's elements about four times; legitimate sizing changes
+/// move the count by tens of percent, and the mesh itself is deterministic for a seed.
+const ARM_STUDY_ELEMENT_MARGIN: f64 = 1.5;
+
 #[test]
 fn the_arm_and_its_motor_pod_mesh_with_a_shared_interface() {
-    assert_meshes("arm_study.step", ARM_STUDY, true, 3.0e-3, 2);
+    let elements = assert_meshes("arm_study.step", ARM_STUDY, true, 3.0e-3, 2);
+    let ceiling = (ARM_STUDY_MEASURED_ELEMENTS as f64 * ARM_STUDY_ELEMENT_MARGIN) as usize;
+    assert!(
+        elements <= ceiling,
+        "arm_study.step meshed to {elements} elements, above {ceiling} \
+         ({ARM_STUDY_ELEMENT_MARGIN} x the measured {ARM_STUDY_MEASURED_ELEMENTS})"
+    );
+}
+
+/// The docs heat-sink example (KiCad library model): 0.25 mm chamfers along every fin edge
+/// and 2.4 um sliver faces at the fin roots. Facet recovery must recover the sliver needles.
+#[test]
+#[ignore = "over 30 min in release (about 330k surface triangles); run with --ignored when changing surface sizing or facet recovery"]
+fn the_docs_heat_sink_meshes() {
+    assert_meshes("electronics-heatsink.step", HEATSINK, false, 10.0e-3, 1);
 }
 
 #[test]
@@ -70,7 +96,7 @@ fn assert_meshes(
     shared_interfaces: bool,
     target_size_m: f64,
     solids: usize,
-) {
+) -> usize {
     let result = mesh_step(source_name, source_bytes, shared_interfaces, target_size_m)
         .unwrap_or_else(|error| panic!("{source_name} must mesh: {error}"));
     let topology = &result.artifact.topology;
@@ -79,6 +105,12 @@ fn assert_meshes(
         !topology.volume_elements.is_empty(),
         "{source_name} volume elements"
     );
+    eprintln!(
+        "{source_name}: {} nodes, {} volume elements",
+        topology.nodes.len(),
+        topology.volume_elements.len()
+    );
+    topology.volume_elements.len()
 }
 
 fn mesh_step(

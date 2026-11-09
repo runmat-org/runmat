@@ -3,7 +3,7 @@
 //! The trusted root digest is supplied by the caller, not learned from the publication.
 //! Encoding and import are bounded, but gather metadata and mesh; this is not a peak-memory
 //! qualification or a replacement for scheduler attestation of response/accounting pairs.
-use crate::study_closure::{check_inventory, read, unique};
+use crate::study_closure::{check_inventory, completion_codec_limits, read, unique};
 use std::collections::BTreeMap;
 
 use runmat_analysis_fea::{
@@ -70,7 +70,12 @@ pub fn prepare_nonlinear_solid_study_root(
         closures: completed.result_closures().to_vec(),
         descendants,
     };
-    let bytes = encode_contract(PREFIX, "nonlinear-solid-study-completion", &wire, LIMITS)?;
+    let bytes = encode_contract(
+        PREFIX,
+        "nonlinear-solid-study-completion",
+        &wire,
+        completion_codec_limits(policy.inventory_limits()),
+    )?;
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::NonlinearSolidStudyCompletion,
         Digest::sha256(&bytes),
@@ -170,7 +175,7 @@ pub fn import_nonlinear_solid_study_root(
         PREFIX,
         "nonlinear-solid-study-completion",
         &payload,
-        import_limits(limits)?,
+        completion_codec_limits(limits),
     )?;
     if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported nonlinear completion schema"));
@@ -213,9 +218,11 @@ pub fn import_nonlinear_solid_study_root(
     drop(manifest);
     drop(manifest_bytes);
     let expected_descendants = wire.descendants;
-    let catalog_resident =
-        runmat_canonical_codec::profile_serialized(&expected_descendants, LIMITS)?
-            .materialization_resident_bytes_estimate;
+    let catalog_resident = runmat_canonical_codec::profile_serialized(
+        &expected_descendants,
+        completion_codec_limits(limits),
+    )?
+    .materialization_resident_bytes_estimate;
     let replay_retained = unavailable_bytes
         .checked_add(catalog_resident)
         .ok_or_else(|| limit("nonlinear root retained replay overflow"))?;
@@ -274,16 +281,6 @@ fn descendant_catalog(
         unique(roots)?,
         unique(objects)?,
     )?)
-}
-
-fn import_limits(limits: ObjectInventoryLimits) -> AnalysisBridgeResult<CanonicalLimits> {
-    Ok(CanonicalLimits::new(
-        usize::try_from(limits.max_total_bytes.min(256 * 1024 * 1024))
-            .map_err(|_| limit("nonlinear root limit overflow"))?,
-        8_000_000,
-        65_536,
-        64,
-    ))
 }
 
 fn invalid(message: &str) -> AnalysisBridgeError {

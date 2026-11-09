@@ -43,3 +43,26 @@ fn sequential_workspace_rejects_overflow_in_any_phase() {
     let impossible = vec![reference(b"overflow", u64::MAX)];
     assert!(import_workspace_phases(&[&ordinary, &impossible]).is_err());
 }
+
+// Boundary: a study completion larger than the former fixed 256 MiB contract ceiling encodes when
+// the run's admitted inventory holds it, and is refused when the admitted inventory does not.
+#[test]
+fn completion_codec_ceiling_follows_the_admitted_inventory() {
+    let payload = vec![7_u8; 4096];
+    let encode = |budget: u64| {
+        runmat_canonical_codec::encode_contract(
+            b"completion-limit-test\0",
+            "completion-limit-test",
+            &payload,
+            completion_codec_limits(ObjectInventoryLimits::admitted(budget)),
+        )
+    };
+    assert!(encode(1024).is_err());
+    let bytes = encode(1 << 20).unwrap();
+    assert!(bytes.len() > 4096);
+    let admitted = ObjectInventoryLimits::admitted(512 * 1024 * 1024);
+    assert_eq!(
+        completion_codec_limits(admitted).maximum_encoded_bytes,
+        512 * 1024 * 1024
+    );
+}

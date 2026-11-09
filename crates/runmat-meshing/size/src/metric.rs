@@ -13,8 +13,12 @@ mod index;
 mod intersection;
 mod uniform;
 mod local;
+mod located;
 mod point_field;
 pub use local::{LocalMetricSource, MetricEntitySupport};
+pub use located::{
+    canonicalize_located, compare_located, LocatedMetricSample, LocatedMetricSource,
+};
 pub use point_field::{integrated_edge_length, intersect_metrics, SurfaceMetricSource};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +230,10 @@ pub struct MetricFieldRequest {
     /// A supported scope is graded by distance instead of applying across incident faces.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entity_supports: Vec<MetricEntitySupport>,
+    /// Entity-local sizing that applies only along part of its entity, with a size that varies
+    /// along its own support (a gap that narrows at one place). Canonically ordered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub located_sources: Vec<LocatedMetricSource>,
     /// Requested element layers across a thin gap between non-incident boundary entities.
     /// `None` keeps existing request identities: two layers across gaps between edges, and one
     /// layer across gaps between facing faces.
@@ -277,6 +285,7 @@ impl MetricFieldRequest {
             contribution.validate()?;
         }
         local::validate_supports(&self.entity_supports)?;
+        located::validate_located(&self.located_sources)?;
         if self
             .cells_across_gap
             .is_some_and(|cells| !(1..=64).contains(&cells))
@@ -328,7 +337,11 @@ impl MetricFieldRequest {
         for contribution in &mut transformed.contributions {
             contribution.metric = transform(contribution.metric);
         }
+        for located in &mut transformed.located_sources {
+            located.metric = transform(located.metric);
+        }
         transformed.contributions.sort_by(compare_contributions);
+        located::canonicalize_located(&mut transformed.located_sources);
         transformed.validate()?;
         Ok(transformed)
     }
@@ -368,6 +381,10 @@ impl ResolvedMetricField {
             .map(|support| support.entity_id.clone())
             .collect();
         field.entity_local = field.local_sources(&entities)?;
+        for index in 0..request.located_sources.len() {
+            let source = field.located_source(index)?;
+            field.entity_local.push(source);
+        }
         Ok(field)
     }
 

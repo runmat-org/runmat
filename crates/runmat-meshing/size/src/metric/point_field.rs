@@ -409,6 +409,7 @@ mod tests {
                 metric: isotropic(0.1),
             }],
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             cells_across_gap: None,
         };
         let field = ResolvedMetricField::new(&request).unwrap();

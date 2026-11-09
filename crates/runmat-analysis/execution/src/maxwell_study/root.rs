@@ -5,6 +5,7 @@
 //! qualification or a replacement for scheduler attestation of response/accounting pairs.
 use std::collections::BTreeMap;
 
+use crate::study_closure::completion_codec_limits;
 use runmat_analysis_fea::{
     execution::{
         AnalysisNumericalObjectKind, AnalysisObjectManifest, MaxwellHarmonicWorkload,
@@ -14,7 +15,7 @@ use runmat_analysis_fea::{
         plan_maxwell_study, CompiledAnalysisStudy, MaxwellStudyPlanningPolicy, MaxwellStudyProduct,
     },
 };
-use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::{
     value::{ValuePayload, ValueRef, ValueRefKind},
     Digest, ProgramRevision,
@@ -38,7 +39,6 @@ use crate::{
 const PREFIX: &[u8] = b"runmat-maxwell-study-completion\0";
 // Full original task history replaces the previous winning-attempt payload.
 const COMPLETION_SCHEMA_VERSION: u16 = 2;
-const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -146,7 +146,12 @@ pub fn prepare_maxwell_study_root(
         closures: completed.result_closures().to_vec(),
         descendants,
     };
-    let bytes = encode_contract(PREFIX, "maxwell-study-completion", &wire, LIMITS)?;
+    let bytes = encode_contract(
+        PREFIX,
+        "maxwell-study-completion",
+        &wire,
+        completion_codec_limits(policy.inventory_limits()),
+    )?;
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::MaxwellStudyCompletion,
         Digest::sha256(&bytes),
@@ -210,8 +215,12 @@ pub fn import_maxwell_study_root(
     if manifest.logical_identity != Digest::sha256(&payload) {
         return Err(invalid("maxwell completion payload identity differs"));
     }
-    let wire: CompletionWire =
-        decode_contract(PREFIX, "maxwell-study-completion", &payload, LIMITS)?;
+    let wire: CompletionWire = decode_contract(
+        PREFIX,
+        "maxwell-study-completion",
+        &payload,
+        completion_codec_limits(limits),
+    )?;
     if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported maxwell completion schema"));
     }

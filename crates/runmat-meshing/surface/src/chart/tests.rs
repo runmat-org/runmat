@@ -230,6 +230,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     .unwrap();
     let metric_request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -971,6 +972,7 @@ fn singular_spherical_wedge_uses_an_exact_bounded_polar_chart() {
     .unwrap();
     let metric_request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 1.3,

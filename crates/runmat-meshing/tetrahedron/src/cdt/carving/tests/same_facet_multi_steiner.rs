@@ -97,6 +97,7 @@ fn same_facet_atomic_refill_reaches_validated_carved_volume() {
 
     let metric = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(20.0).unwrap(),
         maximum_grading_ratio: 2.0,

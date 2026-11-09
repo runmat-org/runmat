@@ -3,8 +3,8 @@ use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError,
 };
 use runmat_meshing_core::{
-    CurveQualityTargets, MetricContribution, MetricContributionScope, MetricFieldRequest,
-    MetricSourceKind, SurfaceQualityTargets,
+    MeshingQualityTargets, MetricContribution, MetricContributionScope, MetricFieldRequest,
+    MetricSourceKind,
 };
 
 use runmat_meshing_size::metric::DirectionalMetricEnvelope;
@@ -27,15 +27,18 @@ const CURVATURE_SAMPLES_PER_EDGE: u32 = 9;
 
 /// Adds deterministic exact-curve curvature constraints to the resolved metric request.
 /// Constructive chord and tangent validation remains authoritative; this source makes the same
-/// geometry demand visible to curve, surface, and later volume metric consumers.
+/// geometry demand visible to curve, surface, and later volume metric consumers. The volume
+/// quality target bounds how long a narrow face's elements may be along it (see
+/// `proximity::derive_proximity_contributions`).
 pub fn derive_curve_geometry_metric(
     topology: &ExactBRepTopology,
     evaluator: &(impl ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
     request: &MetricFieldRequest,
-    curve_quality: CurveQualityTargets,
-    surface_quality: SurfaceQualityTargets,
+    quality: MeshingQualityTargets,
 ) -> Result<MetricFieldRequest, SharedCurveError> {
+    let curve_quality = quality.curve;
+    let surface_quality = quality.surface;
     let relations = TopologyRelations::new(topology, control).map_err(|error| {
         SharedCurveError::new(
             SharedCurveErrorKind::GeometryEvaluation(error.kind),
@@ -172,6 +175,15 @@ pub fn derive_curve_geometry_metric(
                     .push((sample.point_m, sample.normal));
             }
         }
+        let face_normals = face_boundaries
+            .iter()
+            .map(|(face_id, samples)| {
+                (
+                    face_id.clone(),
+                    samples.iter().map(|(_, normal)| *normal).collect(),
+                )
+            })
+            .collect::<BTreeMap<_, Vec<[f64; 3]>>>();
         for (face_id, boundary) in face_boundaries {
             face_witnesses
                 .entry(face_id.clone())
@@ -226,7 +238,6 @@ pub fn derive_curve_geometry_metric(
                 .chain(&edge.end_vertex_id)
                 .cloned()
                 .collect(),
-            endpoint_vertices: [edge.start_vertex_id.clone(), edge.end_vertex_id.clone()],
             face_ids: relations
                 .edge_coedges(&edge.id)
                 .map(|coedge| coedge.face_id.clone())
@@ -238,6 +249,7 @@ pub fn derive_curve_geometry_metric(
                 .cloned()
                 .collect(),
             points_m: witness_points,
+            face_normals,
         });
     }
     contributions.extend(face_metrics.into_contributions()?);
@@ -251,32 +263,17 @@ pub fn derive_curve_geometry_metric(
         * f64::from(request.resolved_cells_across_gap());
     // Exact edge samples locate edge-local sizing; consumers grade it by distance from the
     // edge instead of applying it across each face the edge bounds.
-    let mut supports = edge_witnesses
+    let supports = edge_witnesses
         .iter()
         .map(|witness| runmat_meshing_size::metric::MetricEntitySupport {
             entity_id: witness.edge_id.clone(),
             points_m: witness.points_m.clone(),
         })
         .collect::<Vec<_>>();
-    // A gap that closes at an edge's endpoint is sized from that vertex (see
-    // `closing_endpoint`); the vertex's exact point is its support.
-    let vertex_points = edge_witnesses
-        .iter()
-        .flat_map(|witness| {
-            let first = witness.points_m.first().copied();
-            let last = witness.points_m.last().copied();
-            [
-                witness.endpoint_vertices[0].clone().zip(first),
-                witness.endpoint_vertices[1].clone().zip(last),
-            ]
-        })
-        .flatten()
-        .collect::<BTreeMap<_, _>>();
     for edge in &topology.edges {
         for coedge in relations.edge_coedges(&edge.id) {
             if let Some(witness) = face_witnesses.get_mut(&coedge.face_id) {
-                witness.tolerance_m =
-                    witness.tolerance_m.max(edge.tolerance_m.canonical_value());
+                witness.tolerance_m = witness.tolerance_m.max(edge.tolerance_m.canonical_value());
                 witness.vertex_ids.extend(
                     edge.start_vertex_id
                         .iter()
@@ -294,33 +291,23 @@ pub fn derive_curve_geometry_metric(
             witness.material_sides = sides.clone();
         }
     }
-    contributions.extend(derive_face_proximity_contributions(
+    let (face_gaps, mut located) = derive_face_proximity_contributions(
         face_witnesses.into_values().collect(),
         &contact_pairs,
         search_radius_m,
         request.resolved_cells_across_face_gap(),
         control,
-    )?);
-    let proximity = derive_proximity_contributions(
+    )?;
+    contributions.extend(face_gaps);
+    located.extend(derive_proximity_contributions(
         edge_witnesses,
         &contact_pairs,
         request.global_metric,
         search_radius_m,
         request.resolved_cells_across_gap(),
-        request.maximum_grading_ratio,
+        quality.volume.maximum_radius_edge_ratio,
         control,
-    )?;
-    for contribution in &proximity {
-        if let MetricContributionScope::Entity { entity_id } = &contribution.scope {
-            if let Some(point) = vertex_points.get(entity_id) {
-                supports.push(runmat_meshing_size::metric::MetricEntitySupport {
-                    entity_id: entity_id.clone(),
-                    points_m: vec![*point],
-                });
-            }
-        }
-    }
-    contributions.extend(proximity);
+    )?);
     let mut resolved = request
         .intersect_contributions(contributions)
         .map_err(|error| {
@@ -333,6 +320,10 @@ pub fn derive_curve_geometry_metric(
     entity_supports.sort_by(|left, right| left.entity_id.cmp(&right.entity_id));
     entity_supports.dedup_by(|left, right| left.entity_id == right.entity_id);
     resolved.entity_supports = entity_supports;
+    // Gaps are sized where they are: located sources carry their own supports.
+    located.extend(std::mem::take(&mut resolved.located_sources));
+    runmat_meshing_size::metric::canonicalize_located(&mut located);
+    resolved.located_sources = located;
     resolved.validate().map_err(|error| {
         SharedCurveError::invalid_request("curve geometry metric supports", error.to_string())
     })?;
