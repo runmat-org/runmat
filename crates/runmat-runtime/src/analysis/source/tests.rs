@@ -389,7 +389,7 @@ study second {
         "part"
     );
     assert_eq!(report.program.studies[0].mesh.mesh_id, "volume");
-    assert_eq!(report.program.studies[0].model.model.model_id, "structure");
+    assert_eq!(report.program.studies[0].model.as_ref().unwrap().model.model_id, "structure");
     assert_eq!(
         report.program.studies[0].sequence.steps[0].step_id.0,
         "solve"
