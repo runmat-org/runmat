@@ -67,7 +67,7 @@ pub struct AcousticStudyPreparation {
 enum AcousticStudyHistoryState {
     NotStarted,
     Running(Box<EntryHistoryPhase>),
-    Complete(Option<CompletedEntryHistories>),
+    Complete,
 }
 
 /// The coordinator admits complete entry evidence before preparing immutable fan-in.
@@ -76,6 +76,8 @@ pub struct AcousticStudyCoordinator {
     workload: AcousticFrequencyWorkload,
     entries: Vec<AcousticStudyEntryCoordinator>,
     history: AcousticStudyHistoryState,
+    // Completed evidence stays inline; changing the phase adds no result allocation.
+    completed_histories: Option<CompletedEntryHistories>,
     history_closures: Vec<AcousticStudyResultClosure>,
     history_attempts: Vec<crate::PlannedResourceUsageAttempt>,
     assembly_task: Option<PreparedAcousticFrequencyAssemblyTask>,
@@ -114,6 +116,7 @@ impl AcousticStudyCoordinator {
             workload,
             entries,
             history: AcousticStudyHistoryState::NotStarted,
+            completed_histories: None,
             history_closures: Vec::new(),
             history_attempts: Vec::new(),
             assembly_task: None,
@@ -200,7 +203,7 @@ impl AcousticStudyCoordinator {
                 .collect::<AnalysisBridgeResult<Vec<_>>>()?;
             self.history = match EntryHistoryPhase::new(&context, samples)? {
                 Some(phase) => AcousticStudyHistoryState::Running(Box::new(phase)),
-                None => AcousticStudyHistoryState::Complete(None),
+                None => AcousticStudyHistoryState::Complete,
             };
         }
         let AcousticStudyHistoryState::Running(phase) = &mut self.history else {
@@ -214,7 +217,8 @@ impl AcousticStudyCoordinator {
         else {
             unreachable!("history phase is running");
         };
-        self.history = AcousticStudyHistoryState::Complete(Some(phase.into_completed()?));
+        self.completed_histories = Some(phase.into_completed()?);
+        self.history = AcousticStudyHistoryState::Complete;
         Ok(Vec::new())
     }
 
@@ -275,7 +279,7 @@ impl AcousticStudyCoordinator {
     pub fn prepare_assembly(
         &mut self,
     ) -> AnalysisBridgeResult<&PreparedAcousticFrequencyAssemblyTask> {
-        if !matches!(self.history, AcousticStudyHistoryState::Complete(_)) {
+        if !matches!(self.history, AcousticStudyHistoryState::Complete) {
             return Err(invalid(
                 "acoustic assembly requires the finalized histories",
             ));
@@ -417,7 +421,7 @@ impl AcousticStudyCoordinator {
             workload: self.workload,
             entries,
             histories: match self.history {
-                AcousticStudyHistoryState::Complete(histories) => histories,
+                AcousticStudyHistoryState::Complete => self.completed_histories,
                 _ => return Err(invalid("acoustic histories are not finalized")),
             },
             history_closures: self.history_closures,

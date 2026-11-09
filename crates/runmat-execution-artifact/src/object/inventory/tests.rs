@@ -104,10 +104,11 @@ fn scratch_slots_are_checked_and_empty_inventory_allocates_no_slots() {
 fn admitted_inventory_follows_the_run_budget_within_platform_ceilings() {
     let budget = 14 * 1024 * 1024 * 1024_u64;
     let limits = ObjectInventoryLimits::admitted(budget);
-    assert_eq!(
-        limits.max_total_bytes,
-        budget.min(super::PLATFORM_ADDRESS_SPACE_BYTES)
-    );
+    #[cfg(target_pointer_width = "64")]
+    let expected_total = budget;
+    #[cfg(not(target_pointer_width = "64"))]
+    let expected_total = 1_u64 << usize::BITS;
+    assert_eq!(limits.max_total_bytes, expected_total);
     assert_eq!(
         limits.max_object_bytes,
         limits

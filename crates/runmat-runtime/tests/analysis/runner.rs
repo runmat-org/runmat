@@ -4292,7 +4292,7 @@ pub(super) fn run_fixture(
 ) -> FixtureRunRecord {
     // Fixture runs are numerical contract tests: they run under the explicit finite test
     // admission the runtime's own contract tests use, never a signed-in lease.
-    let _fea_admission = crate::fea_admission_support::guard();
+    let _fea_admission = crate::fea_admission::guard();
     let mut model = (spec.model)();
     configure_model_for_fixture(spec.id, &mut model);
     configure_mesh_backed_electro_thermal_model(spec, &mut model);
