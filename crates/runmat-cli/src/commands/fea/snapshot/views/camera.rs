@@ -556,7 +556,7 @@ mod tests {
     fn a_compact_part_stays_centered_when_the_legend_leaves_no_room() {
         let cube = bounds([0.0, 0.0, 0.0], [0.1, 0.1, 0.1]);
         let layout = Layout {
-            legend: Some((0.45, 0.45)),
+            legend: Some((0.6, 0.45)),
             ..Layout::default()
         };
         let state = shared_camera(

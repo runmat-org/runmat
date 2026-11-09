@@ -534,7 +534,10 @@ mod tests {
                     "{width}x{height}: labels {} px",
                     footprint.label_px
                 );
-                assert!(footprint.width_share < 0.5 && footprint.height_share < 0.35);
+                assert!(
+                    footprint.width_share < 0.5 && footprint.height_share < 0.35,
+                    "{width}x{height}: {footprint:?}"
+                );
             }
         }
         // A 16:10 poster's legend covers the same share of the frame at any size.
