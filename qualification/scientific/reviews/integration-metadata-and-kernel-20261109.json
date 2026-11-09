@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Scientific source conservation across corpus metadata and disabled OCCT kernel repairs",
+  "status": "Scientific source conservation across corpus metadata, disabled OCCT kernel repairs and stale test assertions",
   "measured_source_revision": "878baa910e7806296fee33c672272f90af5d3d24",
   "measured_inputs": {
     "sha256": "1ad763993fe86d2f2d3dd9e089257a7eca9dd188dca98d76d059f2b7f775995d",
@@ -8,7 +8,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "032b8beff18d86a2437018603cd5451d36d66ee2243df686f33d7db922344bbb",
+    "sha256": "c7154386741dfac8468bc0c9aaf658ddee0dca30335f0217641ff7d3c1827a72",
     "files": 25998,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -37,6 +37,18 @@
       "before": ["100644", "blob", "ec7ff1102eb48f4420aef13b3a3f4e8782b2591b"],
       "after": ["100644", "blob", "1a9b49e88f7c81db3fbee61a94e1072b2768cce0"],
       "reason": "Include the integer-array declaration directly. This file is also compiled only with occt-kernel, disabled in both scientific commands. Their compiled geometry implementation is unchanged. OCCT-enabled kernel builds and tests retain their original gates."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "before": ["100644", "blob", "f3fe000c21a9b7f3e5fabef93b15e0531c970d16"],
+      "after": ["100644", "blob", "048b50d6744ce6952892b2129131ea7b54dd7556"],
+      "reason": "Inside the cfg(test) module, derive the procedure count from AnalysisProcedure::ALL and assert the added line_parameters public identity. Both scientific commands link runmat-runtime as a dependency without its unit-test module. Executable runtime source is unchanged. The ordinary cross-platform runtime library tests qualify the assertion repair."
+    },
+    {
+      "path": "crates/runmat-core/tests/fea_workspace.rs",
+      "before": ["100644", "blob", "5829fcd6c7db24b944432b3fa1b4bc6fc3b528a5"],
+      "after": ["100644", "blob", "2f01cc3117a8530bccd85cc6243b4192f7fadb0c"],
+      "reason": "Update the exact refusal message after the CAD selection sidecar was removed in 380fa871f66. Configuration edits remain denied. This separate integration-test target is selected by neither scientific command. The ordinary fea_workspace integration suite qualifies the assertion repair."
     }
   ],
   "qualification_evidence": [
