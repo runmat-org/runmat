@@ -102,8 +102,8 @@ fn connector(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
         ("vertex", _) => json!({ "on": "vertex", "vertex": on }),
         ("edge", "center") => return Err(model("the axis of a round face takes a face; pick one, or place the connector at the edge's middle")),
         ("edge", _) => json!({ "on": "edge_midpoint", "edge": on }),
-        (_, "center") => json!({ "on": "center", "of": on }),
-        _ => json!({ "on": "frame", "frame": { "frame": "on_face", "face": on } }),
+        // On a face, the middle: a planar face's centroid, a round face's axis at mid-length.
+        _ => json!({ "on": "center", "of": on }),
     };
     let rotation = match values.get("rotate") {
         Some(Value::Number(n)) if n.as_f64() == Some(0.0) => None,
@@ -274,12 +274,19 @@ mod tests {
         assert!(t.contains("feature equation1 = curve.equation(") && t.contains("cos(input.t)"), "{t}");
         assert_eq!(refs[0]["lines"][0].as_array().unwrap().len(), 121 * 3);
         assert!(refuses("part.curve-composite", json!({ "curves": [E1] })).contains("two or more"));
+        // Edges in any order: the chain grows from whichever end the next edge meets.
+        let e3 = "edges_between(feature.body.face.side(s1.l3), feature.body.face.end)";
+        let (_, refs) = added("part.curve-composite", json!({ "curves": [E1, e3, E2] }));
+        assert_eq!(refs[0]["lines"][0].as_array().unwrap().len(), 4 * 3);
     }
 
     #[test]
     fn mate_connectors_from_the_canvas_take_their_name() {
         let (t, refs) = added("part.mate-connector", json!({ "name": "pivot", "on": [TOP], "origin": "centroid", "flip": false, "rotate": 0 }));
-        assert!(t.contains("feature pivot = mate_connector(") && t.contains("on_face"), "{t}");
+        assert!(t.contains("feature pivot = mate_connector(") && t.contains("on = center"), "{t}");
+        // The middle of the 40 x 20 top face, 10 mm up (display in metres).
+        let o = &refs[0]["lines"][0];
+        assert!([0.02, 0.01, 0.01].iter().enumerate().all(|(k, v)| (o[k].as_f64().unwrap() - v).abs() < 1e-6), "{o}");
         assert_eq!(refs[0]["kind"], "connector");
         assert_eq!(refs[0]["lines"].as_array().unwrap().len(), 3);
         let (t, _) = added("part.mate-connector", json!({ "name": "bore", "on": [BORE], "origin": "center", "rotate": 30, "flip": true }));
@@ -291,7 +298,8 @@ mod tests {
         // Offsets move the origin along the connector's own axes: 5 mm up the face normal.
         let (t, refs) = added("part.mate-connector", json!({ "name": "lifted", "on": [TOP], "offset_x": 0, "offset_y": 0, "offset_z": 5 }));
         assert!(t.contains("offset = [0 mm, 0 mm, 5 mm]"), "{t}");
-        let z0 = refs[0]["lines"][0][2].as_f64().unwrap();
+        let (x0, z0) = (refs[0]["lines"][0][0].as_f64().unwrap(), refs[0]["lines"][0][2].as_f64().unwrap());
+        assert!((x0 - 0.02).abs() < 1e-6, "connector origin x {x0}");
         // The display is in metres: the 10 mm top face plus 5 mm.
         assert!((z0 - 0.015).abs() < 1e-6, "connector origin z {z0}");
         assert!(refuses("part.mate-connector", json!({ "name": "body", "on": [TOP] })).contains("body"));

@@ -254,17 +254,22 @@ impl<'a, 'b> Run<'a, 'b> {
                     })
                     .collect();
                 let close = |a: [f64; 3], b: [f64; 3]| dot(sub(a, b), sub(a, b)).sqrt() < 1e-9;
-                let mut pts = Vec::new();
+                // Grow the chain from either end, so the edges may come in any order and
+                // any direction (a split edge's pieces come back in the kernel's order).
+                let mut pts: std::collections::VecDeque<[f64; 3]> = Default::default();
                 if let Some(first) = segs.first().copied() {
                     segs.remove(0);
-                    pts.push(first.0);
-                    pts.push(first.1);
+                    pts.push_back(first.0);
+                    pts.push_back(first.1);
                     while !segs.is_empty() {
-                        let last = *pts.last().expect("points");
-                        let Some(k) = segs
-                            .iter()
-                            .position(|s| close(s.0, last) || close(s.1, last))
-                        else {
+                        let (head, tail) = (pts[0], pts[pts.len() - 1]);
+                        if let Some(k) = segs.iter().position(|s| close(s.0, tail) || close(s.1, tail)) {
+                            let s = segs.remove(k);
+                            pts.push_back(if close(s.0, tail) { s.1 } else { s.0 });
+                        } else if let Some(k) = segs.iter().position(|s| close(s.0, head) || close(s.1, head)) {
+                            let s = segs.remove(k);
+                            pts.push_front(if close(s.0, head) { s.1 } else { s.0 });
+                        } else {
                             return Err(self.error(
                                 id,
                                 Some("edges"),
@@ -272,11 +277,10 @@ impl<'a, 'b> Run<'a, 'b> {
                                 "the edges do not join end to end".into(),
                                 Vec::new(),
                             ));
-                        };
-                        let s = segs.remove(k);
-                        pts.push(if close(s.0, last) { s.1 } else { s.0 });
+                        }
                     }
                 }
+                let mut pts: Vec<[f64; 3]> = pts.into();
                 let closed = pts.len() > 2 && close(pts[0], *pts.last().expect("points"));
                 if closed {
                     pts.pop();
