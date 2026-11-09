@@ -1431,6 +1431,171 @@ fn fsi_check_classifies_the_cad_faces_that_join_fluid_and_solid() {
     );
 }
 
+/// Check one variant of a documentation example written next to it, returning the JSON report.
+fn check_variant(temp: &TempDir, name: &str, source: &str) -> Value {
+    let examples = repository_fixture(temp).join("docs/simulation/examples");
+    fs::write(examples.join(name), source).unwrap();
+    let output = runmat_from_repository(
+        temp,
+        &["check", &format!("docs/simulation/examples/{name}"), "--json"],
+    );
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+        panic!(
+            "{name}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+/// G2: `runmat check` binds every observation to a field its family declares, with the same
+/// rule run preparation applies. Steady conduction declares current density per element, so
+/// a nodal current density is the `fea.admission.observation` error run reports.
+#[test]
+fn check_rejects_an_observation_its_family_does_not_declare() {
+    let temp = TempDir::new().unwrap();
+    let study = |hole_edge: &str| {
+        format!(
+            r#"geometry bar {{
+    file = "./geometry/cantilever.step"
+    units = mm
+    region body : solid {{ select name "Beam"; expect exactly_one }}
+    region terminal_a : face {{ select name "Loaded end"; expect exactly_one }}
+    region terminal_b : face {{ select name "Fixed end"; expect exactly_one }}
+}}
+
+mesh bar on geometry.bar {{
+    tetrahedra {{
+        order = linear
+        target_size = 1 m
+        maximum_deviation = 0.001 m
+    }}
+}}
+
+material copper {{
+    electrical {{
+        reference_temperature = 20 degC
+        conductivity = 58000000 A/V/m
+        resistive_heating_coefficient = 0 K^-1
+        relative_permittivity = 1
+        relative_permeability = 1
+    }}
+}}
+
+model conducting_bar {{
+    electromagnetic {{ equation = steady_conduction }}
+    assign material.copper to geometry.bar.region.body
+    constraint return_terminal {{
+        electrical.potential {{ target = geometry.bar.region.terminal_b; value = 0 V }}
+    }}
+    load supply {{
+        electric_current on geometry.bar.region.terminal_a = 100 A
+    }}
+}}
+
+study bar_resistance {{
+    geometry = geometry.bar
+    mesh = mesh.bar
+    model = model.conducting_bar
+    analysis conduction {{ electromagnetic static {{}} }}
+    output potential = analysis.conduction.field.node.electric_potential
+    output peak_current_density = max(magnitude(analysis.conduction.field.element.electric_current_density), over = geometry.bar.region.body)
+    output end_current_density = max(magnitude(analysis.conduction.field.{hole_edge}.electric_current_density), over = geometry.bar.region.terminal_a)
+}}
+"#
+        )
+    };
+    let declared = check_variant(&temp, "conduction-element-density.fea", &study("element"));
+    assert_eq!(declared["status"], "valid", "{declared}");
+    let undeclared = check_variant(&temp, "conduction-node-density.fea", &study("node"));
+    assert_eq!(undeclared["status"], "invalid", "{undeclared}");
+    let diagnostics = undeclared["diagnostics"].to_string();
+    assert!(
+        diagnostics.contains("fea.admission.observation")
+            && diagnostics.contains("end_current_density")
+            && diagnostics.contains("no declaration matches quantity, location, and value shape"),
+        "{diagnostics}"
+    );
+}
+
+/// G19: a transient conjugate heat transfer study starts from an authored uniform initial
+/// temperature. `runmat check` reports a missing one with the run's rule, and admits the
+/// study both when the model declares it and when the analysis selects it with
+/// `initial_conditions`, so run never both requires and rejects it.
+#[test]
+fn transient_conjugate_heat_check_requires_and_admits_its_initial_temperature() {
+    let temp = TempDir::new().unwrap();
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("cht-plate-channel.fea")).unwrap();
+    let transient = |selection: &str| {
+        source.replace(
+            "conjugate_heat_transfer steady {}",
+            &format!(
+                "conjugate_heat_transfer transient {{\n        start_time = 0 s\n        end_time = 10 s\n        time_step = 1 s\n{selection}    }}"
+            ),
+        )
+    };
+    let declare = |source: String| {
+        source.replace(
+            "    interface wetted {",
+            "    initial start {\n        thermal.temperature {\n            target = whole_model\n            uniform = 293.15 K\n        }\n    }\n    interface wetted {",
+        )
+    };
+    let missing = check_variant(&temp, "cht-transient-no-initial.fea", &transient(""));
+    assert_eq!(missing["status"], "invalid", "{missing}");
+    let diagnostics = missing["diagnostics"].to_string();
+    assert!(
+        diagnostics.contains("fea.admission.initial_condition")
+            && diagnostics.contains("transient conjugate heat transfer needs an authored initial temperature"),
+        "{diagnostics}"
+    );
+    let declared = check_variant(&temp, "cht-transient-declared.fea", &declare(transient("")));
+    assert_eq!(declared["status"], "valid", "{declared}");
+    let selected = check_variant(
+        &temp,
+        "cht-transient-selected.fea",
+        &declare(transient(
+            "        initial_conditions = [model.initial.start]\n",
+        )),
+    );
+    assert_eq!(selected["status"], "valid", "{selected}");
+    let steady = check_variant(&temp, "cht-steady-initial.fea", &declare(source.clone()));
+    assert!(
+        steady["diagnostics"]
+            .to_string()
+            .contains("steady conjugate heat transfer takes no initial conditions"),
+        "{steady}"
+    );
+}
+
+/// G17: a fluid–structure study couples through its declared interfaces. With every wetted
+/// face a rigid wall and no interface, `runmat check` reports the run's
+/// `fea.admission.interface` rule.
+#[test]
+fn fsi_check_requires_a_declared_fluid_structure_interface() {
+    let temp = TempDir::new().unwrap();
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("fsi-compliant-tube.fea")).unwrap();
+    let start = source.find("    interface wetted {").unwrap();
+    let end = start + source[start..].find("\n    }\n").unwrap() + "\n    }\n".len();
+    let rigid = check_variant(
+        &temp,
+        "fsi-no-interface.fea",
+        &format!(
+            "{}    constraint bore_wall {{ fluid.no_slip_wall {{ target = geometry.tube.region.bore }} }}\n{}",
+            &source[..start],
+            &source[end..]
+        ),
+    );
+    assert_eq!(rigid["status"], "invalid", "{rigid}");
+    let diagnostics = rigid["diagnostics"].to_string();
+    assert!(
+        diagnostics.contains("fea.admission.interface")
+            && diagnostics.contains("fluid–structure interaction needs a declared fluid–structure interface"),
+        "{diagnostics}"
+    );
+}
+
 // witness: FEA-COUPLING-CHAIN-001/thermal_to_prestress_to_modal @ thermoelastic/tet4/public_study;
 //   coverage: partial; boundary: The thermal-prestress example runs thermal steady, then
 //   thermomechanical preload, then prestressed modal from `runmat run`; no reference values.

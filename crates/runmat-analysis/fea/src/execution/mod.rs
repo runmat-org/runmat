@@ -51,7 +51,8 @@ pub use maxwell_harmonic::{
 };
 mod error;
 pub use electrical_static::{
-    electrical_native_field_definitions, ElectricalNumericalReceipt,
+    electrical_native_field_definition_inventory, electrical_native_field_definitions,
+    ElectricalNumericalReceipt,
     ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult, ElectricalStaticWorkload,
     ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES,
 };
@@ -61,6 +62,7 @@ mod field_topology;
 mod fluid;
 #[cfg(test)]
 pub(crate) use fluid::tests::authored as fluid_test_workload;
+pub(crate) use fluid::coupled_fluid_field_definition_inventory;
 pub use fluid::{
     fluid_native_field_definition_inventory, fluid_native_field_definitions,
     fluid_receipt_encoding_profile, FluidCoupling, FluidIntervalEvidence, FluidNumericalReceipt,

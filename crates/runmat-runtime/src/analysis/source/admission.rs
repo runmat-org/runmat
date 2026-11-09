@@ -1,8 +1,10 @@
 //! Static run admission reported at check time.
 //!
 //! Every rule a run would apply before meshing (family x procedure registry, procedure graph,
-//! constraint, initial-condition and observation kinds, strict accelerator placement, and the
-//! fluid–solid face rule on the imported CAD's shared faces) runs here
+//! constraint and initial-condition kinds, the conjugate heat initial temperature, the
+//! fluid–structure interface, observation binding against the family's declared fields,
+//! strict accelerator placement, and the fluid–solid face rule on the imported CAD's shared
+//! faces) runs here
 //! through the same `runmat_analysis_fea::admission` functions native preparation calls, so
 //! `runmat check` and `runmat run` report the same diagnostic id.
 
