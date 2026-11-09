@@ -385,9 +385,9 @@ fn lidded_case(youngs_modulus: f64, wall: bool) -> Case {
     for constraint in &mut c.model.constraints {
         if let AnalysisConstraint::Structural(s) = constraint {
             match &mut s.kind {
-                StructuralConstraintKind::Fixed { target }
-                | StructuralConstraintKind::Symmetry { target } => {
-                    *target = target(mesh, &target.region_id.clone());
+                StructuralConstraintKind::Fixed { target: bound }
+                | StructuralConstraintKind::Symmetry { target: bound } => {
+                    *bound = target(mesh, &bound.region_id.clone());
                 }
                 _ => unreachable!(),
             }
@@ -418,13 +418,13 @@ fn lidded_case(youngs_modulus: f64, wall: bool) -> Case {
     // The exterior lid becomes the authored wall on the lid solid.
     c.constraints.retain(|c| c.constraint_id != "lid");
     for constraint in &mut c.constraints {
-        let target = match &mut constraint.kind {
+        let bound = match &mut constraint.kind {
             FluidConstraintKind::PrescribedVelocity { target, .. }
             | FluidConstraintKind::NoSlipWall { target }
             | FluidConstraintKind::Symmetry { target } => target,
             _ => unreachable!(),
         };
-        *target = target(mesh, &target.region_id.clone());
+        *bound = target(mesh, &bound.region_id.clone());
     }
     c.constraints.push(lid_wall);
     for boundary in &mut c.boundaries {
