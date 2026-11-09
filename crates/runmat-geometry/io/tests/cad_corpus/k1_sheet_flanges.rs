@@ -125,7 +125,7 @@ fn window(d: &mut PartDocument, y0: f64, z0: f64, y1: f64, z1: f64) {
     d.features.push(Feature::new(
         "window",
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch("s_window"),
+            profile: ProfileRef::sketch("s_window").into(),
             extent: Extent::Symmetric {
                 distance: mm(400.0),
             },
