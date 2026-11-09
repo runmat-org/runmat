@@ -326,6 +326,15 @@
           "target": "canonical MeshingRequest.dimension",
           "validation": "resolved canonical request validation"
         },
+        "cross_section": {
+          "cardinality": "optional_once_for_cross_section_geometry",
+          "default": "None for other geometry; authored triangles controls for cross-sections",
+          "target": "MeshingRequestSettings.cross_section",
+          "identity": "canonical mesh request identity",
+          "validation": "CrossSectionMeshSettings::validate and cross-section semantic validation",
+          "positive_coverage": "language.tests.cross_sections.an_inline_cross_section_lowers_to_layers_traces_and_triangle_controls",
+          "negative_coverage": "language.tests.cross_sections.cross_section_mistakes_are_named"
+        },
         "deterministic_seed": {},
         "target_edge_length_m": {},
         "maximum_chordal_deviation_m": {},
