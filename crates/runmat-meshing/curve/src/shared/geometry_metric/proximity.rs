@@ -48,17 +48,33 @@ pub(super) struct ContactProximityPairs {
 }
 
 /// Gaps between nonincident edges. Each pair whose closest samples lie within the search radius
-/// sizes both edges with `cells_across_gap` cells across the separation, as a located source
-/// (see `runmat_meshing_size::metric::LocatedMetricSource`): full strength at the narrowest
-/// sample, and at every other sample the size of that sample's own separation. A gap that
-/// narrows at one place therefore refines the mesh there and grades away from it, instead of
-/// sizing the whole edge to its narrowest point.
+/// sizes both edges as a located source (see `runmat_meshing_size::metric::LocatedMetricSource`):
+/// full strength at the narrowest sample, and at every other sample the size of that sample's
+/// own separation. A gap that narrows at one place therefore refines the mesh there and grades
+/// away from it, instead of sizing the whole edge to its narrowest point.
+///
+/// The size depends on what lies between the two edges:
+/// - Edges with no face in common face each other across a gap, which gets `cells_across_gap`
+///   cells across the separation.
+/// - Edges that bound a common face measure that face's width `w`: a chamfer, a narrow step,
+///   the end strip of a thin wall. Its own two edges already put one triangle across it, so the
+///   width needs no cells of its own. What a narrow face does bound is the length of its
+///   elements along it: a triangle that spans the face with length `h` along it has a
+///   circumradius of at least `h / 2` and an edge of at most `w`, and so does every
+///   tetrahedron standing on it. Each edge is therefore sized `rho * w` (`rho` the volume's
+///   maximum radius-edge ratio, `narrow_face_aspect`), which keeps the face's own triangles at
+///   a radius-edge ratio of about `rho / 2` and leaves the tetrahedra on them room inside the
+///   bound. A 0.25 mm chamfer along a 35 mm fin edge then takes 3.5 mm elements, where two
+///   cells across its 0.35 mm width took 0.18 mm elements and 200 segments per edge.
+///   The material behind a narrow face is sized by face proximity: the two sides of a thin
+///   wall, the walls of a slot, and the sides of a ligament face each other across it.
 pub(super) fn derive_proximity_contributions(
     mut witnesses: Vec<EdgeWitness>,
     contact_pairs: &ContactProximityPairs,
     base_metric: MetricTensor3,
     search_radius_m: f64,
     cells_across_gap: u32,
+    narrow_face_aspect: f64,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<Vec<LocatedMetricSource>, SharedCurveError> {
     if !search_radius_m.is_finite() || search_radius_m <= 0.0 {
@@ -67,6 +83,17 @@ pub(super) fn derive_proximity_contributions(
             "must be finite and greater than zero",
         ));
     }
+    if !narrow_face_aspect.is_finite() || narrow_face_aspect < 1.0 {
+        return Err(SharedCurveError::invalid_request(
+            "narrow face aspect",
+            "the volume's maximum radius-edge ratio must be finite and at least one",
+        ));
+    }
+    let base_length_m = base_metric
+        .conservative_minimum_length_m()
+        .map_err(|error| {
+            SharedCurveError::invalid_request("proximity metric baseline", error.to_string())
+        })?;
     for witness in &witnesses {
         if witness.points_m.is_empty()
             || witness
@@ -176,9 +203,24 @@ pub(super) fn derive_proximity_contributions(
                 )
                 .for_edge(&left.edge_id));
             }
-            if minimum < search_radius_m {
-                let cells = f64::from(cells_across_gap);
-                let size_m = minimum / cells;
+            let narrow_face = source == MetricSourceKind::Proximity
+                && !left.face_ids.is_disjoint(&right.face_ids);
+            let metric = if narrow_face {
+                if minimum * narrow_face_aspect >= base_length_m {
+                    continue;
+                }
+                // Elements along the narrow face, at most `rho` times its width.
+                MetricTensor3::isotropic_length_m(minimum * narrow_face_aspect).map_err(
+                    |error| {
+                        SharedCurveError::invalid_request("narrow face metric", error.to_string())
+                            .for_edge(&left.edge_id)
+                    },
+                )?
+            } else {
+                if minimum >= search_radius_m {
+                    continue;
+                }
+                let size_m = minimum / f64::from(cells_across_gap);
                 let mut envelope = base;
                 envelope
                     .include(separation_direction, size_m)
@@ -189,24 +231,24 @@ pub(super) fn derive_proximity_contributions(
                         )
                         .for_edge(&left.edge_id)
                     })?;
-                let metric = envelope.metric().map_err(|error| {
+                envelope.metric().map_err(|error| {
                     SharedCurveError::invalid_request(
                         "proximity metric envelope",
                         format!("{error} on {:?}", left.edge_id),
                     )
-                })?;
-                for (index, separations) in [
-                    (left_index, &left_separations),
-                    (right_index, &right_separations),
-                ] {
-                    let witness = &witnesses[index];
-                    located.push(LocatedMetricSource {
-                        source,
-                        entity_id: witness.edge_id.clone(),
-                        metric,
-                        samples: located_samples(&witness.points_m, separations, minimum),
-                    });
-                }
+                })?
+            };
+            for (index, separations) in [
+                (left_index, &left_separations),
+                (right_index, &right_separations),
+            ] {
+                let witness = &witnesses[index];
+                located.push(LocatedMetricSource {
+                    source,
+                    entity_id: witness.edge_id.clone(),
+                    metric,
+                    samples: located_samples(&witness.points_m, separations, minimum),
+                });
             }
         }
     }
@@ -656,6 +698,58 @@ mod tests {
     use super::*;
     use runmat_geometry_core::{GeometryEvaluationError, PersistentEntityKind};
 
+    /// The default volume quality target's maximum radius-edge ratio.
+    const TEN_RADIUS_EDGE: f64 = 10.0;
+
+    /// The two long edges of a 0.25 mm chamfer (0.354 mm wide) along a 35 mm fin edge, at a
+    /// 10 mm target. They bound the chamfer face, so the separation is that face's width: each
+    /// edge is sized rho * w = 3.54 mm along its length, not w / 2 = 0.18 mm.
+    #[test]
+    fn a_narrow_face_sizes_its_edges_along_it_from_its_width() {
+        let width = 0.25e-3 * std::f64::consts::SQRT_2;
+        let chamfer = id(PersistentEntityKind::Face, 30);
+        let mut left = witness(1, 0.0);
+        let mut right = witness(2, width);
+        for (edge, x) in [(&mut left, 0.0), (&mut right, width)] {
+            edge.points_m = (0..9).map(|i| [x, i as f64 * 35.0e-3 / 8.0, 0.0]).collect();
+            edge.face_ids.insert(chamfer.clone());
+        }
+        let size = |left: EdgeWitness, right: EdgeWitness| {
+            derive_proximity_contributions(
+                vec![left, right],
+                &ContactProximityPairs::default(),
+                MetricTensor3::isotropic_length_m(10.0e-3).unwrap(),
+                20.0e-3,
+                2,
+                TEN_RADIUS_EDGE,
+                &Control,
+            )
+            .unwrap()
+        };
+        let located = size(left.clone(), right.clone());
+        assert_eq!(located.len(), 2);
+        let expected = MetricTensor3::isotropic_length_m(width * TEN_RADIUS_EDGE).unwrap();
+        assert!(located.iter().all(|source| source.metric == expected));
+        assert!(located
+            .iter()
+            .flat_map(|source| &source.samples)
+            .all(|sample| (sample.size_scale - 1.0).abs() < 1.0e-12));
+
+        // The same separation between edges of different faces is a gap across which the mesh
+        // puts cells_across_gap cells.
+        let mut apart = right.clone();
+        apart.face_ids = BTreeSet::from([id(PersistentEntityKind::Face, 31)]);
+        let gap = size(left.clone(), apart);
+        assert_eq!(gap.len(), 2);
+        let across = gap[0].metric.xx;
+        assert!((across - 1.0 / (0.5 * width).powi(2)).abs() < 1.0e-9 * across);
+
+        // A face at least base / rho wide needs nothing finer than the base size along it.
+        let mut wide = right;
+        wide.points_m.iter_mut().for_each(|point| point[0] = 1.2e-3);
+        assert!(size(left, wide).is_empty());
+    }
+
     fn face(seed: u8, vertices: &[u8], samples: Vec<([f64; 3], [f64; 3])>) -> FaceWitness {
         let mut witness = FaceWitness::new(id(PersistentEntityKind::Face, seed));
         witness.vertex_ids = vertices
@@ -927,6 +1021,7 @@ mod tests {
                 MetricTensor3::isotropic_length_m(1.0).unwrap(),
                 1.0,
                 cells,
+                TEN_RADIUS_EDGE,
                 &Control,
             )
             .unwrap();
@@ -950,6 +1045,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            TEN_RADIUS_EDGE,
             &Control,
         )
         .unwrap();
@@ -968,6 +1064,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            TEN_RADIUS_EDGE,
             &ExhaustedControl,
         )
         .unwrap_err();
@@ -995,6 +1092,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            TEN_RADIUS_EDGE,
             &control,
         )
         .unwrap();
@@ -1048,6 +1146,7 @@ mod tests {
                 MetricTensor3::isotropic_length_m(1.0).unwrap(),
                 1.0,
                 2,
+                TEN_RADIUS_EDGE,
                 &Control,
             )
         };
@@ -1089,6 +1188,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            TEN_RADIUS_EDGE,
             &Control,
         )
         .unwrap();
@@ -1117,6 +1217,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            TEN_RADIUS_EDGE,
             &Control,
         )
         .unwrap();
@@ -1157,6 +1258,7 @@ mod tests {
                 base,
                 0.02,
                 2,
+                TEN_RADIUS_EDGE,
                 &Control,
             )
             .unwrap();
@@ -1224,6 +1326,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(0.012).unwrap(),
             0.024,
             2,
+            TEN_RADIUS_EDGE,
             &Control,
         )
         .unwrap()
@@ -1322,6 +1425,7 @@ mod tests {
                 MetricTensor3::isotropic_length_m(3.0e-3).unwrap(),
                 6.0e-3,
                 2,
+                TEN_RADIUS_EDGE,
                 &Control,
             )
             .unwrap()

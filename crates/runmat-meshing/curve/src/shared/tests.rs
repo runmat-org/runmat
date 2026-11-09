@@ -702,8 +702,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &UnlimitedControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap();
 
@@ -722,8 +721,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &CancelledControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap_err();
     assert_eq!(
@@ -779,8 +777,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &UnlimitedControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap();
     assert_eq!(
@@ -1156,4 +1153,20 @@ fn repeated_circle_topology(
         })
         .collect();
     topology
+}
+
+/// Curve and surface targets with the default volume target (radius-edge ratio 10).
+fn quality_targets(
+    curve: runmat_meshing_core::CurveQualityTargets,
+    surface: runmat_meshing_core::SurfaceQualityTargets,
+) -> runmat_meshing_core::MeshingQualityTargets {
+    runmat_meshing_core::MeshingQualityTargets {
+        curve,
+        surface,
+        volume: runmat_meshing_core::VolumeQualityTargets {
+            maximum_radius_edge_ratio: 10.0,
+            minimum_scaled_jacobian: 0.001,
+            maximum_metric_edge_length: 1.0,
+        },
+    }
 }

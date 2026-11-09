@@ -3,8 +3,8 @@ use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError,
 };
 use runmat_meshing_core::{
-    CurveQualityTargets, MetricContribution, MetricContributionScope, MetricFieldRequest,
-    MetricSourceKind, SurfaceQualityTargets,
+    MeshingQualityTargets, MetricContribution, MetricContributionScope, MetricFieldRequest,
+    MetricSourceKind,
 };
 
 use runmat_meshing_size::metric::DirectionalMetricEnvelope;
@@ -27,15 +27,18 @@ const CURVATURE_SAMPLES_PER_EDGE: u32 = 9;
 
 /// Adds deterministic exact-curve curvature constraints to the resolved metric request.
 /// Constructive chord and tangent validation remains authoritative; this source makes the same
-/// geometry demand visible to curve, surface, and later volume metric consumers.
+/// geometry demand visible to curve, surface, and later volume metric consumers. The volume
+/// quality target bounds how long a narrow face's elements may be along it (see
+/// `proximity::derive_proximity_contributions`).
 pub fn derive_curve_geometry_metric(
     topology: &ExactBRepTopology,
     evaluator: &(impl ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
     request: &MetricFieldRequest,
-    curve_quality: CurveQualityTargets,
-    surface_quality: SurfaceQualityTargets,
+    quality: MeshingQualityTargets,
 ) -> Result<MetricFieldRequest, SharedCurveError> {
+    let curve_quality = quality.curve;
+    let surface_quality = quality.surface;
     let relations = TopologyRelations::new(topology, control).map_err(|error| {
         SharedCurveError::new(
             SharedCurveErrorKind::GeometryEvaluation(error.kind),
@@ -260,8 +263,7 @@ pub fn derive_curve_geometry_metric(
     for edge in &topology.edges {
         for coedge in relations.edge_coedges(&edge.id) {
             if let Some(witness) = face_witnesses.get_mut(&coedge.face_id) {
-                witness.tolerance_m =
-                    witness.tolerance_m.max(edge.tolerance_m.canonical_value());
+                witness.tolerance_m = witness.tolerance_m.max(edge.tolerance_m.canonical_value());
                 witness.vertex_ids.extend(
                     edge.start_vertex_id
                         .iter()
@@ -293,6 +295,7 @@ pub fn derive_curve_geometry_metric(
         request.global_metric,
         search_radius_m,
         request.resolved_cells_across_gap(),
+        quality.volume.maximum_radius_edge_ratio,
         control,
     )?);
     let mut resolved = request
