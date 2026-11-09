@@ -199,7 +199,8 @@ impl FluidStructureProblem<'_> {
         let mut steps = Vec::new();
         let mut work = 0.0;
         let mut operator: Option<(f64, super::SpdSystem)> = None;
-        for window in times.windows(2) {
+        for (step_index, window) in times.windows(2).enumerate() {
+            let started = runmat_time::Instant::now();
             let (t0, t1) = (window[0], window[1]);
             let dt = t1 - t0;
             if operator.as_ref().is_none_or(|(step, _)| *step != dt) {
@@ -343,6 +344,17 @@ impl FluidStructureProblem<'_> {
                     .structure
                     .dynamic_residual(&response, &arrival_load)?,
             });
+            crate::progress::report_step(
+                "fea.run_fluid_structure_transient",
+                step_index + 1,
+                times.len() - 1,
+                t1,
+                started,
+                format_args!(
+                    " ({iterations} coupling iterations, last fluid solve {} outer and {} linear iterations)",
+                    result.outer_iterations, result.linear_iterations
+                ),
+            );
             let is_last = times.last() == Some(&t1);
             let mut last = is_last.then(|| {
                 (

@@ -176,6 +176,30 @@ pub fn emit_phase(
     });
 }
 
+/// Reports one completed step of a marching solve as a [`FeaProgressStatus::Advanced`] solve
+/// event: `step` of `total`, the step's end time and its wall time. A host that logs progress
+/// (the native worker does, at info) then shows how far the march is and what a step costs.
+pub(crate) fn report_step(
+    operation: &str,
+    step: usize,
+    total: usize,
+    time_s: f64,
+    started: runmat_time::Instant,
+    detail: std::fmt::Arguments<'_>,
+) {
+    emit_phase(
+        operation,
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Advanced,
+        format!(
+            "step {step} of {total} to t = {time_s:e} s in {:.2} s{detail}",
+            started.elapsed().as_secs_f64()
+        ),
+        Some(step as u64),
+        Some(total as u64),
+    );
+}
+
 pub fn is_cancelled() -> bool {
     FEA_PROGRESS_CONTEXT.with(|slot| {
         slot.borrow()
