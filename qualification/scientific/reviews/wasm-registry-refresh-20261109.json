@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "status": "Native scientific source conservation across the generated WASM fingerprint update",
+  "measured_source_revision": "d3598e5fd41e0f94b168278f7795f4763d72f711",
+  "measured_inputs": {
+    "sha256": "8cc2cba15af5bc9be67e4f9bff0b67d7befe69ec739b7007754aea732280ff0c",
+    "files": 25996,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "b064f83ae07580801d244d8c924218423089b944186a8566fb0495718a0e5372",
+    "files": 25996,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": ["authored-cli-physics", "driver-recovery-physics"],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
+      "before": ["100644", "blob", "32c7ad5f07cd257027a72d5b23fbd29185be7dfb"],
+      "after": ["100644", "blob", "448337ce060fb9f8e645ffc3aa3da5cefcbfa7eb"],
+      "reason": "Canonical generation updates only the source fingerprint literal. The complete registration table and build configuration are byte-conserved. The unchanged wasm_registry.rs includes this file only for wasm32, so Linux native scientific compilation and execution do not consume it. This review supplies source conservation; the two required receipts must retain their actual successful measurements at d3598e5fd4."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/wasm-registry-refresh-20261109.json",
+      "sha256": "ff1f2e0c3d75fb41555e4deaf34626c44c7fcd06fb04b258e1e2fa60a0969f32"
+    }
+  ]
+}
