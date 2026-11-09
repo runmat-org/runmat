@@ -983,6 +983,25 @@ fn restored_analysis_retry_observes_cancellation_before_publication() {
     }
 }
 
+/// Decrypted driver diagnostics, so a failed terminal assertion names the cause.
+fn decrypted_diagnostics(control: &DurableControl, state: &DurableState) -> Vec<String> {
+    state
+        .artifacts
+        .values()
+        .filter(|artifact| artifact.kind == artifact_kind(DriverArtifactKind::Diagnostic))
+        .map(|artifact| {
+            open_object(
+                &control.run_key,
+                &artifact.ciphertext,
+                RUN_ID,
+                EncryptionPurpose::DetailedEvent,
+            )
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_else(|error| format!("diagnostic decryption failed: {error}"))
+        })
+        .collect()
+}
+
 fn run_actual_driver_replacement(family: ExactStudyFamily) -> Option<thermal::ColdReplay> {
     run_actual_driver_replacement_with_interruption(family, family.interruption())
 }
@@ -1599,7 +1618,10 @@ async fn actual_driver_replacement_case(
                     *fence == 2 && *target == DriverRunTarget::Cancelled && result.is_none()
                 })
                 .count(),
-            1
+            1,
+            "restored cancellation must publish one result-free Cancelled transition: transitions={:?}; diagnostics={:?}",
+            state.transitions,
+            decrypted_diagnostics(&control, &state)
         );
         assert!(state.transitions.iter().all(|(_, target, _)| {
             !matches!(
@@ -1681,10 +1703,15 @@ async fn actual_driver_replacement_case(
             matches!(&event.kind, DriverEventKind::DeadlineExpired { task_id: expired_id }
                 if *expired_id == task_id)
         }));
-        assert!(state
-            .transitions
-            .iter()
-            .any(|(fence, target, _)| { *fence == 2 && *target == DriverRunTarget::Cancelled }));
+        assert!(
+            state
+                .transitions
+                .iter()
+                .any(|(fence, target, _)| { *fence == 2 && *target == DriverRunTarget::Cancelled }),
+            "expired restored deadline must cancel the run: transitions={:?}; diagnostics={:?}",
+            state.transitions,
+            decrypted_diagnostics(&control, &state)
+        );
         assert!(state.transitions.iter().all(|(_, target, _)| {
             !matches!(
                 target,
@@ -1705,21 +1732,7 @@ async fn actual_driver_replacement_case(
                     .flatten()
             })
             .unwrap_or_else(|| {
-                let diagnostics = state
-                    .artifacts
-                    .values()
-                    .filter(|artifact| artifact.kind == artifact_kind(DriverArtifactKind::Diagnostic))
-                    .map(|artifact| {
-                        open_object(
-                            &control.run_key,
-                            &artifact.ciphertext,
-                            RUN_ID,
-                            EncryptionPurpose::DetailedEvent,
-                        )
-                        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-                        .unwrap_or_else(|error| format!("diagnostic decryption failed: {error}"))
-                    })
-                    .collect::<Vec<_>>();
+                let diagnostics = decrypted_diagnostics(&control, &state);
                 panic!(
                     "replacement did not publish success: transitions={:?}; diagnostics={diagnostics:?}",
                     state.transitions

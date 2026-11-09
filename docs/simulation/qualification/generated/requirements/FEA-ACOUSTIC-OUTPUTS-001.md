@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-OUTPUTS-001: Sound pressure level, transmission loss, intensity and power
 
-0 PASS, 1 PARTIAL, 0 FAIL, 19 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 1 FAIL, 18 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## sound_pressure_level
 
@@ -22,7 +22,7 @@ Evidence kind: IndependentReference. Criterion: `transmission_loss` from inciden
 | acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
 | acoustic_harmonic | tet4 | public_study | OPEN |  |
 | acoustic_harmonic | tet10 | numerical_kernel | OPEN |  |
-| acoustic_harmonic | tet10 | public_study | OPEN |  |
+| acoustic_harmonic | tet10 | public_study | FAIL | `runmat[test:check_cli]::two_fluid_interface_example_publishes_the_plane_wave_transmission_loss` (crates/runmat-cli/tests/check_cli.rs:1198) - transmission_loss on the public two-fluid interface example (m = 4) lies within 0.1 dB of 1.938 dB at 500, 1000 and 2000 Hz; no muffler or one-third-octave swee... |
 
 ## intensity_and_sound_power
 
@@ -32,7 +32,7 @@ Evidence kind: IndependentReference. Criterion: The active intensity field and `
 |---|---|---|---|---|
 | acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
 | acoustic_harmonic | tet4 | public_study | OPEN |  |
-| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::acoustic::tests::sound_power_through_the_matched_end_is_the_plane_wave_intensity_times_area` (crates/runmat-analysis/fea/src/execution/acoustic/tests.rs:166) - On a quadratic duct the NormalFlux reduction of the acoustic intensity through the matched end equals the plane-wave value |p|^2/(2 rho c) times area (1/12 W) w... |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::acoustic::tests::transmission_loss::transmission_loss_of_a_layer_matches_the_plane_wave_reference` (crates/runmat-analysis/fea/src/execution/acoustic/tests/transmission_loss.rs:208) - transmission loss through a plane layer between an incident and an anechoic port matches the closed-form plane-wave result per frequency and converges under ref...<br>`runmat-analysis-fea[lib]::execution::acoustic::tests::sound_power_through_the_matched_end_is_the_plane_wave_intensity_times_area` (crates/runmat-analysis/fea/src/execution/acoustic/tests.rs:178) - plane-wave power through a matched duct end equals |p|²A/(2ρc) and the accounted input power to 0.1 %; the monopole sphere reference is not run. |
 | acoustic_harmonic | tet10 | public_study | OPEN |  |
 
 ## frequency_set_generation

@@ -273,8 +273,6 @@ pub struct GeometryInspection {
     /// Advisory planning evidence only; not an exact meshing bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_extent_m: Option<[f64; 3]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub named_selections: Option<runmat_geometry_core::GeometryNamedSelections>,
     pub content_digest: SourceDigest,
     pub topology_digest: SourceDigest,
     pub capabilities: Vec<GeometryInspectionCapability>,
@@ -285,8 +283,9 @@ pub struct GeometryInspection {
     pub resolved_units: Option<runmat_geometry_core::LengthUnit>,
     #[serde(default)]
     pub unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
-    /// Authored names in the exact model by region role (`vertex`, `edge`, `face`, `solid`), so a
-    /// check can reject a `select name` that matches nothing. Empty when the source carries no exact names.
+    /// Authored names in the exact model by region role (`vertex`, `edge`, `face`, `solid`), one
+    /// entry per named entity (sorted), so a check can reject a `select name` that matches nothing
+    /// or more entities than the region expects. Empty when the source carries no exact names.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub authored_names: std::collections::BTreeMap<String, Vec<String>>,
 }

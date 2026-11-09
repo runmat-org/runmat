@@ -38,12 +38,12 @@ impl ThermalFieldConstructionResourceFacts {
             let definition =
                 history_fields::snapshot_definition(index, ordinal).map_err(invalid)?;
             let sample = RecoveredFieldSample::TimeSeconds(0.0);
-            let identity = RecoveredField::identity_profile_shape(&definition, sample, entities)
-                .map_err(invalid)?;
-            facts.largest_identity_materialization_bytes.0 = facts
-                .largest_identity_materialization_bytes
-                .0
-                .max(identity.materialization_resident_bytes_estimate);
+            // `identity_for` encodes with the direct encoder; its workspace is that profile.
+            let identity =
+                RecoveredField::identity_encoding_workspace_bytes(&definition, sample, entities)
+                    .map_err(invalid)?;
+            facts.largest_identity_materialization_bytes.0 =
+                facts.largest_identity_materialization_bytes.0.max(identity);
             let partition_entities = entities.min(RECOVERED_FIELD_PARTITION_ENTITY_COUNT);
             let profile =
                 RecoveredFieldPartition::profile_shape(&definition, sample, partition_entities)

@@ -71,7 +71,8 @@ pub(crate) fn combine_observation_partitions(
                     .map_err(|_| ObservationError::Limit("observation collective count"))?,
             }
         }
-        ObservationPartitionPayload::WeightedReduction { .. } => {
+        ObservationPartitionPayload::WeightedReduction { .. }
+        | ObservationPartitionPayload::PairedWeightedReduction { .. } => {
             ObservationPartitionCombination::CanonicalCompensatedReduction {
                 collective_count: u32::try_from(contributions.len().saturating_sub(1))
                     .map_err(|_| ObservationError::Limit("observation collective count"))?,
@@ -167,6 +168,67 @@ pub(crate) fn combine_observation_partitions(
             };
             (values, Vec::new())
         }
+        ObservationPartitionPayload::PairedWeightedReduction { .. } => {
+            let mut sums = [
+                CompensatedSum::default(),
+                CompensatedSum::default(),
+                CompensatedSum::default(),
+                CompensatedSum::default(),
+            ];
+            for contribution in contributions {
+                let ObservationPartitionPayload::PairedWeightedReduction {
+                    first_sum,
+                    first_measure,
+                    second_sum,
+                    second_measure,
+                } = contribution.payload
+                else {
+                    return Err(ObservationError::Identity(
+                        "observation partitions contain different payload kinds",
+                    ));
+                };
+                for (total, local) in
+                    sums.iter_mut()
+                        .zip([first_sum, first_measure, second_sum, second_measure])
+                {
+                    total.add(local);
+                }
+            }
+            let [first_sum, first_measure, second_sum, second_measure] =
+                sums.map(CompensatedSum::total);
+            if !(first_measure.is_finite() && first_measure > 0.0)
+                || !(second_measure.is_finite() && second_measure > 0.0)
+            {
+                return Err(ObservationError::Invalid(
+                    "a paired reduction needs both regions to have a positive area".into(),
+                ));
+            }
+            let value = match reduction_operation(observation)? {
+                SpatialReduction::MeanDifference => {
+                    first_sum / first_measure - second_sum / second_measure
+                }
+                // Incident port power over transmitted port power, both in watts.
+                SpatialReduction::TransmissionLoss => {
+                    if !(first_sum > 0.0 && second_sum > 0.0) {
+                        return Err(ObservationError::Invalid(
+                            "transmission loss needs a positive incident and transmitted port power; the incident region must carry an incident wave and the transmitted region an anechoic (radiation) boundary".into(),
+                        ));
+                    }
+                    10.0 * (first_sum / second_sum).log10()
+                }
+                _ => {
+                    return Err(ObservationError::Unsupported(
+                        "paired contributions require a paired spatial reduction",
+                    ))
+                }
+            };
+            if !value.is_finite() {
+                return Err(ObservationError::Invalid(
+                    "paired reduction produced a non-finite value".into(),
+                ));
+            }
+            (vec![value], Vec::new())
+        }
         ObservationPartitionPayload::ExtremaCandidates { .. } => {
             let mut entities = Vec::new();
             let mut values = Vec::new();
@@ -216,7 +278,17 @@ pub(crate) fn combine_observation_partitions(
         value_shape,
         complex_representation: observation.spec.complex_representation,
         entities,
-        field: AnalysisField::host_f64(observation.spec.observation_id.0.clone(), shape, values),
+        field: AnalysisField::host_f64(
+            observation.spec.observation_id.0.clone(),
+            runmat_analysis_core::AnalysisFieldLayout::new(
+                observation.spec.quantity,
+                observation.spec.output_location,
+                observation.result_value_shape.clone(),
+            )
+            .representation(observation.spec.complex_representation),
+            shape,
+            values,
+        ),
         partial_access: observation.spec.storage.partial_access,
         partition_evidence,
     };

@@ -181,7 +181,12 @@ pub(crate) fn assemble(
     // their own side-owned nodes, joined to the first side by the interface conductance.
     let (interfaces, dofs) = thermal_interface::solid_conduction(&projection, &model.interfaces)
         .map_err(ThermalAssemblyError::InvalidProjection)?;
-    let projection = dofs.split_projection(&projection, &interfaces);
+    // A finite-conductance split rewrites the projection in place; one copy stays live.
+    let projection = if dofs.is_nodal() {
+        projection
+    } else {
+        dofs.split_projection(projection, &interfaces)
+    };
     if properties.identity.mesh_digest != Some(mesh.canonical_digest)
         || properties.identity.geometry_id != model.geometry_id
         || properties.identity.geometry_revision != model.geometry_revision
@@ -419,9 +424,7 @@ pub(crate) fn assemble(
                                 evidence.add_projected(node, nodal, 0.0);
                             }
                         })
-                        .map_err(|error| {
-                            ThermalAssemblyError::InvalidProjection(error.to_string())
-                        })?;
+                        .map_err(ThermalAssemblyError::from)?;
                 }
             }
             _ => unreachable!(),
@@ -604,9 +607,7 @@ pub(crate) fn assemble(
                                 applied_source[node] += power * shape;
                             }
                         })
-                        .map_err(|error| {
-                            ThermalAssemblyError::InvalidProjection(error.to_string())
-                        })?;
+                        .map_err(ThermalAssemblyError::from)?;
                 }
             }
             BoundaryOperator::ThermalConvection {
@@ -649,9 +650,7 @@ pub(crate) fn assemble(
                                 }
                             }
                         })
-                        .map_err(|error| {
-                            ThermalAssemblyError::InvalidProjection(error.to_string())
-                        })?;
+                        .map_err(ThermalAssemblyError::from)?;
                 }
             }
             _ => {}
@@ -731,7 +730,7 @@ fn volume_matches(element: &ProjectedElement, target: &RealizedExcitationTarget)
     match target {
         RealizedExcitationTarget::WholeModel => true,
         RealizedExcitationTarget::Region(target) => {
-            target.matches_persistent_entity(&element.region_id)
+            target.selects_volume_element(&element.region_id, &element.provenance)
         }
         _ => false,
     }

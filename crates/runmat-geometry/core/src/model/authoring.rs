@@ -28,6 +28,9 @@ pub enum GeometryDefinitionSource {
     Constructed(GeometryFeatureGraph),
     Derived(DerivedGeometryDefinition),
     Generated(GeneratedGeometryDefinition),
+    /// A 2D board cross-section, meshed and solved by the transmission-line solver; no
+    /// geometry kernel materializes it.
+    CrossSection(super::CrossSectionDefinition),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,8 +40,6 @@ pub struct ImportedGeometryDefinition {
     /// or part of the exact-kernel materialization wire contract.
     #[serde(skip)]
     pub preview_extent_m: Option<[f64; 3]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub named_selections: Option<super::GeometryNamedSelections>,
     pub logical_path: String,
     pub format: GeometrySourceFormat,
     pub authored_units: Option<LengthUnit>,
@@ -369,6 +370,7 @@ impl GeometryDefinition {
                     .validate(Some(&source.source.geometry_id), &parameters)?;
             }
             GeometryDefinitionSource::Generated(source) => source.validate(&parameters)?,
+            GeometryDefinitionSource::CrossSection(section) => section.validate()?,
         }
         let mut regions = std::collections::BTreeSet::new();
         for region in &self.regions {
@@ -449,9 +451,6 @@ impl ImportedGeometryDefinition {
                 "geometry preview extent",
                 "expected finite positive metres",
             ));
-        }
-        if let Some(selections) = &self.named_selections {
-            selections.validate_source(self.content_digest)?;
         }
         token("geometry import path", &self.logical_path)?;
         if !self.format.is_exact() {

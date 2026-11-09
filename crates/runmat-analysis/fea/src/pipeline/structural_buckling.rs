@@ -1,4 +1,5 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisProcedure, StateKind};
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
@@ -200,6 +201,11 @@ pub fn recover_completed_structural_buckling_run(
         .map(|(index, mode)| {
             AnalysisField::host_f64(
                 fea_buckling_mode_shape_field_id(index + 1),
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                )
+                .mode(index),
                 shape.clone(),
                 mode.translations.clone(),
             )
@@ -211,6 +217,8 @@ pub fn recover_completed_structural_buckling_run(
         .map(|(index, mode)| {
             AnalysisField::host_f64(
                 fea_buckling_rotation_shape_field_id(index + 1),
+                AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node)
+                    .mode(index),
                 shape.clone(),
                 mode.rotations.clone(),
             )
@@ -241,11 +249,13 @@ pub fn recover_completed_structural_buckling_run(
     let fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_BUCKLING_LOAD_FACTOR,
+            AnalysisFieldLayout::scalar(ObservationQuantity::LoadFactor, FieldLocation::Mode),
             vec![load_factors.len()],
             load_factors.clone(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_BUCKLING_RESIDUAL_NORM,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Mode),
             vec![residual_norms.len()],
             residual_norms.clone(),
         ),

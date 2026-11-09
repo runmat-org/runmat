@@ -50,7 +50,7 @@ pub(super) fn select(
         .collect::<Vec<_>>();
     crate::planning::resource::require_borrowed_initial_field_ceiling(
         &selected,
-        runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64),
+        runmat_canonical_codec::CanonicalLimits::platform_content(65_536, 64),
         step.accuracy.resources.resident_byte_budget(),
     )
     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;

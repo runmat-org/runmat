@@ -209,7 +209,7 @@ pub fn transfer_solver_field(
     let mut methods = vec![SolverFieldTransferMethod::StableIdentity];
     methods.extend(applied_projection_methods);
     Ok(SolverFieldTransferResult {
-        field: AnalysisField::host_f64(field.field_id.clone(), shape, output),
+        field: AnalysisField::host_f64(field.field_id.clone(), field.layout.clone(), shape, output),
         evidence: SolverFieldTransferEvidence {
             source_artifact_digest: source.canonical_digest,
             target_artifact_digest: target.canonical_digest,
@@ -227,6 +227,7 @@ pub fn transfer_solver_field(
 mod tests {
     use super::*;
     use crate::assembly::solver_solid::tests::artifact;
+    use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
     use runmat_meshing_core::{
         solver_boundary_edge_identity, solver_boundary_face_identity,
         solver_volume_element_identity, CanonicalMeshingContract, ElementOrder,
@@ -240,6 +241,7 @@ mod tests {
         let quadratic = artifact(ElementOrder::Tet10);
         let nodal = AnalysisField::host_f64(
             "displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![4, 3],
             vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 6.0],
         );
@@ -252,14 +254,27 @@ mod tests {
         assert_eq!(&values[15..18], &[1.0, 2.0, 0.0]);
         assert_eq!(&values[27..30], &[0.0, 2.0, 3.0]);
 
-        let history = AnalysisField::host_f64("plastic_strain", vec![1, 2], vec![0.2, 0.3]);
+        let history = AnalysisField::host_f64(
+            "plastic_strain",
+            AnalysisFieldLayout::components(
+                ObservationQuantity::PlasticStrain,
+                FieldLocation::IntegrationPoint,
+                2,
+            ),
+            vec![1, 2],
+            vec![0.2, 0.3],
+        );
         let transferred =
             transfer_solver_field(&linear, &quadratic, None, "elements", &history).unwrap();
         assert_eq!(transferred.field, history);
         assert_eq!(transferred.evidence.projected_entity_count, 0);
 
-        let contact_state =
-            AnalysisField::host_f64("contact_state", vec![4], vec![0.0, 1.0, 1.0, 0.0]);
+        let contact_state = AnalysisField::host_f64(
+            "contact_state",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![4],
+            vec![0.0, 1.0, 1.0, 0.0],
+        );
         let transferred =
             transfer_solver_field(&linear, &quadratic, None, "faces", &contact_state).unwrap();
         assert_eq!(transferred.field, contact_state);
@@ -274,7 +289,12 @@ mod tests {
         let linear = artifact(ElementOrder::Tet4);
         let quadratic = artifact(ElementOrder::Tet10);
         let values = (0..30).map(f64::from).collect::<Vec<_>>();
-        let quadratic_field = AnalysisField::host_f64("state", vec![10, 3], values);
+        let quadratic_field = AnalysisField::host_f64(
+            "state",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            vec![10, 3],
+            values,
+        );
         let restricted =
             transfer_solver_field(&quadratic, &linear, None, "nodes", &quadratic_field).unwrap();
         assert_eq!(restricted.field.shape, vec![4, 3]);
@@ -292,7 +312,15 @@ mod tests {
                 &unrelated,
                 None,
                 "nodes",
-                &AnalysisField::host_f64("x", vec![4], vec![0.0; 4])
+                &AnalysisField::host_f64(
+                    "x",
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global
+                    ),
+                    vec![4],
+                    vec![0.0; 4]
+                )
             )
             .unwrap_err(),
             SolverFieldTransferError::GeometryRevisionMismatch
@@ -300,6 +328,10 @@ mod tests {
 
         let device = AnalysisField {
             field_id: "x".into(),
+            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
             shape: vec![4],
             values: AnalysisFieldValues::DeviceRef(runmat_analysis_core::DeviceFieldRef {
                 backend: "gpu".into(),
@@ -323,7 +355,15 @@ mod tests {
                 &quadratic,
                 None,
                 "nodes",
-                &AnalysisField::host_f64("bad", vec![3], vec![0.0; 3]),
+                &AnalysisField::host_f64(
+                    "bad",
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global
+                    ),
+                    vec![3],
+                    vec![0.0; 3]
+                ),
             )
             .unwrap_err(),
             SolverFieldTransferError::InvalidFieldShape
@@ -346,7 +386,15 @@ mod tests {
                 &tampered,
                 None,
                 "nodes",
-                &AnalysisField::host_f64("x", vec![4], vec![0.0; 4]),
+                &AnalysisField::host_f64(
+                    "x",
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global
+                    ),
+                    vec![4],
+                    vec![0.0; 4]
+                ),
             ),
             Err(SolverFieldTransferError::InvalidTargetArtifact(_))
         ));
@@ -380,7 +428,12 @@ mod tests {
         }
         target.seal_canonical_digest().unwrap();
 
-        let field = AnalysisField::host_f64("temperature", vec![4], vec![10.0, 20.0, 30.0, 40.0]);
+        let field = AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![4],
+            vec![10.0, 20.0, 30.0, 40.0],
+        );
         let transferred = transfer_solver_field(&source, &target, None, "nodes", &field).unwrap();
         assert_eq!(
             transferred.field.as_host_f64().unwrap(),
@@ -479,7 +532,12 @@ mod tests {
         // Successive Pythagorean triples (3,4,5), (5,12,13), (13,84,85)
         // make its reference norm exact even with rescaled hypot reduction.
         // This checks exact transfer/error values, not platform libm rounding.
-        let nodal = AnalysisField::host_f64("temperature", vec![4], vec![-92.0, 4.0, 12.0, 84.0]);
+        let nodal = AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![4],
+            vec![-92.0, 4.0, 12.0, 84.0],
+        );
         let transferred =
             transfer_solver_field(&source, &target, Some(&transfer_map), "nodes", &nodal).unwrap();
         assert_eq!(
@@ -490,17 +548,36 @@ mod tests {
             .evidence
             .methods
             .contains(&SolverFieldTransferMethod::BarycentricInterpolation));
-        let reference = AnalysisField::host_f64("temperature", vec![4], vec![3.0, 4.0, 12.0, 84.0]);
+        let reference = AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![4],
+            vec![3.0, 4.0, 12.0, 84.0],
+        );
         let transfer_error = measure_solver_field_transfer_error(&transferred, &reference).unwrap();
         assert_eq!(transfer_error.absolute_l2_error, 1.0);
         assert_eq!(transfer_error.relative_l2_error, Some(1.0 / 85.0));
-        let wrong_reference = AnalysisField::host_f64("other", vec![4], vec![0.0; 4]);
+        let wrong_reference = AnalysisField::host_f64(
+            "other",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![4],
+            vec![0.0; 4],
+        );
         assert_eq!(
             measure_solver_field_transfer_error(&transferred, &wrong_reference),
             Err(SolverFieldTransferError::InvalidReferenceField)
         );
 
-        let history = AnalysisField::host_f64("history", vec![1, 2], vec![0.2, 0.3]);
+        let history = AnalysisField::host_f64(
+            "history",
+            AnalysisFieldLayout::components(
+                ObservationQuantity::Residual,
+                FieldLocation::Global,
+                2,
+            ),
+            vec![1, 2],
+            vec![0.2, 0.3],
+        );
         let transferred =
             transfer_solver_field(&source, &target, Some(&transfer_map), "elements", &history)
                 .unwrap();

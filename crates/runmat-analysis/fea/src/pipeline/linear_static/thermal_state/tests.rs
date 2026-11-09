@@ -156,7 +156,8 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         .iter()
         .find(|field| field.field_id == crate::fea_thermo_mechanical_temperature_field_id(0))
         .unwrap();
-    assert_eq!(temperature_field.shape, vec![1, 4]);
+    // One integration-point entity per point: one tetrahedron with four points.
+    assert_eq!(temperature_field.shape, vec![4]);
     assert!(temperature_field
         .as_host_f64()
         .unwrap()

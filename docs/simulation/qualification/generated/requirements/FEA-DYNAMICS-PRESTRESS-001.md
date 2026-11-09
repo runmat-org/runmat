@@ -1,6 +1,6 @@
 # FEA-DYNAMICS-PRESTRESS-001: Validated prestressed base states and stability perturbation
 
-0 PASS, 3 PARTIAL, 0 FAIL, 109 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 4 PARTIAL, 0 FAIL, 108 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## complete_base_operator
 
@@ -22,7 +22,7 @@ Evidence kind: IndependentReference. Criterion: Consume only a complete, converg
 | prestressed_structural | canonical_mixed_topology | parallel_cpu | OPEN |  |
 | prestressed_structural | canonical_mixed_topology | domain_decomposed | OPEN |  |
 | prestressed_structural | canonical_mixed_topology | claimed_accelerator | OPEN |  |
-| structural_stability | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::physical_preload_publishes_signed_load_linear_geometric_stiffness` (crates/runmat-analysis/fea/src/tests.rs:1919) - A physical preload publishes a signed-load linear geometric stiffness on a Tet4 fixture. |
+| structural_stability | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::physical_preload_publishes_signed_load_linear_geometric_stiffness` (crates/runmat-analysis/fea/src/tests.rs:2041) - A physical preload publishes a signed-load linear geometric stiffness on a Tet4 fixture. |
 | structural_stability | tet10 | numerical_kernel | OPEN |  |
 | structural_stability | beam | numerical_kernel | OPEN |  |
 | structural_stability | shell | numerical_kernel | OPEN |  |
@@ -127,8 +127,8 @@ Evidence kind: IndependentReference. Criterion: Evidence includes column and fra
 | prestressed_structural | canonical_mixed_topology | parallel_cpu | OPEN |  |
 | prestressed_structural | canonical_mixed_topology | domain_decomposed | OPEN |  |
 | prestressed_structural | canonical_mixed_topology | claimed_accelerator | OPEN |  |
-| structural_stability | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_scaling` (crates/runmat-analysis/fea/src/tests.rs:2012) - A single-tetrahedron compressive preload buckling problem has an exact residual and load factors that scale inversely with load; column and frame buckling, mesh... |
-| structural_stability | tet10 | numerical_kernel | OPEN |  |
+| structural_stability | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_scaling` (crates/runmat-analysis/fea/src/tests.rs:2134) - A single-tetrahedron compressive preload buckling problem has an exact residual and load factors that scale inversely with load; column and frame buckling, mesh... |
+| structural_stability | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::column_buckling::fixed_free_column_buckles_at_the_euler_load_with_converged_eigenpairs` (crates/runmat-analysis/fea/src/tests/column_buckling.rs:116) - A fixed-free Tet10 solid column (1 m, 100 x 50 mm, 250 kN) converges its buckling eigenpairs to the authored relative tolerance and matches Euler's fixed-free l... |
 | structural_stability | beam | numerical_kernel | OPEN |  |
 | structural_stability | shell | numerical_kernel | OPEN |  |
 | structural_stability | tet4 | public_study | OPEN |  |

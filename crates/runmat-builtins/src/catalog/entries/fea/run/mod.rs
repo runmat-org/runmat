@@ -56,7 +56,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         BuiltinDocumentationFaq { question: "How do I reopen results in a later session?", answer: "Save the step's `run_id` and call `fea.results(runId)` in any process that can see the same artifact store." },
         BuiltinDocumentationFaq { question: "Why does my study fail with a missing mesh?", answer: "Solving needs a canonical solver mesh. Generate one with `meshing.generate(part, ...)` and pass it with `fea.study(id, part, model, \"Mesh\", mesh)`." },
     ],
-    links: &[doc_links::SOLVES, doc_links::EVIDENCE, doc_links::USING_FEA, doc_links::MESHING],
+    links: &[doc_links::SOLVES, doc_links::EVIDENCE, doc_links::GET_STARTED, doc_links::MESHING],
     implementation: &[doc_links::FEA_ENTRYPOINTS_SOURCE, doc_links::ANALYSIS_OPERATIONS_SOURCE],
     verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "A study run executes the linear-static path", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_run_study_executes_linear_static_path" },

@@ -366,3 +366,380 @@ fn graded_slab_solver_benchmark() {
         r.outer_iterations, r.linear_iterations
     );
 }
+
+/// Transient solver-speed benchmark (not a validation test): the symmetry-plane channel started
+/// from rest by backward-Euler intervals with the default fluid policy. The interval inertia
+/// ratio ρh²/(µΔt) defaults to 1.6, that of the coarse channel-startup study.
+/// `RUNMAT_CFD_BENCH_N=<n> RUNMAT_CFD_BENCH_THREADS=<t> RUNMAT_CFD_BENCH_STEPS=<s>
+/// [RUNMAT_CFD_BENCH_DT=<s>] cargo test --release -p runmat-analysis-fea --lib
+/// startup_slab_solver_benchmark -- --ignored --nocapture`. The slab has about 6·n³ cells.
+#[test]
+#[ignore = "benchmark"]
+fn startup_slab_solver_benchmark() {
+    let var = |name: &str| std::env::var(name).ok();
+    let n: usize = var("RUNMAT_CFD_BENCH_N")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+    let threads: usize = var("RUNMAT_CFD_BENCH_THREADS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let steps: usize = var("RUNMAT_CFD_BENCH_STEPS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3);
+    let h = 1.0 / n as f64;
+    let dt: f64 = var("RUNMAT_CFD_BENCH_DT")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(h * h / 1.6);
+    let mut f = symmetry_case_on(fixture::case(n, ReferenceCase::Duct, false), |target| {
+        FluidConstraintKind::Symmetry { target }
+    });
+    f.policy = CanonicalFluidPolicy {
+        maximum_resident_bytes: Some(24_000_000_000),
+        ..CanonicalFluidPolicy::default()
+    };
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let cells = p.topology.cells.len();
+    let mut u = vec![[0.0; 3]; cells];
+    let mut pressure = vec![0.0; cells];
+    let mut q = vec![0.0; p.topology.faces.len()];
+    let started = std::time::Instant::now();
+    for step in 0..steps {
+        let previous = super::super::transient::CanonicalFluidFields {
+            pressure_reference_pa: runmat_types::physical::Quantity::new(
+                p.pressure_reference_pa.canonical_values(),
+            ),
+            velocity_m_per_s: runmat_types::physical::Quantity::new(&u[..]),
+            pressure_fluctuation_pa: runmat_types::physical::Quantity::new(&pressure[..]),
+            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::new(&q[..]),
+        };
+        let interval = p
+            .prepare_backward_euler(step as f64 * dt, (step + 1) as f64 * dt, previous)
+            .unwrap();
+        let t = std::time::Instant::now();
+        let r = runmat_cpu_execution::with_cpu_pool(threads, || interval.solve())
+            .unwrap()
+            .unwrap();
+        println!(
+            "{{\"bench\":\"startup_slab\",\"n\":{n},\"cells\":{cells},\"threads\":{threads},\"step\":{step},\"dt\":{dt:.3e},\"solve_s\":{:.3},\"outer_iterations\":{},\"linear_iterations\":{},\"momentum_relative\":{:.3e},\"continuity_relative\":{:.3e}}}",
+            t.elapsed().as_secs_f64(), r.outer_iterations, r.linear_iterations,
+            r.residual.momentum_relative, r.residual.continuity_relative
+        );
+        u = r.velocity_m_per_s.canonical_values().clone();
+        pressure = r.pressure_fluctuation_pa.canonical_values().clone();
+        q = r.face_volume_flux_m3_per_s.canonical_values().clone();
+    }
+    let mean_u = u.iter().map(|v| v[0]).sum::<f64>() / cells as f64;
+    println!(
+        "{{\"bench\":\"startup_slab_total\",\"n\":{n},\"threads\":{threads},\"steps\":{steps},\"solve_s\":{:.3},\"mean_ux\":{mean_u:.9e}}}",
+        started.elapsed().as_secs_f64()
+    );
+}
+
+/// Schur scaling of the SIMPLE sweep (q-fluid-16 item 6): the Rhie–Chow coefficients carry the
+/// momentum relaxation, rau = α V / a_P, while the coupled momentum block is unrelaxed, which
+/// raised the question whether the sweep's pressure operator is half the true one. It is not:
+/// the discrete flux itself carries α, so on cell-scale modes L(rf) is exactly the operator of
+/// the sweep's own correction, and on the lowest mode the viscous term already exceeds the
+/// exact Schur complement (measured 0.32 and 0.84 for exact/sweep at n = 4). Rayleigh
+/// quotients of the exact Schur complement against the sweep's pressure operator, on the
+/// converged symmetry-plane channel, for the lowest pressure mode cos(πx/2) (zero at the outlet, flat at the inlet) and a
+/// cell-alternating one.
+#[test]
+#[ignore = "fluid-18 WIP calibration probe: on the rough mode the exact Schur complement exceeds the sweep operator (exact/sweep 1.15) under the transplanted viscous Schur weight 0.5; owned by the fluid lane"]
+fn sweep_pressure_operator_against_the_exact_schur_complement() {
+    let f = symmetry_case(4, |target| FluidConstraintKind::Symmetry { target });
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let r = p.solve().unwrap();
+    let u = r.velocity_m_per_s.canonical_values().clone();
+    let pressure = r.pressure_fluctuation_pa.canonical_values().clone();
+    let q = r.face_volume_flux_m3_per_s.canonical_values().clone();
+    let smooth = p
+        .topology
+        .cells
+        .iter()
+        .map(|c| (0.5 * std::f64::consts::PI * c.centroid_m[0]).cos())
+        .collect::<Vec<_>>();
+    let mut state = 0x9e3779b97f4a7c15u64;
+    let rough = (0..u.len())
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            if state & 1 == 0 {
+                1.0
+            } else {
+                -1.0
+            }
+        })
+        .collect::<Vec<_>>();
+    for (name, z) in [("smooth", smooth), ("rough", rough)] {
+        let (exact, simple, sweep) =
+            super::super::coupled::schur_rayleigh_quotients(&p, &u, &pressure, &q, &z).unwrap();
+        println!(
+            "schur {name}: exact {exact:.6e} simple {simple:.6e} sweep {sweep:.6e} exact/sweep {:.4} simple/sweep {:.4} relaxation {}",
+            exact / sweep,
+            simple / sweep,
+            p.policy.momentum_relaxation
+        );
+        assert!(exact > 0.0 && simple > 0.0 && sweep > 0.0);
+        // Refutes a factor 2 from the relaxation in rau: the sweep's operator is not below the
+        // exact Schur complement on either mode (doubling it would halve both quotients).
+        assert!(exact / sweep < 1.0, "{name}: exact/sweep {}", exact / sweep);
+        if name == "rough" {
+            // On cell-scale modes the Rhie–Chow Laplacian L(rf) is SIMPLE's own operator.
+            assert!(
+                (0.6..1.05).contains(&(simple / sweep)),
+                "simple/sweep {}",
+                simple / sweep
+            );
+            assert!(exact / sweep > 0.6, "exact/sweep {}", exact / sweep);
+        }
+    }
+}
+
+/// The plane-channel study geometry on a persisted study mesh (`RUNMAT_CFD_BENCH_MESH`, a
+/// `.solver-mesh.cbor`): inlet at min x with a uniform velocity, outlet at max x, no-slip walls at
+/// min/max y, symmetry planes elsewhere; ρ = 1000, µ = 1 as the channel studies.
+fn persisted_channel_case(path: &str, inlet_speed: f64) -> fixture::Fixture {
+    use runmat_meshing_core::{CanonicalMeshingContract, PersistentEntityId, PersistentEntityKind};
+    let bytes = std::fs::read(path).unwrap();
+    let mut mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(&bytes).unwrap();
+    for face in &mut mesh.topology.boundary_faces {
+        face.provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            format!("original-reference-face-{}", face.face_id),
+            vec!["root".into()],
+        )];
+    }
+    mesh.seal_canonical_digest().unwrap();
+    let source = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+    // `RUNMAT_CFD_BENCH_REGION=<k>` keeps the k-th volume region only (a conjugate model's
+    // coolant); every face of it other than the inlet and outlet planes is then a no-slip wall.
+    let region = std::env::var("RUNMAT_CFD_BENCH_REGION").ok().map(|k| {
+        let mut regions = source
+            .elements
+            .iter()
+            .map(|e| e.region_id.clone())
+            .collect::<Vec<_>>();
+        regions.sort();
+        regions.dedup();
+        regions[k.parse::<usize>().unwrap()].clone()
+    });
+    let topology = match &region {
+        Some(region) => crate::topology::FiniteVolumeTopology::derive_selected(
+            &source,
+            fixture::geometry_policy(),
+            crate::topology::FiniteVolumeCellSelection::regions(vec![region.clone()]).unwrap(),
+        ),
+        None => crate::topology::FiniteVolumeTopology::derive(&source, fixture::geometry_policy()),
+    }
+    .unwrap();
+    let mut bx = [f64::MAX, f64::MIN];
+    let mut by = [f64::MAX, f64::MIN];
+    let exterior = topology
+        .faces
+        .iter()
+        .filter(|f| f.neighbor.is_none())
+        .filter_map(|f| f.boundary_source.as_ref())
+        .map(|b| b.projection_boundary_index)
+        .collect::<Vec<_>>();
+    for &i in &exterior {
+        let x = source.boundary_faces[i].centroid_m;
+        bx = [bx[0].min(x[0]), bx[1].max(x[0])];
+        by = [by[0].min(x[1]), by[1].max(x[1])];
+    }
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    let (mut inlet, mut outlet, mut walls, mut planes) = (vec![], vec![], vec![], vec![]);
+    for &i in &exterior {
+        let face = &source.boundary_faces[i];
+        let x = face.centroid_m;
+        let entities = face.provenance.clone();
+        if near(x[0], bx[1]) {
+            outlet.extend(entities);
+        } else if near(x[0], bx[0]) {
+            inlet.extend(entities);
+        } else if region.is_some() || near(x[1], by[0]) || near(x[1], by[1]) {
+            walls.extend(entities);
+        } else {
+            planes.extend(entities);
+        }
+    }
+    let mut material = fixture::material();
+    material.density = runmat_analysis_core::MassDensity::new(1000.0);
+    fixture::Fixture {
+        mesh,
+        source,
+        topology,
+        constraints: vec![
+            FluidConstraint {
+                constraint_id: "inlet".into(),
+                kind: FluidConstraintKind::PrescribedVelocity {
+                    target: target("inlet", inlet),
+                    value: PrescribedValue::Constant([inlet_speed, 0.0, 0.0].map(Velocity::new)),
+                },
+            },
+            FluidConstraint {
+                constraint_id: "walls".into(),
+                kind: FluidConstraintKind::NoSlipWall {
+                    target: target("walls", walls),
+                },
+            },
+        ]
+        .into_iter()
+        .chain((!planes.is_empty()).then(|| FluidConstraint {
+            constraint_id: "spanwise".into(),
+            kind: FluidConstraintKind::Symmetry {
+                target: target("spanwise", planes),
+            },
+        }))
+        .collect(),
+        operators: vec![AnalysisBoundary {
+            boundary_id: "outlet".into(),
+            target: target("outlet", outlet),
+            operator: BoundaryOperator::FluidOutletPressure {
+                value: PrescribedValue::Constant(Pressure::new(0.0)),
+            },
+        }],
+        signals: Vec::new(),
+        actions: Vec::new(),
+        material,
+        policy: CanonicalFluidPolicy {
+            maximum_resident_bytes: Some(24_000_000_000),
+            ..CanonicalFluidPolicy::default()
+        },
+        reference: ReferenceCase::Duct,
+        rotated: false,
+    }
+}
+
+/// Solver-speed benchmark on a persisted study mesh (not a validation test): the channel started
+/// impulsively from rest by backward-Euler intervals of `RUNMAT_CFD_BENCH_DT` (default 0.25 s,
+/// the startup study's) with the default fluid policy. `RUNMAT_CFD_BENCH_MESH=<cbor>
+/// RUNMAT_CFD_BENCH_THREADS=<t> RUNMAT_CFD_BENCH_STEPS=<s> [RUNMAT_CFD_BENCH_STEADY=1]`.
+#[test]
+#[ignore = "benchmark"]
+fn persisted_channel_solver_benchmark() {
+    let var = |name: &str| std::env::var(name).ok();
+    let path = var("RUNMAT_CFD_BENCH_MESH").expect("RUNMAT_CFD_BENCH_MESH");
+    let threads: usize = var("RUNMAT_CFD_BENCH_THREADS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+    let steps: usize = var("RUNMAT_CFD_BENCH_STEPS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2);
+    let dt: f64 = var("RUNMAT_CFD_BENCH_DT")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.25);
+    let speed: f64 = var("RUNMAT_CFD_BENCH_U")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.005);
+    let mut f = persisted_channel_case(&path, speed);
+    if let Some(restart) = var("RUNMAT_CFD_BENCH_RESTART").and_then(|v| v.parse().ok()) {
+        f.policy.gmres_restart = restart;
+    }
+    // A memory probe needs only the first coupled steps: their workspaces are the peak.
+    let probe = var("RUNMAT_CFD_BENCH_OUTER").and_then(|v| v.parse().ok());
+    if let Some(outer) = probe {
+        f.policy.maximum_outer_iterations = outer;
+    }
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let cells = p.topology.cells.len();
+    let reservation = p.reservation();
+    println!(
+        "{{\"bench\":\"persisted_reservation\",\"cells\":{cells},\"faces\":{},\"resident_bytes_upper_bound\":{},\"verification_resident_bytes_upper_bound\":{},\"momentum_jacobian_entries\":{}}}",
+        p.topology.faces.len(),
+        reservation.resident_bytes_upper_bound,
+        reservation.verification_resident_bytes_upper_bound,
+        p.momentum_jacobian.entries()
+    );
+    let whole =
+        crate::topology::FiniteVolumeTopology::reserve_mesh(&f.mesh, fixture::geometry_policy())
+            .unwrap();
+    println!(
+        "{{\"bench\":\"persisted_preparation\",\"mesh_cells\":{},\"whole_mesh_geometry_scratch\":{},\"projection_estimate\":{}}}",
+        whole.cell_count,
+        whole.scratch_bytes,
+        crate::topology::AnalysisProjection::derivation_resident_bytes_estimate(&f.mesh).unwrap()
+    );
+    if probe.is_some() {
+        let t = std::time::Instant::now();
+        let r = runmat_cpu_execution::with_cpu_pool(threads, || p.solve()).unwrap();
+        println!(
+            "{{\"bench\":\"persisted_probe\",\"cells\":{cells},\"solve_s\":{:.3},\"result\":\"{}\"}}",
+            t.elapsed().as_secs_f64(),
+            r.map_or_else(|e| e.to_string().chars().take(80).collect::<String>(), |_| "converged".into())
+        );
+        return;
+    }
+    if var("RUNMAT_CFD_BENCH_STEADY").is_some() {
+        let t = std::time::Instant::now();
+        let r = runmat_cpu_execution::with_cpu_pool(threads, || p.solve())
+            .unwrap()
+            .unwrap();
+        let gradient = channel_pressure_gradient(&p, &r);
+        println!(
+            "{{\"bench\":\"persisted_steady\",\"cells\":{cells},\"threads\":{threads},\"solve_s\":{:.3},\"outer_iterations\":{},\"linear_iterations\":{},\"minus_dpdx\":{gradient:.6}}}",
+            t.elapsed().as_secs_f64(), r.outer_iterations, r.linear_iterations
+        );
+        return;
+    }
+    let mut u = vec![[0.0; 3]; cells];
+    let mut pressure = vec![0.0; cells];
+    let mut q = vec![0.0; p.topology.faces.len()];
+    let started = std::time::Instant::now();
+    for step in 0..steps {
+        let previous = super::super::transient::CanonicalFluidFields {
+            pressure_reference_pa: runmat_types::physical::Quantity::new(
+                p.pressure_reference_pa.canonical_values(),
+            ),
+            velocity_m_per_s: runmat_types::physical::Quantity::new(&u[..]),
+            pressure_fluctuation_pa: runmat_types::physical::Quantity::new(&pressure[..]),
+            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::new(&q[..]),
+        };
+        let interval = p
+            .prepare_backward_euler(step as f64 * dt, (step + 1) as f64 * dt, previous)
+            .unwrap();
+        let t = std::time::Instant::now();
+        let r = runmat_cpu_execution::with_cpu_pool(threads, || interval.solve())
+            .unwrap()
+            .unwrap();
+        println!(
+            "{{\"bench\":\"persisted_startup\",\"cells\":{cells},\"threads\":{threads},\"step\":{step},\"solve_s\":{:.3},\"outer_iterations\":{},\"linear_iterations\":{},\"minus_dpdx\":{:.6}}}",
+            t.elapsed().as_secs_f64(), r.outer_iterations, r.linear_iterations,
+            channel_pressure_gradient(&p, &r)
+        );
+        u = r.velocity_m_per_s.canonical_values().clone();
+        pressure = r.pressure_fluctuation_pa.canonical_values().clone();
+        q = r.face_volume_flux_m3_per_s.canonical_values().clone();
+    }
+    println!(
+        "{{\"bench\":\"persisted_startup_total\",\"cells\":{cells},\"threads\":{threads},\"steps\":{steps},\"solve_s\":{:.3}}}",
+        started.elapsed().as_secs_f64()
+    );
+}
+
+/// −dp/dx from a least-squares line through cell pressures in the middle half of the channel.
+fn channel_pressure_gradient(p: &CanonicalFluidProblem<'_>, r: &CanonicalFluidResult) -> f64 {
+    let xs = p
+        .topology
+        .cells
+        .iter()
+        .map(|c| c.centroid_m[0])
+        .collect::<Vec<_>>();
+    let (lo, hi) = xs
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+    let (l, h) = (lo + 0.25 * (hi - lo), lo + 0.75 * (hi - lo));
+    let pairs = xs
+        .iter()
+        .zip(r.pressure_pa.canonical_values())
+        .filter(|(x, _)| (l..h).contains(*x))
+        .map(|(x, p)| (*x, *p))
+        .collect::<Vec<_>>();
+    let n = pairs.len() as f64;
+    let mx = pairs.iter().map(|v| v.0).sum::<f64>() / n;
+    let mp = pairs.iter().map(|v| v.1).sum::<f64>() / n;
+    let sxy = pairs.iter().map(|v| (v.0 - mx) * (v.1 - mp)).sum::<f64>();
+    let sxx = pairs.iter().map(|v| (v.0 - mx).powi(2)).sum::<f64>();
+    -sxy / sxx
+}

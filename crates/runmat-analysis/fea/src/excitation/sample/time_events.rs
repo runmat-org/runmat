@@ -131,6 +131,7 @@ fn visit_events(
             PhysicalSignal::TemperatureDifference(signal) => collect!(signal),
             PhysicalSignal::HeatFlux(signal) => collect!(signal),
             PhysicalSignal::HeatGenerationDensity(signal) => collect!(signal),
+            PhysicalSignal::HeatRate(signal) => collect!(signal),
             PhysicalSignal::ElectricPotential(signal) => collect!(signal),
             PhysicalSignal::ElectricCurrent(signal) => collect!(signal),
             PhysicalSignal::ElectricCharge(signal) => collect!(signal),

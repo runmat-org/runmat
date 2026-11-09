@@ -42,7 +42,7 @@ directly prescribing the primary unknown.
 
 The `.fea` language accepts the following closed set. Family pages provide complete field syntax,
 equations, examples, conflicts, and verification evidence. If a kind is absent from this table,
-`runmat fea check` rejects it; RunMat does not reinterpret an unknown constraint as a generic
+`runmat check` rejects it; RunMat does not reinterpret an unknown constraint as a generic
 penalty.
 
 | Family | Constraint kinds | Physical role |
@@ -64,15 +64,14 @@ stand in for an acoustic or fluid velocity condition.
 
 ## Which constraint families can I execute today?
 
-All cataloged constraints are part of the typed source contract and are available to `runmat fea
-check`. Native whole-study execution currently admits structural procedure graphs; thermal,
+All cataloged constraints are part of the typed source contract and are available to `runmat check`. Native whole-study execution currently admits structural procedure graphs; thermal,
 electromagnetic, acoustic, fluid, and coupled procedure graphs remain checkable definitions rather
 than admitted end-to-end solves. A parser or semantic-check success proves that names, quantities,
 targets, and relations are coherent. It does not prove that the requested formulation has an
 execution, recovery, and publication path.
 
 Each family guide states the relevant limitation next to its examples. The authoritative summary is
-[FEA capability status](../status). Validation claims require the evidence described in
+[FEA capability status](../validation/status.md). Validation claims require the evidence described in
 [verification and validation](../validation), including formulation-specific references and
 fail-closed negative cases.
 
@@ -333,7 +332,7 @@ reaction force and moment by named constraint. For ties and periodic pairs, insp
 unmatched entities, projection distance, and pair residual. For contact, rank alone is insufficient:
 inspect active/open/stick/slip state, penetration, and contact work.
 
-## What should fail during `runmat fea check`?
+## What should fail during `runmat check`?
 
 Checking should reject an incompatible topology role, missing or ambiguous region, duplicate
 identity, invalid quantity or frame, incomplete pair transform, self-pair, nonphysical coefficient,

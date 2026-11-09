@@ -153,7 +153,15 @@ fn cold_original_material_history_and_accuracy_do_not_promote_missing_mesh_evide
                         topology_digest: publication.request.topology_digest,
                         source_result: publication.request.source_result,
                         payload: CanonicalSemanticStatePayload::Fields {
-                            fields: vec![AnalysisField::host_f64("alpha", vec![1], vec![0.02])]
+                            fields: vec![AnalysisField::host_f64(
+                                "alpha",
+                                runmat_analysis_core::AnalysisFieldLayout::scalar(
+                                    runmat_analysis_core::ObservationQuantity::Residual,
+                                    runmat_analysis_core::FieldLocation::Global
+                                ),
+                                vec![1],
+                                vec![0.02]
+                            )]
                         },
                     }
                 )

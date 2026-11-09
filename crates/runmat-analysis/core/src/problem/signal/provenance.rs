@@ -43,6 +43,7 @@ impl PhysicalSignal {
             Self::TemperatureDifference(signal) => &signal.provenance,
             Self::HeatFlux(signal) => &signal.provenance,
             Self::HeatGenerationDensity(signal) => &signal.provenance,
+            Self::HeatRate(signal) => &signal.provenance,
             Self::ElectricPotential(signal) => &signal.provenance,
             Self::ElectricCurrent(signal) => &signal.provenance,
             Self::ElectricCharge(signal) => &signal.provenance,

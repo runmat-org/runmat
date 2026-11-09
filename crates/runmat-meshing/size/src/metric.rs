@@ -13,7 +13,9 @@ mod index;
 mod intersection;
 mod uniform;
 mod local;
+mod point_field;
 pub use local::{LocalMetricSource, MetricEntitySupport};
+pub use point_field::{integrated_edge_length, intersect_metrics, SurfaceMetricSource};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetricContractError {
@@ -225,7 +227,8 @@ pub struct MetricFieldRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entity_supports: Vec<MetricEntitySupport>,
     /// Requested element layers across a thin gap between non-incident boundary entities.
-    /// `None` is the canonical two layers and keeps existing request identities.
+    /// `None` keeps existing request identities: two layers across gaps between edges, and one
+    /// layer across gaps between facing faces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cells_across_gap: Option<u32>,
 }
@@ -238,6 +241,20 @@ impl MetricFieldRequest {
     pub fn resolved_cells_across_gap(&self) -> u32 {
         self.cells_across_gap
             .unwrap_or(Self::DEFAULT_CELLS_ACROSS_GAP)
+    }
+
+    /// Element layers across the gap between two facing faces of a meshed solid when none is
+    /// requested. With one layer, the faces of a layer `t` thick get surface edges no longer
+    /// than `t`. Each boundary segment's diametral ball (radius at most `t / 2`) then stays clear
+    /// of the opposite face, so the two faces' segments and facets never encroach each other,
+    /// and the volume mesher recovers both faces without splitting across the layer.
+    pub const DEFAULT_CELLS_ACROSS_FACE_GAP: u32 = 1;
+
+    /// Element layers face proximity sizing resolves across the gap between facing faces: the
+    /// requested `cells_across_gap`, or one layer.
+    pub fn resolved_cells_across_face_gap(&self) -> u32 {
+        self.cells_across_gap
+            .unwrap_or(Self::DEFAULT_CELLS_ACROSS_FACE_GAP)
     }
 }
 
@@ -332,15 +349,26 @@ pub struct ResolvedMetricEvaluation {
 pub struct ResolvedMetricField {
     request: MetricFieldRequest,
     index: index::ContributionIndex,
+    /// Every entity-local source of the request, in canonical entity order. They grade the field
+    /// by distance at every point, whichever stage evaluates it (see [`Self::evaluate_at`]).
+    entity_local: Vec<LocalMetricSource>,
 }
 
 impl ResolvedMetricField {
     pub fn new(request: &MetricFieldRequest) -> Result<Self, MetricContractError> {
         request.validate()?;
-        Ok(Self {
+        let mut field = Self {
             request: request.clone(),
             index: index::ContributionIndex::new(request),
-        })
+            entity_local: Vec::new(),
+        };
+        let entities = request
+            .entity_supports
+            .iter()
+            .map(|support| support.entity_id.clone())
+            .collect();
+        field.entity_local = field.local_sources(&entities)?;
+        Ok(field)
     }
 
     pub fn resolve(

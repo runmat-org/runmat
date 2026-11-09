@@ -59,6 +59,15 @@ pub(crate) fn snapshot_definition(
     )
 }
 
+/// Storage layout of a thermal history snapshot at `step`: its definition's layout at that step.
+/// The producer stores values in it and the state-encoding profile charges it.
+pub(crate) fn storage_layout(
+    definition: &RecoveredFieldDefinition,
+    step: usize,
+) -> runmat_analysis_core::AnalysisFieldLayout {
+    definition.layout().step(step)
+}
+
 /// Snapshot index of the second-side interface temperature, published after the four primary
 /// histories when the study has a finite-conductance thermal interface.
 pub(crate) const INTERFACE: usize = 4;

@@ -61,9 +61,9 @@ Each change produces a new solve. The embedded figures continue to show the orig
 From the downloaded project directory:
 
 ```sh
-runmat fea check heatsink-steady.fea
-runmat fea plan heatsink-steady.fea
-runmat fea run heatsink-steady.fea
+runmat check heatsink-steady.fea
+runmat plan heatsink-steady.fea
+runmat run heatsink-steady.fea
 ```
 
 **Check** validates the source. **Plan** describes the geometry, mesh, analysis and output work. **Run** executes the study and publishes its results. Geometry import, meshing and solving run in a native Desktop or CLI installation.

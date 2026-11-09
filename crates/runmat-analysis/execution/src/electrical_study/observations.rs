@@ -150,18 +150,10 @@ impl ElectricalStudyCoordinator {
             self.preparation.output_policy,
         )?;
         let usage = self.extend_usage(&task.resource_plan, accounting)?;
-        self.observation_state.reduced.push(reduced);
+        self.observation_state.push_reduced(reduced)?;
         self.usage = Some(usage);
         self.closures.push(closure);
-        let count = self
-            .observation_state
-            .fanout
-            .as_ref()
-            .expect("fanout")
-            .source_request
-            .plan
-            .observations
-            .len();
+        let count = self.observation_state.reduction_count();
         self.phase = if self.observation_state.reduced.len() == count {
             ElectricalStudyPhase::ReadyForObservationAssembly
         } else {
@@ -235,6 +227,7 @@ impl ElectricalStudyCoordinator {
             ObservationHistorySourceContext::VolumeMesh {
                 mesh: &self.preparation.mesh,
             },
+            runmat_analysis_fea::results::observation::ObservationPublicationScope::Complete,
         )?;
         let usage = self.extend_usage(&task.resource_plan, accounting)?;
         let tail = self.prepare_tail(&usage, Some(catalog.clone()))?;

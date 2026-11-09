@@ -1,6 +1,6 @@
 //! Clone demand for an immutable compiled definition; original properties stay shared.
 use super::CompiledAnalysisStudy;
-use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
+use runmat_canonical_codec::{profile_typed_resident_bytes, CanonicalLimits};
 impl CompiledAnalysisStudy {
     /// Original metadata and validated property owner, each charged once.
     pub fn retained_storage_bytes_estimate(&self, limits: CanonicalLimits) -> Result<u64, String> {
@@ -28,7 +28,8 @@ impl CompiledAnalysisStudy {
             properties,
             solver_mesh_digest: _,
         } = self;
-        let metadata = profile_serialized(
+        // A clone owns typed values; it never builds a value tree.
+        let metadata = profile_typed_resident_bytes(
             &(
                 module_path,
                 study_id,
@@ -39,8 +40,7 @@ impl CompiledAnalysisStudy {
             ),
             limits,
         )
-        .map_err(|error| error.to_string())?
-        .materialization_resident_bytes_estimate;
+        .map_err(|error| error.to_string())?;
         metadata
             .checked_add(
                 properties

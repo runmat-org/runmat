@@ -5,7 +5,7 @@ mass flow, moving/no-slip/slip walls, pressure reference, outlet pressure, symme
 initial state. Geometry regions identify the fluid volume and exact boundary faces; inlet/outlet
 meaning is never inferred from face normals or names.
 
-`fea run` executes steady and transient incompressible laminar flow from a `.fea` study. The
+`runmat run` executes steady and transient incompressible laminar flow from a `.fea` study. The
 canonical numerical route is a cell-centred finite-volume discretization on tetrahedral cells:
 conservative face fluxes, Rhie–Chow pressure–velocity coupling with nonorthogonal correction,
 linear-upwind convection and the full Newtonian stress. Transient flow advances with backward
@@ -50,8 +50,8 @@ separation and boundary-layer accuracy require their own independent evidence an
 
 | Procedure | Required domain/state | Current numerical status |
 | --- | --- | --- |
-| `fluid steady` | Static velocity/pressure state | Canonical Tet4 finite volume; runs from `fea run` |
-| `fluid transient` | Time samples and compatible initial state | Canonical backward Euler; runs from `fea run` |
+| `fluid steady` | Static velocity/pressure state | Canonical Tet4 finite volume; runs from `runmat run` |
+| `fluid transient` | Time samples and compatible initial state | Canonical backward Euler; runs from `runmat run` |
 | `fluid harmonic` | Frequency samples and complex state | Typed contract only; no realization |
 | `fluid nonlinear` | Load-factor domain | Typed contract only; no realization |
 
@@ -194,4 +194,4 @@ residual does not establish spatial accuracy.
 
 See [fluid constraints](../constraints/fluid), [fluid loads](../loads/fluid),
 [conjugate heat transfer](./conjugate-heat-transfer),
-[fluid–structure interaction](./fluid-structure-interaction), and [current status](../status).
+[fluid–structure interaction](./fluid-structure-interaction), and [current status](../validation/status.md).

@@ -9,6 +9,9 @@
 //!
 //! `coverage: complete` states the listed tests discharge the whole criterion for those
 //! envelopes; the default `partial` records narrower support and never yields PASS.
+//! `; check: <id>[,<id>]` marks the test as physics verification of reference checks in the
+//! capability ledger (`checks`): the check states the problem, the reference and the tolerance,
+//! and the Validation pages list the test under it. Plumbing and admission tests carry no check.
 //! A tag is a `// witness:` comment line plus its `//` continuation lines, placed directly
 //! above the test function (attributes may sit between). Several tags may stack on one test.
 //! The scanner is std-only so no crate depends on the qualification crate. A tag declares what
@@ -56,6 +59,8 @@ pub struct Tag {
     pub boundary: String,
     /// Cargo features the test needs (`; features: a,b` in the tag).
     pub features: Vec<String>,
+    /// Ledger reference checks this test verifies (`; check: id` in the tag).
+    pub checks: Vec<String>,
     /// The author states these tests discharge the whole criterion for the envelopes.
     pub complete: bool,
     pub test: TestLocator,
@@ -79,10 +84,20 @@ pub fn repository_root() -> PathBuf {
 
 /// Split an optional `; features: a,b` field out of a tag's text.
 pub fn split_features(text: &str) -> (String, Vec<String>) {
-    let Some(start) = text.find("; features:") else {
+    split_list(text, "; features:")
+}
+
+/// Split an optional `; check: id[,id]` field out of a tag's text.
+pub fn split_checks(text: &str) -> (String, Vec<String>) {
+    split_list(text, "; check:")
+}
+
+/// Split one optional `; key: a,b` list field, ending at the next `;`, out of a tag's text.
+fn split_list(text: &str, key: &str) -> (String, Vec<String>) {
+    let Some(start) = text.find(key) else {
         return (text.to_string(), Vec::new());
     };
-    let rest = &text[start + "; features:".len()..];
+    let rest = &text[start + key.len()..];
     let end = rest.find(';').unwrap_or(rest.len());
     let features = rest[..end]
         .split(',')
@@ -408,6 +423,7 @@ fn scan_file(
                     for (tag_line, text) in pending.drain(..) {
                         let location = format!("{display}:{tag_line}");
                         let (text, features) = split_features(&text);
+                        let (text, checks) = split_checks(&text);
                         match parse_tag_text(&text) {
                             Ok((requirement, obligation, envelopes, boundary, complete)) => tags
                                 .push(Tag {
@@ -416,6 +432,7 @@ fn scan_file(
                                     envelopes,
                                     boundary,
                                     features,
+                                    checks,
                                     complete,
                                     test: locator.clone(),
                                 }),
@@ -492,9 +509,20 @@ fn is_test_attr(attribute: &str) -> bool {
 pub fn validate_tags(tags: &[Tag], registry: &[&Requirement]) -> Vec<Problem> {
     let mut problems = Vec::new();
     let by_id: BTreeMap<&str, &Requirement> = registry.iter().map(|r| (r.id, *r)).collect();
+    let known_checks: BTreeSet<&str> = crate::checks().collect();
     let mut seen = BTreeSet::new();
     for tag in tags {
         let location = format!("{}:{}", tag.test.source, tag.test.line);
+        for check in &tag.checks {
+            if !known_checks.contains(check.as_str()) {
+                problems.push(Problem {
+                    location: location.clone(),
+                    message: format!(
+                        "unknown reference check `{check}`; add it to the ledger's `checks`"
+                    ),
+                });
+            }
+        }
         let Some(requirement) = by_id.get(tag.requirement.as_str()) else {
             problems.push(Problem {
                 location,

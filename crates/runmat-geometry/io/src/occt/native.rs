@@ -1,7 +1,8 @@
 use super::{
-    exact_healing_projection, exact_projection, ffi, import_validation, topology_from_raw,
-    OcctCadFormat, OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart, OcctCadTopology,
-    OcctRawAssemblyNode, OcctRawFaceEvaluationSample, OcctRawFaceSemantic, OcctRawTopology,
+    edge_tolerance_admission, exact_healing_projection, exact_projection, ffi, import_validation,
+    topology_from_raw, OcctCadFormat, OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart,
+    OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceEvaluationSample, OcctRawFaceSemantic,
+    OcctRawTopology,
 };
 use crate::exact::{ExactCadImportOptions, ImportedExactCad};
 use crate::import::{
@@ -205,6 +206,7 @@ pub(crate) fn import_exact_cad_shape(
         analysis: options.analysis.clone(),
         kernel_body_shapes: projection.kernel_body_shapes,
         kernel_entity_ids: projection.kernel_entity_ids,
+        edge_tolerance_admissions: Vec::new(),
     };
     let tolerance_m = imported
         .topology
@@ -223,6 +225,15 @@ pub(crate) fn import_exact_cad_shape(
         )
         .map_err(import_validation::map_validation_error)?;
     let evaluation_control = import_validation::ImportEvaluationControl::new(context, options);
+    imported.edge_tolerance_admissions = edge_tolerance_admission::project(
+        &payload.edge_tolerance_admissions,
+        meters_per_source_unit,
+        options.analysis.requested_deviation_m.canonical_value(),
+        &imported.topology,
+        &evaluator,
+        &evaluation_control,
+    )
+    .map_err(import_validation::map_validation_error)?;
     let validated_mass_properties = imported
         .topology
         .bodies
@@ -585,6 +596,7 @@ fn ffi_import_options(
         heal_short_edges_and_sliver_faces: false,
         share_interfaces: false,
         maximum_healing_displacement: 0.0,
+        admissible_edge_gap_m: 0.0,
         cancel_token_id,
     })
 }
@@ -621,6 +633,7 @@ pub(super) fn ffi_exact_import_options(
             .maximum_healing_displacement_m
             .canonical_value()
             / meters_per_source_unit,
+        admissible_edge_gap_m: options.analysis.requested_deviation_m.canonical_value(),
         cancel_token_id,
     }
 }

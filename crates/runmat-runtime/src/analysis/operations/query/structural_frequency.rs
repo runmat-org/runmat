@@ -76,6 +76,7 @@ pub(super) fn results_op(
         .map(|sample| sample.plan_entry().frequency_hz())
         .collect::<Vec<_>>();
     let receipt = publication.receipt();
+    let truncation = receipt.modal_truncation_balance();
     let summary = AnalysisResultsSummary {
         field_count: descriptors.len(),
         total_elements: descriptors
@@ -83,17 +84,26 @@ pub(super) fn results_op(
             .map(|descriptor| descriptor.element_count)
             .sum(),
         frequency_sample_count: frequencies.len(),
-        available_frequencies_hz: frequencies,
+        available_frequencies_hz: frequencies.clone(),
         max_frequency_solver_residual: receipt
             .samples()
             .iter()
             .map(|sample| sample.solver_relative_residual())
             .reduce(f64::max),
-        max_frequency_balance_error: receipt
-            .samples()
-            .iter()
-            .map(|sample| sample.physical_relative_balance_error())
-            .reduce(f64::max),
+        max_frequency_balance_error: truncation
+            .is_none()
+            .then(|| {
+                receipt
+                    .samples()
+                    .iter()
+                    .map(|sample| sample.physical_relative_balance_error())
+                    .reduce(f64::max)
+            })
+            .flatten(),
+        modal_truncation_balance_error: truncation
+            .map(|measure| measure.maximum_relative_balance_error),
+        modal_truncation_balance_frequency_hz: truncation
+            .and_then(|measure| frequencies.get(measure.sample_index).copied()),
         ..AnalysisResultsSummary::default()
     };
     Ok(OperationEnvelope::new(

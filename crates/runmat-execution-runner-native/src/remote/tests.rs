@@ -39,16 +39,7 @@ use super::driver::run_remote_driver;
 
 mod mixed_recovery;
 
-fn fixture_org_id() -> String {
-    runmat_server_client::ids::OrgId::from_uuid(uuid::Uuid::from_u128(1)).to_string()
-}
-
-fn fixture_driver_lease_id(fence: u64) -> String {
-    runmat_server_client::ids::ExecutionDriverLeaseId::from_uuid(uuid::Uuid::from_u128(u128::from(
-        fence,
-    )))
-    .to_string()
-}
+use super::test_ids::{test_driver_lease_id, test_org_id, TEST_ORG_ID};
 
 #[derive(Default)]
 struct FakeState {
@@ -289,10 +280,10 @@ async fn remote_driver_commits_verified_externalized_results() {
         authority: DriverAuthority {
             server_url: "https://control.invalid".into(),
             run_id: run_id.into(),
-            org_id: fixture_org_id(),
+            org_id: test_org_id(),
             project_id: "project-1".into(),
             allocation_lease_id: "allocation-1".into(),
-            driver_lease_id: fixture_driver_lease_id(1),
+            driver_lease_id: test_driver_lease_id(1),
             fencing_token: 1,
             credential: "driver-secret".into(),
         },
@@ -337,10 +328,10 @@ async fn cancelled_console_free_completion_does_not_publish_a_result() {
         authority: DriverAuthority {
             server_url: "https://control.invalid".into(),
             run_id: run_id.into(),
-            org_id: fixture_org_id(),
+            org_id: test_org_id(),
             project_id: "project-1".into(),
             allocation_lease_id: "allocation-1".into(),
-            driver_lease_id: fixture_driver_lease_id(1),
+            driver_lease_id: test_driver_lease_id(1),
             fencing_token: 1,
             credential: "driver-secret".into(),
         },
@@ -446,10 +437,10 @@ async fn replacement_restores_a_verified_run_scoped_object_closure() {
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: fixture_org_id(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
-        driver_lease_id: fixture_driver_lease_id(2),
+        driver_lease_id: test_driver_lease_id(2),
         fencing_token: 2,
         credential: "credential".into(),
     };
@@ -482,10 +473,10 @@ async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: fixture_org_id(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
-        driver_lease_id: fixture_driver_lease_id(4),
+        driver_lease_id: test_driver_lease_id(4),
         fencing_token: 4,
         credential: "credential".into(),
     };
@@ -1010,16 +1001,16 @@ async fn run_encrypted_remote_request_with_prior_sequence(
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run_id.into(),
-        org_id: fixture_org_id(),
+        org_id: test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: "allocation-1".into(),
-        driver_lease_id: fixture_driver_lease_id(driver_fence),
+        driver_lease_id: test_driver_lease_id(driver_fence),
         fencing_token: driver_fence,
         credential: "driver-secret".into(),
     };
     let prior_checkpoint = prior_checkpoint_sequence.map(|sequence| {
         let prior_authority = DriverAuthority {
-            driver_lease_id: fixture_driver_lease_id(1),
+            driver_lease_id: test_driver_lease_id(1),
             fencing_token: 1,
             ..authority.clone()
         };
@@ -1240,7 +1231,7 @@ fn endpoint_material(
         entropy,
         EndpointIdentityEvidence {
             schema_version: 1,
-            org_id: fixture_org_id(),
+            org_id: TEST_ORG_ID.into(),
             cluster_id: "cluster-1".into(),
             node_id: "node-1".into(),
             allocation_lease_id: "allocation-1".into(),

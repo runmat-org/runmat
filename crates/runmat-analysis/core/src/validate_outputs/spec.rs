@@ -23,6 +23,7 @@ pub(super) fn validate_spec(
     validate_sign(request, spec)?;
     validate_complex(step, request, spec)?;
     validate_target_location(request, spec)?;
+    validate_pairing(request, spec)?;
     validate_recovery(request, spec)?;
     super::sampling::validate_sampling(step, request, &spec.sampling)?;
     super::sampling::validate_reduction(step, request, spec)?;
@@ -42,10 +43,50 @@ pub(super) fn validate_authored_spec(
     validate_sign(request, spec)?;
     validate_complex(step, request, spec)?;
     validate_target_location(request, spec)?;
+    validate_pairing(request, spec)?;
     validate_recovery(request, spec)?;
     super::sampling::validate_sampling(step, request, &spec.sampling)?;
     super::sampling::validate_reduction(step, request, spec)?;
     super::sampling::validate_storage(request, spec)
+}
+
+/// A paired reduction (pressure drop, transmission loss) reads exactly a two-face-region target,
+/// and a two-region target is read only by a paired reduction.
+fn validate_pairing(
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    let paired_target = matches!(spec.target, ObservationTarget::RegionPair { .. });
+    let paired_reduction = spec.spatial_reduction().is_paired();
+    if paired_target != paired_reduction {
+        return observation_error(
+            request,
+            "a two-region target requires a paired reduction, and a paired reduction requires two face regions",
+        );
+    }
+    if paired_reduction
+        && (!matches!(
+            request,
+            ObservationRequest::Reduction(_) | ObservationRequest::History(_)
+        ) || spec.value_shape != ObservationValueShape::Scalar
+            || spec.component != ObservationComponent::All
+            || spec.complex_representation != ComplexRepresentation::Real
+            || spec.output_location != FieldLocation::Global)
+    {
+        return observation_error(
+            request,
+            "a paired reduction reads one real scalar field into one global value",
+        );
+    }
+    if spec.spatial_reduction() == SpatialReduction::TransmissionLoss
+        && spec.quantity != ObservationQuantity::AcousticPortIntensity
+    {
+        return observation_error(
+            request,
+            "transmission loss reads the acoustic port intensity",
+        );
+    }
+    Ok(())
 }
 
 fn validate_target_location(
@@ -198,7 +239,9 @@ fn is_acoustic(quantity: ObservationQuantity) -> bool {
         ObservationQuantity::AcousticPressure
             | ObservationQuantity::AcousticParticleVelocity
             | ObservationQuantity::AcousticIntensity
+            | ObservationQuantity::AcousticPortIntensity
             | ObservationQuantity::SoundPressureLevel
+            | ObservationQuantity::TransmissionLoss
     )
 }
 
@@ -271,6 +314,10 @@ fn validate_target(
             .interfaces
             .iter()
             .any(|interface| interface.interface_id == *interface_id),
+        ObservationTarget::RegionPair { first, second } => [first, second].iter().all(|region| {
+            !region.region_id.trim().is_empty()
+                && region.entity_dimension == crate::EntityDimension::Face
+        }),
         ObservationTarget::Spatial(ExcitationTarget::WholeModel)
         | ObservationTarget::WholeModel => true,
         ObservationTarget::Point { position } => position.is_finite(),

@@ -6,8 +6,7 @@ use super::{SharedCurveError, SharedCurveMesh};
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-curve-canonical-cbor/v4\0";
 const CONTRACT_DOMAIN: &str = "shared-curve-mesh/v4";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 1024 * 1024, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 /// Encodes an admitted shared-curve artifact in its sole canonical wire form.
 pub fn encode_shared_curve_mesh(
@@ -102,7 +101,7 @@ pub(super) fn decode_with_byte_limit(
     decode_with_limits(
         bytes,
         topology,
-        CanonicalLimits::new(maximum_encoded_bytes, 20_000_000, 1024 * 1024, 64),
+        CanonicalLimits::content_bounded(maximum_encoded_bytes, 1024 * 1024, 64),
     )
 }
 

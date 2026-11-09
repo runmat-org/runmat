@@ -84,7 +84,7 @@ fn quadratic_boundary_uses_original_midside_values_and_preserves_winding() {
         .enumerate()
         .map(|(index, id)| (id, index as u32))
         .collect();
-    let triangles = boundary_triangles(&ids, &indices).unwrap();
+    let triangles = boundary_triangles(&ids, &indices, SurfaceDetail::Full).unwrap();
     let positions = [
         [0., 0.],
         [1., 0.],
@@ -119,11 +119,11 @@ fn quadratic_boundary_uses_original_midside_values_and_preserves_winding() {
 fn linear_boundary_preserves_the_original_triangle_and_missing_nodes_fail_closed() {
     let indices = HashMap::from([(11, 5), (23, 8), (37, 2)]);
     assert_eq!(
-        boundary_triangles(&[11, 23, 37], &indices).unwrap(),
+        boundary_triangles(&[11, 23, 37], &indices, SurfaceDetail::Full).unwrap(),
         [[5, 8, 2]]
     );
-    assert!(boundary_triangles(&[11, 23, 37, 41, 53, 67], &indices).is_none());
-    assert!(boundary_triangles(&[11, 23], &indices).is_none());
+    assert!(boundary_triangles(&[11, 23, 37, 41, 53, 67], &indices, SurfaceDetail::Full).is_none());
+    assert!(boundary_triangles(&[11, 23], &indices, SurfaceDetail::Full).is_none());
 }
 
 #[test]
@@ -201,4 +201,22 @@ fn boundary_triangles_face_out_of_their_elements_whatever_the_stored_winding() {
             }
         }
     }
+}
+
+#[test]
+fn corner_detail_draws_one_triangle_per_quadratic_face() {
+    let ids = [11, 23, 37, 41, 53, 67];
+    let indices = ids
+        .into_iter()
+        .enumerate()
+        .map(|(index, id)| (id, index as u32))
+        .collect();
+    assert_eq!(
+        boundary_triangles(&ids, &indices, SurfaceDetail::Corners).unwrap(),
+        vec![[0, 1, 2]]
+    );
+    assert_eq!(
+        boundary_triangles(&ids[..3], &indices, SurfaceDetail::Corners).unwrap(),
+        vec![[0, 1, 2]]
+    );
 }

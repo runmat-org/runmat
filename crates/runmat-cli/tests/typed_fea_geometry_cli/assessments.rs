@@ -49,7 +49,6 @@ fn authored_transient_and_frequency_assessments_reopen_without_re_solving_the_nu
             &project,
             &[
                 "--offline",
-                "fea",
                 "check",
                 "src/main.fea",
                 "--study",
@@ -62,7 +61,6 @@ fn authored_transient_and_frequency_assessments_reopen_without_re_solving_the_nu
             &project,
             &[
                 "--offline",
-                "fea",
                 "run",
                 "src/main.fea",
                 "--study",
@@ -93,7 +91,6 @@ fn authored_transient_and_frequency_assessments_reopen_without_re_solving_the_nu
         let definition = run["study_definition_digest"].as_str().unwrap();
         let reassess_args = [
             "--offline",
-            "fea",
             "reassess",
             "src/main.fea",
             "--study",

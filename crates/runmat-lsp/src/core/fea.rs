@@ -16,6 +16,7 @@ use runmat_types::Span;
 use super::analysis::make_document_symbol;
 use super::position::{offset_to_position, position_to_offset};
 
+mod highlight;
 mod hover;
 mod hover_docs;
 mod navigation;
@@ -253,10 +254,7 @@ fn semantic_tokens_for_syntax(source: &str, syntax: &FeaSyntaxModule) -> Semanti
     let mut encoded = Vec::new();
     let mut previous = Position::new(0, 0);
     let mut first = true;
-    for token in &syntax.tokens.tokens {
-        let Some(token_type) = semantic_token_type(token.kind) else {
-            continue;
-        };
+    for (token, class) in highlight::classify(source, &syntax.tokens.tokens) {
         let position = offset_to_position(source, token.span.start);
         let delta_line = if first {
             position.line
@@ -272,8 +270,8 @@ fn semantic_tokens_for_syntax(source: &str, syntax: &FeaSyntaxModule) -> Semanti
             delta_line,
             delta_start,
             length: token.span.end.saturating_sub(token.span.start) as u32,
-            token_type,
-            token_modifiers_bitset: 0,
+            token_type: class.token_type,
+            token_modifiers_bitset: class.modifiers,
         });
         previous = position;
         first = false;

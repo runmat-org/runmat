@@ -83,7 +83,7 @@ fn reference_arithmetic_counts_real_and_complex_primitive_updates() {
 }
 
 #[test]
-fn symbolic_factors_use_stored_fill_and_reject_other_families() {
+fn symbolic_factors_use_stored_fill_for_every_direct_family() {
     let mut entries = TripletBuilder::<f64>::new(3, 3);
     for row in 0..3 {
         for column in 0..3 {
@@ -149,14 +149,55 @@ fn symbolic_factors_use_stored_fill_and_reject_other_families() {
     let symbolic =
         SymbolicFactorization::analyze::<f64>(matrix.as_ref().into(), &options, SolveControl::NONE)
             .unwrap();
-    assert!(matches!(
-        symbolic.reference_work(),
-        Err(ReferenceWorkError::FactorKind(FactorKind::Lu))
-    ));
+    // Dense 3x3: symmetrized fill columns of heights 3, 2, 1.
+    let work = symbolic.reference_work().unwrap();
+    assert_eq!(work.square_roots, 0);
+    assert_eq!(work.factorization_operations().unwrap().operations(), 16);
+    assert_eq!(work.solve_operations_per_rhs.operations(), 15);
     assert_eq!(
         symbolic.measurement_coverage().unwrap(),
-        DirectMeasurementCoverage::Excluded(ExcludedDirectKernel::SparseLu)
+        DirectMeasurementCoverage::Measured(work)
     );
+}
+
+#[test]
+fn lu_reference_counts_pivot_scaling_and_square_trailing_updates() {
+    for complex in [false, true] {
+        let (pivot, scale, update) = if complex { (6, 6, 8) } else { (1, 1, 2) };
+        for heights in [vec![], vec![1], vec![3, 2, 1], vec![2, 2, 2, 1]] {
+            let mut factor = 0u64;
+            let mut solve = 0u64;
+            for &height in &heights {
+                let p = height - 1;
+                factor += pivot;
+                for _ in 0..p {
+                    factor += scale;
+                }
+                for _row in 0..p {
+                    for _column in 0..p {
+                        factor += update;
+                    }
+                }
+                for _triangle in 0..2 {
+                    for _ in 0..p {
+                        solve += update;
+                    }
+                }
+                solve += scale;
+            }
+            let measured = general_columns(heights.iter().copied(), complex).unwrap();
+            assert_eq!(measured.square_roots, 0);
+            assert_eq!(
+                measured.factorization_operations().unwrap().operations(),
+                factor
+            );
+            assert_eq!(measured.solve_operations_per_rhs.operations(), solve);
+        }
+    }
+    assert!(matches!(
+        general_columns([0].into_iter(), false),
+        Err(ReferenceWorkError::InvalidColumn)
+    ));
 }
 
 #[test]
@@ -173,13 +214,10 @@ fn excluded_sparse_pivot_kernels_keep_refined_execution_and_covered_batches() {
         }
     }
     let matrix = entries.build();
-    for (kind, exclusion) in [
-        (FactorKind::Lu, ExcludedDirectKernel::SparseLu),
-        (
-            FactorKind::BunchKaufman,
-            ExcludedDirectKernel::SparseBunchKaufman,
-        ),
-    ] {
+    for (kind, exclusion) in [(
+        FactorKind::BunchKaufman,
+        ExcludedDirectKernel::SparseBunchKaufman,
+    )] {
         let ledger = Arc::new(UsageLedger::new(count(100_000), count(100_000)).unwrap());
         let context = UsageContext::new(Arc::clone(&ledger));
         context.run_sync(|| {

@@ -119,6 +119,18 @@ impl AuthoredExcitationKind {
         }
     }
 
+    /// The signal quantity an excitation of this kind reads under `distribution`: a heat
+    /// generation preserving its resultant reads a total heat rate (W), compiled to a uniform
+    /// density over the meshed region volume.
+    pub fn signal_quantity(self, distribution: ExcitationDistribution) -> PhysicalQuantityKind {
+        match (self, distribution) {
+            (Self::HeatGeneration, ExcitationDistribution::PreserveResultant) => {
+                PhysicalQuantityKind::Power
+            }
+            _ => self.quantity(),
+        }
+    }
+
     pub fn default_distribution(self) -> ExcitationDistribution {
         match self {
             Self::Force
@@ -237,7 +249,7 @@ fn validate_excitation(
         .map(|signal| signal.shape().clone())
         .or_else(|| parameterized.map(AuthoredParameterizedSignal::shape))
         .ok_or_else(|| "excitation references an unknown signal".to_string())?;
-    if quantity != excitation.kind.quantity() {
+    if quantity != excitation.kind.signal_quantity(excitation.distribution) {
         return Err("excitation signal has the wrong physical quantity".into());
     }
     if shape.topology_component_count().is_some()
@@ -385,6 +397,9 @@ fn valid_distribution(kind: AuthoredExcitationKind, distribution: ExcitationDist
             (
                 AuthoredExcitationKind::Force | AuthoredExcitationKind::Moment,
                 ExcitationDistribution::Concentrated
+            ) | (
+                AuthoredExcitationKind::HeatGeneration,
+                ExcitationDistribution::PreserveResultant
             ) | (
                 AuthoredExcitationKind::Traction
                     | AuthoredExcitationKind::Pressure

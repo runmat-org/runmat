@@ -9,8 +9,8 @@ use crate::{
 use super::step_error;
 
 pub(super) fn validate(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
-    validate_family_procedure(step)?;
     validate_solution_space(step)?;
+    validate_family_procedure(step)?;
     validate_independent_domain(step)?;
     validate_settings(step)?;
     validate_state_declarations(step)?;
@@ -53,36 +53,78 @@ fn validate_settings(step: &ProcedureStep) -> Result<(), AnalysisValidationError
             step,
             "structural nonlinear kinematics require a structural nonlinear step",
         )),
+        (
+            ProcedureSettings::StructuralModalBasis(settings),
+            AnalysisProcedure::ModalExtraction | AnalysisProcedure::PrestressedModalExtraction,
+        ) if step.family == PhysicsFamily::Structural => {
+            validate_residual_vector_directions(step, &settings.residual_vector_directions)
+        }
+        (ProcedureSettings::StructuralModalBasis(_), _) => Err(step_error(
+            step,
+            "residual vectors require a structural modal extraction step",
+        )),
+        (
+            ProcedureSettings::StructuralModalFrequency(_),
+            AnalysisProcedure::HarmonicResponse | AnalysisProcedure::PrestressedHarmonicResponse,
+        ) if step.family == PhysicsFamily::Structural
+            && step.solution_space == SolutionSpace::ModalReduced =>
+        {
+            Ok(())
+        }
+        (ProcedureSettings::StructuralModalFrequency(_), _) => Err(step_error(
+            step,
+            "static correction requires a modal-reduced structural frequency step",
+        )),
     }
 }
 
+/// At most three distinct, finite, nonzero global directions (one per translational axis span).
+fn validate_residual_vector_directions(
+    step: &ProcedureStep,
+    directions: &[crate::SpectrumDirection],
+) -> Result<(), AnalysisValidationError> {
+    if directions.is_empty() || directions.len() > 3 {
+        return Err(step_error(
+            step,
+            "residual vectors name one to three directions",
+        ));
+    }
+    let mut unit = Vec::with_capacity(directions.len());
+    for direction in directions {
+        let norm = direction
+            .vector
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        if direction.frame != crate::CoordinateFrame::Global
+            || !norm.is_finite()
+            || norm <= f64::EPSILON
+        {
+            return Err(step_error(
+                step,
+                "residual-vector directions are finite, nonzero and global",
+            ));
+        }
+        let candidate = direction.vector.map(|value| value / norm);
+        if unit.iter().any(|existing: &[f64; 3]| {
+            existing
+                .iter()
+                .zip(candidate)
+                .all(|(left, right)| (left - right).abs() <= 1.0e-12)
+        }) {
+            return Err(step_error(step, "residual-vector directions are distinct"));
+        }
+        unit.push(candidate);
+    }
+    Ok(())
+}
+
 fn validate_family_procedure(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
-    let supported = match step.family {
-        PhysicsFamily::Structural => true,
-        PhysicsFamily::Thermal | PhysicsFamily::Fluid => matches!(
-            step.procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::Nonlinear
-                | AnalysisProcedure::Adaptive
-        ),
-        PhysicsFamily::Electromagnetic => matches!(
-            step.procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::HarmonicResponse
-                | AnalysisProcedure::Nonlinear
-                | AnalysisProcedure::Adaptive
-        ),
-        PhysicsFamily::Acoustic => matches!(
-            step.procedure,
-            AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::HarmonicResponse
-                | AnalysisProcedure::ModalExtraction
-                | AnalysisProcedure::Adaptive
-        ),
-        PhysicsFamily::Coupled(family) => coupled_procedure_is_supported(family, step.procedure),
-    };
+    // The closed family x procedure registry is the one authority: a pending identity is
+    // defined (admission reports its pending id); an absent one is not a procedure of the family.
+    let supported =
+        crate::analysis_identity_status(step.family, step.procedure, step.solution_space).is_some();
     if supported {
         Ok(())
     } else {
@@ -93,30 +135,6 @@ fn validate_family_procedure(step: &ProcedureStep) -> Result<(), AnalysisValidat
                 step.procedure, step.family
             ),
         ))
-    }
-}
-
-fn coupled_procedure_is_supported(
-    family: CoupledPhysicsFamily,
-    procedure: AnalysisProcedure,
-) -> bool {
-    match family {
-        CoupledPhysicsFamily::Thermomechanical
-        | CoupledPhysicsFamily::Electrothermal
-        | CoupledPhysicsFamily::ConjugateHeatTransfer => matches!(
-            procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::Nonlinear
-                | AnalysisProcedure::Adaptive
-        ),
-        CoupledPhysicsFamily::FluidStructureInteraction => matches!(
-            procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::Nonlinear
-                | AnalysisProcedure::Adaptive
-        ),
     }
 }
 
@@ -150,7 +168,9 @@ fn validate_solution_space(step: &ProcedureStep) -> Result<(), AnalysisValidatio
 
 fn validate_independent_domain(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
     let domain_matches = match step.procedure {
-        AnalysisProcedure::Static => matches!(step.independent_domain, IndependentDomain::Static),
+        AnalysisProcedure::Static | AnalysisProcedure::LineParameters => {
+            matches!(step.independent_domain, IndependentDomain::Static)
+        }
         AnalysisProcedure::ModalExtraction
         | AnalysisProcedure::PrestressedModalExtraction
         | AnalysisProcedure::EigenvalueBuckling => {

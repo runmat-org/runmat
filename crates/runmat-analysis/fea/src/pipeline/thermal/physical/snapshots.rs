@@ -1,31 +1,36 @@
-//! Physical thermal snapshot shapes for nodal scalars and element vectors.
+//! Physical thermal snapshots: each step's values stored under the field id and layout of the
+//! published snapshot definition (`physics::thermal::history_fields`), the one authority.
 
 use runmat_analysis_core::AnalysisField;
 
-pub(super) fn scalar_snapshots(
-    values: Vec<Vec<f64>>,
-    field_id: fn(usize) -> String,
-) -> Vec<AnalysisField> {
-    values
-        .into_iter()
-        .enumerate()
-        .map(|(index, values)| {
-            let len = values.len();
-            AnalysisField::host_f64(field_id(index), vec![len], values)
-        })
-        .collect()
-}
+use crate::{contracts::FeaRunError, physics::thermal::history_fields};
 
-pub(super) fn vector_snapshots(
+/// Snapshots of history `snapshot` (see `history_fields::snapshot_entities`), one per step.
+pub(super) fn snapshots(
     values: Vec<Vec<f64>>,
-    field_id: fn(usize) -> String,
-) -> Vec<AnalysisField> {
+    snapshot: usize,
+) -> Result<Vec<AnalysisField>, FeaRunError> {
     values
         .into_iter()
         .enumerate()
-        .map(|(index, values)| {
-            let count = values.len() / 3;
-            AnalysisField::host_f64(field_id(index), vec![count, 3], values)
+        .map(|(step, values)| {
+            let definition = history_fields::snapshot_definition(snapshot, step)
+                .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+            let layout = history_fields::storage_layout(&definition, step);
+            let components = layout
+                .component_count()
+                .ok_or_else(|| FeaRunError::Solve("thermal snapshot value shape".into()))?;
+            let shape = if components == 1 {
+                vec![values.len()]
+            } else {
+                vec![values.len() / components, components]
+            };
+            Ok(AnalysisField::host_f64(
+                definition.field_id().to_string(),
+                layout,
+                shape,
+                values,
+            ))
         })
         .collect()
 }

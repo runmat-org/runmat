@@ -1,15 +1,16 @@
 use super::{resource_or_cancelled, FacetRecoveryWork};
+use crate::cdt::insertion::topology_access::TetrahedralTopology;
 use crate::{
     cavity::constrained::{
         constrained_cavity_boundary_node_ids, constrained_cavity_star_refill_for_apex,
         ConstrainedCavity,
     },
-    cdt::{DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayVolumeTopology},
+    cdt::{DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind},
 };
 
 pub(in crate::cdt::facet_recovery) fn star_refill(
     cavity: &ConstrainedCavity,
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Option<Vec<[u32; 4]>>, DelaunayFacetRecoveryError> {
@@ -17,7 +18,7 @@ pub(in crate::cdt::facet_recovery) fn star_refill(
         work.cavity_apex_attempt(constraint_index)?;
         let Some(tetrahedra) = constrained_cavity_star_refill_for_apex(cavity, apex, |node| {
             topology
-                .nodes
+                .nodes()
                 .get(node as usize)
                 .map(|node| node.coordinates_m.canonical_value())
         }) else {

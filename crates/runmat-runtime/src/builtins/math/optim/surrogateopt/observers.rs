@@ -127,7 +127,7 @@ impl Observers {
     fn from_selected(
         outputs: Vec<RepeatableCallable>,
         plots: Vec<RepeatableCallable>,
-        c: &ScalarCooperation,
+        #[cfg_attr(not(feature = "plot-core"), allow(unused_variables))] c: &ScalarCooperation,
     ) -> BuiltinResult<Self> {
         #[cfg(not(feature = "plot-core"))]
         let _ = c;

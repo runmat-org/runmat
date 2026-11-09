@@ -19,9 +19,9 @@ sweep load_envelope over study.bracket_response {
 Check the sweep root and inspect its case count:
 
 ```sh
-runmat fea check bracket.fea --sweep load_envelope
-runmat fea plan bracket.fea --sweep load_envelope
-runmat fea run bracket.fea --sweep load_envelope
+runmat check bracket.fea --sweep load_envelope
+runmat plan bracket.fea --sweep load_envelope
+runmat run bracket.fea --sweep load_envelope
 ```
 
 Cases may finish in any order; publication restores canonical case order and retains stable case

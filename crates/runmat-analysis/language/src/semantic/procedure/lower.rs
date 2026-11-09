@@ -225,9 +225,12 @@ fn reject_unknown_members(
             error(
                 declaration,
                 statement.span,
-                format!(
-                    "`{name}` is not a member of `{} {}`",
-                    header.family, header.procedure
+                crate::semantic::pending::with_pending(
+                    format!(
+                        "`{name}` is not a member of `{} {}`",
+                        header.family, header.procedure
+                    ),
+                    crate::semantic::pending::procedure_member(name),
                 ),
                 diagnostics,
             );
@@ -302,6 +305,12 @@ fn lower_procedure(
                     diagnostics,
                 )?,
             };
+            super::modal_reduction::residual_vectors(
+                declaration,
+                statements,
+                &mut step,
+                diagnostics,
+            )?;
             step
         }
         ("structural", "transient") => {
@@ -330,6 +339,12 @@ fn lower_procedure(
             let mut step = ProcedureStep::structural_modal_harmonic(id, state.0, state.1);
             step.independent_domain =
                 requirements::frequencies(declaration, procedure, statements, diagnostics)?;
+            super::modal_reduction::static_correction(
+                declaration,
+                statements,
+                &mut step,
+                diagnostics,
+            )?;
             step
         }
         ("structural", "prestressed_modal") => {
@@ -344,6 +359,12 @@ fn lower_procedure(
                     diagnostics,
                 )?,
             };
+            super::modal_reduction::residual_vectors(
+                declaration,
+                statements,
+                &mut step,
+                diagnostics,
+            )?;
             step
         }
         ("structural", "buckling") => {
@@ -585,6 +606,12 @@ fn generic_procedure(
                 requested_count: requirements::count(declaration, header, statements, diagnostics)?,
             },
             StateKind::AcousticModes,
+        ),
+        // The ledger identity row owns its status; admission reports it while it is pending.
+        "line_parameters" if family == PhysicsFamily::Electromagnetic => (
+            AnalysisProcedure::LineParameters,
+            IndependentDomain::Static,
+            static_state(family),
         ),
         "nonlinear" => (
             AnalysisProcedure::Nonlinear,

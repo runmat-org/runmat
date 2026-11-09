@@ -1,3 +1,4 @@
+mod compact_mesh;
 mod geometry_lines;
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
@@ -45,6 +46,14 @@ pub struct FigureSnapshot {
     pub plots: Vec<PlotDescriptor>,
 }
 
+fn orientation_triad_default() -> bool {
+    true
+}
+
+fn orientation_triad_is_default(shown: &bool) -> bool {
+    *shown
+}
+
 /// Full replay scene payload capable of reconstructing a figure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +64,13 @@ pub struct FigureScene {
     pub geometry_overlay: Option<crate::geometry_scene::GeometrySceneOverlay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub geometry_lines: Vec<GeometryLines>,
+    /// A geometry scene's corner orientation triad (see
+    /// [`crate::geometry_scene::GeometryScene::show_orientation_triad`]); written only when off.
+    #[serde(
+        default = "orientation_triad_default",
+        skip_serializing_if = "orientation_triad_is_default"
+    )]
+    pub geometry_orientation_triad: bool,
     pub schema_version: u32,
     pub layout: FigureLayout,
     pub metadata: FigureMetadata,
@@ -743,6 +759,7 @@ impl FigureScene {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots,
@@ -779,10 +796,18 @@ impl FigureScene {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots,
         })
+    }
+
+    /// The largest distance between a saved position and the scene's own position when
+    /// [`Self::from_geometry_scene`] exports it (the export's position quantization).
+    pub fn geometry_position_error_m(scene: &crate::geometry_scene::GeometryScene) -> f64 {
+        compact_mesh::PositionGrid::for_diagonal((scene.bounds.max - scene.bounds.min).length())
+            .maximum_error()
     }
 
     pub fn from_geometry_scene(scene: &crate::geometry_scene::GeometryScene) -> Self {
@@ -796,10 +821,13 @@ impl FigureScene {
         figure.z_label = Some("Z".to_string());
         figure.set_axes_view(0, -38.0, 24.0);
         let snapshot = FigureSnapshot::capture(&figure);
+        let grid = compact_mesh::PositionGrid::for_diagonal(
+            (scene.bounds.max - scene.bounds.min).length(),
+        );
         let plots = scene
             .chunks
             .iter()
-            .filter_map(scene_chunk_to_mesh_plot)
+            .filter_map(|chunk| scene_chunk_to_mesh_plot(chunk, grid))
             .collect::<Vec<_>>();
 
         Self {
@@ -809,8 +837,9 @@ impl FigureScene {
             geometry_lines: scene
                 .chunks
                 .iter()
-                .filter_map(GeometryLines::capture)
+                .filter_map(|chunk| GeometryLines::capture(chunk, grid))
                 .collect(),
+            geometry_orientation_triad: scene.show_orientation_triad,
             layout: FigureLayout {
                 axes_rows: 1,
                 axes_cols: 1,
@@ -907,6 +936,7 @@ impl FigureScene {
         scene.overlay = self.geometry_overlay;
         scene.physical_context = self.geometry_physical_context;
         scene.show_grid = self.metadata.grid_enabled;
+        scene.show_orientation_triad = self.geometry_orientation_triad;
         scene.axis_equal = self.metadata.axis_equal;
         Ok(scene)
     }
@@ -1084,6 +1114,7 @@ fn append_geometry_scene_chunks(
 
 fn scene_chunk_to_mesh_plot(
     chunk: &crate::geometry_scene::GeometrySceneChunk,
+    grid: compact_mesh::PositionGrid,
 ) -> Option<ScenePlot> {
     if chunk.render_data.pipeline_type != crate::core::PipelineType::Triangles {
         return None;
@@ -1092,31 +1123,27 @@ fn scene_chunk_to_mesh_plot(
     if indices.len() < 3 {
         return None;
     }
-    let triangles = indices
-        .chunks_exact(3)
-        .map(|item| [item[0], item[1], item[2]])
-        .collect::<Vec<_>>();
-    if triangles.is_empty() {
-        return None;
-    }
-    let vertices = chunk
-        .vertices
-        .iter()
-        .map(|vertex| vertex.position)
-        .collect::<Vec<_>>();
+    let compact_mesh::CompactSurface {
+        vertices,
+        triangles,
+        vertex_colors,
+        triangle_colors,
+    } = compact_mesh::compact_surface(&chunk.vertices, indices, grid)?;
     Some(ScenePlot::Mesh {
         vertices,
         triangles,
         mesh_id: chunk.mesh_id.clone(),
         face_color_rgba: chunk.material.albedo.to_array(),
         edge_color_rgba: [0.08, 0.10, 0.13, 1.0],
-        face_alpha: chunk.material.albedo.w,
+        // The chunk's opacity is already in its face and vertex colours; a face alpha would
+        // apply it a second time when the mesh is decoded.
+        face_alpha: 1.0,
         edge_alpha: 0.0,
         edge_width: 0.0,
         edge_mode: "none".to_string(),
         feature_edge_groups: Vec::new(),
-        vertex_colors_rgba: chunk.vertices.iter().map(|vertex| vertex.color).collect(),
-        triangle_colors_rgba: Vec::new(),
+        vertex_colors_rgba: vertex_colors,
+        triangle_colors_rgba: triangle_colors,
         axes_index: 0,
         label: chunk.label.clone(),
         regions: chunk.regions.iter().map(Into::into).collect(),
@@ -4444,6 +4471,7 @@ mod tests {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots: vec![ScenePlot::Surface {
@@ -5550,6 +5578,7 @@ mod tests {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots: vec![ScenePlot::Surface {

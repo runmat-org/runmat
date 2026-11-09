@@ -185,19 +185,23 @@ pub fn slab_bar_mesh(axial_cells: usize, lateral_cells: usize) -> SolverMeshArti
 /// Straight-sided quadratic version of the same shared convergence fixture.
 /// Midpoints are shared by global edge identity, including the Tri6 boundary.
 pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
-    elevate_to_tet10(slab_mesh(cell_count))
+    elevate_planar_tet4_fixture(slab_mesh(cell_count))
 }
 
 /// Straight-sided quadratic version of [`slab_bar_mesh`].
 pub fn quadratic_slab_bar_mesh(axial_cells: usize, lateral_cells: usize) -> SolverMeshArtifact {
-    elevate_to_tet10(slab_bar_mesh(axial_cells, lateral_cells))
+    elevate_planar_tet4_fixture(slab_bar_mesh(axial_cells, lateral_cells))
 }
 
-fn elevate_to_tet10(mut mesh: SolverMeshArtifact) -> SolverMeshArtifact {
+/// Straight-sided Tet10 elevation of a Tet4 box fixture whose boundary faces are axis-aligned
+/// planes ([`slab_mesh`], [`super::layered_box_mesh`]). Midside nodes of boundary edges carry
+/// the source faces and planar charts of their faces.
+pub fn elevate_planar_tet4_fixture(mut mesh: SolverMeshArtifact) -> SolverMeshArtifact {
     use crate::{
         solver_midside_node_identity, sort_solver_node_exact_parameters, SolverNodeExactParameter,
         TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
     };
+    assert_eq!(mesh.resolved_request.element_order, ElementOrder::Tet4);
     let mut midsides = BTreeMap::new();
     let topo = &mut *mesh.topology;
     for element in &topo.volume_elements {

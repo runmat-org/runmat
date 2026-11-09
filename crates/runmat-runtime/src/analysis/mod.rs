@@ -53,6 +53,9 @@ mod modal_run_admission;
 mod render_topology;
 use modal_run_admission::analysis_admit_modal_run_with_id;
 use render_topology::render_topology_from_solver_mesh;
+#[cfg(feature = "plot-core")]
+use render_topology::render_topology_from_solver_mesh_at;
+pub use render_topology::{DroppedMidsides, SurfaceDetail};
 pub mod assessment;
 mod nonlinear_result;
 pub use artifact_root::{
@@ -273,6 +276,7 @@ pub use study_numerical_result::StructuralStudyNumericalResult;
 pub use frequency_result::{
     StructuralFrequencyArtifactRootIndex, StructuralFrequencyFinalizedHistoryArtifactRoots,
     StructuralFrequencyHistoryArtifactRoot, StructuralStudyFrequencyNumericalResult,
+    StructuralStudyModalFrequencyNumericalResult,
     StructuralStudyPrestressedFrequencyNumericalResult,
     StructuralStudyPrestressedFrequencyReductionResult,
     StructuralStudyPrestressedModalFrequencyReductionResult,
@@ -353,13 +357,13 @@ pub use contracts::{
     AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
-    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef,
-    AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
-    AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
-    AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
-    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
-    AnalysisRenderTriangleRange, AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData,
-    AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
+    AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisImmutableValueSpec,
+    AnalysisModalRunOptions, AnalysisModelSourceEvidence, AnalysisModelSourceFileEvidence,
+    AnalysisModelSourceKind, AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata,
+    AnalysisRandomResponseRunOptions, AnalysisRenderMesh, AnalysisRenderRegion,
+    AnalysisRenderTopology, AnalysisRenderTopologySource, AnalysisRenderTriangleRange,
+    AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
+    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
     AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities, AnalysisSolverOptions,
     AnalysisStructuralFrequencyRunOptions, AnalysisStructuralFrequencySolver,
@@ -403,7 +407,7 @@ pub enum AnalysisFigureMeshSource {
 pub use operations::{
     analysis_field_page_by_run_id_op, analysis_observation_history_sample_by_run_id_op,
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
-    analysis_trends_op,
+    analysis_trends_op, bounded_default_results_query, RESULTS_INLINE_FIELD_BYTES,
 };
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
@@ -430,8 +434,8 @@ const ANALYSIS_PLAN_STUDY_OPERATION: &str = "fea.plan_study";
 const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "fea.plan_study/v1";
 const ANALYSIS_PLAN_STUDY_SWEEP_OPERATION: &str = "fea.plan_study_sweep";
 const ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION: &str = "fea.plan_study_sweep/v1";
-pub(crate) const ANALYSIS_RUN_STUDY_OPERATION: &str = "fea.run_study";
-pub(crate) const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "fea.run_study/v1";
+pub const ANALYSIS_RUN_STUDY_OPERATION: &str = "fea.run_study";
+pub const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "fea.run_study/v1";
 const ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION: &str = "fea.validate_study_sweep";
 const ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION: &str = "fea.validate_study_sweep/v1";
 pub(crate) const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "fea.run_study_sweep";

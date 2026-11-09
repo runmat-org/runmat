@@ -2,6 +2,7 @@ use super::*;
 mod certificate;
 mod closure_diagnostics;
 mod periodic;
+mod transmission_loss;
 use crate::{
     contracts::SolverPreconditioner,
     fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
@@ -171,7 +172,7 @@ fn acoustic_portable_admission_and_result_import_fail_closed() {
 }
 
 // witness: FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power @ acoustic_harmonic/tet10/numerical_kernel;
-//   coverage: partial; boundary: plane-wave power through a matched duct end equals |p|²A/(2ρc) and
+//   coverage: partial; check: matched-duct-power; boundary: plane-wave power through a matched duct end equals |p|²A/(2ρc) and
 //   the accounted input power to 0.1 %; the monopole sphere reference is not run.
 #[test]
 fn sound_power_through_the_matched_end_is_the_plane_wave_intensity_times_area() {

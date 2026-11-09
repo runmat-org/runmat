@@ -259,4 +259,4 @@ absence must be treated as a model limitation rather than hidden in an effective
 
 See [thermal constraints](../constraints/thermal), [thermal loads](../loads/thermal),
 [thermomechanical analysis](./thermomechanical), [electrothermal analysis](./electrothermal),
-[outputs](../language/outputs-fields-and-observations), and [current status](../status).
+[outputs](../language/outputs-fields-and-observations), and [current status](../validation/status.md).

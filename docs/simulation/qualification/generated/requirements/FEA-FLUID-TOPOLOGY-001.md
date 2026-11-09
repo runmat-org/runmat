@@ -8,7 +8,7 @@ Evidence kind: PhysicalBalance. Criterion: Retain canonical cell identities, com
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::finite_volume::tests::exact_two_cell_geometry_is_conservative_and_retains_original_boundary_mapping` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:77) - Two affine Tet4 cells; oriented surface closure, volume and original face mapping. No skew/curved mesh envelope proof. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::finite_volume::tests::exact_two_cell_geometry_is_conservative_and_retains_original_boundary_mapping` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:80) - Two affine Tet4 cells; oriented surface closure, volume and original face mapping. No skew/curved mesh envelope proof. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
@@ -23,7 +23,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Projection is deterministic unde
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::finite_volume::tests::stable_cell_face_physics_is_invariant_to_reordered_source_access_indices` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:137) - Two-cell source access reordering, not execution placement equivalence. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::finite_volume::tests::stable_cell_face_physics_is_invariant_to_reordered_source_access_indices` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:140) - Two-cell source access reordering, not execution placement equivalence. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
@@ -38,7 +38,7 @@ Evidence kind: RejectionInvariant. Criterion: Admit supported tetrahedral order/
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::finite_volume::tests::rejects_nonmanifold_missing_boundary_inversion_curvature_and_mutated_record` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:200) - Selected malformed source cases only, not complete quality-envelope convergence. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::finite_volume::tests::rejects_nonmanifold_missing_boundary_inversion_curvature_and_mutated_record` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:206) - Selected malformed source cases only, not complete quality-envelope convergence.<br>`runmat-analysis-fea[lib]::topology::finite_volume::tests::flat_study_cells_close_within_the_rounding_bound_and_keep_face_errors_detectable` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:475) - The flattest cells of three study meshes at their study offsets; the closure check admits them and still resolves a reversed face (V/2) by more than four orders... |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
@@ -53,7 +53,7 @@ Evidence kind: ResourceAdmission. Criterion: Count construction inventory and ch
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::finite_volume::tests::exact_admission_bounds_succeed_and_each_one_below_rejects` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:237) - Exact finite-volume construction counts and one-below limits; requested bytes are not RSS. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::topology::finite_volume::tests::exact_admission_bounds_succeed_and_each_one_below_rejects` (crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs:253) - Exact finite-volume construction counts and one-below limits; requested bytes are not RSS. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |

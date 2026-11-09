@@ -528,6 +528,8 @@ fn layup(
                         declaration,
                         body,
                         "angle",
+                        // A ply angle is an Angle quantity (`45 deg`, `0 rad`), not a bare
+                        // dimensionless number.
                         runmat_types::physical::DynamicDimension::quantity_type(
                             runmat_types::physical::QuantityKind::Angle,
                         ),

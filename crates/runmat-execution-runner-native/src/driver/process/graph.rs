@@ -199,13 +199,7 @@ fn prepare(
             request
                 .task
                 .console
-                .map(|controls| {
-                    crate::console_retention::ConsoleRetentionOwner::source_subgrant(
-                        request.task.resources.memory_bytes,
-                        controls,
-                        1,
-                    )
-                })
+                .map(|controls| crate::console_source_subgrant(&request.task.resources, controls))
                 .transpose()
                 .map_err(|error| invalid(error.to_string()))?,
         )?,

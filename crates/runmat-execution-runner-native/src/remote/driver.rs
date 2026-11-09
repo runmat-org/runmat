@@ -616,6 +616,19 @@ pub(super) async fn commit_response(
         &response,
         ProgramExecutionResponse::Failure { .. } | ProgramExecutionResponse::RuntimeFailure { .. }
     );
+    if cancelled && failed && console.is_none() {
+        // A cancelled attempt's failure carries no outputs or console transcript,
+        // so the run ends Cancelled without a result, never Failed.
+        return transition(
+            control,
+            config,
+            DriverRunTarget::Cancelled,
+            Some("cancelled-during-execution"),
+            None,
+            None,
+        )
+        .await;
+    }
     let response = match response {
         response @ ProgramExecutionResponse::GraphSuccess { .. } if console.is_none() => {
             let plaintext = serde_json::to_vec(&response).map_err(protocol)?;

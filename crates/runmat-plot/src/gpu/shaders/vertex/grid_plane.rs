@@ -10,14 +10,14 @@ struct Uniforms {
 var<uniform> uniforms: Uniforms;
 
 struct GridParams {
-    major_step: f32,
-    minor_step: f32,
+    major_step_x: f32,
+    minor_step_x: f32,
     fade_start: f32,
     fade_end: f32,
     camera_pos: vec3<f32>,
-    _pad0: f32,
+    major_step_y: f32,
     target_pos: vec3<f32>,
-    _pad1: f32,
+    minor_step_y: f32,
     major_color: vec4<f32>,
     minor_color: vec4<f32>,
 }
@@ -63,8 +63,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let x = input.world_position.x;
     let y = input.world_position.y;
 
-    let minor = max(grid_line(x, grid.minor_step), grid_line(y, grid.minor_step));
-    let major = max(grid_line(x, grid.major_step), grid_line(y, grid.major_step));
+    let minor = max(grid_line(x, grid.minor_step_x), grid_line(y, grid.minor_step_y));
+    let major = max(grid_line(x, grid.major_step_x), grid_line(y, grid.major_step_y));
     let minor_only = minor * (1.0 - major);
 
     // Fade out towards edges of the grid patch (and keep it subtle when very large).

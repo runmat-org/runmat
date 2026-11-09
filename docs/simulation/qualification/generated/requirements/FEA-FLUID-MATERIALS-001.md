@@ -1,6 +1,6 @@
 # FEA-FLUID-MATERIALS-001: Rheology, porous media and species transport
 
-0 PASS, 0 PARTIAL, 0 FAIL, 16 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 14 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## generalized_newtonian
 
@@ -8,7 +8,7 @@ Evidence kind: IndependentReference. Criterion: Power law, Carreau and Carreau-Y
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| generalized_newtonian_flow | tet4 | numerical_kernel | OPEN |  |
+| generalized_newtonian_flow | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::rheology::shear_thinning_power_law_channel_converges_to_the_closed_form_profile` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/rheology.rs:20) - shear-thinning power-law (n = 0.5) channel converges to the closed-form profile; Carreau, Cross and yield-stress laws, temperature dependence and the shear-rate... |
 | generalized_newtonian_flow | tet4 | public_study | OPEN |  |
 | generalized_newtonian_flow | tet10 | numerical_kernel | OPEN |  |
 | generalized_newtonian_flow | tet10 | public_study | OPEN |  |
@@ -30,7 +30,7 @@ Evidence kind: IndependentReference. Criterion: Darcy, Brinkman and Forchheimer 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| porous_media_flow | tet4 | numerical_kernel | OPEN |  |
+| porous_media_flow | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::porous::uniform_flow_through_a_porous_zone_has_the_darcy_forchheimer_gradient` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/porous.rs:11) - uniform flow through a porous slab has the pressure gradient μU/K + ½ρC₂U² (Darcy and Forchheimer terms); Brinkman layers, anisotropy, local thermal equilibrium... |
 | porous_media_flow | tet4 | public_study | OPEN |  |
 | porous_media_flow | tet10 | numerical_kernel | OPEN |  |
 | porous_media_flow | tet10 | public_study | OPEN |  |

@@ -3,7 +3,7 @@
 //! This is the only authority that maps typed response-spectrum and random-response results into
 //! the generic analysis-field transport used by paging, plotting, and artifact persistence.
 
-use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisField, FieldStatistic};
 
 use crate::{
     contracts::{RandomResponseFieldSelector, ResponseSpectrumFieldSelector},
@@ -15,12 +15,20 @@ pub fn response_spectrum_fields(recovery: &ResponseSpectrumFieldRecovery) -> Vec
     let translation = recovery.nodal().translation();
     fields.push(AnalysisField::host_f64(
         ResponseSpectrumFieldSelector::Nodal(translation.quantity()).field_id(),
+        translation
+            .quantity()
+            .layout()
+            .statistic(FieldStatistic::ComponentMagnitudeEnvelope),
         translation.shape().to_vec(),
         translation.values().to_vec(),
     ));
     if let Some(rotation) = recovery.nodal().rotation() {
         fields.push(AnalysisField::host_f64(
             ResponseSpectrumFieldSelector::Nodal(rotation.quantity()).field_id(),
+            rotation
+                .quantity()
+                .layout()
+                .statistic(FieldStatistic::ComponentMagnitudeEnvelope),
             rotation.shape().to_vec(),
             rotation.values().to_vec(),
         ));
@@ -29,6 +37,10 @@ pub fn response_spectrum_fields(recovery: &ResponseSpectrumFieldRecovery) -> Vec
         fields.extend(deformation.iter().map(|field| {
             AnalysisField::host_f64(
                 ResponseSpectrumFieldSelector::Deformation(field.quantity()).field_id(),
+                field
+                    .quantity()
+                    .layout()
+                    .statistic(FieldStatistic::ComponentMagnitudeEnvelope),
                 field.shape().to_vec(),
                 field.values().to_vec(),
             )
@@ -46,11 +58,19 @@ pub fn random_response_fields(result: &ModalRandomResponseResult) -> Vec<Analysi
             [
                 AnalysisField::host_f64(
                     RandomResponseFieldSelector::root_mean_square(field.quantity()).field_id(),
+                    field
+                        .quantity()
+                        .layout()
+                        .statistic(FieldStatistic::RootMeanSquare),
                     shape.clone(),
                     field.rms().to_vec(),
                 ),
                 AnalysisField::host_f64(
                     RandomResponseFieldSelector::variance(field.quantity()).field_id(),
+                    field
+                        .quantity()
+                        .layout()
+                        .statistic(FieldStatistic::Variance),
                     shape,
                     field.variance().to_vec(),
                 ),

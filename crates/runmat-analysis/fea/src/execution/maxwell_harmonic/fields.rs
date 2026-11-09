@@ -248,11 +248,13 @@ impl MaxwellHarmonicSolverResult {
             .into_iter()
             .zip(definitions)
             .map(|(field, definition)| {
+                let layout = definition.layout();
                 RecoveredField::new(
                     definition,
                     RecoveredFieldSample::Final,
                     AnalysisField::host_f64(
                         field.field_id,
+                        layout,
                         field.shape,
                         field.values.values().collect(),
                     ),

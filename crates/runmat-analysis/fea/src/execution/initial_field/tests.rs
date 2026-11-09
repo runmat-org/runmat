@@ -43,6 +43,11 @@ fn artifact(
         RecoveredFieldSample::Final,
         AnalysisField {
             field_id: "initial".into(),
+            layout: runmat_analysis_core::AnalysisFieldLayout::new(
+                quantity,
+                runmat_analysis_core::FieldLocation::Node,
+                shape.clone(),
+            ),
             shape: if shape == ObservationValueShape::Scalar {
                 vec![4]
             } else {
@@ -254,6 +259,7 @@ fn initial_input_does_not_silently_select_a_history_sample_or_invalid_temperatur
             RecoveredFieldSample::Final,
             AnalysisField {
                 field_id: "initial".into(),
+                layout: original.fields()[0].definition().layout(),
                 shape: vec![4],
                 values: AnalysisFieldValues::HostF64(vec![value; 4]),
             },

@@ -1,6 +1,8 @@
 //! Placement-neutral orchestration of an exact authored acoustic frequency plan.
 //! Each entry owns its numerical evidence; aggregation is a separately governed task.
 use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
+pub use crate::sampled_study_observations::history::CompletedEntryHistories;
+use crate::sampled_study_observations::history::{EntryHistoryContext, EntryHistoryPhase};
 use crate::AnalysisPhaseExecutionEvidence;
 use crate::{
     import_acoustic_frequency_assembly, prepare_acoustic_frequency_assembly_task,
@@ -39,6 +41,10 @@ pub struct CompletedAcousticStudy {
     pub compiled: CompiledAnalysisStudy,
     pub workload: AcousticFrequencyWorkload,
     pub entries: Vec<CompletedAcousticStudyEntry>,
+    /// Histories over the frequencies of the sweep, finalized after the last entry.
+    pub histories: Option<CompletedEntryHistories>,
+    /// The original checkpoint and finalization task responses of `histories`, in order.
+    pub history_closures: Vec<AcousticStudyResultClosure>,
     pub assembly: ImportedAcousticFrequencyAssembly,
     pub resource_usage: PreparedResourceUsage,
     pub assembly_closure: AcousticStudyAssemblyClosure,
@@ -57,11 +63,21 @@ pub struct AcousticStudyPreparation {
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
 }
 
+/// Lifecycle of the study-level history phase that runs after every entry completes.
+enum AcousticStudyHistoryState {
+    NotStarted,
+    Running(Box<EntryHistoryPhase>),
+    Complete(Option<CompletedEntryHistories>),
+}
+
 /// The coordinator admits complete entry evidence before preparing immutable fan-in.
 pub struct AcousticStudyCoordinator {
     preparation: Arc<AcousticStudyPreparation>,
     workload: AcousticFrequencyWorkload,
     entries: Vec<AcousticStudyEntryCoordinator>,
+    history: AcousticStudyHistoryState,
+    history_closures: Vec<AcousticStudyResultClosure>,
+    history_attempts: Vec<crate::PlannedResourceUsageAttempt>,
     assembly_task: Option<PreparedAcousticFrequencyAssemblyTask>,
     assembly: Option<ImportedAcousticFrequencyAssembly>,
     assembly_closure: Option<AcousticStudyAssemblyClosure>,
@@ -97,6 +113,9 @@ impl AcousticStudyCoordinator {
             preparation,
             workload,
             entries,
+            history: AcousticStudyHistoryState::NotStarted,
+            history_closures: Vec::new(),
+            history_attempts: Vec::new(),
             assembly_task: None,
             assembly: None,
             assembly_closure: None,
@@ -108,7 +127,9 @@ impl AcousticStudyCoordinator {
         &self.entries
     }
     pub fn entries_mut(&mut self) -> AnalysisBridgeResult<&mut [AcousticStudyEntryCoordinator]> {
-        if self.assembly_task.is_some() {
+        if self.assembly_task.is_some()
+            || !matches!(self.history, AcousticStudyHistoryState::NotStarted)
+        {
             return Err(invalid("entry lifecycle is frozen for assembly"));
         }
         Ok(&mut self.entries)
@@ -134,9 +155,131 @@ impl AcousticStudyCoordinator {
         &self.preparation.product.compiled
     }
 
+    fn history_context<'a>(
+        preparation: &'a AcousticStudyPreparation,
+        entries: &[AcousticStudyEntryCoordinator],
+    ) -> AnalysisBridgeResult<EntryHistoryContext<'a>> {
+        let first = entries
+            .first()
+            .ok_or_else(|| invalid("acoustic study has no entries"))?;
+        Ok(EntryHistoryContext {
+            producer: first.producer()?,
+            step: preparation.selected_step(),
+            source: crate::ObservationHistoryFinalizationSource::VolumeMesh {
+                mesh: first.mesh_objects()?,
+            },
+            history_context:
+                runmat_analysis_fea::execution::ObservationHistorySourceContext::VolumeMesh {
+                    mesh: &preparation.mesh,
+                },
+            program_revision: &preparation.program_revision,
+            chunk_bytes: preparation.output_policy.chunk_bytes(),
+            inventory_limits: preparation.output_policy.inventory_limits(),
+        })
+    }
+
+    /// Prepare the next wave of the study-level history phase, which checkpoints every
+    /// history across the complete entries in frequency order and then finalizes it. The
+    /// tasks of a wave are independent; each wave depends on the one before. An empty wave
+    /// once every history is published (at once when the step declares none).
+    pub fn prepare_history(
+        &mut self,
+    ) -> AnalysisBridgeResult<Vec<crate::SampledObservationTask<'_>>> {
+        if self.assembly_task.is_some() || self.entries.iter().any(|entry| !entry.is_complete()) {
+            return Err(invalid(
+                "acoustic histories require complete, unassembled entry evidence",
+            ));
+        }
+        let preparation = Arc::clone(&self.preparation);
+        let context = Self::history_context(&preparation, &self.entries)?;
+        if matches!(self.history, AcousticStudyHistoryState::NotStarted) {
+            let samples = self
+                .entries
+                .iter()
+                .map(AcousticStudyEntryCoordinator::history_sample)
+                .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+            self.history = match EntryHistoryPhase::new(&context, samples)? {
+                Some(phase) => AcousticStudyHistoryState::Running(Box::new(phase)),
+                None => AcousticStudyHistoryState::Complete(None),
+            };
+        }
+        let AcousticStudyHistoryState::Running(phase) = &mut self.history else {
+            return Ok(Vec::new());
+        };
+        if phase.completed().is_none() && !phase.prepare(&context)?.is_empty() {
+            return Ok(self.pending_history_tasks());
+        }
+        let AcousticStudyHistoryState::Running(phase) =
+            std::mem::replace(&mut self.history, AcousticStudyHistoryState::NotStarted)
+        else {
+            unreachable!("history phase is running");
+        };
+        self.history = AcousticStudyHistoryState::Complete(Some(phase.into_completed()?));
+        Ok(Vec::new())
+    }
+
+    /// The prepared history wave, in task order.
+    pub fn pending_history_tasks(&self) -> Vec<crate::SampledObservationTask<'_>> {
+        match &self.history {
+            AcousticStudyHistoryState::Running(phase) => phase.pending(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Complete the prepared history wave with one response and its accounting per task, in
+    /// task order.
+    pub fn complete_history(
+        &mut self,
+        source: &impl CacheImport,
+        responses: Vec<(ProgramExecutionResponse, AnalysisPhaseExecutionEvidence)>,
+    ) -> AnalysisBridgeResult<()> {
+        let preparation = Arc::clone(&self.preparation);
+        let context = Self::history_context(&preparation, &self.entries)?;
+        let AcousticStudyHistoryState::Running(phase) = &mut self.history else {
+            return Err(invalid("acoustic history phase is not running"));
+        };
+        let tasks = phase.pending();
+        if tasks.is_empty() || tasks.len() != responses.len() {
+            return Err(invalid(
+                "acoustic history responses differ from the prepared wave",
+            ));
+        }
+        let mut closures = Vec::with_capacity(tasks.len());
+        let mut attempts = Vec::new();
+        for (task, (response, accounting)) in tasks.iter().zip(&responses) {
+            validate_accounting(task.host, task.resource_plan, response, accounting)?;
+            attempts.extend(accounting.resource_graph(task.resource_plan)?.attempts);
+            closures.push(AcousticStudyResultClosure::new(
+                AcousticStudyResultPhase::History {
+                    ordinal: self.history_closures.len() + closures.len(),
+                },
+                task.host,
+                response,
+                accounting,
+            ));
+        }
+        drop(tasks);
+        phase.complete(
+            source,
+            responses
+                .into_iter()
+                .map(|(response, _)| response)
+                .collect(),
+            &context,
+        )?;
+        self.history_closures.extend(closures);
+        self.history_attempts.extend(attempts);
+        Ok(())
+    }
+
     pub fn prepare_assembly(
         &mut self,
     ) -> AnalysisBridgeResult<&PreparedAcousticFrequencyAssemblyTask> {
+        if !matches!(self.history, AcousticStudyHistoryState::Complete(_)) {
+            return Err(invalid(
+                "acoustic assembly requires the finalized histories",
+            ));
+        }
         if self.assembly_task.is_some() || self.entries.iter().any(|entry| !entry.is_complete()) {
             return Err(invalid(
                 "acoustic assembly requires complete, unassembled entry evidence",
@@ -227,6 +370,7 @@ impl AcousticStudyCoordinator {
             .iter()
             .flat_map(|entry| entry.resource_attempts().iter().cloned())
             .collect();
+        attempts.extend(self.history_attempts.iter().cloned());
         attempts.extend(accounting.resource_graph(&task.resource_plan)?.attempts);
         let graph = PlannedResourceUsageGraph::new(attempts, wave_wall_millis)?;
         let usage = crate::prepare_planned_resource_graph_usage(
@@ -272,6 +416,11 @@ impl AcousticStudyCoordinator {
             compiled: preparation.product.compiled,
             workload: self.workload,
             entries,
+            histories: match self.history {
+                AcousticStudyHistoryState::Complete(histories) => histories,
+                _ => return Err(invalid("acoustic histories are not finalized")),
+            },
+            history_closures: self.history_closures,
             assembly: self.assembly.expect("completed assembly"),
             resource_usage: self.resource_usage.expect("completed assembly accounting"),
             assembly_closure: self.assembly_closure.expect("completed assembly closure"),

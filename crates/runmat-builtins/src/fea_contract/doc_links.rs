@@ -16,7 +16,8 @@ const fn source(label: &'static str, url: &'static str) -> BuiltinDocumentationL
     }
 }
 
-pub const USING_FEA: BuiltinDocumentationLink = doc("Using FEA", "/docs/simulation/using-fea");
+pub const GET_STARTED: BuiltinDocumentationLink =
+    doc("Get started with FEA", "/docs/simulation/get-started");
 pub const MODELS: BuiltinDocumentationLink = doc("FEA models", "/docs/simulation/models");
 pub const STUDY_CONTRACTS: BuiltinDocumentationLink =
     doc("Study contracts", "/docs/simulation/study-contracts");

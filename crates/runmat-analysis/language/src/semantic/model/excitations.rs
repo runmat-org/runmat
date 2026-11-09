@@ -188,6 +188,10 @@ fn explicit_excitation(
         direction,
         distribution: if signal.shape().topology_component_count().is_some() {
             ExcitationDistribution::TopologyField
+        } else if kind == AuthoredExcitationKind::HeatGeneration
+            && signal.quantity() == runmat_analysis_core::PhysicalQuantityKind::Power
+        {
+            ExcitationDistribution::PreserveResultant
         } else {
             kind.default_distribution()
         },
@@ -361,12 +365,21 @@ fn load(
         return None;
     };
     let (kind, quantity) = kind_policy(declaration, kind, statement.span, diagnostics)?;
+    // `heat_generation on <solid> = <W>` is a total heat rate, distributed uniformly over the
+    // region's meshed volume when the study compiles; W/m^3 stays a density.
+    let total_heat_rate = kind == AuthoredExcitationKind::HeatGeneration
+        && crate::semantic::units::is_dimension(value, runmat_types::PhysicalDimension::POWER);
+    let (quantity, distribution) = if total_heat_rate {
+        ("heat_rate", ExcitationDistribution::PreserveResultant)
+    } else {
+        (quantity, kind.default_distribution())
+    };
     let signal_id = format!("load.{name}.value");
     let signal = if signals::depends_on_model_input(value) {
         LoweredLoadSignal::Parameterized(Box::new(signals::parameterized_from_expression(
             declaration,
             &signal_id,
-            kind.quantity(),
+            kind.signal_quantity(distribution),
             quantity,
             value,
             diagnostics,
@@ -402,7 +415,7 @@ fn load(
             target,
             frame,
             direction: None,
-            distribution: kind.default_distribution(),
+            distribution,
             kinematics: ExcitationKinematics::FixedFrame,
             signal_id: SignalId(signal_id),
             active_step_ids: Vec::new(),

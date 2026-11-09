@@ -248,6 +248,30 @@ impl RecoveredFieldDefinition {
         self.entity_domain
     }
 
+    /// The typed layout of this definition's host storage.
+    pub fn layout(&self) -> runmat_analysis_core::AnalysisFieldLayout {
+        let layout = runmat_analysis_core::AnalysisFieldLayout::new(
+            self.quantity,
+            self.location,
+            self.value_shape.clone(),
+        );
+        match self.numeric_representation {
+            RecoveredFieldNumericRepresentation::Real => layout,
+            RecoveredFieldNumericRepresentation::ComplexInterleaved => {
+                layout.representation(runmat_analysis_core::ComplexRepresentation::Complex)
+            }
+        }
+    }
+
+    /// The layout pre-value profiles charge: this definition's layout at the widest published
+    /// state a producer may store (stepped and modal fields carry their ordinal in storage).
+    pub fn profile_layout(&self) -> runmat_analysis_core::AnalysisFieldLayout {
+        let widest =
+            usize::try_from(runmat_types::wire_integer::MAX_WIRE_INTEGER).unwrap_or(usize::MAX);
+        self.layout()
+            .with_ordinal(runmat_analysis_core::FieldOrdinal::Step(widest))
+    }
+
     pub fn value_shape(&self) -> &ObservationValueShape {
         &self.value_shape
     }
@@ -848,6 +872,8 @@ pub enum RecoveredFieldError {
     StorageIdentifierMismatch,
     #[error("recovered field storage shape is invalid")]
     StorageShapeMismatch,
+    #[error("recovered field storage layout differs from its definition")]
+    StorageLayoutMismatch,
     #[error("recovered field catalog contains a duplicate semantic sample")]
     CatalogDuplicateSample,
     #[error("recovered field location is not supported by the current spatial evaluator")]

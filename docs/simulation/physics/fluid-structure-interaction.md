@@ -4,7 +4,7 @@ Fluid–structure interaction (FSI) transfers fluid traction to a structure and 
 motion back to the fluid. The paired interface is explicit; matching-looking CAD faces do not
 create coupling.
 
-`fea run` executes steady and transient fluid–structure studies. The fluid side is the canonical
+`runmat run` executes steady and transient fluid–structure studies. The fluid side is the canonical
 finite-volume flow of the [fluid flow](./fluid) analysis on the deformed fluid domain; the
 structure is a small-strain linear elastic solid on the solid regions of the same conformal
 mesh. The two sides are iterated to agreement in every solve or time interval.
@@ -39,8 +39,8 @@ RunMat applies them as follows:
 
 | Procedure | Contract | Execution |
 | --- | --- | --- |
-| `fluid_structure_interaction steady` | Equilibrium deflection under steady flow and the flow through the deflected passage | Runs from `fea run` |
-| `fluid_structure_interaction transient` | Moving-mesh backward-Euler flow and average-acceleration Newmark structure, converged every interval | Runs from `fea run` |
+| `fluid_structure_interaction steady` | Equilibrium deflection under steady flow and the flow through the deflected passage | Runs from `runmat run` |
+| `fluid_structure_interaction transient` | Moving-mesh backward-Euler flow and average-acceleration Newmark structure, converged every interval | Runs from `runmat run` |
 | `fluid_structure_interaction nonlinear` | Load-factor domain | Typed contract; not yet executed |
 
 ## How do I declare an FSI interface?
@@ -100,6 +100,13 @@ aligned symmetry planes (`structural.symmetry`) are also admitted.
   accepted interval, its coupling iterations and residual, the cumulative interface work, the
   strain and kinetic energy (average acceleration makes their sum equal the work), and the
   structure's dynamic residual.
+- `field.element.stress` and `field.element.von_mises_stress` on the solid, recovered from the
+  converged displacement:
+  [not yet in the current release](pending:fluid-structure-interaction.solid-stress).
+
+A one-way study, where a structural analysis takes the pressure and wall shear stress of an earlier
+fluid analysis as a load on the wetted faces without feeding the deflection back into the flow, is
+[not yet in the current release](pending:fluid-structure-interaction.one-way-fluid-loads).
 
 ## How do I choose coupling time step and convergence tolerance?
 
@@ -110,4 +117,4 @@ are outside the envelope.
 
 See [fluid flow](./fluid), [structural analysis](./structural),
 [fluid constraints](../constraints/fluid), [structural constraints](../constraints/structural),
-[interfaces](../constraints/interfaces), and [current status](../status).
+[interfaces](../constraints/interfaces), and [current status](../validation/status.md).

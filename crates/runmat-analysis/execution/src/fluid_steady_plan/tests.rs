@@ -245,8 +245,8 @@ fn native_recovery_has_exact_original_layout_source_request_and_plan_without_sta
     let native = original
         .recover_native_fields(&w, &m, &recovered.request)
         .unwrap();
-    // Velocity, pressure, face flux, vorticity and wall shear stress.
-    assert_eq!(native.fields().len(), 5);
+    // Velocity, pressure, face flux, vorticity, wall shear stress and face pressure.
+    assert_eq!(native.fields().len(), 6);
 }
 
 fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {

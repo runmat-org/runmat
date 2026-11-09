@@ -11,10 +11,10 @@ use crate::{
 const SPLIT: f64 = 0.4;
 const K_LOWER: f64 = 40.0;
 const K_UPPER: f64 = 10.0;
-const HOT: f64 = 400.0;
-const COLD: f64 = 300.0;
+pub(super) const HOT: f64 = 400.0;
+pub(super) const COLD: f64 = 300.0;
 
-fn boundary(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
+pub(super) fn boundary(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
     let mut target = RegionTarget::boundary(
         runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),
     );
@@ -43,7 +43,10 @@ fn material(id: &str, k: f64) -> MaterialModel {
     m
 }
 
-fn workload(mesh: &SolverMeshArtifact, transfer: ThermalInterfaceTransfer) -> ThermalWorkload {
+pub(super) fn workload(
+    mesh: &SolverMeshArtifact,
+    transfer: ThermalInterfaceTransfer,
+) -> ThermalWorkload {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.structural = None;
     model.thermo_mechanical = None;
@@ -101,11 +104,12 @@ fn workload(mesh: &SolverMeshArtifact, transfer: ThermalInterfaceTransfer) -> Th
 
 /// The joint as two named faces, one per body, as an imprinted CAD assembly names them.
 fn mesh() -> SolverMeshArtifact {
-    let mut mesh = layered_box_mesh(
-        [2, 5, 2],
-        [0.5, 1.0, 0.5],
-        &[(SPLIT, "lower"), (2.0, "upper")],
-    );
+    mesh_with([2, 5, 2])
+}
+
+/// The two-layer joint box with `cells` hexahedral cells (each split into tetrahedra).
+pub(super) fn mesh_with(cells: [usize; 3]) -> SolverMeshArtifact {
+    let mut mesh = layered_box_mesh(cells, [0.5, 1.0, 0.5], &[(SPLIT, "lower"), (2.0, "upper")]);
     for face in &mut mesh.topology.boundary_faces {
         if let Some(lower) = face
             .provenance

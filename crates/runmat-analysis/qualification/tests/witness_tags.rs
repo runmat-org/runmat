@@ -1,9 +1,10 @@
 //! Every `// witness:` tag in the repository must name a real obligation, only required
 //! envelopes, and sit on a real test function. A stale or broken tag fails here.
 use runmat_analysis_qualification::{
+    checks,
     requirement::{Envelope, ExecutionEnvelope, Formulation, MeshOrder},
     requirements,
-    witness::{parse_tag_text, repository_root, scan, validate_tags},
+    witness::{parse_tag_text, repository_root, scan, split_checks, validate_tags},
 };
 
 // witness: FEA-RELEASE-REGISTER-001/witness_tags_valid @ shared_infrastructure/mesh_independent/source_check;
@@ -56,6 +57,22 @@ fn tag_text_parses_alternatives_and_rejects_unknown_names() {
     assert!(parse_tag_text("A/b @ thermal_steady/tet4/serial; boundary: x").is_err());
     assert!(parse_tag_text("A/b @ thermal_steady/tet4/durable;").is_err());
     assert!(parse_tag_text("A/b @ thermal_steady/tet4/durable; boundary:  ").is_err());
+}
+
+#[test]
+fn check_field_splits_out_and_names_ledger_checks() {
+    let (rest, ids) =
+        split_checks("A/b @ thermal_steady/tet4/durable; check: one, two; boundary: x");
+    assert_eq!(ids, ["one", "two"]);
+    assert_eq!(rest, "A/b @ thermal_steady/tet4/durable; boundary: x");
+    assert!(parse_tag_text(&rest).is_ok());
+    // Every non-planned ledger check is named by some witness tag or quotes receipts; the docs
+    // lint enforces that, and here every check named at a test exists in the ledger.
+    let known: Vec<_> = checks().collect();
+    let (tags, _) = scan(&repository_root());
+    let named: std::collections::BTreeSet<_> = tags.iter().flat_map(|t| t.checks.iter()).collect();
+    assert!(!named.is_empty());
+    assert!(named.iter().all(|id| known.contains(&id.as_str())));
 }
 
 // witness: FEA-RELEASE-REGISTER-001/evidence_catalog_generated @ shared_infrastructure/mesh_independent/source_check;

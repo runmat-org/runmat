@@ -437,7 +437,8 @@ fn integration_work(
                     .ok_or(ObservationError::Limit("volume reduction work"))
             })
         }
-        ResolvedObservationTarget::Boundary { face_indices, .. } => {
+        ResolvedObservationTarget::Boundary { face_indices, .. }
+        | ResolvedObservationTarget::BoundaryPair { face_indices, .. } => {
             let projection =
                 topology
                     .solid_projection

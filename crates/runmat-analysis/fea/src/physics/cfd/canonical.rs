@@ -125,7 +125,10 @@ impl Default for CanonicalFluidPolicy {
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,
             maximum_linear_iterations: 1000,
-            gmres_restart: 32,
+            // The coupled step's flexible GMRES stagnates at restart 32 (3 230 iterations,
+            // ~241 s per startup interval on the 12k-cell channel); 128 keeps enough of the
+            // Krylov space (454 iterations). Cost: (2r+1) vectors of 4n, ~8 KB per cell.
+            gmres_restart: 128,
             momentum_relaxation: 0.5,
             pressure_relaxation: 0.25,
             linear_relative_tolerance: 1e-8,
@@ -184,6 +187,14 @@ pub enum CanonicalFluidError {
     Accounting(#[from] runmat_simulation_usage::LedgerError),
     #[error("invalid canonical fluid input: {0}")]
     Invalid(&'static str),
+    /// A geometry-derived authority failed at one cell: the cell names the mesh element.
+    #[error("invalid canonical fluid input: {reason} at element {element_id} (centroid {centroid_m:?} m, {samples} stencil samples)")]
+    InvalidCell {
+        reason: &'static str,
+        element_id: u64,
+        centroid_m: [f64; 3],
+        samples: usize,
+    },
     #[error("unsupported canonical fluid envelope: {0}")]
     Unsupported(&'static str),
     #[error("canonical fluid resource admission failed: {0}")]
@@ -373,7 +384,9 @@ impl<'a> CanonicalFluidProblem<'a> {
                 | FluidConstraintKind::Symmetry { target }
                 | FluidConstraintKind::PressureReference { target, .. } => target,
                 FluidConstraintKind::Periodic(_) => {
-                    return Err(CanonicalFluidError::Unsupported("periodic fluid boundary"));
+                    return Err(CanonicalFluidError::Unsupported(
+                        crate::admission::FLUID_PERIODIC.message,
+                    ));
                 }
             };
             add_entities(target.resolved_entities().len())?;
@@ -395,7 +408,11 @@ impl<'a> CanonicalFluidProblem<'a> {
         if items > policy.maximum_authority_items {
             return Err(CanonicalFluidError::Resource("authority items"));
         }
-        let reservation = resources::reserve(source, topology, policy)?;
+        // Necessary early gate: every cell's momentum row holds at least its own block, so a
+        // ceiling below this minimum rejects before the stencils are derived. The admitted
+        // reservation is rederived below from the exact momentum pattern.
+        let reservation =
+            resources::reserve_exact(source, topology, policy, topology.cells.len() as u64)?;
         if constraints
             .iter()
             .any(|c| c.constraint_id.is_empty() || c.constraint_id.len() > 256)
@@ -409,7 +426,9 @@ impl<'a> CanonicalFluidProblem<'a> {
         {
             return Err(CanonicalFluidError::Resource("boundary authority metadata"));
         }
-        let reservation = resources::admit_authority_profile(
+        // Count-only gate before boundary/source binding allocates; the admitted reservation is
+        // rederived below from the momentum pattern.
+        resources::admit_authority_profile(
             source,
             constraints,
             boundary_operators,
@@ -497,6 +516,22 @@ impl<'a> CanonicalFluidProblem<'a> {
         let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
         let momentum_jacobian =
             jacobian::MomentumJacobianPattern::derive(topology, &boundaries, &velocity_stencils)?;
+        // Admit the exact momentum stencil now that its pattern exists; the count-only bound
+        // above only gated the derivation.
+        let reservation = resources::admit_authority_profile(
+            source,
+            constraints,
+            boundary_operators,
+            signals,
+            excitations,
+            policy,
+            resources::reserve_exact(
+                source,
+                topology,
+                policy,
+                momentum_jacobian.block_column_count(),
+            )?,
+        )?;
         let numerical_input_identity = identity(
             "fea-fluid-numerical-input/v8",
             &(

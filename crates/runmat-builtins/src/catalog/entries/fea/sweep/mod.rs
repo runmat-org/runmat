@@ -62,7 +62,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         BuiltinDocumentationFaq { question: "What does FailFast change?", answer: "With the default `true`, the sweep stops at the first failed study. With `false`, every study is attempted and failures are collected with their one-based study index." },
         BuiltinDocumentationFaq { question: "Can a sweep mix different geometries or physics?", answer: "Yes. Each element is a complete study with its own geometry, model, and execution plan; only the study ids must be unique." },
     ],
-    links: &[doc_links::SWEEPS, doc_links::STUDY_CONTRACTS, doc_links::USING_FEA],
+    links: &[doc_links::SWEEPS, doc_links::STUDY_CONTRACTS, doc_links::GET_STARTED],
     implementation: &[doc_links::FEA_MODELING_SOURCE],
     verification: &[
         doc_links::STUDY_AND_SWEEP_CONSTRUCTION_TEST,

@@ -20,10 +20,9 @@ guess a face ordinal from a viewport.
 ## 2. Declare geometry and regions
 
 The example declares both solid occurrences, a support on each disconnected part, and a load face
-on the left part. Each region states its topology role and expected cardinality. Run `runmat fea
-check` after this step; a stale or ambiguous selector should fail before meshing.
+on the left part. Each region states its topology role and expected cardinality. Run `runmat check` after this step; a stale or ambiguous selector should fail before meshing.
 
-The included STEP file carries the authored body and end-face names used below. No operator-local named-selection metadata is required. The study stays in one readable source file; exporting the project preserves its CAD names.
+The included STEP file carries the authored body and end-face names the study selects; `select name` resolves only names authored in the CAD file. The study stays in one readable source file; exporting the project preserves its CAD names.
 
 ```fea
 geometry bracket {
@@ -110,9 +109,9 @@ study structural_static {
 ## 6. Check, plan, and run
 
 ```sh
-runmat fea check docs/simulation/examples/structural-static.fea
-runmat fea plan docs/simulation/examples/structural-static.fea
-runmat fea run docs/simulation/examples/structural-static.fea
+runmat check docs/simulation/examples/structural-static.fea
+runmat plan docs/simulation/examples/structural-static.fea
+runmat run docs/simulation/examples/structural-static.fea
 ```
 
 Read check diagnostics before planning. In the plan, verify the selected root, geometry, mesh,
@@ -132,5 +131,5 @@ plot(stress, "Edges", true);
 ```
 
 The `.m` object-construction path and `.fea` file path share canonical study and result contracts,
-but their current public entrypoints differ. `runmat fea run file.fea` is the file workflow;
+but their current public entrypoints differ. `runmat run file.fea` is the file workflow;
 `fea.run(study)` accepts a typed `fea.Study` object, not a path.

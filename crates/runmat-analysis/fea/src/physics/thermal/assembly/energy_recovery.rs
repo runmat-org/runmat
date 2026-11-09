@@ -96,7 +96,7 @@ impl ThermalOperatorAssembly {
                         }
                     }
                 })
-                .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+                .map_err(ThermalAssemblyError::from)?;
         }
 
         let mut boundary_loss = PowerSum::default();
@@ -137,7 +137,7 @@ impl ThermalOperatorAssembly {
                             }
                         }
                     })
-                    .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+                    .map_err(ThermalAssemblyError::from)?;
             }
         }
         if model

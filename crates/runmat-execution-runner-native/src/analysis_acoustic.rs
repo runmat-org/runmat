@@ -120,6 +120,56 @@ pub(crate) async fn execute_with_pool(
             preceding[ordinal] = Some(dependency);
         }
     }
+    let mut terminal = preceding
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| protocol("acoustic assembly is missing a terminal entry dependency"))?;
+    // Histories span the frequencies: checkpoint and finalize them once every entry is done,
+    // one wave at a time; the tasks of a wave are independent.
+    loop {
+        validate_pool(pool, scope_id, pool_id)?;
+        let tasks = coordinator.prepare_history().map_err(protocol)?;
+        if tasks.is_empty() {
+            break;
+        }
+        let prepared = tasks
+            .iter()
+            .map(|task| PreparedAnalysisTask {
+                host: task.host,
+                program: task.program,
+                resource_plan: Some(task.resource_plan),
+                prepared_closure: None,
+                fallback_resources: policy.resources.clone(),
+                dependencies: terminal.clone(),
+            })
+            .collect::<Vec<_>>();
+        let executed = execute_analysis_task_batch(
+            pool,
+            prepared,
+            AnalysisTaskBatchPolicy {
+                retry: policy.retry,
+                deadline_unix_millis: policy.deadline_unix_millis,
+                priority: policy.priority,
+            },
+        )
+        .await
+        .map_err(|error| protocol(format!("acoustic history wave failed: {error}")))?;
+        if executed.len() != tasks.len() {
+            return Err(protocol(
+                "acoustic history wave response inventory differs from submitted tasks",
+            ));
+        }
+        let mut wave = Vec::with_capacity(executed.len());
+        let mut dependencies = Vec::with_capacity(executed.len());
+        for (task, executed) in tasks.iter().zip(executed) {
+            let attempt = planned_phase_execution(task.resource_plan, &executed)?;
+            dependencies.push(dependency(&executed));
+            wave.push((executed.response, attempt));
+        }
+        drop(tasks);
+        coordinator.complete_history(pool, wave).map_err(protocol)?;
+        terminal = dependencies;
+    }
     let assembly = coordinator.prepare_assembly().map_err(protocol)?;
     validate_pool(pool, scope_id, pool_id)?;
     let (executed, accounting) = execute_one(
@@ -127,10 +177,7 @@ pub(crate) async fn execute_with_pool(
         &assembly.host,
         &assembly.program,
         &assembly.resource_plan,
-        preceding
-            .into_iter()
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| protocol("acoustic assembly is missing a terminal entry dependency"))?,
+        terminal,
         &policy,
     )
     .await?;

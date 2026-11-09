@@ -54,7 +54,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         BuiltinDocumentationFaq { question: "When should I use Sequence instead of Steps?", answer: "Use `Steps` for independent single-step analyses. Use a `fea.AnalysisSequence` whenever activation, state transfer between steps, branching, or restart policy matters." },
         BuiltinDocumentationFaq { question: "Why does fea.model accept a model without materials?", answer: "Construction only checks component types and geometry ownership. The complete model rules, including at least one material and one constraint or boundary, are checked when you build a study." },
     ],
-    links: &[doc_links::MODELS, doc_links::STUDY_CONTRACTS, doc_links::USING_FEA],
+    links: &[doc_links::MODELS, doc_links::STUDY_CONTRACTS, doc_links::GET_STARTED],
     implementation: &[doc_links::FEA_MODELING_SOURCE],
     verification: &[
         doc_links::STUDY_AND_SWEEP_CONSTRUCTION_TEST,

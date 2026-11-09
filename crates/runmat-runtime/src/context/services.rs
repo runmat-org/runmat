@@ -1689,7 +1689,7 @@ pub trait RuntimeAnalysisService {
     >;
 
     /// Execute a typed `.fea` study document by path through the host's public study runner
-    /// (`runmat fea run`), returning its authenticated publication. Hosts without a native
+    /// (`runmat run`), returning its authenticated publication. Hosts without a native
     /// study runner refuse explicitly.
     fn execute_document(
         &self,

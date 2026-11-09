@@ -83,6 +83,7 @@ pub(super) fn map_fea_run_error(
                 | ResourcePlanningError::CanonicalWireCapacity { .. }
                 | ResourcePlanningError::AccuracyCeiling { .. }
                 | ResourcePlanningError::StaticSolveCeiling { .. }
+                | ResourcePlanningError::ThermalSolveCeiling { .. }
                 | ResourcePlanningError::Inventory(_)
                 | ResourcePlanningError::Capability(_)
                 | ResourcePlanningError::Accelerator { .. } => OperationErrorType::Capacity,

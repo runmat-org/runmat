@@ -10,7 +10,8 @@ use runmat_analysis_fea::execution::{
     AnalysisTransportProfiler, ThermalWorkload, THERMAL_RECEIPT_MAX_ENCODED_BYTES,
 };
 use runmat_analysis_fea::planning::resource::{
-    build_thermal_resource_plan, FeaResourcePlan, LocalExecutionPlan, PreparedThermalResourceFacts,
+    build_thermal_resource_plan_from, FeaResourcePlan, LocalExecutionPlan,
+    PreparedThermalResourceFacts,
 };
 use runmat_execution::Digest;
 use runmat_execution_artifact::ObjectNamespace;
@@ -53,8 +54,9 @@ pub fn rederive_thermal_resource_plan(
     let local_execution = LocalExecutionPlan::from_cpu_millicores(declared.request.cpu_millicores)
         .map_err(|error| crate::AnalysisBridgeError::Invalid(error.to_string()))?;
     let field_source = source::decode(workload, mesh, inputs, true)?;
+    let numerical = workload.prepare_primary_fields(mesh)?;
     let (result_output, receipt_output, state_profiles_output) =
-        projected_thermal_outputs(workload, mesh, policy)?;
+        projected_thermal_outputs(workload, mesh, &numerical, policy)?;
     let facts = PreparedThermalResourceFacts {
         local_execution,
         field_source: source::facts(field_source.as_ref(), mesh, inputs)?,
@@ -64,9 +66,10 @@ pub fn rederive_thermal_resource_plan(
         state_profiles_output,
         output_set: projected_output_set_resource_facts(),
     };
-    Ok(build_thermal_resource_plan(
+    Ok(build_thermal_resource_plan_from(
         workload,
         mesh,
+        &numerical,
         policy.chunk_bytes(),
         facts,
     )?)
@@ -96,8 +99,6 @@ pub(crate) fn prepare_thermal_inputs_with_source(
             "thermal retained field requires its original source binding".into(),
         ));
     }
-    let (result_output, receipt_output, state_profiles_output) =
-        projected_thermal_outputs(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ThermalWorkload,
         workload.identity()?.digest(),
@@ -129,6 +130,10 @@ pub(crate) fn prepare_thermal_inputs_with_source(
             policy.inventory_limits(),
         )?);
     }
+    // One preassembly derivation serves the output projection and the resource plan.
+    let numerical = workload.prepare_primary_fields(mesh)?;
+    let (result_output, receipt_output, state_profiles_output) =
+        projected_thermal_outputs(workload, mesh, &numerical, policy)?;
     let facts = PreparedThermalResourceFacts {
         local_execution,
         field_source: source::facts(field_source, mesh, &inputs)?,
@@ -138,7 +143,9 @@ pub(crate) fn prepare_thermal_inputs_with_source(
         state_profiles_output,
         output_set: projected_output_set_resource_facts(),
     };
-    let resource_plan = build_thermal_resource_plan(workload, mesh, policy.chunk_bytes(), facts)?;
+    let resource_plan =
+        build_thermal_resource_plan_from(workload, mesh, &numerical, policy.chunk_bytes(), facts)?;
+    drop(numerical);
     Ok(PreparedThermalInputs {
         inputs,
         resource_plan,
@@ -148,13 +155,13 @@ pub(crate) fn prepare_thermal_inputs_with_source(
 fn projected_thermal_outputs(
     workload: &ThermalWorkload,
     mesh: &SolverMeshArtifact,
+    numerical: &runmat_analysis_fea::execution::PreparedThermalPrimarySolve<'_>,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<(
     runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
     runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
     runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
 )> {
-    let numerical = workload.prepare_primary_fields(mesh)?;
     let result = numerical.transport_profile(policy.chunk_bytes())?;
     let mut receipt = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
     receipt.push(THERMAL_RECEIPT_MAX_ENCODED_BYTES)?;

@@ -73,131 +73,8 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
     let (document, topology, _) = runmat_geometry_fixtures::exact_tetrahedron();
     let host = TestHost::default().with_geometry_inspection(
         "project/geometry/tetrahedron.step",
-        GeometryInspection {preview_extent_m: None,
-            named_selections: Some({
-                let mut metadata: runmat_geometry_core::GeometryNamedSelections = serde_json::from_str(r#"{
-  "schema_version": 1,
-  "source_digest": [
-    121,
-    173,
-    34,
-    177,
-    204,
-    101,
-    47,
-    35,
-    7,
-    161,
-    216,
-    249,
-    195,
-    236,
-    86,
-    68,
-    250,
-    47,
-    134,
-    222,
-    29,
-    151,
-    0,
-    130,
-    13,
-    35,
-    78,
-    225,
-    25,
-    158,
-    109,
-    52
-  ],
-  "regions": [
-    {
-      "region_id": "body",
-      "role": "solid",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"
-      },
-      "cardinality": "exactly_one"
-    },
-    {
-      "region_id": "support",
-      "role": "face",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"
-      },
-      "cardinality": "exactly_one"
-    },
-    {
-      "region_id": "load_face",
-      "role": "face",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"
-      },
-      "cardinality": "exactly_one"
-    },
-    {
-      "region_id": "hot",
-      "role": "face",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"
-      },
-      "cardinality": "exactly_one"
-    },
-    {
-      "region_id": "bulk",
-      "role": "solid",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"
-      },
-      "cardinality": "exactly_one"
-    },
-    {
-      "region_id": "left",
-      "role": "face",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"
-      },
-      "cardinality": "exactly_one"
-    },
-    {
-      "region_id": "right",
-      "role": "face",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"
-      },
-      "cardinality": "exactly_one"
-    },
-    {
-      "region_id": "bottom_y",
-      "role": "face",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:ae08f150d6636feb8607ede706d4202f4481fb1d7b9399842aae13d235837e33"
-      },
-      "cardinality": "exactly_one"
-    },
-    {
-      "region_id": "bottom_z",
-      "role": "face",
-      "selector": {
-        "kind": "persistent_id",
-        "value": "persistent-entity:sha256:1f2056eadc83682feeabae84eae920614441a06141b296350bb4d4548218a75e"
-      },
-      "cardinality": "exactly_one"
-    }
-  ]
-}"#).unwrap();
-                metadata.source_digest = document.source.content_digest;
-                metadata
-            }),
+        GeometryInspection {
+            preview_extent_m: None,
             unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
@@ -207,7 +84,27 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
             ],
             exchange: None,
             resolved_units: None,
-            authored_names: Default::default(),
+            // The fixture STEP authors these names; check resolves `select name` only from them.
+            authored_names: BTreeMap::from([
+                (
+                    "solid".to_string(),
+                    vec!["body".to_string(), "bulk".to_string()],
+                ),
+                (
+                    "face".to_string(),
+                    [
+                        "support",
+                        "load_face",
+                        "hot",
+                        "left",
+                        "right",
+                        "bottom_y",
+                        "bottom_z",
+                    ]
+                    .map(str::to_string)
+                    .to_vec(),
+                ),
+            ]),
         },
     );
     let checked = FeaCompiler::new(&host).check(CheckRequest {

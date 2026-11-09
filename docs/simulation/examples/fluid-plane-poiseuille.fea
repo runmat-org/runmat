@@ -1,7 +1,10 @@
-// Plane Poiseuille flow between parallel walls 0.1 m apart. Symmetry planes close the thin
-// spanwise slab, so the developed flow is u = 1.5 U (1 - (2y/h - 1)^2) and dp/dx = -12 mu U / h^2.
+// Plane Poiseuille flow between parallel walls 0.1 m apart in a channel 3 m long (L/h = 30).
+// Symmetry planes close the thin spanwise slab, so the developed flow is
+// u = 1.5 U (1 - (2y/h - 1)^2) and the developed drop is 12 mu U L / h^2 = 36 Pa.
+// The uniform inlet adds an entrance loss of about 0.9 h of equivalent channel length
+// (Re = rho U h / mu = 1), about 3% of the developed drop; pressure_drop lies within 5% of 36 Pa.
 geometry channel {
-    file = "./geometry/plane-channel.step"
+    file = "./geometry/plane-channel-long.step"
     units = m
     region fluid : cell { select result; expect exactly_one }
     region inlet : face { select name "Inlet"; expect exactly_one }
@@ -15,7 +18,7 @@ geometry channel {
 mesh channel on geometry.channel {
     tetrahedra {
         order = linear
-        target_size = 0.01 m
+        target_size = 0.015 m
         maximum_deviation = 0.001 m
     }
 }
@@ -51,4 +54,5 @@ study plane_poiseuille {
     output pressure = analysis.flow.field.cell.fluid_pressure
     output peak_speed = max(magnitude(output.velocity), over = geometry.channel.region.fluid)
     output inlet_pressure = max(output.pressure, over = geometry.channel.region.fluid)
+    output pressure_drop = pressure_drop(analysis.flow, from = geometry.channel.region.inlet, to = geometry.channel.region.outlet)
 }

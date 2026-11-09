@@ -60,7 +60,7 @@ This complete model assigns steel to both solids in a STEP assembly, fixes one f
 disconnected occurrence, applies a resultant force to the left part, and requests displacement and
 von Mises stress:
 
-The complete example package includes its CAD file and machine-managed named-selection metadata. The study stays in one readable source file; exporting the project preserves its selections.
+The included STEP file carries the authored body and end-face names the study selects; `select name` resolves only names authored in the CAD file. The study stays in one readable source file; exporting the project preserves its CAD names.
 
 ```fea
 geometry bracket {
@@ -121,9 +121,9 @@ quadrature distributes it consistently over the face mesh. A face target alone d
 arbitrary traction vector onto that face normal.
 
 ```sh
-runmat fea check bracket.fea
-runmat fea plan bracket.fea
-runmat fea run bracket.fea
+runmat check bracket.fea
+runmat plan bracket.fea
+runmat run bracket.fea
 ```
 
 For isotropic linear elasticity, $\mathsf C=\mathsf C(E,\nu)$ is assembled from `youngs_modulus`
@@ -249,6 +249,9 @@ analysis response after analysis.modes {
 Use direct response when modal truncation is unacceptable; use modal response when the retained basis
 captures the excited band and participation. Check damping, frequency spacing around resonances,
 complex equilibrium residual, and modal truncation. A frequency list is part of study identity.
+A modal-reduced sweep is accepted on its reduced-space residual and publishes its full-order
+imbalance as the modal truncation measure; `static_correction = applied_loads` and modal
+`residual_vectors` reduce it (see [modal truncation and residual vectors](../language/reference/procedures.md#modal-truncation-and-residual-vectors)).
 
 The [solid harmonic qualification case](../qualification/solid-harmonic) checks physical
 Tet4/Tet10 direct and modal response against independent element integrals and oscillator

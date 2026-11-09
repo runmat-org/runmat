@@ -139,11 +139,14 @@ impl MagnetostaticSolverResult {
             .into_iter()
             .zip(&request.plan.requirements)
             .map(|(field, requirement)| {
+                let definition = native_magnetic_field_definition(field.field_id, requirement)?;
+                let layout = definition.layout();
                 RecoveredField::new(
-                    native_magnetic_field_definition(field.field_id, requirement)?,
+                    definition,
                     RecoveredFieldSample::Final,
                     AnalysisField::host_f64(
                         field.field_id,
+                        layout,
                         field.shape,
                         field.values.values().collect(),
                     ),

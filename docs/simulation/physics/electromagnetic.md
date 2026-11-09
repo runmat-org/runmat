@@ -5,7 +5,7 @@ flux density, field intensity, and frequency-dependent loss. RunMat uses typed q
 amperes, coulombs, current density, and vector potential; it never passes them to a solver as
 unitless numbers.
 
-Four electromagnetic analyses run from a `.fea` study with `runmat fea run`:
+Four electromagnetic analyses run from a `.fea` study with `runmat run`:
 
 | Analysis | Selected by | Unknown | Elements |
 | --- | --- | --- | --- |
@@ -13,6 +13,11 @@ Four electromagnetic analyses run from a `.fea` study with `runmat fea run`:
 | Electrostatics | `electromagnetic { equation = electrostatics }` + `electromagnetic static {}` | electric potential $V$ | Tet4 / Tet10 nodal |
 | Magnetostatics | `electromagnetic { equation = magnetostatics }` + `electromagnetic static {}` | magnetic vector potential $\mathbf A$ | lowest-order Nédélec edges |
 | Time-harmonic fields | `electromagnetic harmonic { frequencies = [...] }` | electric field phasor $\mathbf E$ | lowest-order Nédélec edges |
+
+A fifth analysis computes the impedance, delay and coupling of board traces from a 2D
+cross-section of the stackup: `electromagnetic line_parameters {}`
+[not yet in the current release](pending:electromagnetic.line_parameters). See
+[trace impedance](./trace-impedance.md).
 
 The loss of a steady-current or harmonic analysis can heat a thermal analysis of the same parts
 (see [How does the loss heat the part?](#how-does-the-loss-heat-the-part) and
@@ -174,4 +179,4 @@ Resolve the skin depth $\delta=\sqrt{2/(\omega\mu\sigma)}$ with several elements
 
 See [electromagnetic constraints](../constraints/electromagnetic),
 [electromagnetic loads](../loads/electromagnetic), [electrothermal analysis](./electrothermal),
-[typed units](../language/types-units-and-expressions), and [current status](../status).
+[typed units](../language/types-units-and-expressions), and [current status](../validation/status.md).

@@ -1,4 +1,5 @@
 use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_meshing_core::{
     solver_volume_element_identity, FieldTopologyLocation, MeshNeighbor, MeshRegion,
     PersistentEntityId, PersistentEntityKind, SolverMeshNode, SolverVolumeElement, StableDigest,
@@ -68,6 +69,7 @@ fn recovery_estimator_marks_stress_discontinuity_by_stable_identity() {
     let artifact = two_tetrahedron_artifact();
     let stress = AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRESS,
+        AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element),
         vec![2, 6],
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     );
@@ -120,7 +122,12 @@ fn recovery_estimator_marks_stress_discontinuity_by_stable_identity() {
 #[test]
 fn recovery_estimator_handles_uniform_stress_and_fails_closed() {
     let artifact = two_tetrahedron_artifact();
-    let uniform = AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![2, 6], vec![1.0; 12]);
+    let uniform = AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRESS,
+        AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element),
+        vec![2, 6],
+        vec![1.0; 12],
+    );
     let estimate = estimate_structural_recovery_error(
         &artifact,
         "elements",
@@ -131,7 +138,12 @@ fn recovery_estimator_handles_uniform_stress_and_fails_closed() {
     assert_eq!(estimate.total_error, 0.0);
     assert!(estimate.marked_element_identities.is_empty());
 
-    let invalid = AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![2, 5], vec![0.0; 10]);
+    let invalid = AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRESS,
+        AnalysisFieldLayout::components(ObservationQuantity::Stress, FieldLocation::Element, 5),
+        vec![2, 5],
+        vec![0.0; 10],
+    );
     assert_eq!(
         estimate_structural_recovery_error(
             &artifact,
@@ -155,6 +167,7 @@ fn recovery_estimator_handles_uniform_stress_and_fails_closed() {
     );
     let discontinuous = AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRESS,
+        AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element),
         vec![2, 6],
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     );
@@ -206,6 +219,7 @@ fn recovery_estimator_preserves_stress_jumps_across_region_sides() {
     artifact.seal_canonical_digest().unwrap();
     let stress = AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRESS,
+        AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element),
         vec![2, 6],
         vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     );
@@ -268,6 +282,10 @@ fn tetrahedron10_integration_point_estimator_preserves_linear_recovery() {
         .collect::<Vec<_>>();
     let stress = AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+        AnalysisFieldLayout::symmetric_tensor3(
+            ObservationQuantity::Stress,
+            FieldLocation::IntegrationPoint,
+        ),
         vec![4, 6],
         values,
     );
@@ -301,6 +319,17 @@ fn tet4_constant_point_and_element_stress_have_the_same_physical_norm() {
                 FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS
             } else {
                 FEA_FIELD_STRUCTURAL_STRESS
+            },
+            if points {
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Stress,
+                    FieldLocation::IntegrationPoint,
+                )
+            } else {
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Stress,
+                    FieldLocation::Element,
+                )
             },
             vec![2 * count, 6],
             values,

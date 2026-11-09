@@ -173,7 +173,7 @@ Evidence kind: SemanticRealization. Criterion: Authored equality constraints com
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::compilation::admission::tests::exact_caller_boundary_preserves_original_plan_across_all_compiler_routes` (crates/runmat-analysis/fea/src/constraints/compilation/admission/tests.rs:10) - Prepared structural constraint fixtures compare original canonical plans and bytes at the exact requested workspace boundary and reject one byte below; no cross...<br>`runmat-analysis-fea[lib]::constraints::tests::general_equation_compiles_to_one_canonical_sparse_row` (crates/runmat-analysis/fea/src/constraints/tests.rs:648) - A general equation compiles to one canonical sparse row.<br>`runmat-analysis-fea[lib]::constraints::tests::canonical_solid_solve_enforces_affine_equation_and_recovers_reactions` (crates/runmat-analysis/fea/src/constraints/tests.rs:798) - A canonical solid solve enforces an affine equation and recovers reactions. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::compilation::admission::tests::exact_caller_boundary_preserves_original_plan_across_all_compiler_routes` (crates/runmat-analysis/fea/src/constraints/compilation/admission/tests.rs:10) - Prepared structural constraint fixtures compare original canonical plans and bytes at the exact requested workspace boundary and reject one byte below; no cross...<br>`runmat-analysis-fea[lib]::constraints::tests::general_equation_compiles_to_one_canonical_sparse_row` (crates/runmat-analysis/fea/src/constraints/tests.rs:674) - A general equation compiles to one canonical sparse row.<br>`runmat-analysis-fea[lib]::constraints::tests::canonical_solid_solve_enforces_affine_equation_and_recovers_reactions` (crates/runmat-analysis/fea/src/constraints/tests.rs:824) - A canonical solid solve enforces an affine equation and recovers reactions. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -188,7 +188,7 @@ Evidence kind: SemanticRealization. Criterion: Use the mathematical structure of
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::tests::dense_global_equation_selects_multiplier_enforcement_before_affine_fill` (crates/runmat-analysis/fea/src/constraints/tests.rs:697) - A dense global equation selects multiplier enforcement before any affine fill; direct elimination and penalty selection are separate cases. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::tests::dense_global_equation_selects_multiplier_enforcement_before_affine_fill` (crates/runmat-analysis/fea/src/constraints/tests.rs:723) - A dense global equation selects multiplier enforcement before any affine fill; direct elimination and penalty selection are separate cases. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -203,7 +203,7 @@ Evidence kind: SemanticRealization. Criterion: Contact remains an `AnalysisInter
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::tests::nonlinear_accepted_states_preserve_complete_constraint_kinematics` (crates/runmat-analysis/fea/src/constraints/tests.rs:1478) - Nonlinear accepted states preserve complete constraint kinematics. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::tests::nonlinear_accepted_states_preserve_complete_constraint_kinematics` (crates/runmat-analysis/fea/src/constraints/tests.rs:1510) - Nonlinear accepted states preserve complete constraint kinematics. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -218,7 +218,7 @@ Evidence kind: SemanticRealization. Criterion: Constraint validation has two lev
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::structural::topology::identity::tests::counted_validation_reports_first_authored_failure_before_later_duplicates` (crates/runmat-analysis/fea/src/physics/structural/topology/identity/tests.rs:168) - Counted validation reports the first authored failure before later duplicates. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::structural::topology::identity::tests::counted_validation_reports_first_authored_failure_before_later_duplicates` (crates/runmat-analysis/fea/src/physics/structural/topology/identity/tests.rs:193) - Counted validation reports the first authored failure before later duplicates. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -233,7 +233,7 @@ Evidence kind: SemanticRealization. Criterion: Constraint results include: nodal
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::solve::reaction::tests::independent_constraint_rows_match_the_diagonal_reaction_law_across_workers` (crates/runmat-analysis/fea/src/solve/reaction.rs:147) - Independent constraint rows match the diagonal reaction law across workers.<br>`runmat-analysis-fea[lib]::solve::static_balance::tests::prescribed_beam_extension_closes_reaction_and_work_against_closed_form` (crates/runmat-analysis/fea/src/solve/static_balance.rs:308) - A prescribed beam extension closes reaction and work against the closed form. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::solve::reaction::tests::independent_constraint_rows_match_the_diagonal_reaction_law_across_workers` (crates/runmat-analysis/fea/src/solve/reaction.rs:231) - Independent constraint rows match the diagonal reaction law across workers.<br>`runmat-analysis-fea[lib]::solve::static_balance::tests::prescribed_beam_extension_closes_reaction_and_work_against_closed_form` (crates/runmat-analysis/fea/src/solve/static_balance.rs:445) - A prescribed beam extension closes reaction and work against the closed form. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

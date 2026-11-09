@@ -19,7 +19,7 @@ use super::{
 
 const MODAL_WORKLOAD_PREFIX: &[u8] = b"runmat-structural-modal-workload/v1\0";
 const MODAL_WORKLOAD_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Authored prestressed-modal intent before its exact preload state has been published.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -60,6 +60,12 @@ impl CanonicalCodecControl for NeverCancelled {
     }
 }
 
+/// Largest canonical encoding one process can hold. A Rust allocation is bounded by
+/// `isize::MAX` bytes: 2 GiB - 1 on wasm32 (whose address space is 4 GiB), and beyond any
+/// machine's memory on 64-bit targets. Run-data contracts use this as their codec ceiling; the
+/// run's admitted budget gates their actual size where the bytes are produced or materialized.
+pub const PLATFORM_MAXIMUM_ENCODED_BYTES: usize = isize::MAX as usize;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanonicalLimits {
     /// Bound for both trusted owned encoding and hostile decoding.
@@ -98,6 +104,20 @@ impl CanonicalLimits {
         Self::new(
             maximum_encoded_bytes,
             maximum_encoded_bytes,
+            maximum_string_bytes,
+            maximum_nesting_depth,
+        )
+    }
+
+    /// Content-bounded limits at the platform allocation ceiling, for run data whose size the
+    /// run's admitted budget governs. Grammar, canonical form, string and nesting bounds still
+    /// refuse malformed input.
+    pub const fn platform_content(
+        maximum_string_bytes: usize,
+        maximum_nesting_depth: usize,
+    ) -> Self {
+        Self::content_bounded(
+            PLATFORM_MAXIMUM_ENCODED_BYTES,
             maximum_string_bytes,
             maximum_nesting_depth,
         )

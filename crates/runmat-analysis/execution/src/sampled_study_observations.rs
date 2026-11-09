@@ -1,4 +1,7 @@
 //! Source-bound sampled fanout, ordered reductions and publication assembly.
+//! A history that spans the entries of a sampled study is checkpointed and finalized by
+//! [`history::EntryHistoryPhase`] once every entry is complete.
+pub(crate) mod history;
 mod retention;
 use crate::{
     import_observation_assembly, import_observation_partition_contribution,
@@ -8,7 +11,9 @@ use crate::{
     ObservationReductionPreparation, PreparedObservationAssembly, PreparedObservationFanout,
     PreparedObservationPartition, PreparedObservationReduction,
 };
-use crate::{AnalysisBridgeError, AnalysisBridgeResult, AnalysisOutputPolicy};
+use crate::{
+    AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, AnalysisOutputPolicy,
+};
 use runmat_analysis_core::ProcedureStep;
 use runmat_analysis_fea::{
     execution::{ObservationHistorySourceContext, StepIdentity},
@@ -16,7 +21,7 @@ use runmat_analysis_fea::{
         field::RecoveredFieldSample,
         observation::{
             ObservationFieldCatalog, ObservationPublicationCatalog, ObservationPublicationEntry,
-            ObservationSamplePublication,
+            ObservationPublicationScope, ObservationSamplePublication, ResolvedObservation,
         },
     },
 };
@@ -30,6 +35,9 @@ pub(crate) struct SampledStudyObservations {
     pub(crate) contributions: BTreeMap<usize, ImportedObservationPartitionContribution>,
     pub reduction: Option<PreparedObservationReduction>,
     pub(crate) reduced: Vec<ImportedReducedObservation>,
+    /// The reduction task host of each `reduced` result, in the same order: a history
+    /// checkpoint names the task that produced its sample.
+    pub(crate) reduction_hosts: Vec<AnalysisHostWorkload>,
     pub assembly: Option<PreparedObservationAssembly>,
     pub completed: Option<ImportedObservations>,
     pub catalog: Option<ObservationPublicationCatalog>,
@@ -90,6 +98,25 @@ impl SampledStudyObservations {
             policy.inventory_limits(),
         )
     }
+    /// Observations the fan-out sampled, in plan order. An observation whose schedule excludes
+    /// this sample (for example one frequency of a sweep) has no partitions and no reduction.
+    fn sampled_observations(&self) -> impl Iterator<Item = &ResolvedObservation> + '_ {
+        let fanout = self.fanout.as_ref();
+        fanout
+            .into_iter()
+            .flat_map(|fanout| fanout.source_request.plan.observations.iter())
+            .filter(move |observation| {
+                fanout.is_some_and(|fanout| {
+                    fanout.partitions.iter().any(|task| {
+                        task.partition_plan.observation_id == observation.spec.observation_id
+                    })
+                })
+            })
+    }
+    /// Reductions this fan-out needs before assembly: one per sampled observation.
+    pub fn reduction_count(&self) -> usize {
+        self.sampled_observations().count()
+    }
     pub fn prepare_reduction(
         &self,
         revision: &ProgramRevision,
@@ -97,7 +124,10 @@ impl SampledStudyObservations {
     ) -> AnalysisBridgeResult<PreparedObservationReduction> {
         let ordinal = self.reduced.len();
         let fanout = self.fanout.as_ref().expect("prepared fanout");
-        let observation = &fanout.source_request.plan.observations[ordinal];
+        let observation = self
+            .sampled_observations()
+            .nth(ordinal)
+            .ok_or_else(|| invalid("sampled reduction ordinal outside fanout"))?;
         let selected = fanout
             .partitions
             .iter()
@@ -130,6 +160,29 @@ impl SampledStudyObservations {
         })?;
 
         Ok(task)
+    }
+    /// Retain one imported reduction with the host of the reduction task that produced it.
+    pub(crate) fn push_reduced(
+        &mut self,
+        reduced: ImportedReducedObservation,
+    ) -> AnalysisBridgeResult<()> {
+        let host = self
+            .reduction
+            .as_ref()
+            .ok_or_else(|| invalid("sampled reduction absent"))?
+            .host
+            .clone();
+        self.reduced.push(reduced);
+        self.reduction_hosts.push(host);
+        Ok(())
+    }
+    /// The plan this entry's observations were resolved and evaluated against.
+    pub(crate) fn plan(
+        &self,
+    ) -> Option<&runmat_analysis_fea::results::observation::ResolvedObservationPlan> {
+        self.fanout
+            .as_ref()
+            .map(|fanout| &fanout.source_request.plan)
     }
     pub fn import_reduction(
         &self,
@@ -182,6 +235,10 @@ impl SampledStudyObservations {
             policy.inventory_limits(),
         )
     }
+    /// The entry's publication catalog. With `ObservationPublicationScope::Entry` it covers
+    /// the field outputs scheduled at this entry; histories scheduled here stay in the sample
+    /// manifest for the study's entry-history phase, and an entry that schedules only
+    /// histories publishes no sample.
     pub fn publication_catalog(
         &self,
         artifact: &ImportedObservations,
@@ -189,12 +246,31 @@ impl SampledStudyObservations {
         fields: ObservationFieldCatalog,
         step: &ProcedureStep,
         context: ObservationHistorySourceContext<'_>,
+        scope: ObservationPublicationScope,
     ) -> AnalysisBridgeResult<ObservationPublicationCatalog> {
         let task = self
             .assembly
             .as_ref()
             .ok_or_else(|| invalid("sampled assembly absent"))?;
-        Ok(ObservationPublicationCatalog::new(
+        let histories_only = artifact.manifest.results.iter().all(|entry| {
+            step.observations.iter().any(|request| {
+                matches!(request, runmat_analysis_core::ObservationRequest::History(spec)
+                    if spec.observation_id == entry.observation_id)
+            })
+        });
+        if scope == ObservationPublicationScope::Entry && histories_only {
+            return Ok(ObservationPublicationCatalog::scoped(
+                scope,
+                producer,
+                task.source_request.plan.clone(),
+                fields,
+                step,
+                Vec::new(),
+                context,
+            )?);
+        }
+        Ok(ObservationPublicationCatalog::scoped(
+            scope,
             producer,
             task.source_request.plan.clone(),
             fields,

@@ -51,13 +51,15 @@ fn grounded_faces(
                 MagneticConstraintKind::VectorPotentialGround { target } => target,
                 _ => {
                     return Err(MaxwellError::Unsupported(
-                        "harmonic analysis admits magnetic.vector_potential_ground; conductivity and permittivity fix the gauge, so magnetic.coulomb_gauge, prescribed or periodic vector potentials are not admitted".into(),
+                        crate::admission::MAXWELL_CONSTRAINT.message.into(),
                     ))
                 }
             },
             _ => {
                 return Err(MaxwellError::Unsupported(
-                    "non-electromagnetic constraint in a harmonic analysis".into(),
+                    crate::admission::MAXWELL_NONELECTROMAGNETIC_CONSTRAINT
+                        .message
+                        .into(),
                 ))
             }
         };
@@ -110,7 +112,7 @@ pub fn compile_canonical_input(
     let grounded_faces = grounded_faces(model, &projection)?;
     if grounded_faces.is_empty() {
         return Err(MaxwellError::Unsupported(
-            "a harmonic analysis needs a far field: ground the outer boundary with magnetic.vector_potential_ground".into(),
+            crate::admission::MAXWELL_FAR_FIELD.message.into(),
         ));
     }
     let properties = crate::properties::compile_solid_property_map(model, mesh).map_err(invalid)?;

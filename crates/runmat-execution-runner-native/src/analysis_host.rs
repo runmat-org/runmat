@@ -72,12 +72,17 @@ fn execute_analysis<
     if let Err(error) = limits.validate() {
         return failure(error.to_string());
     }
+    // A reserved task's worker ceiling is its admitted memory budget, the same law the
+    // planner used for the task's output policy; an unreserved request keeps the host limits.
+    let inventory = resources.map_or(limits.inventory, |resources| {
+        ObjectInventoryLimits::admitted(resources.memory_bytes)
+    });
     match runmat_analysis_execution::execute_serial_analysis_host_response(
         request,
         store,
         kernel,
         limits.chunk_bytes,
-        limits.inventory,
+        inventory,
         resources,
     ) {
         Ok(response) => {

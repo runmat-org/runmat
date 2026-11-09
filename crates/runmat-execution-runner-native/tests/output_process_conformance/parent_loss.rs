@@ -40,21 +40,20 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
         backend: PoolBackend::LocalProcesses,
         resources: Default::default(),
     });
-    let request = runmat_execution_artifact::ReservedProgramExecutionRequest::new(
-        program,
-        ResourceRequest {
-            cpu_millicores: config.worker_cpu_millicores,
-            memory_bytes: config.worker_memory_bytes,
-            scratch_bytes: config.worker_scratch_bytes,
-            max_wall_millis: 30_000,
-            max_artifact_bytes: 1024 * 1024,
-            max_egress_bytes: 0,
-            max_relay_bytes: 0,
-            accelerators: vec![],
-            required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
-        },
-    )
-    .unwrap();
+    let resources = ResourceRequest {
+        cpu_millicores: config.worker_cpu_millicores,
+        memory_bytes: config.worker_memory_bytes,
+        scratch_bytes: config.worker_scratch_bytes,
+        max_wall_millis: 30_000,
+        max_artifact_bytes: 1024 * 1024,
+        max_egress_bytes: 0,
+        max_relay_bytes: 0,
+        accelerators: vec![],
+        required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+    };
+    let request =
+        runmat_execution_artifact::ReservedProgramExecutionRequest::new(program, resources.clone())
+            .unwrap();
     let mut command = HostCommand::new(&config.executable);
     command.arguments = config.worker_arguments.clone();
     // The test executable needs its parent's native loader/bootstrap paths.
@@ -83,7 +82,10 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     }
     let launch = ConsoleLaunch {
         request: &request,
-        console_budget: ConsoleBudget::single(console).unwrap(),
+        console_budget: runmat_execution_runner_native::console_source_subgrant(
+            &resources, console,
+        )
+        .unwrap(),
     };
     write_payload(&mut writer, &serde_json::to_vec(&launch).unwrap(), limits)
         .await

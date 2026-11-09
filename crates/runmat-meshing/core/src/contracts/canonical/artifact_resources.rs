@@ -3,7 +3,7 @@ use super::{
     artifact_workspace::slots, ElementOrder, MeshingContractError, SolverMeshArtifact,
     SolverMeshTopology, StableDigest,
 };
-use runmat_canonical_codec::{serialized_materialization_resident_bytes_estimate, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 
 impl SolverMeshTopology {
     /// Requested temporary flat buffers for independent topology validation.
@@ -46,13 +46,16 @@ impl SolverMeshArtifact {
     /// The estimate depends only on inventory sizes: both sealed digests are profiled at their
     /// widest encoding, so a stale or zeroed seal is reported by validation, after admission.
     pub fn validation_resident_bytes_estimate(&self) -> Result<u64, MeshingContractError> {
-        let encoding = serialized_materialization_resident_bytes_estimate(
+        // The identity digest uses the direct encoder, which holds the encoded bytes and its
+        // ordering buffers but builds no value tree.
+        let encoding = runmat_canonical_codec::profile_canonical_encoding(
             &DigestIndependentArtifact::from(self),
             CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
         )
         .map_err(|error| {
             MeshingContractError::invalid("mesh validation resources", error.to_string())
-        })?;
+        })?
+        .resident_workspace_bytes_estimate;
         Ok(
             validation_scratch_bytes(&self.topology, self.resolved_request.element_order)?
                 .max(encoding),

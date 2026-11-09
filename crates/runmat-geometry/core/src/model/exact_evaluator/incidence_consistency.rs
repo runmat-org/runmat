@@ -111,7 +111,8 @@ where
             tolerance_m.max(edge.tolerance_m.canonical_value() * EDGE_TOLERANCE_SAMPLING_ALLOWANCE),
             control,
             &additional_parameters,
-        )?;
+        )
+        .map_err(|error| with_edge_use_context(error, edge, face))?;
     }
     Ok(())
 }
@@ -233,17 +234,16 @@ where
         }
         let midpoint_sample = sample_edge_use(evaluator, edge, coedge, face, midpoint, control)?;
         validate_sample(midpoint_sample, tolerance_m)?;
-        let curve_flatness = midpoint_deviation(
-            interval.start_sample.curve_point,
-            interval.end_sample.curve_point,
-            midpoint_sample.curve_point,
+        // The validated quantity is the gap g(t) = curve(t) - surface(pcurve(t)). Stop refining
+        // once g is linear between the interval ends to a quarter of the tolerance: the samples
+        // then bound g on the interval. Requiring each curve itself to be that flat would bisect
+        // a curved edge with a nanometre tolerance into micrometre intervals.
+        let gap_curvature = midpoint_deviation(
+            gap(interval.start_sample),
+            gap(interval.end_sample),
+            gap(midpoint_sample),
         );
-        let mapped_flatness = midpoint_deviation(
-            interval.start_sample.mapped_point,
-            interval.end_sample.mapped_point,
-            midpoint_sample.mapped_point,
-        );
-        if curve_flatness.max(mapped_flatness) <= tolerance_m * 0.25 {
+        if gap_curvature <= tolerance_m * 0.25 {
             continue;
         }
         if interval.depth >= MAX_REFINEMENT_DEPTH {
@@ -321,6 +321,30 @@ fn require_consistent(
         ));
     }
     Ok(())
+}
+
+fn with_edge_use_context(
+    error: GeometryEvaluationError,
+    edge: &ExactEdge,
+    face: &ExactFace,
+) -> GeometryEvaluationError {
+    if error.kind != GeometryEvaluationErrorKind::InconsistentGeometry {
+        return error;
+    }
+    GeometryEvaluationError::new(
+        error.kind,
+        format!(
+            "{} (edge {} on face {}, written edge tolerance {:e} m)",
+            error.reason,
+            edge.id.source_topology_id,
+            face.id.source_topology_id,
+            edge.tolerance_m.canonical_value()
+        ),
+    )
+}
+
+fn gap(sample: Sample) -> [f64; 3] {
+    std::array::from_fn(|axis| sample.curve_point[axis] - sample.mapped_point[axis])
 }
 
 fn midpoint_deviation(start: [f64; 3], end: [f64; 3], midpoint: [f64; 3]) -> f64 {

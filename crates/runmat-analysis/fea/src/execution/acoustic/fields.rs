@@ -18,6 +18,9 @@ use runmat_analysis_core::{
 
 /// Element-average mean active intensity ½Re(p v*), W/m².
 pub const ACOUSTIC_INTENSITY_FIELD_ID: &str = "acoustic.intensity";
+/// Element plane-wave port intensity: incident wave on incident faces, outgoing wave on
+/// anechoic faces, W/m².
+pub const ACOUSTIC_PORT_INTENSITY_FIELD_ID: &str = "acoustic.port_intensity";
 
 #[cfg(test)]
 mod tests;
@@ -40,6 +43,7 @@ impl AcousticHarmonicSolverResult {
         let definitions = acoustic_native_field_definitions(&request)?;
         let counts = [
             self.ordered_node_ids().len(),
+            self.ordered_element_ids().len(),
             self.ordered_element_ids().len(),
             self.ordered_element_ids().len(),
         ];
@@ -158,6 +162,13 @@ impl AcousticHarmonicSolverResult {
                     .copied()
                     .collect(),
             )?,
+            native_field(
+                ACOUSTIC_PORT_INTENSITY_FIELD_ID,
+                &request.plan.requirements[3],
+                sample,
+                vec![self.port_intensity_w_per_m2().len()],
+                self.port_intensity_w_per_m2().to_vec(),
+            )?,
         ];
         request
             .plan
@@ -187,7 +198,7 @@ impl AcousticHarmonicSolverResult {
                 .eq(expected.map(f64::to_bits)),
             AnalysisFieldValues::DeviceRef(_) => false,
         };
-        let [pressure, velocity, intensity] = fields else {
+        let [pressure, velocity, intensity, port] = fields else {
             return false;
         };
         matches(
@@ -205,7 +216,7 @@ impl AcousticHarmonicSolverResult {
         ) && matches(
             intensity,
             &mut self.intensity_w_per_m2().iter().flatten().copied(),
-        )
+        ) && matches(port, &mut self.port_intensity_w_per_m2().iter().copied())
     }
 }
 
@@ -219,7 +230,7 @@ pub fn acoustic_native_field_definitions(
             "acoustic native fields require canonical volume-mesh topology",
         ));
     }
-    let [pressure, velocity, intensity] = request.plan.requirements.as_slice() else {
+    let [pressure, velocity, intensity, port] = request.plan.requirements.as_slice() else {
         return Err(invalid(
             "acoustic native inventory is nodal pressure, element particle velocity and element \
              intensity",
@@ -238,6 +249,7 @@ pub fn acoustic_native_field_definitions(
         native_acoustic_field_definition("acoustic.pressure", pressure)?,
         native_acoustic_field_definition("acoustic.particle_velocity", velocity)?,
         native_acoustic_field_definition(ACOUSTIC_INTENSITY_FIELD_ID, intensity)?,
+        native_acoustic_field_definition(ACOUSTIC_PORT_INTENSITY_FIELD_ID, port)?,
     ])
 }
 
@@ -268,6 +280,14 @@ pub(in crate::execution) fn native_acoustic_field_plan(
                 FieldLocation::Element,
                 RecoveredFieldEntityDomain::VolumeElements,
                 ObservationValueShape::Vector3,
+                elements,
+            )?,
+            // Plane-wave port intensity, real; nonzero only in elements owning port faces.
+            native_requirement(
+                ObservationQuantity::AcousticPortIntensity,
+                FieldLocation::Element,
+                RecoveredFieldEntityDomain::VolumeElements,
+                ObservationValueShape::Scalar,
                 elements,
             )?,
         ],
@@ -328,7 +348,10 @@ pub(in crate::execution) fn native_acoustic_field_definition(
         requirement.entity_domain,
         requirement.value_shape.clone(),
         // Intensity is a real time-average; pressure and velocity are complex phasors.
-        if requirement.quantity == ObservationQuantity::AcousticIntensity {
+        if matches!(
+            requirement.quantity,
+            ObservationQuantity::AcousticIntensity | ObservationQuantity::AcousticPortIntensity
+        ) {
             RecoveredFieldNumericRepresentation::Real
         } else {
             RecoveredFieldNumericRepresentation::ComplexInterleaved
@@ -345,11 +368,13 @@ fn native_field(
     values: Vec<f64>,
 ) -> AnalysisExecutionResult<RecoveredField> {
     let definition = native_acoustic_field_definition(field_id, requirement)?;
+    let layout = definition.layout();
     RecoveredField::new(
         definition,
         sample,
         AnalysisField {
             field_id: field_id.into(),
+            layout,
             shape,
             values: AnalysisFieldValues::HostF64(values),
         },

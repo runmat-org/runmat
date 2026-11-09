@@ -150,7 +150,6 @@ geometry bracket {
 "#;
     let inspection = GeometryInspection {
         preview_extent_m: None,
-        named_selections: None,
         unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::Declared {
             contexts: vec![runmat_geometry_core::physical::LengthUnitDeclaration {
                 context: "STEP fixture #1".into(),
@@ -190,33 +189,20 @@ geometry bracket {
 //   shared_infrastructure/mesh_independent/source_check; coverage: partial;
 //   boundary: Authored `units = m` over a STEP file declaring millimetres resolves to metres and reports a located units-override warning; the check stays valid.
 #[test]
-fn readable_inline_geometry_uses_asset_owned_named_selections() {
-    let entity = runmat_geometry_core::PersistentEntityId::new(
-        runmat_geometry_core::PersistentEntityKind::Solid,
-        "exact-bracket".into(),
-        vec!["root".into()],
-    );
-    let id = entity.analysis_selection_id().unwrap();
-    let metadata = runmat_geometry_core::GeometryNamedSelections {
-        schema_version: 1,
-        source_digest: runmat_geometry_core::GeometryDigest::from_bytes([3; 32]),
-        regions: vec![runmat_geometry_core::GeometryRegionDefinition {
-            region_id: "body".into(),
-            role: runmat_geometry_core::GeometryRegionRole::Solid,
-            selector: runmat_geometry_core::GeometryRegionSelector::PersistentId(id.clone()),
-            cardinality: runmat_geometry_core::GeometryRegionCardinality::ExactlyOne,
-        }],
-    };
-    let source = r#"geometry bracket { file = "./bracket.brep"; units = m
+fn select_name_resolves_only_names_authored_in_the_cad_file() {
+    let source = r#"geometry bracket { file = "./bracket.step"; units = m
         region body : solid { select name "body"; expect exactly_one }
+        region pad : face { select name "pad"; expect exactly_one }
     }
 material steel { mass_density = 7850 kg/m^3 }
 model loaded_bracket { assign material.steel to geometry.bracket.region.body }
 "#;
     let inspection = GeometryInspection {
-        authored_names: Default::default(),
+        authored_names: std::collections::BTreeMap::from([(
+            "solid".to_string(),
+            vec!["body".to_string()],
+        )]),
         preview_extent_m: None,
-        named_selections: Some(metadata),
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![
@@ -227,37 +213,94 @@ model loaded_bracket { assign material.steel to geometry.bracket.region.body }
         resolved_units: None,
         unit_evidence: Default::default(),
     };
-    let host = TestHost::default().with_geometry_inspection("project/bracket.brep", inspection);
+    let host = TestHost::default().with_geometry_inspection("project/bracket.step", inspection);
     let checked = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),
             root: source_module("project/main.fea", source, 1),
         },
     });
-    assert!(checked.is_valid(), "{:?}", checked.diagnostics);
-    assert!(!source.contains("persistent-entity:"));
-    assert!(!source.contains("import geometry"));
-    let geometry = checked.geometries.values().next().unwrap();
-    assert_eq!(geometry.module_path, "project/main.fea");
-    let runmat_geometry_core::GeometryDefinitionSource::Imported(imported) = &geometry.source
-    else {
-        panic!("imported")
-    };
-    assert_eq!(
-        imported
-            .named_selections
-            .as_ref()
-            .unwrap()
-            .selection("body", runmat_geometry_core::GeometryRegionRole::Solid)
-            .unwrap(),
-        id
+    let messages = checked
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    // The authored solid name resolves; the face name the CAD file does not carry is refused,
+    // with no other source of names to fall back on.
+    assert!(
+        !messages.iter().any(|message| message.contains("\"body\"")),
+        "{messages:#?}"
     );
-    assert!(checked
-        .bound
-        .graph
-        .source_dependencies()
-        .unwrap()
-        .contains(&LogicalSourcePath::new("project/.runmat/geometry/bracket.brep.json").unwrap()));
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("selects face name \"pad\"")
+                && message.contains("names no faces")),
+        "{messages:#?}"
+    );
+    // The CAD file is the only geometry dependency: no selection metadata path is read.
+    let dependencies = checked.bound.graph.source_dependencies().unwrap();
+    assert!(
+        dependencies
+            .iter()
+            .all(|path| !path.as_str().contains(".runmat/")),
+        "{dependencies:?}"
+    );
+}
+
+#[test]
+fn a_name_carried_by_two_entities_fails_an_exactly_one_region_at_check() {
+    let source = r#"geometry plate { file = "./plate.step"; units = m
+        region coolant : solid { select name "coolant"; expect exactly_one }
+        region both : solid { select name "coolant"; expect one_or_more }
+    }
+"#;
+    let inspection = GeometryInspection {
+        authored_names: std::collections::BTreeMap::from([(
+            "solid".to_string(),
+            vec![
+                "coolant".to_string(),
+                "coolant".to_string(),
+                "plate".to_string(),
+            ],
+        )]),
+        preview_extent_m: None,
+        content_digest: SourceDigest([3; 32]),
+        topology_digest: SourceDigest([4; 32]),
+        capabilities: vec![
+            GeometryInspectionCapability::Topology,
+            GeometryInspectionCapability::PersistentIds,
+        ],
+        exchange: None,
+        resolved_units: None,
+        unit_evidence: Default::default(),
+    };
+    let host = TestHost::default().with_geometry_inspection("project/plate.step", inspection);
+    let checked = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    let messages = checked
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.contains("which 2 solids"))
+            .count(),
+        1,
+        "{messages:#?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("region `coolant`")),
+        "{messages:#?}"
+    );
 }
 
 #[test]
@@ -269,7 +312,6 @@ geometry channel {
 }
 "#;
     let inspection = GeometryInspection {
-        named_selections: None,
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![

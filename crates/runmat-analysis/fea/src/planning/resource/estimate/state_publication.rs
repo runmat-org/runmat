@@ -20,9 +20,10 @@ pub(super) fn build_state_publication_plan(
             materialization < state_bytes,
             "state materialization below its encoding",
         ),
+        // Content-addressed repeated chunks can make unique transport smaller than the payload.
         (
-            demand.inputs.transport_closure_bytes < demand.inputs.encoded_payload_bytes,
-            "input transport below input payload",
+            demand.inputs.transport_closure_bytes.0 == 0,
+            "empty input transport",
         ),
         (
             demand.inputs.decoded_resident_bytes_admission_budget

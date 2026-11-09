@@ -191,7 +191,14 @@ impl RecoveredFieldPartition {
             definition: source.definition().clone(),
             sample: source.sample(),
             source_indices,
-            storage: AnalysisField::host_f64(source.definition().field_id(), shape, values),
+            // The partition keeps its source's storage layout, published state (ordinal)
+            // included, so the reassembled field has the source's identity.
+            storage: AnalysisField::host_f64(
+                source.definition().field_id(),
+                source.storage().layout.clone(),
+                shape,
+                values,
+            ),
         };
         partition.identity = partition.derive_identity()?;
         partition.validate()?;
@@ -231,6 +238,14 @@ impl RecoveredFieldPartition {
         self.definition.validate()?;
         self.sample.validate()?;
         self.definition.validate_storage_shape(&self.storage)?;
+        if self.storage.layout
+            != self
+                .definition
+                .layout()
+                .with_ordinal(self.storage.layout.ordinal)
+        {
+            return Err(RecoveredFieldError::StorageLayoutMismatch);
+        }
         let expected_shape = self.definition.storage_shape(self.source_indices.len())?;
         if self.schema_version != 1
             || self.source_indices.is_empty()

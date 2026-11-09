@@ -1,4 +1,5 @@
 use super::*;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 pub(super) struct TransientRunFinalization<'a> {
     pub(super) model: &'a AnalysisModel,
@@ -222,6 +223,11 @@ pub(super) fn finish_transient_run(
         .map(|(index, value)| {
             AnalysisField::host_f64(
                 fea_transient_kinetic_energy_field_id(index),
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::KineticEnergy,
+                    FieldLocation::Global,
+                )
+                .step(index),
                 vec![1],
                 vec![value],
             )
@@ -234,6 +240,11 @@ pub(super) fn finish_transient_run(
         .map(|(index, value)| {
             AnalysisField::host_f64(
                 fea_transient_strain_energy_field_id(index),
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::StrainEnergy,
+                    FieldLocation::Global,
+                )
+                .step(index),
                 vec![1],
                 vec![value],
             )
@@ -247,6 +258,8 @@ pub(super) fn finish_transient_run(
         .map(|(index, value)| {
             AnalysisField::host_f64(
                 fea_transient_residual_norm_field_id(index),
+                AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global)
+                    .step(index),
                 vec![1],
                 vec![value],
             )
@@ -255,22 +268,27 @@ pub(super) fn finish_transient_run(
     let external_work_snapshots = scalar_snapshots(
         transient.external_work_j.canonical_values(),
         fea_transient_external_work_field_id,
+        runmat_analysis_core::ObservationQuantity::ExternalWork,
     );
     let support_work_snapshots = scalar_snapshots(
         transient.support_work_j.canonical_values(),
         fea_transient_support_work_field_id,
+        runmat_analysis_core::ObservationQuantity::SupportWork,
     );
     let damping_dissipation_snapshots = scalar_snapshots(
         transient.damping_dissipation_j.canonical_values(),
         fea_transient_damping_dissipation_field_id,
+        runmat_analysis_core::ObservationQuantity::DampingDissipation,
     );
     let energy_balance_residual_snapshots = scalar_snapshots(
         transient.energy_balance_residual_j.canonical_values(),
         fea_transient_energy_balance_residual_field_id,
+        runmat_analysis_core::ObservationQuantity::Balance,
     );
     let relative_energy_balance_error_snapshots = scalar_snapshots(
         &transient.relative_energy_balance_error,
         fea_transient_relative_energy_balance_error_field_id,
+        runmat_analysis_core::ObservationQuantity::Balance,
     );
     if let Some(field) = reaction_force_snapshots.last() {
         let mut field = field.clone();
@@ -488,11 +506,26 @@ pub(super) fn finish_transient_run(
     })
 }
 
-fn scalar_snapshots(values: &[f64], field_id: impl Fn(usize) -> String) -> Vec<AnalysisField> {
+fn scalar_snapshots(
+    values: &[f64],
+    field_id: impl Fn(usize) -> String,
+    quantity: runmat_analysis_core::ObservationQuantity,
+) -> Vec<AnalysisField> {
+    let layout = runmat_analysis_core::AnalysisFieldLayout::scalar(
+        quantity,
+        runmat_analysis_core::FieldLocation::Global,
+    );
     values
         .iter()
         .copied()
         .enumerate()
-        .map(|(index, value)| AnalysisField::host_f64(field_id(index), vec![1], vec![value]))
+        .map(|(index, value)| {
+            AnalysisField::host_f64(
+                field_id(index),
+                layout.clone().step(index),
+                vec![1],
+                vec![value],
+            )
+        })
         .collect()
 }

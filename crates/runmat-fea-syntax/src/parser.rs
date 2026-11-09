@@ -563,10 +563,18 @@ impl FeaParser {
                 span: self.token(index).span,
             })
         } else {
+            let message = if matches!(self.kind(index), Some(FeaTokenKind::Keyword(_))) {
+                format!(
+                    "`{}` is a keyword and cannot be a declared name yet; choose another name [pending:language.keyword-names]",
+                    self.lexeme(index)
+                )
+            } else {
+                "expected an identifier".to_string()
+            };
             self.diagnostics.push(FeaSyntaxDiagnostic {
                 kind,
                 span: self.token(index).span,
-                message: "expected an identifier".to_string(),
+                message,
             });
             None
         }

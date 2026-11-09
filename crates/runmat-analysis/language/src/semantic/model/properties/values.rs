@@ -77,7 +77,10 @@ pub(in crate::semantic::model) fn validate_assignments(
             diagnostic(
                 declaration,
                 statement.span,
-                format!("unsupported definition member `{name}`"),
+                crate::semantic::pending::with_pending(
+                    format!("unsupported definition member `{name}`"),
+                    crate::semantic::pending::definition_member(name.as_str()),
+                ),
                 diagnostics,
             );
         } else if !seen.insert(name) {
@@ -173,14 +176,17 @@ pub(in crate::semantic::model) fn required_quantity(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
     let value = required_assignment(declaration, statements, name, diagnostics)?;
-    if !(value.value_type).is_quantity(dimension.into()) {
-        invalid(
-            declaration,
-            value,
-            name,
-            "quantity of the required dimension",
-            diagnostics,
+    let expected = dimension.into();
+    if !(value.value_type).is_quantity(expected) {
+        let angle = runmat_types::physical::DynamicDimension::quantity_type(
+            runmat_types::physical::QuantityKind::Angle,
         );
+        let requirement = if expected == angle {
+            "quantity with an angle unit (deg or rad)"
+        } else {
+            "quantity of the required dimension"
+        };
+        invalid(declaration, value, name, requirement, diagnostics);
         return None;
     }
     scalar(value).or_else(|| {
@@ -289,6 +295,21 @@ pub(in crate::semantic::model) fn required_vector(
 ) -> Option<[f64; 3]> {
     let dimension = dimension.into();
     let value = required_assignment(declaration, statements, name, diagnostics)?;
+    if let CheckedExpressionKind::Quantity { value: inner, .. } = &value.kind {
+        if matches!(inner.kind, CheckedExpressionKind::List(_)) {
+            diagnostic(
+                declaration,
+                value.span,
+                format!(
+                    "definition member `{name}` takes a unit on each component (`[0 m, 0 m, 0 m]`); \
+                     one trailing unit on the vector is not accepted yet{}",
+                    crate::semantic::pending::marker(crate::semantic::pending::VECTOR_TRAILING_UNIT)
+                ),
+                diagnostics,
+            );
+            return None;
+        }
+    }
     let CheckedExpressionKind::List(values) = &value.kind else {
         invalid(
             declaration,

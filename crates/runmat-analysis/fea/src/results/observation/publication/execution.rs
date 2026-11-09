@@ -310,14 +310,26 @@ impl ObservationPublicationCatalog {
                             ObservationFieldCatalogSource::VolumeMeshRecovery { .. } => {
                                 ObservationSelectionCoordinate::VolumeMeshRecovery
                             }
-                            ObservationFieldCatalogSource::StructuralFrequencyHistory {
-                                samples,
-                            } => {
-                                source_catalog = samples.iter().find(|catalog| {
-                                    matches!(catalog.source(), ObservationFieldCatalogSource::Structural { manifest, .. }
-                                        if manifest.fields.iter().any(|field| field.field == evidence.source_field && field.sample == sample.coordinate))
-                                }).ok_or_else(|| invalid("frequency history execution source sample is absent"))?;
-                                ObservationSelectionCoordinate::StructuralRecovery
+                            ObservationFieldCatalogSource::EntryHistory { samples } => {
+                                source_catalog = samples
+                                    .iter()
+                                    .find(|catalog| {
+                                        catalog.entry_recovery().is_ok_and(|(_, manifest)| {
+                                            manifest.fields.iter().any(|field| {
+                                                field.field == evidence.source_field
+                                                    && field.sample == sample.coordinate
+                                            })
+                                        })
+                                    })
+                                    .ok_or_else(|| {
+                                        invalid("entry history execution source sample is absent")
+                                    })?;
+                                match source_catalog.source() {
+                                    ObservationFieldCatalogSource::VolumeMeshRecovery {
+                                        ..
+                                    } => ObservationSelectionCoordinate::VolumeMeshRecovery,
+                                    _ => ObservationSelectionCoordinate::StructuralRecovery,
+                                }
                             }
                             ObservationFieldCatalogSource::Thermal { manifest } => {
                                 let ordinal = manifest

@@ -196,7 +196,10 @@ fn constraint(
             diagnostic(
                 declaration,
                 declaration.span,
-                format!("unsupported essential constraint `{kind}`"),
+                crate::semantic::pending::with_pending(
+                    format!("unsupported essential constraint `{kind}`"),
+                    crate::semantic::pending::constraint(&kind),
+                ),
                 diagnostics,
             );
             return None;

@@ -245,7 +245,11 @@ impl PatternFingerprint {
 
 pub(crate) enum SymbolicInner {
     Cholesky(faer::sparse::linalg::cholesky::SymbolicCholesky<usize>),
-    Lu(faer::sparse::linalg::lu::SymbolicLu<usize>),
+    Lu {
+        symbolic: faer::sparse::linalg::lu::SymbolicLu<usize>,
+        /// Reference schedule fixed at analysis from the symmetrized pattern.
+        reference: Result<DirectReferenceWork, ReferenceWorkError>,
+    },
 }
 
 /// Ordering plus symbolic factor for one sparsity pattern; shareable across numeric
@@ -331,6 +335,32 @@ impl SymbolicFactorization {
         let values = try_vec(col_idx.len(), T::zero())?;
         let matrix = CsrRef::try_new(n, n, row_ptr, col_idx, &values)?;
         Self::analyze::<T>(matrix.into(), options, control)
+    }
+
+    /// The [`FactorEstimate`] that [`Self::analyze_pattern`] reports, without building the
+    /// factor structure when the analysis is simplicial (caller-owned Cholesky or LDLT): the
+    /// ordering, then the elimination tree and column counts of the permuted pattern. Other
+    /// options run the full analysis.
+    pub fn estimate_pattern<T: FactorScalar>(
+        n: usize,
+        row_ptr: &[usize],
+        col_idx: &[usize],
+        options: &DirectOptions,
+        control: SolveControl<'_>,
+    ) -> SolverResult<FactorEstimate> {
+        if options.workspace != DirectWorkspacePolicy::CallerOwned
+            || !matches!(options.kind, FactorKind::Cholesky | FactorKind::Ldlt)
+        {
+            return Ok(
+                Self::analyze_pattern::<T>(n, row_ptr, col_idx, options, control)?.estimate(),
+            );
+        }
+        let values = try_vec(col_idx.len(), T::zero())?;
+        let matrix: SparseInput<'_, T> = CsrRef::try_new(n, n, row_ptr, col_idx, &values)?.into();
+        control.check()?;
+        let permutation = symmetric_ordering(matrix, &options.ordering)?;
+        control.check()?;
+        cholesky::simplicial_estimate::<T>(matrix, options.kind, &permutation)
     }
 
     pub fn kind(&self) -> FactorKind {

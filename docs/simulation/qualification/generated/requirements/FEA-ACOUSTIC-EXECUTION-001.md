@@ -8,8 +8,8 @@ Evidence kind: PublicationIntegrity. Criterion: Exact frequency fan-in preserves
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::acoustic_frequency_assembly::tests::native_admitted_frequency_assembly_reopens_original_complete_fields_and_metadata` (crates/runmat-execution-runner-native/src/analysis_kernel/acoustic_frequency_assembly/tests.rs:84) - Tet4/Tet10, two/three serial-native frequencies, reversed completion and cold filesystem fields; no actual parallel/distributed/GPU or producer-termination clai... |
-| acoustic_harmonic | tet10 | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::acoustic_frequency_assembly::tests::native_admitted_frequency_assembly_reopens_original_complete_fields_and_metadata` (crates/runmat-execution-runner-native/src/analysis_kernel/acoustic_frequency_assembly/tests.rs:84) - Tet4/Tet10, two/three serial-native frequencies, reversed completion and cold filesystem fields; no actual parallel/distributed/GPU or producer-termination clai... |
+| acoustic_harmonic | tet4 | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::acoustic_frequency_assembly::tests::native_admitted_frequency_assembly_reopens_original_complete_fields_and_metadata` (crates/runmat-execution-runner-native/src/analysis_kernel/acoustic_frequency_assembly/tests.rs:87) - Tet4/Tet10, two/three serial-native frequencies, reversed completion and cold filesystem fields; no actual parallel/distributed/GPU or producer-termination clai... |
+| acoustic_harmonic | tet10 | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::acoustic_frequency_assembly::tests::native_admitted_frequency_assembly_reopens_original_complete_fields_and_metadata` (crates/runmat-execution-runner-native/src/analysis_kernel/acoustic_frequency_assembly/tests.rs:87) - Tet4/Tet10, two/three serial-native frequencies, reversed completion and cold filesystem fields; no actual parallel/distributed/GPU or producer-termination clai... |
 | acoustic_harmonic | tet4 | public_study | OPEN |  |
 | acoustic_harmonic | tet10 | public_study | OPEN |  |
 | acoustic_harmonic | canonical_tetrahedra | durable | OPEN |  |
@@ -40,7 +40,7 @@ Evidence kind: ResourceAdmission. Criterion: Worker rederivation rejects altered
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::acoustic_harmonic::tests::native_acoustic_rejects_valid_but_substituted_resource_plan` (crates/runmat-execution-runner-native/src/analysis_kernel/acoustic_harmonic/tests.rs:383) - Tet4 native worker plan substitution rejection; not measured RSS, whole-family lifetime or complete cancellation evidence. |
+| acoustic_harmonic | tet4 | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::acoustic_harmonic::tests::native_acoustic_rejects_valid_but_substituted_resource_plan` (crates/runmat-execution-runner-native/src/analysis_kernel/acoustic_harmonic/tests.rs:388) - Tet4 native worker plan substitution rejection; not measured RSS, whole-family lifetime or complete cancellation evidence. |
 | acoustic_harmonic | tet10 | native_process | OPEN |  |
 | acoustic_harmonic | tet4 | public_study | OPEN |  |
 | acoustic_harmonic | tet10 | public_study | OPEN |  |

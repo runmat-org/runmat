@@ -221,6 +221,7 @@ mod tests {
             original.sample(),
             runmat_analysis_core::AnalysisField::host_f64(
                 original.definition().field_id(),
+                original.definition().layout(),
                 original.storage().shape.clone(),
                 values,
             ),

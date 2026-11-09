@@ -30,7 +30,9 @@ pub use model::{
     CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadCurveEvaluator, CadEvaluatorSet,
     CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator, CadLabelRef,
     CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType, CadParameterSelector,
-    CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind, CurveDerivatives,
+    CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind, CrossSectionDefinition,
+    CrossSectionEnclosure, CrossSectionLayer, CrossSectionLayerRole, CrossSectionStackupSource,
+    CrossSectionTrace, CrossSectionTraceBase, CrossSectionTraceRole, CurveDerivatives,
     CurveEvaluatorId, CurveProjection, DecodedExactGeometryComponents, DerivedGeometryDefinition,
     DisplayTessellationRef, EncodedExactGeometryClosure, EncodedFacetedSolidClosure, EntityIdRange,
     ExactAssembly, ExactBRepModel, ExactBRepTopology, ExactBody, ExactCoedge,
@@ -75,9 +77,6 @@ pub use model::{
     FACETED_SOLID_SCHEMA_VERSION, GEOMETRY_DOCUMENT_SCHEMA_VERSION, GEOMETRY_HEALING_MEDIA_TYPE,
     GEOMETRY_HEALING_REPORT_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
     GEOMETRY_REVISION_MAP_SCHEMA_VERSION, KERNEL_REPRESENTATION_MEDIA_TYPE,
-};
-pub use model::{
-    geometry_selection_metadata_path, is_geometry_selection_metadata_path, GeometryNamedSelections,
 };
 pub use selection::{EntityKind, EntityRef};
 

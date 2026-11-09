@@ -36,6 +36,10 @@ pub struct ImageExportSettings {
     pub quality: f32,
     /// Include metadata in output (reserved)
     pub include_metadata: bool,
+    /// Device pixels per layout point for text and overlays (titles, legends, colorbars).
+    /// A poster meant to be shown scaled down, such as on a phone, uses 2 or more so its
+    /// labels stay readable. Geometry-scene exports with a camera honour it.
+    pub pixels_per_point: f32,
 }
 
 /// Supported image formats
@@ -56,6 +60,7 @@ impl Default for ImageExportSettings {
             background_color: [1.0, 1.0, 1.0, 1.0],
             quality: 0.95,
             include_metadata: true,
+            pixels_per_point: 1.0,
         }
     }
 }
@@ -231,27 +236,17 @@ impl ImageExporter {
     ) -> Result<Vec<u8>, String> {
         let width = self.settings.width.max(1);
         let height = self.settings.height.max(1);
-        let png = if let Some(theme) = &self.theme {
-            crate::export::native_surface::render_geometry_scene_png_bytes_interactive_with_camera_and_theme(
+        let rgba =
+            crate::export::native_surface::render_geometry_scene_rgba_bytes_with_camera_theme_and_scale(
                 scene.clone(),
                 width,
                 height,
                 camera,
-                theme.clone(),
+                self.theme.clone().unwrap_or_default(),
+                self.settings.pixels_per_point,
             )
-            .await
-        } else {
-            let rgba =
-                crate::export::native_surface::render_geometry_scene_rgba_bytes_interactive_with_camera_and_theme(
-                    scene.clone(),
-                    width,
-                    height,
-                    camera,
-                    PlotThemeConfig::default(),
-                )
-                .await?;
-            self.encode_png_bytes(&rgba)
-        }?;
+            .await?;
+        let png = self.encode_png_bytes(&rgba)?;
         super::geometry_callouts::annotate_png(png, scene, camera, width, height)
     }
 

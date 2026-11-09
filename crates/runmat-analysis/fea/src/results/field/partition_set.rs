@@ -258,10 +258,16 @@ pub fn reconstruct_recovered_field(
         );
     }
     let shape = definition.storage_shape(entity_count)?;
+    // Every partition carries its source field's layout; the source identity covers it.
+    let layout = set
+        .partitions
+        .first()
+        .map(|partition| partition.storage.layout.clone())
+        .ok_or(RecoveredFieldError::IdentityMismatch)?;
     let field = RecoveredField::new(
         definition.clone(),
         sample,
-        runmat_analysis_core::AnalysisField::host_f64(definition.field_id(), shape, values),
+        runmat_analysis_core::AnalysisField::host_f64(definition.field_id(), layout, shape, values),
     )?;
     if field.identity() != expected_identity {
         return Err(RecoveredFieldError::IdentityMismatch);

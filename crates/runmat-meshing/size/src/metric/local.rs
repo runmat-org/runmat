@@ -174,6 +174,28 @@ impl ResolvedMetricField {
         })
     }
 
+    /// The sizing field at a point of a scope whose uniform part is `constant`: intersected with
+    /// every entity-local source of the request and with the scope's own graded sources
+    /// `scope_sources`, each graded by distance to `point_m`.
+    ///
+    /// Curve, surface and volume stages all evaluate sizing through this function, so a point
+    /// receives the same size whether a boundary curve, a face or the volume asks. An edge-local
+    /// source (for example proximity across a thin gap) refines the faces and curves near its
+    /// support even when they do not bound that edge; otherwise the volume next to such a face
+    /// asks for cells finer than the face's own triangles allow.
+    pub fn evaluate_at(
+        &self,
+        constant: MetricTensor3,
+        scope_sources: &[LocalMetricSource],
+        point_m: [f64; 3],
+    ) -> Result<MetricTensor3, MetricContractError> {
+        self.graded(
+            constant,
+            self.entity_local.iter().chain(scope_sources),
+            point_m,
+        )
+    }
+
     /// Evaluate `constant` intersected with every local source graded to `point_m`.
     pub fn evaluate_graded(
         &self,
@@ -181,7 +203,16 @@ impl ResolvedMetricField {
         sources: &[LocalMetricSource],
         point_m: [f64; 3],
     ) -> Result<MetricTensor3, MetricContractError> {
-        if sources.is_empty() {
+        self.graded(constant, sources.iter(), point_m)
+    }
+
+    fn graded<'a>(
+        &self,
+        constant: MetricTensor3,
+        sources: impl Iterator<Item = &'a LocalMetricSource> + Clone,
+        point_m: [f64; 3],
+    ) -> Result<MetricTensor3, MetricContractError> {
+        if sources.clone().next().is_none() {
             return Ok(constant);
         }
         if point_m.iter().any(|value| !value.is_finite()) {
@@ -202,15 +233,20 @@ impl ResolvedMetricField {
         }
         // Nearest sources first (ties keep canonical order): each one that tightens the metric
         // shrinks the distance beyond which a later source is isotropically coarser than the
-        // metric's coarsest direction, so it is dominated and skipped. Every consumer, including
-        // the independent validator, evaluates through this function.
-        let mut order = sources
-            .iter()
-            .map(|source| (bounds_distance(source.bounds, point_m), source))
-            .collect::<Vec<_>>();
-        order.sort_by(|left, right| left.0.total_cmp(&right.0));
+        // metric's coarsest direction, so it is dominated and skipped. Sources already beyond
+        // that distance under `constant` alone are dropped before the sort. Every consumer,
+        // including the independent validator, evaluates through this function.
         let mut metric = constant;
         let mut reach_length = coarsest_length_bound(metric)?;
+        let mut order = sources
+            .filter_map(|source| {
+                let lower_bound = bounds_distance(source.bounds, point_m);
+                let reach = source.characteristic_length_m
+                    + (reach_length - source.characteristic_length_m) / slope;
+                (lower_bound <= reach).then_some((lower_bound, source))
+            })
+            .collect::<Vec<_>>();
+        order.sort_by(|left, right| left.0.total_cmp(&right.0));
         for (lower_bound, source) in order {
             let reach = source.characteristic_length_m
                 + (reach_length - source.characteristic_length_m) / slope;
@@ -243,7 +279,7 @@ impl ResolvedMetricField {
 
 /// Upper bound on the coarsest directional length of a tensor: its smallest eigenvalue is at
 /// least `det / lambda_max^2`, and a row-sum bound dominates `lambda_max`.
-fn coarsest_length_bound(metric: MetricTensor3) -> Result<f64, MetricContractError> {
+pub(super) fn coarsest_length_bound(metric: MetricTensor3) -> Result<f64, MetricContractError> {
     metric.validate()?;
     let maximum = metric.maximum_row_density();
     let determinant = metric.xx * metric.yy * metric.zz + 2.0 * metric.xy * metric.xz * metric.yz
@@ -259,7 +295,10 @@ fn coarsest_length_bound(metric: MetricTensor3) -> Result<f64, MetricContractErr
     }
 }
 
-fn scaled(metric: MetricTensor3, size_scale: f64) -> Result<MetricTensor3, MetricContractError> {
+pub(super) fn scaled(
+    metric: MetricTensor3,
+    size_scale: f64,
+) -> Result<MetricTensor3, MetricContractError> {
     let factor = (size_scale * size_scale).recip();
     let result = MetricTensor3 {
         xx: metric.xx * factor,
@@ -273,7 +312,7 @@ fn scaled(metric: MetricTensor3, size_scale: f64) -> Result<MetricTensor3, Metri
     Ok(result)
 }
 
-fn bounds_distance(bounds: ([f64; 3], [f64; 3]), point: [f64; 3]) -> f64 {
+pub(super) fn bounds_distance(bounds: ([f64; 3], [f64; 3]), point: [f64; 3]) -> f64 {
     (0..3)
         .map(|axis| {
             let below = bounds.0[axis] - point[axis];

@@ -123,6 +123,35 @@ pub struct AuthoredModel {
 }
 
 impl AuthoredModel {
+    /// A model with no domains, materials, loads or constraints.
+    pub fn empty(module_path: &str, model_id: &str) -> Self {
+        Self {
+            module_path: module_path.to_string(),
+            model_id: model_id.to_string(),
+            thermal: None,
+            thermo_mechanical: None,
+            electromagnetic: None,
+            inputs: Vec::new(),
+            includes: Vec::new(),
+            sections: Vec::new(),
+            layups: Vec::new(),
+            orientations: Vec::new(),
+            material_assignments: Vec::new(),
+            property_assignments: Vec::new(),
+            constraints: Vec::new(),
+            boundaries: Vec::new(),
+            connectors: Vec::new(),
+            interfaces: Vec::new(),
+            signals: Vec::new(),
+            parameterized_signals: Vec::new(),
+            excitations: Vec::new(),
+            excitation_cases: Vec::new(),
+            response_spectra: Vec::new(),
+            random_excitations: Vec::new(),
+            initial_conditions: Vec::new(),
+        }
+    }
+
     pub fn reference(&self) -> AuthoredModelRef {
         AuthoredModelRef {
             module_path: self.module_path.clone(),

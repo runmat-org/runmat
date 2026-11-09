@@ -44,6 +44,7 @@ const rustCoreOutputPath = path.resolve(
   "crates/runmat-analysis/core/src/study/output/quantity.rs"
 );
 const rustFieldLocationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/study/output.rs");
+const rustCoreFieldPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/field.rs");
 const rustSignalPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/signal.rs");
 const rustExcitationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/excitation.rs");
 const rustGeometryUnitsPath = path.resolve(
@@ -206,6 +207,8 @@ function rustTypeToTs(type) {
       return { type: "FeaAnalysisProcedure", nullable: false };
     case "ProcedureStep":
       return { type: "FeaProcedureStep", nullable: false };
+    case "runmat_analysis_core::AnalysisFieldLayout":
+      return { type: "FeaFieldLayout", nullable: false };
     case "ProcedureStepId":
       return { type: "string", nullable: false };
     case "AnalysisFieldPageValues":
@@ -220,11 +223,8 @@ function rustTypeToTs(type) {
       };
     case "runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation":
       return { type: '"real" | "complex_interleaved"', nullable: false };
-    case "AnalysisFieldStatistic":
-      return {
-        type: '"component_magnitude_envelope" | "root_mean_square" | "variance"',
-        nullable: false,
-      };
+    case "runmat_analysis_core::FieldStatistic":
+      return { type: "FeaFieldStatistic", nullable: false };
     case "runmat_analysis_core::SpectrumDirection":
       return {
         type: "{ frame: FeaCoordinateFrame; vector: [number, number, number] }",
@@ -468,6 +468,7 @@ function main() {
   const coreFormulationSource = fs.readFileSync(rustCoreFormulationPath, "utf8");
   const coreOutputSource = fs.readFileSync(rustCoreOutputPath, "utf8");
   const fieldLocationSource = fs.readFileSync(rustFieldLocationPath, "utf8");
+  const coreFieldSource = fs.readFileSync(rustCoreFieldPath, "utf8");
   const signalSource = fs.readFileSync(rustSignalPath, "utf8");
   const excitationSource = fs.readFileSync(rustExcitationPath, "utf8");
   const geometryUnitsSource = fs.readFileSync(rustGeometryUnitsPath, "utf8");
@@ -562,16 +563,21 @@ export type FeaSamplingPolicy = "final" | "every_accepted_increment" | { time_se
 export type FeaRetentionPolicy = "canonical" | "until_dependents_complete" | { latest_samples: { count: number } } | { explicit_samples: { maximum_count: number } };
 export interface FeaObservationSpec {
   observation_id: string; quantity: FeaObservationQuantity;
-  value_shape: "scalar" | "vector3" | "symmetric_tensor3" | { tensor: { extents: number[] } };
+  value_shape: FeaObservationValueShape;
   target: FeaObservationTarget; source_location: FeaFieldLocationContract; output_location: FeaFieldLocationContract;
   recovery: "native" | "extrapolate" | "volume_weighted_average" | "area_weighted_average" | "conservative_projection" | "shape_function_interpolation";
   component: "all" | "x" | "y" | "z" | "normal" | "tangent1" | "tangent2" | "trace" | "hydrostatic" | "deviatoric" | "von_mises" | "maximum_principal" | "minimum_principal" | "magnitude";
   frame: FeaCoordinateFrame; sign_convention: "native" | "tension_positive" | "compression_positive" | "outward_positive" | "inward_positive";
-  complex_representation: "real" | "imaginary" | "magnitude" | "phase_radians" | "complex";
+  complex_representation: FeaComplexRepresentation;
   sampling: FeaSamplingPolicy; reduction: FeaReductionPolicy | null; storage: FeaObservationStoragePolicy;
   purpose: "publication" | "solver_control" | "visualization" | "downstream_state"; cost: FeaObservationCostEstimate;
 }
 ${formatTypeUnion("FeaFieldLocationContract", readEnumValues(fieldLocationSource, "FieldLocation"))}
+export type FeaObservationValueShape = "scalar" | "vector3" | "symmetric_tensor3" | { tensor: { extents: number[] } };
+${formatTypeUnion("FeaComplexRepresentation", readEnumValues(fieldLocationSource, "ComplexRepresentation"))}
+export type FeaFieldOrdinal = { kind: "single" } | { kind: "step"; index: number } | { kind: "mode"; index: number };
+${formatTypeUnion("FeaFieldStatistic", readEnumValues(coreFieldSource, "FieldStatistic"))}
+export interface FeaFieldLayout { quantity: FeaObservationQuantity; location: FeaFieldLocationContract; value_shape: FeaObservationValueShape; representation?: FeaComplexRepresentation; ordinal: FeaFieldOrdinal; statistic?: FeaFieldStatistic; }
 export type FeaObservationTarget = { spatial: FeaExcitationTarget } | { point: { position: FeaPosition } } | { path: { positions: FeaPosition[] } } | { connector: { connector_id: string } } | { constraint: { constraint_id: string } } | "whole_model";
 export interface FeaReductionPolicy { spatial: "none" | "integral" | "average" | "root_mean_square" | "euclidean_norm" | "minimum" | "maximum" | "resultant" | "moment"; series: "none" | "minimum" | "maximum" | "absolute_maximum" | "root_mean_square" | "mean" | "variance" | "envelope"; extrema_ties: "first_canonical" | "all_locations"; }
 export interface FeaObservationStoragePolicy { precision: FeaSignalPrecision; compression: "lossless" | { error_bounded: { maximum_relative_error: number } } | "none"; retention: FeaRetentionPolicy; partial_access: "manifest_and_chunks" | "whole_artifact"; }
@@ -602,6 +608,7 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     moment: "{ newton_meters: number }", traction: "{ pascals: number }", pressure: "{ pascals: number }",
     body_force_density: "{ newtons_per_cubic_meter: number }", temperature: "{ kelvin: number }",
     temperature_difference: "{ kelvin: number }",
+    heat_rate: "{ watts: number }",
     heat_flux: "{ watts_per_square_meter: number }", heat_generation_density: "{ watts_per_cubic_meter: number }",
     electric_potential: "{ volts: number }", electric_current: "{ amperes: number }", electric_charge: "{ coulombs: number }",
     electric_current_density: "{ amperes_per_square_meter: number }", electric_charge_density: "{ coulombs_per_cubic_meter: number }",

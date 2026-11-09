@@ -8,8 +8,8 @@ charge-density load $\int_\Omega\rho_q\,d\Omega$. RunMat keeps these measures di
 projection.
 
 The declarations below are implemented in the typed source checker. Electromagnetic procedure
-graphs are not yet admitted by the native typed whole-study executor; `runmat fea check` can verify
-the source contract, while `runmat fea run` currently fails closed at the non-structural execution
+graphs are not yet admitted by the native typed whole-study executor; `runmat check` can verify
+the source contract, while `runmat run` currently fails closed at the non-structural execution
 boundary. The lower-level electromagnetic operation is a separate API surface.
 
 | Kind | Quantity | Projection/boundary meaning |

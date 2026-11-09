@@ -133,7 +133,7 @@ impl ClockControl {
                 let mut start = NodeClockStartV1 {
                     schema_version: 1,
                     owner: NodeClockOwnerV1 {
-                        org_id: "org-1".into(),
+                        org_id: crate::remote::test_ids::TEST_ORG_ID.into(),
                         cluster_id: "cluster-clock".into(),
                         node_id: "node-clock".into(),
                         run_id: RUN_ID.into(),

@@ -20,11 +20,40 @@ impl GradientMetric {
         }
         Ok(Self { matrix })
     }
+    /// Whether the sample directions span three dimensions with margin: `det M ≥ 1e-6 (tr M / 3)³`.
+    /// `M` is symmetric positive semidefinite, so `det M / (tr M / 3)³ = Π λ_i / λ̄³ ∈ [0, 1]`: zero
+    /// exactly when the samples are coplanar or collinear, and at least `λ_min / λ_max · λ_mid / λ̄`
+    /// otherwise. On the compliant-tube mesh every other stencil sits above 0.048; coplanar rings sit at 0.
+    pub(super) fn spans_three_dimensions(&self) -> bool {
+        let m = &self.matrix;
+        let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        let mean = (m[0][0] + m[1][1] + m[2][2]) / 3.0;
+        mean > 0.0 && det >= 1e-6 * mean * mean * mean
+    }
     pub(super) fn weight(&self, displacement: V) -> Result<V, Error> {
         solve_three(
             self.matrix,
             scale(displacement, 1.0 / dot(displacement, displacement)),
         )
+    }
+}
+
+/// Names the cell whose stencil failed, so a geometry defect can be traced to its element.
+pub(super) fn at_cell(
+    error: Error,
+    cell: &crate::topology::FiniteVolumeCell,
+    samples: usize,
+) -> Error {
+    match error {
+        Error::Invalid(reason) => Error::InvalidCell {
+            reason,
+            element_id: cell.element_id,
+            centroid_m: cell.centroid_m,
+            samples,
+        },
+        other => other,
     }
 }
 

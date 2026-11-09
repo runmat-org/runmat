@@ -1,5 +1,6 @@
 //! Shared original numerical-result projection, with no equilibrium re-solve.
 use super::*;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 pub(super) fn recover(
     model: &AnalysisModel,
@@ -142,26 +143,46 @@ pub(super) fn recover(
         fields: vec![
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                ),
                 nodal_vector_shape(&summary.structural_dof_layout),
                 projected_displacement.translations,
             ),
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_VON_MISES,
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                ),
                 vec![element_count],
                 von_mises,
             ),
             AnalysisField::host_f64(
                 crate::contracts::FEA_FIELD_STRUCTURAL_STRESS,
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Stress,
+                    FieldLocation::Element,
+                ),
                 vec![element_count, TENSOR_COMPONENT_COUNT],
                 stress,
             ),
             AnalysisField::host_f64(
                 crate::contracts::FEA_FIELD_STRUCTURAL_STRAIN,
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Strain,
+                    FieldLocation::Element,
+                ),
                 vec![element_count, TENSOR_COMPONENT_COUNT],
                 strain,
             ),
             AnalysisField::host_f64(
                 crate::contracts::FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::ReactionForce,
+                    FieldLocation::Node,
+                ),
                 nodal_vector_shape(&summary.structural_dof_layout),
                 projected_reaction.translations,
             ),
@@ -184,6 +205,11 @@ pub(super) fn recover(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_nonlinear_displacement_field_id(first_output_index + index),
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                )
+                .step(first_output_index + index),
                 nodal_vector_shape(&summary.structural_dof_layout),
                 snapshot.translations.clone(),
             )
@@ -195,6 +221,8 @@ pub(super) fn recover(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_nonlinear_rotation_field_id(first_output_index + index),
+                AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node)
+                    .step(first_output_index + index),
                 nodal_vector_shape(&summary.structural_dof_layout),
                 snapshot.rotations.clone(),
             )
@@ -208,6 +236,11 @@ pub(super) fn recover(
         .map(|(index, values)| {
             AnalysisField::host_f64(
                 fea_nonlinear_von_mises_field_id(first_output_index + index),
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                )
+                .step(first_output_index + index),
                 vec![element_count],
                 values,
             )
@@ -221,6 +254,11 @@ pub(super) fn recover(
         .map(|(index, values)| {
             AnalysisField::host_f64(
                 fea_nonlinear_plastic_strain_field_id(first_output_index + index),
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::PlasticStrain,
+                    FieldLocation::Element,
+                )
+                .step(first_output_index + index),
                 vec![element_count, TENSOR_COMPONENT_COUNT],
                 values,
             )
@@ -234,29 +272,48 @@ pub(super) fn recover(
         .map(|(index, values)| {
             AnalysisField::host_f64(
                 fea_nonlinear_equivalent_plastic_strain_field_id(first_output_index + index),
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::EquivalentPlasticStrain,
+                    FieldLocation::Element,
+                )
+                .step(first_output_index + index),
                 vec![element_count],
                 values,
             )
         })
         .collect::<Vec<_>>();
     // One value per contact point of the prepared contact operator, in operator order.
-    let contact_point_fields = |snapshots: &[Vec<f64>], id: fn(usize) -> String| {
-        snapshots
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(index, values)| {
-                AnalysisField::host_f64(id(first_output_index + index), vec![values.len()], values)
-            })
-            .collect::<Vec<_>>()
-    };
+    let contact_point_fields =
+        |snapshots: &[Vec<f64>],
+         id: fn(usize) -> String,
+         quantity: runmat_analysis_core::ObservationQuantity| {
+            snapshots
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(index, values)| {
+                    AnalysisField::host_f64(
+                        id(first_output_index + index),
+                        runmat_analysis_core::AnalysisFieldLayout::scalar(
+                            quantity,
+                            runmat_analysis_core::FieldLocation::Interface,
+                        )
+                        .step(first_output_index + index),
+                        vec![values.len()],
+                        values,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
     let contact_pressure_snapshots = contact_point_fields(
         &nonlinear.contact_pressure_snapshots,
         crate::contracts::fea_nonlinear_contact_pressure_field_id,
+        runmat_analysis_core::ObservationQuantity::ContactPressure,
     );
     let contact_gap_snapshots = contact_point_fields(
         &nonlinear.contact_gap_snapshots,
         crate::contracts::fea_nonlinear_contact_gap_field_id,
+        runmat_analysis_core::ObservationQuantity::ContactGap,
     );
     let load_factor_snapshots = nonlinear
         .load_factors
@@ -266,6 +323,8 @@ pub(super) fn recover(
         .map(|(index, value)| {
             AnalysisField::host_f64(
                 fea_nonlinear_load_factor_field_id(first_output_index + index),
+                AnalysisFieldLayout::scalar(ObservationQuantity::LoadFactor, FieldLocation::Global)
+                    .step(first_output_index + index),
                 vec![1],
                 vec![value],
             )
@@ -279,6 +338,8 @@ pub(super) fn recover(
         .map(|(index, value)| {
             AnalysisField::host_f64(
                 fea_nonlinear_residual_norm_field_id(first_output_index + index),
+                AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global)
+                    .step(first_output_index + index),
                 vec![1],
                 vec![value],
             )
@@ -310,6 +371,10 @@ pub(super) fn recover(
             0,
             AnalysisField::host_f64(
                 "structural.nonlinear.initial_displacement",
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                ),
                 nodal_vector_shape(&summary.structural_dof_layout),
                 initial.translations.clone(),
             ),
@@ -319,6 +384,7 @@ pub(super) fn recover(
             0,
             AnalysisField::host_f64(
                 "structural.nonlinear.initial_rotation",
+                AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node),
                 nodal_vector_shape(&summary.structural_dof_layout),
                 initial.rotations,
             ),

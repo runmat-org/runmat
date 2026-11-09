@@ -25,7 +25,7 @@ profile to a cluster, queue, provider capabilities, and pinned trust identity.
 For an explicit CLI placement:
 
 ```sh
-runmat fea run bracket.fea \
+runmat run bracket.fea \
   --study bracket_response \
   --cluster engineering \
   --project 00000000-0000-0000-0000-000000000000 \

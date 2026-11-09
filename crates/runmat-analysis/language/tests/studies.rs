@@ -124,7 +124,7 @@ study response {{
             if value.dimension() == runmat_types::PhysicalDimension::FORCE && value.canonical_value() == 1000.0
     ));
     assert!(matches!(
-        &study.model.arguments[0].value,
+        &study.model.as_ref().unwrap().arguments[0].value,
         runmat_analysis_core::AuthoredModelArgumentValue::StudyInput(reference)
             if reference.input_id == "commanded_load"
     ));
@@ -285,7 +285,10 @@ study response {
     assert_eq!(study.module_path, "project/main.fea");
     assert_eq!(study.geometry.definition.module_path, "project/library.fea");
     assert_eq!(study.mesh.module_path, "project/library.fea");
-    assert_eq!(study.model.model.module_path, "project/library.fea");
+    assert_eq!(
+        study.model.as_ref().unwrap().model.module_path,
+        "project/library.fea"
+    );
 }
 
 // witness: FEA-AUTHORING-COMPILER-002/study_and_sweep_lowering @
@@ -401,6 +404,84 @@ study response {{
         runmat_analysis_core::SequenceDependencyReason::StateTransfer
     );
     assert_eq!(sequence.transitions[0].state_id.0, "basis");
+}
+
+// witness: FEA-AUTHORING-LANGUAGE-002/declarative_semantics @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Modal residual vectors and modal-reduced static correction lower into the typed
+//   procedure settings; malformed values are rejected with a procedure diagnostic.
+#[test]
+fn modal_reduction_enrichment_lowers_into_typed_procedure_settings() {
+    let study = |modal: &str, harmonic: &str| {
+        format!(
+            r#"{PART_AND_MESH}
+model structure {{
+}}
+study response {{
+    geometry = geometry.part
+    mesh = mesh.part
+    model = model.structure
+    analysis modes {{
+        structural modal {{
+            modes = 8
+            {modal}
+        }}
+        retain basis
+    }}
+    analysis sweep after analysis.modes {{
+        structural modal_harmonic {{
+            basis = analysis.modes.state.basis
+            frequencies = [20, 40] Hz
+            {harmonic}
+        }}
+    }}
+}}
+"#
+        )
+    };
+    let program = check(&study(
+        "residual_vectors = [[0, 0, 1], [1, 0, 0]]",
+        "static_correction = applied_loads",
+    ));
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let sequence = &program.studies.values().next().unwrap().sequence;
+    assert_eq!(
+        sequence.steps[0]
+            .modal_residual_vector_directions()
+            .iter()
+            .map(|direction| direction.vector)
+            .collect::<Vec<_>>(),
+        vec![[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
+    );
+    assert_eq!(
+        sequence.steps[1].modal_static_correction(),
+        runmat_analysis_core::ModalStaticCorrection::AppliedLoads
+    );
+
+    let plain = check(&study("", ""));
+    assert!(plain.is_valid(), "{:#?}", plain.diagnostics);
+    let sequence = &plain.studies.values().next().unwrap().sequence;
+    assert!(sequence.steps[0]
+        .modal_residual_vector_directions()
+        .is_empty());
+    assert_eq!(
+        sequence.steps[1].modal_static_correction(),
+        runmat_analysis_core::ModalStaticCorrection::None
+    );
+
+    for (modal, harmonic) in [
+        ("residual_vectors = [[0, 0, 0]]", ""),
+        ("residual_vectors = [[0, 0, 1], [0, 0, 2]]", ""),
+        ("residual_vectors = [0, 0, 1]", ""),
+        ("", "static_correction = inertia"),
+    ] {
+        let rejected = check(&study(modal, harmonic));
+        assert!(!rejected.is_valid(), "{modal} {harmonic} must be rejected");
+        assert!(rejected
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.starts_with("fea.semantic")));
+    }
 }
 
 // witness: FEA-AUTHORING-LANGUAGE-002/declarative_semantics @

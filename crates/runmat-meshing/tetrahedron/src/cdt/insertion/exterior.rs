@@ -196,21 +196,43 @@ impl UnconstrainedHull {
     }
 }
 
-/// A hull face of cell `index` whose plane holds `node`.
+/// A hull face whose plane holds `node`, among the cells whose closure contains it.
+///
+/// A node on a hull edge or vertex lies in several cells, and the walk may return an interior
+/// one; the cells sharing the node's face, edge or vertex are reached across the faces whose
+/// plane holds it. Missing the hull face would send the node down the interior path, which
+/// cuts the cells under coplanar hull faces from the cavity although their circumspheres hold
+/// the node, leaving the complex non-Delaunay.
 fn coplanar_hull_face(
     topology: &TopologyMutation,
     index: u32,
     node: DelaunayVolumeNode,
     work: &mut InsertionWork<'_>,
 ) -> Result<Option<(u32, usize)>, DelaunayInsertionError> {
-    let tet = topology
-        .tetrahedron(index)
-        .expect("located tetrahedron is active");
-    for opposite in 0..4 {
-        if tet.neighbors[opposite].is_none()
-            && face_side(topology, tet.vertex_indices, opposite, node, work)? == FaceSide::Coplanar
-        {
-            return Ok(Some((index, opposite)));
+    let mut pending = vec![index];
+    let mut visited = BTreeSet::from([index]);
+    while let Some(index) = pending.pop() {
+        let tet = topology
+            .tetrahedron(index)
+            .expect("located tetrahedron is active");
+        for opposite in 0..4 {
+            if face_side(topology, tet.vertex_indices, opposite, node, work)? != FaceSide::Coplanar
+            {
+                continue;
+            }
+            match tet.neighbors[opposite] {
+                None => return Ok(Some((index, opposite))),
+                Some(neighbor) => {
+                    if visited.insert(neighbor) {
+                        if visited.len() as u64 > work.options.maximum_cavity_tetrahedra {
+                            return Err(resource(
+                                "hull insertion closure-star tetrahedron limit exceeded",
+                            ));
+                        }
+                        pending.push(neighbor);
+                    }
+                }
+            }
         }
     }
     Ok(None)

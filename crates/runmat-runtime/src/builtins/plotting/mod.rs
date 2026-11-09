@@ -280,6 +280,7 @@ pub use self::engine::{
     render_figure_snapshot_with_camera_state, render_geometry_observation_snapshot,
     render_geometry_scene_observation_snapshot, render_geometry_scene_snapshot,
     render_geometry_scene_snapshot_with_camera_state,
+    render_geometry_scene_snapshot_with_camera_state_scaled,
 };
 pub(crate) use self::error::{plotting_error, plotting_error_with_source};
 pub use self::figure_scene::present_figure_on_surface;
@@ -291,8 +292,9 @@ pub use self::figure_scene::{
 #[cfg(feature = "plot-core")]
 pub use self::geometry_scene::{
     append_geometry_scene_chunks, clone_geometry_scene, close_geometry_scene,
-    encode_geometry_figure_scene, export_geometry_scene, import_geometry_scene,
-    import_geometry_scene_payload, present_geometry_scene_on_surface, replace_geometry_scene,
+    encode_geometry_figure_scene, encode_geometry_figure_scene_within, export_geometry_scene,
+    import_geometry_scene, import_geometry_scene_payload, present_geometry_scene_on_surface,
+    replace_geometry_scene, GeometrySceneEncodeError,
 };
 #[cfg(feature = "plot-core")]
 pub use self::import_registry::register_imported_geometry_scene;

@@ -116,6 +116,16 @@ fn usage(cpu: u64, wall: u64) -> ResourceUsage {
         ..Default::default()
     }
 }
+/// How long a child waits for its parent's answer to a forwarded lease call. A start is
+/// one exchange. A renewal or settlement may wait out the parent's whole outage window
+/// while RunMat Server restarts, so it waits that window plus one exchange.
+pub(crate) fn parent_reply_timeout(budget: Option<&FeaRunBudget>) -> std::time::Duration {
+    use runmat_simulation_usage::outage;
+    budget.map_or(outage::LEASE_EXCHANGE_TIMEOUT, |budget| {
+        outage::forwarded_reply_timeout(std::time::Duration::from_millis(budget.heartbeat_millis))
+    })
+}
+
 mod owner;
 mod worker;
 pub use owner::{Close, Parent};

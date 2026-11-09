@@ -1,12 +1,10 @@
-use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, GeometryEvaluationControl,
-};
+use runmat_geometry_core::{ExactBRepTopology, ExactCurveEvaluator, GeometryEvaluationControl};
 use runmat_meshing_core::{CanonicalEntityRange, MeshingPartitionDescriptor, MeshingPartitionKind};
 
 use super::{
     discretize::{
         discretize_edge, geometry_error, validate_options, CurveMetricField,
-        SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
+        ExactFacePcurveEvaluator, SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
     },
     SharedCurveBatch, SharedCurveError, SharedCurveMesh, SHARED_CURVE_BATCH_SCHEMA_VERSION,
     SHARED_CURVE_MESH_SCHEMA_VERSION,
@@ -48,7 +46,7 @@ pub fn curve_partition_descriptors(
 pub fn discretize_shared_curve_partition(
     topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
+    pcurves: &dyn ExactFacePcurveEvaluator,
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,

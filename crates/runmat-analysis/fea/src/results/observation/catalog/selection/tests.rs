@@ -18,6 +18,7 @@ fn structural_selection_preserves_catalog_order_and_all_required_samples() {
         RecoveredFieldSample::TimeSeconds(1.0),
         AnalysisField::host_f64(
             field.definition().field_id(),
+            field.definition().layout(),
             vec![projection.nodes.len()],
             vec![1.0; projection.nodes.len()],
         ),

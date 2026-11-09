@@ -25,7 +25,7 @@ const AUDIT_ELEMENT_PREFIX: &[u8] = b"runmat-fea-compiled-property-audit-element
 const SEQUENCE_DIGEST_PREFIX: &[u8] = b"runmat-fea-compiled-property-sequence/v2\0";
 /// Header contracts hold scalars, digests and a fixed number of sequence digests: their size
 /// does not grow with the mesh.
-const HEADER_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 64, 4096, 64);
+pub(super) const HEADER_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 64, 4096, 64);
 /// One element's semantics (material, section, laminate plies). Element count never enters
 /// this bound; every element is encoded on its own.
 const ELEMENT_LIMITS: CanonicalLimits =

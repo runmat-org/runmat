@@ -1,6 +1,6 @@
 # FEA-SHARED-PROPERTIES-001: Element-complete typed constitutive ownership
 
-0 PASS, 9 PARTIAL, 0 FAIL, 71 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 8 PARTIAL, 0 FAIL, 72 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## distinct_property_roles
 
@@ -23,7 +23,7 @@ Evidence kind: SemanticRealization. Criterion: The material target is a closed s
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::tests::solver_mesh_material_regions_select_assigned_solid_materials` (crates/runmat-analysis/fea/src/assembly/mod.rs:2334) - Solver-mesh material regions select the assigned solid materials; beam, shell and cell roles are not covered by this test. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::tests::solver_mesh_material_regions_select_assigned_solid_materials` (crates/runmat-analysis/fea/src/assembly/mod.rs:2655) - Solver-mesh material regions select the assigned solid materials; beam, shell and cell roles are not covered by this test. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -38,7 +38,7 @@ Evidence kind: SemanticRealization. Criterion: The four roles are therefore form
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-core[lib]::problem::region_resolution::tests::material_targets_resolve_only_against_their_compatible_topology_aliases` (crates/runmat-analysis/core/src/problem/region_resolution.rs:484) - Material targets resolve only against compatible topology aliases. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -53,7 +53,7 @@ Evidence kind: SemanticRealization. Criterion: Every active material-bearing ele
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::solver_solid::tests::solid_material_coverage_rejects_overlap_stale_and_wrong_role` (crates/runmat-analysis/fea/src/assembly/solver_solid/tests.rs:235) - Solid material coverage rejects overlap, stale revision and wrong role at assembly; beam, shell and composite coverage are separate. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::assembly::solver_solid::tests::solid_material_coverage_rejects_overlap_stale_and_wrong_role` (crates/runmat-analysis/fea/src/assembly/solver_solid/tests.rs:356) - Solid material coverage rejects overlap, stale revision and wrong role at assembly; beam, shell and composite coverage are separate. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -83,7 +83,7 @@ Evidence kind: SemanticRealization. Criterion: formulation adapters borrow typed
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::properties::tests::semantic_identity_is_independent_of_assignment_order_but_audit_is_not` (crates/runmat-analysis/fea/src/properties/tests.rs:409) - Semantic identity is independent of assignment order while the audit trail is not. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::properties::tests::semantic_identity_is_independent_of_assignment_order_but_audit_is_not` (crates/runmat-analysis/fea/src/properties/tests.rs:422) - Semantic identity is independent of assignment order while the audit trail is not. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -98,7 +98,7 @@ Evidence kind: SemanticRealization. Criterion: Material coverage is necessary bu
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::properties::tests::explicit_properties_reject_duplicate_and_missing_sections` (crates/runmat-analysis/fea/src/properties/tests.rs:297) - Explicit properties reject duplicate and missing sections. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::properties::tests::explicit_properties_reject_duplicate_and_missing_sections` (crates/runmat-analysis/fea/src/properties/tests.rs:304) - Explicit properties reject duplicate and missing sections. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -113,7 +113,7 @@ Evidence kind: SemanticRealization. Criterion: Explicit beam and shell elements 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::properties::preparation::tests::explicit_cache_exact_ceiling_preserves_identity_shape_and_bytes` (crates/runmat-analysis/fea/src/properties/preparation/tests.rs:344) - Explicit beam and shell fixture topology cache preserves identities, borrowed source and exact resource ceiling; no material coverage, laminate physics or distr...<br>`runmat-analysis-fea[lib]::properties::tests::laminate_property_identity_round_trips_and_rejects_competing_homogeneous_ownership` (crates/runmat-analysis/fea/src/properties/tests.rs:333) - Laminate property identity round-trips and rejects competing homogeneous ownership. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::properties::preparation::tests::explicit_cache_exact_ceiling_preserves_identity_shape_and_bytes` (crates/runmat-analysis/fea/src/properties/preparation/tests.rs:352) - Explicit beam and shell fixture topology cache preserves identities, borrowed source and exact resource ceiling; no material coverage, laminate physics or distr...<br>`runmat-analysis-fea[lib]::properties::tests::laminate_property_identity_round_trips_and_rejects_competing_homogeneous_ownership` (crates/runmat-analysis/fea/src/properties/tests.rs:340) - Laminate property identity round-trips and rejects competing homogeneous ownership. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -143,7 +143,7 @@ Evidence kind: SemanticRealization. Criterion: Qualification must include single
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::properties::tests::compiled_map_projects_explicit_beam_and_shell_domains_without_cross_role_fallback` (crates/runmat-analysis/fea/src/properties/tests.rs:267) - Explicit beam and shell domains project without cross-role fallback; a multi-solid exact-CAD corpus is not covered. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::properties::tests::compiled_map_projects_explicit_beam_and_shell_domains_without_cross_role_fallback` (crates/runmat-analysis/fea/src/properties/tests.rs:274) - Explicit beam and shell domains project without cross-role fallback; a multi-solid exact-CAD corpus is not covered. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

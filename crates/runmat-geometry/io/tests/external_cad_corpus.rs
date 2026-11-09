@@ -493,3 +493,46 @@ fn sandbox_bracket_samples_stay_inside_original_edge_domains() {
     }
     assert!(checked > 0);
 }
+
+/// One solid ("Pack negative perimeter cable") carried out of an exported EV battery pack. The
+/// writer stamps a 0.9 nm tolerance on every edge, while its swept B-spline pcurves sit up to
+/// 23 nm from their 3D curves. Import rebuilds those pcurves and admits each remaining gap, far
+/// within the request's 0.1 mm geometric tolerance, by raising the edge's tolerance to the
+/// measured gap. Every such edge is recorded, and the file passes incidence validation.
+#[test]
+fn exported_pack_cable_with_nanometre_pcurve_gaps_imports() {
+    const CABLE: &[u8] = include_bytes!("fixtures/battery_pack_perimeter_cable.step");
+    let imported = import_exact_cad(
+        "battery_pack_perimeter_cable.step",
+        CABLE,
+        GeometryFormat::Step,
+        &ExactCadImportOptions {
+            source_units: Some(LengthUnit::Millimeter),
+            ..ExactCadImportOptions::default()
+        },
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let tolerances: Vec<f64> = imported
+        .topology
+        .edges
+        .iter()
+        .map(|edge| edge.tolerance_m.canonical_value())
+        .collect();
+    let written = tolerances.iter().copied().fold(f64::INFINITY, f64::min);
+    let raised = tolerances.iter().copied().fold(0.0_f64, f64::max);
+    assert!(written < 1.0e-9, "written edge tolerance {written:e} m");
+    assert!(
+        raised < 1.0e-6,
+        "raised edge tolerance {raised:e} m against written {written:e} m"
+    );
+    assert!(!imported.edge_tolerance_admissions.is_empty());
+    for admission in &imported.edge_tolerance_admissions {
+        assert!(admission.admitted, "{}", admission.describe());
+        assert!(admission.gap_before_m > admission.written_tolerance_m);
+        assert!(admission.gap_after_m <= admission.gap_before_m);
+        assert!(admission.admitted_tolerance_m <= raised);
+    }
+    assert_eq!(imported.edge_tolerance_defects().count(), 0);
+    assert_eq!(imported.topology.solids.len(), 1);
+}

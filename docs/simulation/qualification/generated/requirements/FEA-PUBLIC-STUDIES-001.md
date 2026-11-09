@@ -1,14 +1,14 @@
 # FEA-PUBLIC-STUDIES-001: Published studies run from the public command
 
-0 PASS, 0 PARTIAL, 1 FAIL, 68 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 2 FAIL, 65 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## docs_examples_run
 
-Evidence kind: PublicRun. Criterion: Every file in docs/simulation/examples and docs/fea/examples completes with `runmat fea run` on the release build; the generated catalog records pass and wall time for each.
+Evidence kind: PublicRun. Criterion: Every file in docs/simulation/examples and docs/fea/examples completes with `runmat run` on the release build; the generated catalog records pass and wall time for each.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | public_study | FAIL | `runmat[test:check_cli]::structural_static_step_documentation_example_runs_and_publishes_fields` (crates/runmat-cli/tests/check_cli.rs:275) - The structural static STEP documentation example runs from the CLI and publishes fields; the other examples are separate cases.<br>`runmat[test:check_cli]::response_spectrum_documentation_example_runs_its_two_step_study` (crates/runmat-cli/tests/check_cli.rs:424) - The response-spectrum documentation example runs its two-step study.<br>`runmat[test:check_cli]::random_response_documentation_example_exposes_paged_statistical_fields` (crates/runmat-cli/tests/check_cli.rs:528) - The random-response documentation example runs and exposes paged statistical fields.<br>`runmat[test:check_cli]::acoustic_cavity_example_runs_its_certified_frequency_sweep` (crates/runmat-cli/tests/check_cli.rs:631) - The acoustic cavity harmonic example runs its frequency sweep to a completed, numerically acceptable run. |
+| shared_infrastructure | canonical_mixed_topology | public_study | PARTIAL | `runmat[test:check_cli]::structural_static_step_documentation_example_runs_and_publishes_fields` (crates/runmat-cli/tests/check_cli.rs:345) - The structural static STEP documentation example runs from the CLI and publishes fields; the other examples are separate cases.<br>`runmat[test:check_cli]::response_spectrum_documentation_example_runs_its_two_step_study` (crates/runmat-cli/tests/check_cli.rs:503) - The response-spectrum documentation example runs its two-step study.<br>`runmat[test:check_cli]::random_response_documentation_example_exposes_paged_statistical_fields` (crates/runmat-cli/tests/check_cli.rs:607) - The random-response documentation example runs and exposes paged statistical fields.<br>`runmat[test:check_cli]::acoustic_cavity_example_runs_its_certified_frequency_sweep` (crates/runmat-cli/tests/check_cli.rs:710) - The acoustic cavity harmonic example runs its frequency sweep to a completed, numerically acceptable run. |
 
 ## each_family_runs_local_and_remote
 
@@ -77,13 +77,13 @@ Evidence kind: PublicRun. Criterion: Thermal into preload into buckling or prest
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| thermoelastic | canonical_tetrahedra | public_study | OPEN |  |
+| thermoelastic | canonical_tetrahedra | public_study | PARTIAL | `runmat[test:check_cli]::thermal_prestress_example_runs_its_three_step_chain` (crates/runmat-cli/tests/check_cli.rs:1260) - Local public chained run only; remote execution is a separate case. |
 | thermoelastic | canonical_tetrahedra | remote_execution | OPEN |  |
 | electrothermal | canonical_tetrahedra | public_study | OPEN |  |
 | electrothermal | canonical_tetrahedra | remote_execution | OPEN |  |
-| conjugate_heat_transfer | canonical_tetrahedra | public_study | OPEN |  |
+| conjugate_heat_transfer | canonical_tetrahedra | public_study | FAIL | `runmat[test:check_cli]::cht_plate_channel_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1223) - Local public CHT run only; remote execution is a separate case. |
 | conjugate_heat_transfer | canonical_tetrahedra | remote_execution | OPEN |  |
-| fluid_structure_interaction | canonical_tetrahedra | public_study | OPEN |  |
+| fluid_structure_interaction | canonical_tetrahedra | public_study | FAIL | `runmat[test:check_cli]::fsi_compliant_tube_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1243) - Local public FSI run only; remote execution is a separate case. |
 | fluid_structure_interaction | canonical_tetrahedra | remote_execution | OPEN |  |
 
 ## transient_structural_runs

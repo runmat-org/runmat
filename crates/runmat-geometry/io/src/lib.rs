@@ -27,8 +27,8 @@ pub use source_units::source_unit_evidence;
 mod occt;
 
 pub use exact::{
-    import_exact_cad, ExactCadAnalysisOptions, ExactCadImportOptions, ImportedExactCad,
-    SourceUnitsAuthority,
+    import_exact_cad, EdgeToleranceAdmission, ExactCadAnalysisOptions, ExactCadImportOptions,
+    ImportedExactCad, SourceUnitsAuthority,
 };
 pub use faceted::{import_faceted_solid, FacetedSolidImportOptions, ImportedFacetedSolid};
 pub use import::{

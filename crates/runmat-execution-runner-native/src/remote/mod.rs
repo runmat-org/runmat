@@ -77,4 +77,6 @@ mod driver_replacement_tests;
 #[cfg(test)]
 mod pool_tests;
 #[cfg(test)]
+pub(crate) mod test_ids;
+#[cfg(test)]
 mod tests;

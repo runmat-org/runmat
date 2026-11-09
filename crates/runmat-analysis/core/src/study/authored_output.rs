@@ -351,6 +351,52 @@ impl AuthoredOutputExpression {
                     }
                 }
             }
+            Self::PortReduction {
+                reduction,
+                source,
+                first,
+                second,
+            } => {
+                for region in [first, second] {
+                    validate_region(region)?;
+                    if region_measure(region)? != PhysicalDimension::AREA {
+                        return Err(AuthoredOutputError::PortReductionRequiresFaceRegions);
+                    }
+                }
+                let AuthoredOutputType::Field {
+                    value,
+                    shape,
+                    domain,
+                    location: _,
+                } = source.validate(steps, outputs)?
+                else {
+                    return Err(AuthoredOutputError::SpatialReductionRequiresField);
+                };
+                if domain != AuthoredFieldDomain::Real || shape != ObservationValueShape::Scalar {
+                    return Err(AuthoredOutputError::PortReductionRequiresRealScalar);
+                }
+                match reduction {
+                    AuthoredPortReduction::MeanDifference => Ok(AuthoredOutputType::Reduced {
+                        value,
+                        shape: ObservationValueShape::Scalar,
+                    }),
+                    AuthoredPortReduction::TransmissionLoss => {
+                        if value
+                            != AuthoredOutputValue::Physical(
+                                ObservationQuantity::AcousticPortIntensity,
+                            )
+                        {
+                            return Err(AuthoredOutputError::TransmissionLossRequiresPortIntensity);
+                        }
+                        Ok(AuthoredOutputType::Reduced {
+                            value: AuthoredOutputValue::Physical(
+                                ObservationQuantity::TransmissionLoss,
+                            ),
+                            shape: ObservationValueShape::Scalar,
+                        })
+                    }
+                }
+            }
             Self::SpatialSelection { source, target } => {
                 validate_region(target)?;
                 let output @ AuthoredOutputType::Field { .. } = source.validate(steps, outputs)?
@@ -532,6 +578,7 @@ pub(super) fn field_domain(
                 quantity,
                 crate::ObservationQuantity::JoulePowerDensity
                     | crate::ObservationQuantity::AcousticIntensity
+                    | crate::ObservationQuantity::AcousticPortIntensity
             ) =>
         {
             AuthoredFieldDomain::Real
@@ -611,6 +658,12 @@ pub enum AuthoredOutputError {
     NonMeasurableRegion,
     #[error("output region target is invalid")]
     InvalidRegion,
+    #[error("a port reduction reads two face regions")]
+    PortReductionRequiresFaceRegions,
+    #[error("a port reduction reads a real scalar field")]
+    PortReductionRequiresRealScalar,
+    #[error("transmission loss reads the acoustic port intensity of a harmonic analysis")]
+    TransmissionLossRequiresPortIntensity,
     #[error("spatial selection requires a field source")]
     SpatialSelectionRequiresField,
     #[error("interpolation requires a field source")]

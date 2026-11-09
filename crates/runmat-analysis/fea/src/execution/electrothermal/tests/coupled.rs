@@ -107,7 +107,7 @@ fn exact_rise(x: f64) -> f64 {
 
 // witness: FEA-COUPLING-ELECTROTHERMAL-002/two_way_conductivity_feedback @
 //   electrothermal/tet10/numerical_kernel; coverage: partial;
-//   boundary: Two-way coupled steady Joule heating on a Tet10 bar with temperature-dependent
+//   check: two-way-joule-heating; boundary: Two-way coupled steady Joule heating on a Tet10 bar with temperature-dependent
 //   resistivity iterates at least three sweeps; temperature matches the closed-form cosine profile
 //   with second-order convergence on 2, 4 and 8 cells, terminal power equals the Joule integral,
 //   and power matches I^2 R(T) within 0.5 percent. One bar geometry; the busbar CLI study is not

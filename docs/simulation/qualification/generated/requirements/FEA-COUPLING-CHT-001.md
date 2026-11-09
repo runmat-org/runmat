@@ -1,6 +1,6 @@
 # FEA-COUPLING-CHT-001: Thermal/fluid conjugate heat transfer
 
-0 PASS, 0 PARTIAL, 0 FAIL, 3 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 1 FAIL, 2 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## interface
 
@@ -8,7 +8,7 @@ Evidence kind: PhysicalBalance. Criterion: Conservatively transfer temperature a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| conjugate_heat_transfer | canonical_mixed_topology | public_study | OPEN |  |
+| conjugate_heat_transfer | canonical_mixed_topology | public_study | FAIL | `runmat[test:check_cli]::cht_plate_channel_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1223) - The CHT plate-channel example runs two-way from `runmat run` to a completed, numerically acceptable run; interface closure is the runtime gate, not asserted her... |
 
 ## iteration
 

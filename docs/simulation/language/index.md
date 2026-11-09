@@ -1,56 +1,52 @@
+---
+description: The .fea study language describes a finite-element study as typed declarations with units, which runmat check, plan and run verify, resolve and solve.
+keywords: [.fea language, FEA study file, declarations, runmat check, runmat run, finite element study, simulation language]
+doc_type: language-reference
+examples: [cantilever-static, two-body-static]
+---
 # Study language
 
-A `.fea` file defines an engineering analysis in source form. It names the geometry, regions,
-mesh, material behavior, applied conditions, analysis sequence, requested results, and—when
-needed—how independent work may be placed. RunMat checks those declarations before it starts CAD
-translation, meshing, or a solver.
+A `.fea` file describes a finite-element study in source form: the geometry and its named regions, the mesh, the materials, the loads and supports, the analysis steps, the results to publish, and, when needed, how the work is placed on cores, GPUs and workers. RunMat checks the whole description before it translates CAD, meshes or solves, so an error in a unit, a region name or a procedure is reported in seconds, at its line.
 
-The language is declarative. It has typed declarations and expressions, physical quantities with
-units, immutable references, and explicit imports. General computation remains in `.m` functions;
-a `.fea` module can import one of those functions by file and use it through a bounded signal or
-geometry-generation contract.
+The language is declarative and typed. Every value has a type, every physical value has a unit, and every reference is a path that the checker resolves, such as `geometry.beam.region.fixed_end`. Studies are plain text, so they diff, review and version like code. General computation stays in `.m` functions: a `.fea` module imports a function by file and uses it to generate a signal, a spectrum or a geometry.
 
-## The object model
+RunMat Desktop, the `runmat` command line and the RunMat agent all read and write the same `.fea` files.
 
-Seven top-level declarations divide the study into parts with clear ownership:
+## What a `.fea` file declares
 
-| Declaration | What it defines |
-| --- | --- |
-| `geometry` | An imported, constructed, derived, or generated geometric model and its named regions |
-| `mesh` | A meshing request for one geometry |
-| `material` | Constitutive properties and their physical capabilities |
-| `model` | Property assignments, constraints, loads, signals, excitations, interfaces, and initial conditions |
-| `study` | One bound geometry, mesh, model, ordered analysis sequence, inputs, and outputs |
-| `sweep` | Named input cases over one study |
-| `execution` | Optional placement, resource, fan-out, partitioning, and resilience preferences |
+A file is a set of top-level declarations. Each one owns one part of the study:
 
-The declarations are peers. A study refers to a model; the model is not nested inside the study.
-This lets several studies reuse one physical model without copying it. Nesting is reserved for
-objects owned by a declaration, such as regions inside geometry and loads inside a model.
+| Declaration | What it defines | Reference |
+| --- | --- | --- |
+| `geometry` | An imported, constructed, derived or generated geometric model, and its named regions | [geometry](./reference/declarations.md#geometry) |
+| `mesh` | The meshing request for one geometry: element shape and order, target size, surface deviation and local refinement | [mesh](./reference/declarations.md#mesh) |
+| `material` | Constitutive properties: elastic, plastic, thermal, electrical, magnetic, acoustic and fluid behavior, and damping | [material](./reference/declarations.md#material) |
+| `model` | Material assignments, sections, constraints, loads, signals, excitations, interfaces, connectors and initial conditions | [model](./reference/declarations.md#model) |
+| `study` | One geometry, mesh and model; the ordered analysis steps; inputs, outputs and assessments | [study](./reference/declarations.md#study) |
+| `sweep` | Named cases of one study's inputs, combined as a product or element by element | [sweep](./reference/declarations.md#sweep) |
+| `execution` | Placement, resources, fan-out, partitioning and resilience for a study's work | [execution](./reference/declarations.md#execution) |
+| `table` | Tabulated or modeled data over a domain that boundaries refer to, such as an acoustic impedance over frequency | [table](./reference/declarations.md#table) |
 
-## A first checked study
+The declarations are peers. A study refers to a model by name; the model is not nested inside the study, so several studies can share one model, mesh or material without copying it. Nesting is reserved for what a declaration owns: regions inside a geometry, loads inside a model, analysis steps inside a study.
 
-The smallest useful structural example still states its physical ownership explicitly:
+## A complete study
 
-The complete example package includes its CAD file and machine-managed named-selection metadata. The study stays in one readable source file; exporting the project preserves its selections.
+This study fixes one end of a steel cantilever, applies a 100 kPa downward traction to the other end, and solves a linear static step on quadratic tetrahedra (Tet10). It publishes the displacement and von Mises stress fields and the peak tip deflection, and it checks that deflection against a 0.5 mm design limit (L/2,000).
 
-```fea
-geometry bracket {
-    file = "./geometry/two-box-assembly.step"
-    units = m
-
-    region left_body : solid { select name "left_body"; expect exactly_one }
-    region right_body : solid { select name "right_body"; expect exactly_one }
-    region left_support : face { select name "left_support"; expect exactly_one }
-    region left_load_face : face { select name "left_load_face"; expect exactly_one }
-    region right_support : face { select name "right_support"; expect exactly_one }
+```fea source=cantilever-static.fea
+geometry beam {
+    file = "./geometry/cantilever.step"
+    units = mm
+    region body : solid { select name "Beam"; expect exactly_one }
+    region fixed_end : face { select name "Fixed end"; expect exactly_one }
+    region loaded_end : face { select name "Loaded end"; expect exactly_one }
 }
 
-mesh bracket on geometry.bracket {
+mesh beam on geometry.beam {
     tetrahedra {
-        order = linear
-        target_size = 1.5 m
-        maximum_deviation = 0.05 m
+        order = quadratic
+        target_size = 0.15 m
+        maximum_deviation = 0.001 m
     }
 }
 
@@ -62,59 +58,90 @@ material steel {
     }
 }
 
-model loaded_bracket {
-    assign material.steel to geometry.bracket.region.left_body
-    assign material.steel to geometry.bracket.region.right_body
-
-    constraint left_support {
-        structural.fixed { target = geometry.bracket.region.left_support }
+model loaded_beam {
+    assign material.steel to geometry.beam.region.body
+    constraint fixed_end {
+        structural.fixed { target = geometry.beam.region.fixed_end }
     }
-    constraint right_support {
-        structural.fixed { target = geometry.bracket.region.right_support }
+    load end_traction {
+        traction on geometry.beam.region.loaded_end = [0, 0, -100000] Pa
     }
-    load service_traction {
-        traction on geometry.bracket.region.left_load_face = [166.6666666667, 0, 0] Pa
-    }
-    load_case service { include load.service_traction }
+    load_case service { include load.end_traction }
 }
 
-study bracket_static {
-    geometry = geometry.bracket
-    mesh = mesh.bracket
-    model = model.loaded_bracket
-
+study cantilever_static {
+    geometry = geometry.beam
+    mesh = mesh.beam
+    model = model.loaded_beam
     analysis static { structural static {} }
-
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
+    output tip_deflection = max(magnitude(analysis.static.field.node.displacement), over = geometry.beam.region.loaded_end)
+    assessment deflection_limit {
+        value = output.tip_deflection
+        maximum = 0.5 mm
+        evidence = authored_samples
+    }
 }
 ```
 
-The checked-in copy is
-[`structural-static.fea`](../examples/structural-static.fea). From the
-repository root:
+Read it top to bottom:
+
+- **`geometry`** imports `cantilever.step`, whose length unit is the millimeter, and names three regions. `select name` resolves a name authored in the CAD file, and `expect exactly_one` makes the check fail if the name matches no entity or several.
+- **`mesh`** asks for quadratic tetrahedra with a 0.15 m target edge length and at most 0.001 m deviation from the CAD surface.
+- **`material`** gives steel its density and isotropic elastic constants. The unit is part of each value: `200 GPa` and `200e9 Pa` are the same quantity.
+- **`model`** assigns the material to the body, fixes one end face, applies the traction to the other, and groups the load in a load case.
+- **`study`** binds the geometry, mesh and model, runs one `structural static` step named `static`, and publishes results by path, `analysis.<step>.field.<location>.<quantity>`. The `assessment` turns the tip deflection into a pass or fail verdict.
+
+The file is the canonical example [`cantilever-static.fea`](../examples/cantilever-static.fea). The [linear static guide](../guides/linear-static.md) walks through modeling, running and reading it. A two-body version, with two material assignments and two supports, is [`structural-static.fea`](../examples/structural-static.fea).
+
+## Check, plan and run
+
+Three commands take a study from source to result. From the repository root:
 
 ```sh
-runmat fea check docs/simulation/examples/structural-static.fea
-runmat fea plan docs/simulation/examples/structural-static.fea
-runmat fea run docs/simulation/examples/structural-static.fea
+runmat check docs/simulation/examples/cantilever-static.fea
+runmat plan docs/simulation/examples/cantilever-static.fea
+runmat run docs/simulation/examples/cantilever-static.fea
 ```
 
-`check` resolves imports and performs source and semantic checking. `plan` selects a study or sweep
-and reports the logical work without doing it. `run` materializes geometry and mesh, validates the
-realized model, executes the admitted numerical work, and publishes results and evidence.
+| Command | What it does | What it leaves out |
+| --- | --- | --- |
+| `runmat check` | Parses the file and its imports, resolves every reference, checks types and units, resolves regions against the names in the CAD file, and checks that each physics family runs each requested procedure. Reports every error with its file, line and column. | Meshing and solving. |
+| `runmat plan` | Selects one study or sweep and prints its logical phases and analysis definition: geometry, mesh, each analysis step, state transfers, outputs and placement. | Meshing and solving. |
+| `runmat run` | Imports the CAD, meshes, solves each analysis step, evaluates outputs and assessments, and publishes the result with its provenance. | |
+
+When a file declares more than one study or sweep, choose one with `--study <name>` or `--sweep <name>`. `--json` prints structured output for tools and scripts. The same `check` and `run` commands take `.m` scripts, so a project that mixes `.m` code and `.fea` studies uses one workflow. The [diagnostics page](./diagnostics-and-tooling.md) lists the messages and the editor support: completion, hover, go to definition and rename.
+
+## Rules that hold everywhere
+
+- **Every physical value carries a unit.** The checker converts compatible units and rejects incompatible ones, so `target_size = 2 kg` is an error. Dimensionless values, such as Poisson's ratio, are bare numbers. The [units table](./types-units-and-expressions.md) lists every accepted spelling.
+- **References are typed paths.** `geometry.beam.region.loaded_end` is a face region, `material.steel` a material, `analysis.static.field.node.displacement` a nodal vector field. A reference to something of the wrong kind is a check error.
+- **Region names come from the CAD file.** `select name "Loaded end"` matches a name authored in the STEP or IGES file, `select tag` matches a presentation layer, and `select persistent_id` matches a canonical entity id (`persistent-entity:sha256:…`). Inside the solver, every region is identified by its canonical id. See [geometry, models and assignments](./geometry-models-and-assignments.md).
+- **Nothing runs until everything checks.** CAD import, meshing and solving start only after the study and every module it imports check clean.
+- **Reuse is explicit.** A file imports exactly the declarations it uses (`import model mounting from "./models/mounting.fea"`), and a model can include another model's declarations. See [files, modules and imports](./files-modules-and-imports.md).
+
+## The same objects from `.m` code
+
+The `fea.*`, `geometry.*` and `meshing.*` functions build studies from `.m` code: `fea.study` binds a geometry, a model and execution settings, and `fea.run` solves the study. After a run, `fea.results` loads the saved result by its run id and `fea.field` selects a field from it for plotting or further computation. See the [function reference](/docs/reference/builtins).
 
 ## Read next
 
-- [Files, modules, and imports](./files-modules-and-imports)
-- [Types, units, and expressions](./types-units-and-expressions)
-- [Geometry, models, and assignments](./geometry-models-and-assignments)
-- [Studies, analyses, and state](./studies-analyses-and-state)
-- [Inputs, sweeps, and cases](./inputs-sweeps-and-cases)
-- [Outputs, fields, and observations](./outputs-fields-and-observations)
-- [Parallel and distributed execution](./execution-parallel-and-distributed)
-- [RunMat function integration](./runmat-function-integration)
-- [Diagnostics and tooling](./diagnostics-and-tooling)
+Language pages:
 
-Use the [first static study guide](./guides/first-static-study) for a complete task and the
-[declaration reference](./reference/declarations) for exact field rules.
+- [Types, units and expressions](./types-units-and-expressions.md)
+- [Files, modules and imports](./files-modules-and-imports.md)
+- [Geometry, models and assignments](./geometry-models-and-assignments.md)
+- [Studies, analyses and state](./studies-analyses-and-state.md)
+- [Inputs, sweeps and cases](./inputs-sweeps-and-cases.md)
+- [Outputs, fields and observations](./outputs-fields-and-observations.md)
+- [Execution, parallel work and distributed work](./execution-parallel-and-distributed.md)
+- [RunMat function integration](./runmat-function-integration.md)
+- [Diagnostics and tooling](./diagnostics-and-tooling.md)
+
+Reference:
+
+- [Declarations](./reference/declarations.md): every declaration and member, with types, units and defaults.
+- [Procedures](./reference/procedures.md): every analysis step, by physics family.
+- [Grammar](./reference/grammar.md): the syntax in EBNF.
+- [Glossary](../glossary.md) and [release status](../validation/status.md).

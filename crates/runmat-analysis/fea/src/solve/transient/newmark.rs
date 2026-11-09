@@ -71,15 +71,7 @@ fn measured<R>(
 }
 
 pub(super) fn spmv_work(matrix: &RealSparseMatrix) -> Result<OperationCount, LedgerError> {
-    matrix
-        .pattern()
-        .row_offsets()
-        .windows(2)
-        .try_fold(OperationCount::ZERO, |total, row| {
-            total
-                .checked_add(OperationCount::direct_real_dot(row[1] - row[0])?)
-                .map_err(LedgerError::from)
-        })
+    crate::algebra::capacity::real_spmv_work(matrix)
 }
 
 /// Three scaled sparse terms form one support-based reference sum. Each stored
@@ -463,7 +455,7 @@ mod tests {
 
     // witness: FEA-DYNAMICS-RESPONSE-001/second_order_equilibrium_excitation @
     //   linear_structural_dynamics/mesh_independent/numerical_kernel; coverage: partial;
-    //   boundary: Undamped free vibration under Newmark converges at second order; damped and forced
+    //   check: free-vibration-time-integration; boundary: Undamped free vibration under Newmark converges at second order; damped and forced
     //   cases are other tests.
     #[test]
     fn undamped_free_vibration_converges_at_second_order() {

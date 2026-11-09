@@ -331,12 +331,8 @@ fn prepare_program(
     match request.task.console {
         Some(controls) => Ok(WorkerLaunchRequest::ReservedConsole {
             request: reserved,
-            console_budget: crate::console_retention::ConsoleRetentionOwner::source_subgrant(
-                request.task.resources.memory_bytes,
-                controls,
-                1,
-            )
-            .map_err(|error| error.to_string())?,
+            console_budget: crate::console_source_subgrant(&request.task.resources, controls)
+                .map_err(|error| error.to_string())?,
         }),
         None => Ok(WorkerLaunchRequest::Reserved(reserved)),
     }

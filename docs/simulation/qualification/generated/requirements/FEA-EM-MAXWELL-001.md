@@ -16,7 +16,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Support complex coefficients and
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| harmonic_maxwell | edge_elements | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::maxwell::tests::terminal::current_driven_strip_impedance_converges_to_the_skin_effect_solution` (crates/runmat-analysis/fea/src/physics/maxwell/tests/terminal.rs:237) - Three frequencies are solved with complex coefficients and each matches its closed form; composition of several frequencies in one study is not asserted. |
+| harmonic_maxwell | edge_elements | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::maxwell::tests::terminal::current_driven_strip_impedance_converges_to_the_skin_effect_solution` (crates/runmat-analysis/fea/src/physics/maxwell/tests/terminal.rs:253) - Three frequencies are solved with complex coefficients and each matches its closed form; composition of several frequencies in one study is not asserted. |
 
 ## reconstruction
 

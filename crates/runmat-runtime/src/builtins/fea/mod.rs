@@ -229,7 +229,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
         input,
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
     ) {
-        // A `.fea` path runs through the host's public study runner, as `runmat fea run`.
+        // A `.fea` path runs through the host's public study runner, as `runmat run`.
         let path = scalar_string(&input, RUN_NAME, &ERROR_INPUT)?;
         let service = crate::context::legacy::active()
             .and_then(|runtime| runtime.service_ports().analysis().cloned())
@@ -380,9 +380,9 @@ async fn create_results_object_from_args(
         }
     }
     let requested = run_id_from_value(RESULTS_NAME, &args[0])?;
-    let query = results_query_from_args(args.view().range(1..)?)?;
+    let (query, explicit_field_values) = results_query_from_args(args.view().range(1..)?)?;
     artifact_access::read(RESULTS_NAME, || {
-        create_persisted_results_object(args, requested, query)
+        create_persisted_results_object(args, requested, query, explicit_field_values)
     })
     .await
 }
@@ -391,6 +391,7 @@ fn create_persisted_results_object(
     args: crate::call::BuiltinArguments,
     requested: String,
     query: AnalysisResultsQuery,
+    explicit_field_values: bool,
 ) -> BuiltinResult<Value> {
     // A definition run id names every attempt; the object reports the attempt it holds.
     let run_id = crate::analysis::storage::resolve_run_attempt(&requested).map_err(|err| {
@@ -400,6 +401,13 @@ fn create_persisted_results_object(
             format!("failed to resolve the latest FEA run attempt: {err}"),
         )
     })?;
+    // Without a field-value option the object opens bounded; an explicit request is answered.
+    let query = if explicit_field_values {
+        query
+    } else {
+        crate::analysis::bounded_default_results_query(&run_id, query)
+            .map_err(|err| builtin_error(RESULTS_NAME, &ERROR_OPERATION, err))?
+    };
     let envelope = analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None))
         .map_err(|err| operation_error(RESULTS_NAME, &ERROR_OPERATION, err))?;
     let mut public_data = envelope.data;
@@ -716,7 +724,7 @@ fn object_payload_omitting<T: DeserializeOwned>(
 
 fn results_query_from_args(
     args: crate::call::FunctionArgumentView<'_>,
-) -> BuiltinResult<AnalysisResultsQuery> {
+) -> BuiltinResult<(AnalysisResultsQuery, bool)> {
     let mut query = AnalysisResultsQuery::default();
     let mut seen = HashSet::new();
     for pair in expect_name_value_tail(RESULTS_NAME, args)? {
@@ -770,7 +778,7 @@ fn results_query_from_args(
             }
         }
     }
-    Ok(query)
+    Ok((query, seen.contains("includefieldvalues")))
 }
 
 fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
@@ -1040,7 +1048,13 @@ fn field_object(
     );
     object.insert(
         "quantity".to_string(),
-        Value::String(descriptor.quantity.clone().into()),
+        Value::String(
+            serde_json::to_value(descriptor.layout.quantity)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_string))
+                .unwrap_or_default()
+                .into(),
+        ),
     );
     object.insert(
         "statistic".to_string(),
@@ -2559,6 +2573,7 @@ mod tests {
         temperature_kelvin_builtin, turbulence_intensity_builtin,
     };
     use futures::executor::block_on;
+    use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
     use runmat_analysis_fea::ComputeBackend;
     use runmat_meshing_core::CanonicalMeshingContract;
     use runmat_types::MemberAccess;
@@ -3297,6 +3312,10 @@ mod tests {
         // analysis producers publish them.
         let field = AnalysisField {
             field_id: "structural.displacement".into(),
+            layout: runmat_analysis_core::AnalysisFieldLayout::vector3(
+                runmat_analysis_core::ObservationQuantity::Displacement,
+                runmat_analysis_core::FieldLocation::Node,
+            ),
             shape: vec![3, 3],
             values: AnalysisFieldValues::HostF64(vec![
                 1.0, 10.0, 100.0, 2.0, 20.0, 200.0, 3.0, 30.0, 300.0,
@@ -3327,6 +3346,11 @@ mod tests {
         // A rank-3 tensor field keeps the same rule on every axis.
         let tensor = AnalysisField {
             field_id: "structural.stress_tensor".into(),
+            layout: runmat_analysis_core::AnalysisFieldLayout::components(
+                runmat_analysis_core::ObservationQuantity::Stress,
+                runmat_analysis_core::FieldLocation::Element,
+                4,
+            ),
             shape: vec![2, 2, 2],
             values: AnalysisFieldValues::HostF64((0..8).map(f64::from).collect()),
         };
@@ -3344,6 +3368,10 @@ mod tests {
     fn fea_field_metadata_remains_exact_in_public_objects() {
         let field = AnalysisField {
             field_id: "stress".into(),
+            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Stress,
+                runmat_analysis_core::FieldLocation::Element,
+            ),
             shape: vec![u32::MAX as usize, 0],
             values: AnalysisFieldValues::HostF64(Vec::new()),
         };
@@ -3370,6 +3398,10 @@ mod tests {
 
         let device_field = AnalysisField {
             field_id: "device".into(),
+            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
             shape: vec![u32::MAX as usize],
             values: AnalysisFieldValues::DeviceRef(runmat_analysis_core::DeviceFieldRef {
                 backend: "wgpu".into(),
@@ -4684,7 +4716,7 @@ mod tests {
                 observation_histories: Vec::new(),
                 series_reductions: Vec::new(),
                 fields: vec![AnalysisField::host_f64(
-                    "structural.von_mises",
+                    "structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element),
                     vec![1],
                     vec![42.0],
                 )],
@@ -4752,8 +4784,24 @@ mod tests {
     fn persist_synthetic_indexed_results() -> String {
         let indexed_fields = |prefix: &str| {
             vec![
-                AnalysisField::host_f64(format!("{prefix}.0"), vec![1], vec![10.0]),
-                AnalysisField::host_f64(format!("{prefix}.1"), vec![1], vec![20.0]),
+                AnalysisField::host_f64(
+                    format!("{prefix}.0"),
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global,
+                    ),
+                    vec![1],
+                    vec![10.0],
+                ),
+                AnalysisField::host_f64(
+                    format!("{prefix}.1"),
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global,
+                    ),
+                    vec![1],
+                    vec![20.0],
+                ),
             ]
         };
         let run_id = crate::analysis::storage::next_run_id();

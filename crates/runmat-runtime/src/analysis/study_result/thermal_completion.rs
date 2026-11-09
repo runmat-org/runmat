@@ -65,7 +65,8 @@ impl ThermalStudyCompletion {
             root,
             catalog,
         } = self;
-        let metadata = runmat_canonical_codec::profile_serialized(
+        // Typed owners (cloned, never materialized as a value tree).
+        let metadata = runmat_canonical_codec::profile_typed_resident_bytes(
             &(
                 observations,
                 workload,
@@ -84,8 +85,7 @@ impl ThermalStudyCompletion {
             ),
             limits,
         )
-        .map_err(|error| error.to_string())?
-        .materialization_resident_bytes_estimate;
+        .map_err(|error| error.to_string())?;
         metadata
             .checked_add(compiled.shared_clone_storage_bytes_estimate(limits)?)
             .ok_or_else(|| "thermal completion clone storage overflow".into())

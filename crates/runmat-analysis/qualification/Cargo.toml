@@ -23,3 +23,6 @@ required-features = ["docs-export"]
 [dependencies]
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+
+[build-dependencies]
+serde_json = { workspace = true }

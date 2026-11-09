@@ -8,8 +8,7 @@ use runmat_geometry_core::{GeometryAllocationScope, GeometryEvaluationControl};
 use serde::{Deserialize, Serialize};
 const PREFIX: &[u8] = b"runmat-meshing-face-record-set/v2\0";
 const DOMAIN: &str = "exact-face-record-set/v2";
-const LIMITS: CanonicalLimits =
-    CanonicalLimits::new(256 * 1024 * 1024, 10_000_000, 1024 * 1024, 64);
+const LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 pub const EXACT_FACE_PARTITION_RECORD_SET_SCHEMA_VERSION: u16 = 2;
 #[derive(Serialize)]
 struct Header<'a> {

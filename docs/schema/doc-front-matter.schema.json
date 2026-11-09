@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FEA doc front matter",
+  "description": "Front matter on docs/simulation pages. Navigation titles stay in docs/catalog.json and manual.json; front matter carries search, agent and doc-type metadata. Written in the YAML subset `key: value`, `key: [a, b]` and `- item` lists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["description", "keywords", "doc_type"],
+  "properties": {
+    "description": {
+      "type": "string",
+      "minLength": 50,
+      "maxLength": 320,
+      "description": "Search and Open Graph summary; site search indexes title, summary and keywords."
+    },
+    "keywords": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 2 },
+      "description": "Engineering terms a reader would search for (\"von Mises\", \"Tet10\", \"modal analysis\")."
+    },
+    "doc_type": {
+      "enum": ["landing", "concept", "guide", "model-setup", "physics-reference", "language-reference", "builtin-reference", "validation", "release-status", "glossary", "records"],
+      "description": "The METHOD §1.2 doc type; it fixes the page template."
+    },
+    "family": {
+      "type": "array",
+      "items": { "enum": ["structural", "thermal", "electromagnetic", "acoustic", "fluid", "thermomechanical", "electrothermal", "conjugate-heat-transfer", "fluid-structure-interaction"] },
+      "uniqueItems": true
+    },
+    "examples": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+      "description": "Example catalog ids (docs/simulation/examples/catalog.json) the page uses."
+    },
+    "generated": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Command that regenerates this page; present only on generated pages."
+    }
+  }
+}

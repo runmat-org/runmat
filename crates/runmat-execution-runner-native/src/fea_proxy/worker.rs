@@ -2,7 +2,6 @@ use super::*;
 use runmat_process_host::ipc::private_control::ControlFrameWriter;
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(35);
 
 struct Pending {
     sequence: u64,
@@ -113,6 +112,7 @@ impl Client {
         &self,
         state: &mut ClientState,
         operation: Operation,
+        timeout: Duration,
     ) -> Result<Reply, FeaRunDenied> {
         if !self
             .replies
@@ -159,7 +159,7 @@ impl Client {
             .map_err(|_| FeaRunDenied::ServerUnreachable)
             .and_then(|()| {
                 receiver
-                    .recv_timeout(RESPONSE_TIMEOUT)
+                    .recv_timeout(timeout)
                     .map_err(|_| FeaRunDenied::ServerUnreachable)
             });
         self.replies
@@ -193,6 +193,7 @@ impl FeaRunAdmission for WorkerAdmission {
             Operation::Start {
                 request: request.clone(),
             },
+            parent_reply_timeout(None),
         )?;
         let Reply::Budget { budget } = reply else {
             return Err(FeaRunDenied::LicenseInvalid);
@@ -247,6 +248,7 @@ impl FeaRunPermit for ProxyPermit {
                 outcome,
                 usage: usage.clone(),
             },
+            parent_reply_timeout(Some(&self.budget)),
         );
         state.active = None;
         match reply? {
@@ -261,7 +263,11 @@ impl ProxyPermit {
         if state.active != Some(self.root) {
             return Err(FeaRunDenied::LicenseInvalid);
         }
-        match self.client.call_locked(&mut state, operation)? {
+        match self.client.call_locked(
+            &mut state,
+            operation,
+            parent_reply_timeout(Some(&self.budget)),
+        )? {
             Reply::Budget { budget } => Ok(budget),
             _ => Err(FeaRunDenied::LicenseInvalid),
         }

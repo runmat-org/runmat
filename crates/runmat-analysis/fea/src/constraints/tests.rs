@@ -6,6 +6,7 @@ use runmat_analysis_core::{
     StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralTranslationDof,
     Translation, TranslationDofValue,
 };
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_execution::Digest;
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
@@ -1803,11 +1804,13 @@ fn result_evidence_aggregates_only_canonical_reaction_owners() {
     let fields = vec![
         AnalysisField::host_f64(
             crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![node_count, 3],
             vec![0.0; node_count * 3],
         ),
         AnalysisField::host_f64(
             crate::FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node),
             vec![node_count, 3],
             reactions,
         ),

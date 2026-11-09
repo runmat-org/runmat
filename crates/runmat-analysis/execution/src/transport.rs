@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use runmat_execution::identity::ValueId;
+use runmat_execution::value::ValueRef;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{
     LogicalObject, ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
@@ -13,14 +14,23 @@ use crate::{
 
 /// A portable analysis request and the complete input-object inventory it needs. The input bytes
 /// belong to encrypted transport; the executable request retains only immutable references.
+/// Each object's bytes are held once, in the logical inventory; a transported reference names
+/// its bytes by position there.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedAnalysisProgram {
     pub request: ProgramExecutionRequest,
-    pub objects: Vec<ProgramExecutionObject>,
+    references: Vec<(ValueRef, usize)>,
     logical_objects: Vec<LogicalObject>,
 }
 
 impl PreparedAnalysisProgram {
+    /// Every transported input object, in reference-id order: its reference and its bytes.
+    pub fn objects(&self) -> impl ExactSizeIterator<Item = (&ValueRef, &[u8])> + '_ {
+        self.references
+            .iter()
+            .map(|(reference, index)| (reference, self.logical_objects[*index].bytes.as_slice()))
+    }
+
     /// Requested storage of both owned transport inventories and immutable request metadata.
     /// These buffers coexist on a coordinating driver; this is not measured process memory.
     pub(crate) fn retained_storage_bytes(&self) -> AnalysisBridgeResult<u64> {
@@ -37,16 +47,19 @@ impl PreparedAnalysisProgram {
             .checked_add(metadata.materialization_resident_bytes_estimate)
             .and_then(|n| {
                 n.checked_add(
-                    (self.objects.capacity() as u64)
-                        .checked_mul(std::mem::size_of::<ProgramExecutionObject>() as u64)?,
+                    (self.references.capacity() as u64).checked_mul(std::mem::size_of::<(
+                        ValueRef,
+                        usize,
+                    )>()
+                        as u64)?,
                 )
             })
             .ok_or_else(|| {
                 AnalysisBridgeError::Invalid("retained program storage overflow".into())
             })?;
-        for object in &self.objects {
+        for (reference, _) in &self.references {
             let reference = runmat_canonical_codec::profile_serialized(
-                &object.reference,
+                reference,
                 runmat_canonical_codec::CanonicalLimits::new(
                     1024 * 1024 * 1024,
                     100_000_000,
@@ -55,8 +68,7 @@ impl PreparedAnalysisProgram {
                 ),
             )?;
             bytes = bytes
-                .checked_add(object.bytes.capacity() as u64)
-                .and_then(|n| n.checked_add(reference.materialization_resident_bytes_estimate))
+                .checked_add(reference.materialization_resident_bytes_estimate)
                 .ok_or_else(|| {
                     AnalysisBridgeError::Invalid("retained program storage overflow".into())
                 })?;
@@ -75,11 +87,11 @@ impl PreparedAnalysisProgram {
         &self,
         locations: Vec<ProgramExecutionObjectLocation>,
     ) -> AnalysisBridgeResult<ProgramExecutionInputs> {
-        if locations.len() != self.objects.len()
+        if locations.len() != self.references.len()
             || locations
                 .iter()
-                .zip(&self.objects)
-                .any(|(location, object)| location.reference != object.reference)
+                .zip(&self.references)
+                .any(|(location, (reference, _))| &location.reference != reference)
         {
             return Err(AnalysisBridgeError::Identity(
                 "analysis input locations differ from the prepared object inventory",
@@ -134,8 +146,10 @@ pub fn prepare_analysis_program(
     validate_prepared_analysis_inputs(host, inputs)?;
 
     let mut roots = Vec::with_capacity(inputs.len());
-    let mut inventory = BTreeMap::<ValueId, ProgramExecutionObject>::new();
-    let mut logical_inventory = BTreeMap::<runmat_execution::Digest, LogicalObject>::new();
+    // Transported references by id, each naming its bytes by logical digest; the bytes are
+    // borrowed from the prepared inputs until the one owned inventory is built below.
+    let mut inventory = BTreeMap::<ValueId, (ValueRef, runmat_execution::Digest)>::new();
+    let mut logical_inventory = BTreeMap::<runmat_execution::Digest, &LogicalObject>::new();
     for (prepared, contract) in inputs.iter().zip(&host.workload.inputs) {
         let references = prepared.references(&host.artifact_access, contract.reference_kind)?;
         let root = references
@@ -146,23 +160,21 @@ pub fn prepare_analysis_program(
             ))?;
         roots.push(root);
         for (reference, object) in references.into_iter().zip(&prepared.objects) {
-            logical_inventory
-                .entry(object.descriptor.digest)
-                .or_insert_with(|| object.clone());
-            let transported = ProgramExecutionObject {
-                reference,
-                bytes: object.bytes.clone(),
-            };
-            transported.validate()?;
-            match inventory.get(&transported.reference.id) {
-                Some(existing) if existing != &transported => {
+            let digest = object.descriptor.digest;
+            let logical = *logical_inventory.entry(digest).or_insert(object);
+            validate_transported(&reference, &object.bytes)?;
+            match inventory.get(&reference.id) {
+                Some((existing, existing_digest))
+                    if existing != &reference
+                        || logical_inventory[existing_digest].bytes != logical.bytes =>
+                {
                     return Err(AnalysisBridgeError::Identity(
                         "analysis input object id collides with different content",
                     ))
                 }
                 Some(_) => {}
                 None => {
-                    inventory.insert(transported.reference.id, transported);
+                    inventory.insert(reference.id, (reference, digest));
                 }
             }
         }
@@ -178,16 +190,45 @@ pub fn prepare_analysis_program(
             ))
         }
     };
-    let transported = ProgramExecutionObject {
-        reference: descriptor_reference.clone(),
-        bytes: descriptor.bytes.clone(),
-    };
-    transported.validate()?;
-    inventory.insert(transported.reference.id, transported);
-    logical_inventory.insert(descriptor.descriptor.digest, descriptor);
+    validate_transported(descriptor_reference, &descriptor.bytes)?;
+    let descriptor_digest = descriptor.descriptor.digest;
+    inventory.insert(
+        descriptor_reference.id,
+        (descriptor_reference.clone(), descriptor_digest),
+    );
+    // The one owned copy of every object's bytes.
+    let mut descriptor = Some(descriptor);
+    let mut positions = BTreeMap::new();
+    let mut logical_objects = Vec::with_capacity(logical_inventory.len() + 1);
+    let mut owned = logical_inventory
+        .into_iter()
+        .map(|(digest, object)| (digest, Some(object)))
+        .collect::<BTreeMap<_, _>>();
+    owned.entry(descriptor_digest).or_insert(None);
+    for (digest, object) in owned {
+        positions.insert(digest, logical_objects.len());
+        logical_objects.push(match object {
+            Some(object) => object.clone(),
+            None => descriptor.take().expect("descriptor inserted once"),
+        });
+    }
     Ok(PreparedAnalysisProgram {
         request,
-        objects: inventory.into_values().collect(),
-        logical_objects: logical_inventory.into_values().collect(),
+        references: inventory
+            .into_values()
+            .map(|(reference, digest)| (reference, positions[&digest]))
+            .collect(),
+        logical_objects,
     })
+}
+
+/// Validate one transported object against its reference. Objects are chunks, so the
+/// temporary copy is one chunk and is dropped at once.
+fn validate_transported(reference: &ValueRef, bytes: &[u8]) -> AnalysisBridgeResult<()> {
+    ProgramExecutionObject {
+        reference: reference.clone(),
+        bytes: bytes.to_vec(),
+    }
+    .validate()?;
+    Ok(())
 }

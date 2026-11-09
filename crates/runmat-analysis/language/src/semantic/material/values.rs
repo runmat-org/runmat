@@ -43,7 +43,12 @@ pub fn require_closed_law(
     diagnostics.push(diagnostic(
         declaration,
         value.span,
-        format!("material plastic law must be the explicit string `{supported}`"),
+        crate::semantic::pending::with_pending(
+            format!("material plastic law must be the explicit string `\"{supported}\"`"),
+            // A bare identifier, as fluid and porous laws are written, is planned.
+            matches!(&value.kind, CheckedExpressionKind::Enum(_))
+                .then_some(crate::semantic::pending::PLASTIC_LAW_IDENTIFIER),
+        ),
     ));
     None
 }

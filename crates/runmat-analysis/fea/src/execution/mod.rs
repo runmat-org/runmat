@@ -167,8 +167,9 @@ pub use frequency_publication::{
     StructuralFrequencyPublicationManifest, StructuralFrequencyPublicationSample,
 };
 pub use frequency_receipt::{
-    StructuralFrequencyEntrySolverEvidence, StructuralFrequencyNumericalReceipt,
-    StructuralFrequencySolutionSpace, StructuralFrequencySolverEvidenceInput,
+    ModalTruncationBalance, StructuralFrequencyEntrySolverEvidence,
+    StructuralFrequencyNumericalReceipt, StructuralFrequencySolutionSpace,
+    StructuralFrequencySolverEvidenceInput,
 };
 pub use frequency_result::{
     StructuralFrequencyResultEntry, StructuralFrequencySolverResult,

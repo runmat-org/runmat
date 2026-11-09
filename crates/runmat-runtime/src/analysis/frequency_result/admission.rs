@@ -64,6 +64,23 @@ pub(in crate::analysis) fn admit_prestressed_structural_frequency_result(
     )
 }
 
+pub(in crate::analysis) fn admit_modal_structural_frequency_result(
+    numerical: &StructuralStudyFrequencyNumericalResult,
+    solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
+    options: &AnalysisStructuralFrequencyRunOptions,
+    assigned_run_id: String,
+    modal_state: &runmat_analysis_fea::execution::CanonicalSemanticState,
+) -> Result<CompletedStructuralFrequencyStep, String> {
+    admit_structural_frequency_result_with_state(
+        numerical,
+        solver_mesh,
+        options,
+        assigned_run_id,
+        None,
+        Some(modal_state),
+    )
+}
+
 pub(in crate::analysis) fn admit_prestressed_modal_structural_frequency_result(
     numerical: &StructuralStudyFrequencyNumericalResult,
     solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
@@ -112,8 +129,12 @@ fn admit_structural_frequency_result_with_state(
             &numerical.result,
             &numerical.publication,
         ),
-        (None, Some(_)) => return Err(
-            "structural modal-frequency admission requires its prestress state".into(),
+        (None, Some(modal)) => runmat_analysis_fea::pipeline::structural_frequency::admit_modal_structural_frequency_publication(
+            &numerical.workload,
+            solver_mesh,
+            modal,
+            &numerical.result,
+            &numerical.publication,
         ),
     }
     .map_err(|error| error.to_string())?;
@@ -166,33 +187,16 @@ fn admit_structural_frequency_result_with_state(
         .iter()
         .map(|sample| sample.physical_relative_balance_error())
         .fold(0.0_f64, f64::max);
-    let solver_convergence = if maximum_solver_residual <= relative_tolerance {
-        QualityGate::Pass
-    } else {
-        QualityGate::Fail
-    };
-    let result_quality = if maximum_balance_error <= relative_tolerance {
-        QualityGate::Pass
-    } else {
-        QualityGate::Fail
-    };
-    let mut quality_reasons = Vec::new();
-    if solver_convergence != QualityGate::Pass {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::StructuralFrequencyResidualExceeded,
-            detail: format!(
-                "maximum structural frequency relative solver residual {maximum_solver_residual} exceeds {relative_tolerance}"
-            ),
-        });
-    }
-    if result_quality != QualityGate::Pass {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::StructuralFrequencyBalanceExceeded,
-            detail: format!(
-                "maximum structural frequency physical balance error {maximum_balance_error} exceeds {relative_tolerance}"
-            ),
-        });
-    }
+    let FrequencyQualityClassification {
+        solver_convergence,
+        result_quality,
+        quality_reasons,
+    } = classify_structural_frequency_quality(
+        acceptance_space(numerical.workload.solver()),
+        maximum_solver_residual,
+        maximum_balance_error,
+        relative_tolerance,
+    );
     let numerically_acceptable =
         solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass;
     let run_status = classify_run_status(result_quality, numerically_acceptable);
@@ -229,6 +233,86 @@ fn admit_structural_frequency_result_with_state(
     })
 }
 
+/// Which residual a structural frequency solve is accepted on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::analysis) enum FrequencyAcceptanceSpace {
+    /// The full-order solve: its solver residual and its physical balance both meet the
+    /// authored tolerance.
+    Direct,
+    /// A modal-reduced solve: the reduced-space residual meets the authored tolerance. The
+    /// full-space balance error measures modal truncation; it is published as
+    /// `modal_truncation_balance` and is not compared with the algebraic tolerance.
+    ModalReduced,
+}
+
+fn acceptance_space(
+    solver: &runmat_analysis_fea::execution::StructuralFrequencySolverPlan,
+) -> FrequencyAcceptanceSpace {
+    match solver {
+        runmat_analysis_fea::execution::StructuralFrequencySolverPlan::Direct { .. } => {
+            FrequencyAcceptanceSpace::Direct
+        }
+        runmat_analysis_fea::execution::StructuralFrequencySolverPlan::ModalReduced { .. } => {
+            FrequencyAcceptanceSpace::ModalReduced
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(in crate::analysis) struct FrequencyQualityClassification {
+    pub solver_convergence: QualityGate,
+    pub result_quality: QualityGate,
+    pub quality_reasons: Vec<QualityReason>,
+}
+
+/// Classifies a structural frequency sweep against its authored relative tolerance.
+pub(in crate::analysis) fn classify_structural_frequency_quality(
+    space: FrequencyAcceptanceSpace,
+    maximum_solver_residual: f64,
+    maximum_balance_error: f64,
+    relative_tolerance: f64,
+) -> FrequencyQualityClassification {
+    let solver_convergence = if maximum_solver_residual <= relative_tolerance {
+        QualityGate::Pass
+    } else {
+        QualityGate::Fail
+    };
+    let result_quality = match space {
+        FrequencyAcceptanceSpace::Direct if maximum_balance_error <= relative_tolerance => {
+            QualityGate::Pass
+        }
+        FrequencyAcceptanceSpace::Direct => QualityGate::Fail,
+        FrequencyAcceptanceSpace::ModalReduced => solver_convergence,
+    };
+    let mut quality_reasons = Vec::new();
+    if solver_convergence != QualityGate::Pass {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::StructuralFrequencyResidualExceeded,
+            detail: match space {
+                FrequencyAcceptanceSpace::Direct => format!(
+                    "maximum structural frequency relative solver residual {maximum_solver_residual} exceeds {relative_tolerance}"
+                ),
+                FrequencyAcceptanceSpace::ModalReduced => format!(
+                    "maximum modal-reduced frequency residual {maximum_solver_residual} exceeds {relative_tolerance}"
+                ),
+            },
+        });
+    }
+    if space == FrequencyAcceptanceSpace::Direct && result_quality != QualityGate::Pass {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::StructuralFrequencyBalanceExceeded,
+            detail: format!(
+                "maximum structural frequency physical balance error {maximum_balance_error} exceeds {relative_tolerance}"
+            ),
+        });
+    }
+    FrequencyQualityClassification {
+        solver_convergence,
+        result_quality,
+        quality_reasons,
+    }
+}
+
 fn authored_frequency_relative_tolerance(
     workload: &runmat_analysis_fea::execution::StructuralFrequencyWorkload,
 ) -> Result<f64, String> {
@@ -261,4 +345,67 @@ fn authored_frequency_relative_tolerance(
             "structural frequency publication requires a mandatory relative algebraic residual or conservation criterion"
                 .to_string()
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modal_reduced_sweep_is_gated_on_its_reduced_residual_not_its_truncation_balance() {
+        // Cantilever modal -> modal_harmonic, 8 modes: reduced residual ~5e-17, full-space
+        // balance 0.0923 from truncation.
+        let classified = classify_structural_frequency_quality(
+            FrequencyAcceptanceSpace::ModalReduced,
+            5.0e-17,
+            0.0923,
+            1.0e-8,
+        );
+        assert_eq!(classified.solver_convergence, QualityGate::Pass);
+        assert_eq!(classified.result_quality, QualityGate::Pass);
+        assert!(classified.quality_reasons.is_empty());
+
+        let unconverged = classify_structural_frequency_quality(
+            FrequencyAcceptanceSpace::ModalReduced,
+            1.0e-6,
+            1.0e-12,
+            1.0e-8,
+        );
+        assert_eq!(unconverged.result_quality, QualityGate::Fail);
+        assert_eq!(
+            unconverged
+                .quality_reasons
+                .iter()
+                .map(|reason| reason.code)
+                .collect::<Vec<_>>(),
+            vec![QualityReasonCode::StructuralFrequencyResidualExceeded]
+        );
+    }
+
+    #[test]
+    fn direct_sweep_keeps_the_strict_physical_balance_tolerance() {
+        let classified = classify_structural_frequency_quality(
+            FrequencyAcceptanceSpace::Direct,
+            5.0e-17,
+            0.0923,
+            1.0e-8,
+        );
+        assert_eq!(classified.solver_convergence, QualityGate::Pass);
+        assert_eq!(classified.result_quality, QualityGate::Fail);
+        assert_eq!(
+            classified
+                .quality_reasons
+                .iter()
+                .map(|reason| reason.code)
+                .collect::<Vec<_>>(),
+            vec![QualityReasonCode::StructuralFrequencyBalanceExceeded]
+        );
+        let accepted = classify_structural_frequency_quality(
+            FrequencyAcceptanceSpace::Direct,
+            1.0e-12,
+            1.0e-9,
+            1.0e-8,
+        );
+        assert_eq!(accepted.result_quality, QualityGate::Pass);
+    }
 }

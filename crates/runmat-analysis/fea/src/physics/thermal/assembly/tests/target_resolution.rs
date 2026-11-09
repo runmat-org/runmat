@@ -103,3 +103,50 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
         assert_eq!(direct.conductivity, convection.conductivity);
     }
 }
+
+/// A solid region selected by CAD solid name resolves to the exact Solid the elements were
+/// meshed from, which elements carry as provenance beside their canonical mesh region. Heat
+/// generation on such a target applies Q V over the selected elements.
+#[test]
+fn heat_generation_on_a_cad_solid_target_resolves_volume_elements_through_provenance() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+        let projection = AnalysisProjection::derive(&mesh).unwrap();
+        let element = &projection.elements[0];
+        let solid = element
+            .provenance
+            .iter()
+            .find(|entity| entity.kind == runmat_meshing_core::PersistentEntityKind::Solid)
+            .unwrap()
+            .clone();
+        assert_ne!(solid, element.region_id);
+        let mut target = RegionTarget::volume("cell_1");
+        target.bind_resolved_entities(vec![solid]).unwrap();
+        let mut excitations = heat_generation(12_383.9);
+        let mut realized = excitations.iter().cloned().collect::<Vec<_>>();
+        realized[0].target = RealizedExcitationTarget::Region(target);
+        excitations = RealizedExcitations::new(realized);
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let facts =
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
+        let assembly = assemble(
+            &model,
+            &mesh,
+            facts.support(),
+            &excitations,
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let expected_power = 12_383.9 * element.signed_volume_m3;
+        assert!(
+            (assembly
+                .applied_source
+                .canonical_values()
+                .iter()
+                .sum::<f64>()
+                - expected_power)
+                .abs()
+                <= expected_power.abs() * 1.0e-12
+        );
+    }
+}

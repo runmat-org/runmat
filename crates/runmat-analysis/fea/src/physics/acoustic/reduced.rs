@@ -1,4 +1,7 @@
 use runmat_analysis_core::{AnalysisField, AnalysisModel};
+use runmat_analysis_core::{
+    AnalysisFieldLayout, ComplexRepresentation, FieldLocation, ObservationQuantity,
+};
 
 use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
@@ -10,6 +13,16 @@ use crate::{
 };
 
 use super::{domain, linear, medium, recovery};
+
+/// Nodal sound pressure levels of peak pressure phasor magnitudes: the shared RMS definition
+/// of the distributed observations, so both result paths publish one level.
+pub(crate) fn nodal_sound_pressure_levels_db(pressure_magnitude_pa: &[f64]) -> Vec<f64> {
+    pressure_magnitude_pa
+        .iter()
+        .copied()
+        .map(runmat_analysis_core::sound_pressure_level_db)
+        .collect()
+}
 
 /// Executes the graph-domain acoustic proxy.
 ///
@@ -60,10 +73,7 @@ pub fn solve_reduced_harmonic(
         .zip(&pressure_imag)
         .map(|(real, imaginary)| imaginary.atan2(*real))
         .collect::<Vec<_>>();
-    let sound_pressure_level_db = pressure_magnitude
-        .iter()
-        .map(|pressure| 20.0 * (pressure.max(2.0e-5) / 2.0e-5).log10())
-        .collect::<Vec<_>>();
+    let sound_pressure_level_db = nodal_sound_pressure_levels_db(&pressure_magnitude);
     let particle_velocity = recovery::particle_velocity(
         &pressure_real,
         topology,
@@ -106,6 +116,8 @@ pub fn solve_reduced_harmonic(
         ));
         frequency_response_fields.push(AnalysisField::host_f64(
             crate::fea_acoustic_frequency_response_field_id(*frequency_hz),
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::Magnitude),
             vec![node_count],
             sweep_magnitude,
         ));
@@ -129,27 +141,44 @@ pub fn solve_reduced_harmonic(
     let mut fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node),
             vec![node_count],
             pressure_real,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::Imaginary),
             vec![node_count],
             pressure_imag,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::Magnitude),
             vec![node_count],
             pressure_magnitude,
         ),
-        AnalysisField::host_f64(FEA_FIELD_ACOUSTIC_PHASE, vec![node_count], phase),
+        AnalysisField::host_f64(
+            FEA_FIELD_ACOUSTIC_PHASE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::PhaseRadians),
+            vec![node_count],
+            phase,
+        ),
         AnalysisField::host_f64(
             FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::SoundPressureLevel),
             vec![node_count],
             sound_pressure_level_db,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+            AnalysisFieldLayout::vector3(
+                ObservationQuantity::AcousticParticleVelocity,
+                FieldLocation::Node,
+            ),
             vec![node_count, 3],
             particle_velocity,
         ),

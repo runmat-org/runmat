@@ -20,7 +20,7 @@ Evidence kind: SemanticRealization. Criterion: The bounded native provider must 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:geometry_features]::imported_source_aliases_and_persistent_ids_remain_distinct` (crates/runmat-analysis/language/tests/geometry_features.rs:11) - Compiler checks source alias versus persistent-id selectors remain distinct typed values; no native CAD feature history, regeneration or AP242 export evidence. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:geometry_features]::imported_source_aliases_are_rejected` (crates/runmat-analysis/language/tests/geometry_features.rs:11) - Compiler checks source alias versus persistent-id selectors remain distinct typed values; no native CAD feature history, regeneration or AP242 export evidence. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

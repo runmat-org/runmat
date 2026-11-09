@@ -56,3 +56,14 @@ pub(crate) enum ThermalAssemblyError {
         location: String,
     },
 }
+
+/// A projection traversal that ran out of simulation work keeps its usage type; every other
+/// projection failure is an invalid projection.
+impl From<crate::topology::AnalysisProjectionError> for ThermalAssemblyError {
+    fn from(error: crate::topology::AnalysisProjectionError) -> Self {
+        match error {
+            crate::topology::AnalysisProjectionError::Accounting(cause) => Self::Accounting(cause),
+            error => Self::InvalidProjection(error.to_string()),
+        }
+    }
+}

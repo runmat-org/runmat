@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-ACCURACY-001: Mandatory acoustic accuracy gates publication
 
-0 PASS, 0 PARTIAL, 2 FAIL, 2 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 2 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## lineage
 
@@ -8,8 +8,8 @@ Evidence kind: AccuracyAcceptance. Criterion: Accuracy preparation and receipt v
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | prepared_controller | FAIL | `runmat-analysis-execution[lib]::tests::acoustic_accuracy_tests::acoustic_accuracy_admission_binds_retained_result_and_original_intent` (crates/runmat-analysis/execution/src/tests/acoustic_accuracy.rs:70) - Both-order accepted-output bridge fixture validates exact context and rejects production relabeling; not actual native worker or full public gate evidence. |
-| acoustic_harmonic | tet10 | prepared_controller | FAIL | `runmat-analysis-execution[lib]::tests::acoustic_accuracy_tests::acoustic_accuracy_admission_binds_retained_result_and_original_intent` (crates/runmat-analysis/execution/src/tests/acoustic_accuracy.rs:70) - Both-order accepted-output bridge fixture validates exact context and rejects production relabeling; not actual native worker or full public gate evidence. |
+| acoustic_harmonic | tet4 | prepared_controller | PARTIAL | `runmat-analysis-execution[lib]::tests::acoustic_accuracy_tests::acoustic_accuracy_admission_binds_retained_result_and_original_intent` (crates/runmat-analysis/execution/src/tests/acoustic_accuracy.rs:73) - Both-order accepted-output bridge fixture validates exact context and rejects production relabeling; not actual native worker or full public gate evidence. |
+| acoustic_harmonic | tet10 | prepared_controller | PARTIAL | `runmat-analysis-execution[lib]::tests::acoustic_accuracy_tests::acoustic_accuracy_admission_binds_retained_result_and_original_intent` (crates/runmat-analysis/execution/src/tests/acoustic_accuracy.rs:73) - Both-order accepted-output bridge fixture validates exact context and rejects production relabeling; not actual native worker or full public gate evidence. |
 
 ## gate
 

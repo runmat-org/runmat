@@ -19,7 +19,7 @@ pub use cluster::{
 };
 pub(crate) use execution_target::resolve_endpoint_trust;
 pub use execution_target::{ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
-pub use fea::{FeaCommand, FeaRootArgs};
+pub use fea::{FeaRootArgs, SnapshotPresentationArgs};
 pub use job::{JobCommand, JobRecoveryCommand};
 pub use mex::MexArgs;
 pub use native_interface::{NativeInterfaceCommand, NativeInterfacePrepareArgs};

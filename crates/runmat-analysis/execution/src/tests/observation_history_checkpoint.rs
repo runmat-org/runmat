@@ -111,6 +111,7 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
             coordinate,
             runmat_analysis_core::AnalysisField::host_f64(
                 definition.field_id(),
+                definition.layout(),
                 vec![projection.nodes.len(), 3],
                 vec![index as f64 + 1.0; projection.nodes.len() * 3],
             ),

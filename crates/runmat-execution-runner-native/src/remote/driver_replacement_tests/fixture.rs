@@ -1,16 +1,5 @@
 use super::*;
 
-fn fixture_org_id() -> String {
-    runmat_server_client::ids::OrgId::from_uuid(uuid::Uuid::from_u128(1)).to_string()
-}
-
-fn fixture_driver_lease_id(fence: u64) -> String {
-    runmat_server_client::ids::ExecutionDriverLeaseId::from_uuid(uuid::Uuid::from_u128(u128::from(
-        fence,
-    )))
-    .to_string()
-}
-
 pub(super) struct ExactStudyFixture {
     pub(super) control: DurableControl,
     pub(super) run_key: RunKeyMaterial,
@@ -458,7 +447,7 @@ fn worker_allocation(
     let signer = EndpointIdentitySigner::from_secret([entropy + 20; 32]).unwrap();
     let mut evidence = EndpointIdentityEvidence {
         schema_version: 1,
-        org_id: fixture_org_id(),
+        org_id: crate::remote::test_ids::TEST_ORG_ID.into(),
         cluster_id: "cluster-1".into(),
         node_id: format!("node-{allocation_id}"),
         allocation_lease_id: allocation_id.into(),
@@ -508,7 +497,7 @@ pub(super) fn driver_identity_material() -> EndpointIdentityMaterial {
         entropy,
         EndpointIdentityEvidence {
             schema_version: 1,
-            org_id: fixture_org_id(),
+            org_id: crate::remote::test_ids::TEST_ORG_ID.into(),
             cluster_id: "cluster-1".into(),
             node_id: "driver-node".into(),
             allocation_lease_id: DRIVER_ALLOCATION.into(),
@@ -538,10 +527,10 @@ pub(super) fn driver_authority(fence: u64, server_url: String) -> DriverAuthorit
     DriverAuthority {
         server_url,
         run_id: RUN_ID.into(),
-        org_id: fixture_org_id(),
+        org_id: crate::remote::test_ids::test_org_id(),
         project_id: "project-1".into(),
         allocation_lease_id: DRIVER_ALLOCATION.into(),
-        driver_lease_id: fixture_driver_lease_id(fence),
+        driver_lease_id: crate::remote::test_ids::test_driver_lease_id(fence),
         fencing_token: fence,
         credential: format!("credential-{fence}"),
     }

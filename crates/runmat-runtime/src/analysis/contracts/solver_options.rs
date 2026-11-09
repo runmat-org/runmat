@@ -74,6 +74,7 @@ impl AnalysisSolverOptions {
                     truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
                         *requested_count,
                     ),
+                    residual_vector_directions: step.modal_residual_vector_directions().to_vec(),
                     ..AnalysisModalRunOptions::default()
                 };
                 Ok(Self::StructuralModes(options))
@@ -87,16 +88,14 @@ impl AnalysisSolverOptions {
             (Structural, EigenvalueBuckling, SolutionSpace::Direct) => Ok(
                 Self::StructuralBuckling(AnalysisBucklingRunOptions::default()),
             ),
+            // Direct and modal-reduced (modal -> harmonic) sweeps share the frequency options.
             (
                 Structural,
-                PrestressedHarmonicResponse,
+                HarmonicResponse | PrestressedHarmonicResponse,
                 SolutionSpace::Direct | SolutionSpace::ModalReduced,
             ) => Ok(Self::StructuralFrequency(
                 AnalysisStructuralFrequencyRunOptions::default(),
             )),
-            (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(
-                Self::StructuralFrequency(AnalysisStructuralFrequencyRunOptions::default()),
-            ),
             (Acoustic, ModalExtraction | TransientResponse, SolutionSpace::Direct) => Ok(
                 Self::AcousticResponse(super::super::AnalysisAcousticResponseRunOptions::default()),
             ),

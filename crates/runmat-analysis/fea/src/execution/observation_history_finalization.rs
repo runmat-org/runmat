@@ -14,7 +14,8 @@ use crate::results::observation::{
 };
 
 const PREFIX: &[u8] = b"runmat-observation-history-finalization/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy)]
 pub enum ObservationHistorySourceContext<'a> {
@@ -255,7 +256,7 @@ impl ObservationHistoryFinalizationRequest {
                 }
             }
             (
-                ObservationFieldCatalogSource::StructuralFrequencyHistory { samples },
+                ObservationFieldCatalogSource::EntryHistory { samples },
                 ObservationHistorySourceContext::Structural {
                     source: super::StructuralObservationSource::Frequency(workload),
                     mesh,
@@ -265,34 +266,18 @@ impl ObservationHistoryFinalizationRequest {
                     return Err(invalid("frequency source workload selects another step"));
                 }
                 catalog.validate_frequency_history_plan(&self.plan, workload, mesh)?;
-                for sample in samples {
-                    let ObservationFieldCatalogSource::Structural {
-                        recovery_request,
-                        manifest,
-                    } = sample.source()
-                    else {
-                        return Err(invalid("frequency history contains a nonstructural sample"));
-                    };
-                    if recovery_request.producer != self.producer
-                        || manifest.topology_digest != self.plan.topology_digest
-                    {
-                        return Err(invalid("frequency producer or topology differs"));
-                    }
-                    for entry in &manifest.fields {
-                        if entry.definition.identity()
-                            == observation.source_field_definition_identity
-                            && resolved_observation_accepts_sample(
-                                &self.plan,
-                                observation,
-                                entry.sample,
-                                None,
-                            )
-                            .map_err(invalid)?
-                        {
-                            expected.push(entry);
-                        }
-                    }
-                }
+                self.accepted_entry_samples(samples, observation, &mut expected)?;
+            }
+            (
+                ObservationFieldCatalogSource::EntryHistory { samples },
+                ObservationHistorySourceContext::VolumeMesh { mesh },
+            ) => {
+                let step = match samples.first().map(ObservationFieldCatalog::source) {
+                    Some(ObservationFieldCatalogSource::VolumeMeshRecovery { step, .. }) => step,
+                    _ => return Err(invalid("volume-mesh entry history has no authored step")),
+                };
+                catalog.validate_volume_mesh_history_plan(&self.plan, self.producer, step, mesh)?;
+                self.accepted_entry_samples(samples, observation, &mut expected)?;
             }
             (
                 ObservationFieldCatalogSource::Thermal { manifest },
@@ -426,6 +411,43 @@ impl ObservationHistoryFinalizationRequest {
                 LIMITS,
             )?),
         ))
+    }
+    /// Every accepted source coordinate of an entry history, in entry order: one producer and
+    /// one topology across the entries.
+    fn accepted_entry_samples<'a>(
+        &self,
+        samples: &'a [ObservationFieldCatalog],
+        observation: &crate::results::observation::ResolvedObservation,
+        expected: &mut Vec<&'a crate::results::field::RecoveredFieldArtifactEntry>,
+    ) -> AnalysisExecutionResult<()> {
+        for sample in samples {
+            let (recovery_request, manifest) = sample.entry_recovery()?;
+            // Structural recoveries share the plan's discretization digest; a volume-mesh
+            // entry's plan was resolved on the mesh by `validate_volume_mesh_history_plan`.
+            let structural = matches!(
+                sample.source(),
+                ObservationFieldCatalogSource::Structural { .. }
+            );
+            if recovery_request.producer != self.producer
+                || (structural && manifest.topology_digest != self.plan.topology_digest)
+            {
+                return Err(invalid("entry history producer or topology differs"));
+            }
+            for entry in &manifest.fields {
+                if entry.definition.identity() == observation.source_field_definition_identity
+                    && resolved_observation_accepts_sample(
+                        &self.plan,
+                        observation,
+                        entry.sample,
+                        None,
+                    )
+                    .map_err(invalid)?
+                {
+                    expected.push(entry);
+                }
+            }
+        }
+        Ok(())
     }
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate()?;

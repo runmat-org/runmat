@@ -1,4 +1,5 @@
 use super::*;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_meshing_core::{
     fixtures::{canonical_tetrahedron_solver_mesh, connected_quadratic_tetrahedron_solver_mesh},
     CanonicalMeshingContract, SolverEntityTransfer, SolverTransferMethod, SolverTransferSource,
@@ -65,6 +66,11 @@ fn quadratic_h_transfer_retains_scalar_vector_modes_and_rejects_linear_fallback(
         };
         let field = AnalysisField::host_f64(
             "quadratic",
+            AnalysisFieldLayout::components(
+                ObservationQuantity::Displacement,
+                FieldLocation::Node,
+                components,
+            ),
             vec![source.topology.nodes.len(), components],
             source
                 .topology
@@ -75,6 +81,11 @@ fn quadratic_h_transfer_retains_scalar_vector_modes_and_rejects_linear_fallback(
         );
         let reference = AnalysisField::host_f64(
             "quadratic",
+            AnalysisFieldLayout::components(
+                ObservationQuantity::Displacement,
+                FieldLocation::Node,
+                components,
+            ),
             vec![target.topology.nodes.len(), components],
             target
                 .topology
@@ -127,16 +138,36 @@ fn quadratic_h_transfer_retains_scalar_vector_modes_and_rejects_linear_fallback(
 fn transfer_error_keeps_extreme_finite_scales_and_rejects_unrepresentable_norms() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for scale in [1.0e200, 1.0e-200] {
-        let field = AnalysisField::host_f64("x", vec![4], vec![scale; 4]);
+        let field = AnalysisField::host_f64(
+            "x",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![4],
+            vec![scale; 4],
+        );
         let transfer = transfer_solver_field(&mesh, &mesh, None, "nodes", &field).unwrap();
-        let reference = AnalysisField::host_f64("x", vec![4], vec![2.0 * scale; 4]);
+        let reference = AnalysisField::host_f64(
+            "x",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![4],
+            vec![2.0 * scale; 4],
+        );
         let evidence = measure_solver_field_transfer_error(&transfer, &reference).unwrap();
         assert!((evidence.absolute_l2_error / (2.0 * scale) - 1.0).abs() < 1.0e-14);
         assert!((evidence.relative_l2_error.unwrap() - 0.5).abs() < 1.0e-14);
     }
-    let field = AnalysisField::host_f64("x", vec![4], vec![1.0e308; 4]);
+    let field = AnalysisField::host_f64(
+        "x",
+        AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+        vec![4],
+        vec![1.0e308; 4],
+    );
     let transfer = transfer_solver_field(&mesh, &mesh, None, "nodes", &field).unwrap();
-    let reference = AnalysisField::host_f64("x", vec![4], vec![0.0; 4]);
+    let reference = AnalysisField::host_f64(
+        "x",
+        AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+        vec![4],
+        vec![0.0; 4],
+    );
     assert_eq!(
         measure_solver_field_transfer_error(&transfer, &reference).unwrap_err(),
         SolverFieldTransferError::InvalidReferenceField

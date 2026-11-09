@@ -277,7 +277,7 @@ fn elastic_rigidity_admission(
 
 /// The factor that proves coercivity is reserved in full: the topology-derived envelope bounds
 /// the exact factorization of any numerical support of the pattern.
-fn factor_admission(
+pub(super) fn factor_admission(
     pattern: &crate::algebra::SparsePattern,
 ) -> Result<SolverAdmissionResourcePolicy, ResourcePlanningError> {
     let bound = CoercivityWorkEnvelope::derive(pattern)

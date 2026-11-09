@@ -1,3 +1,4 @@
+use runmat_analysis_core::AnalysisFieldLayout;
 use runmat_analysis_core::{
     AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape,
 };
@@ -25,7 +26,12 @@ fn temperature_definition(label: &str) -> RecoveredFieldDefinition {
 }
 
 fn temperature_field(label: &str) -> AnalysisField {
-    AnalysisField::host_f64(label, vec![4], vec![300.0, 301.0, 302.0, 303.0])
+    AnalysisField::host_f64(
+        label,
+        AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+        vec![4],
+        vec![300.0, 301.0, 302.0, 303.0],
+    )
 }
 
 #[test]
@@ -36,7 +42,12 @@ fn partition_shape_profile_bounds_actual_contract_without_numeric_storage() {
         let field = RecoveredField::new(
             definition.clone(),
             sample,
-            AnalysisField::host_f64(definition.field_id(), vec![count], vec![f64::MAX; count]),
+            AnalysisField::host_f64(
+                definition.field_id(),
+                definition.profile_layout(),
+                vec![count],
+                vec![f64::MAX; count],
+            ),
         )
         .unwrap();
         let partition = RecoveredFieldPartition::select(&field, (0..count).collect()).unwrap();
@@ -108,6 +119,7 @@ fn partition_shape_profile_covers_vector_and_tensor_widths() {
         let count = 7;
         let storage = AnalysisField::host_f64(
             definition.field_id(),
+            definition.profile_layout(),
             definition.storage_shape(count).unwrap(),
             vec![-f64::MAX; count * definition.storage_component_count().unwrap()],
         );
@@ -249,7 +261,12 @@ fn catalog_rejects_semantic_ambiguity_and_topology_shape_mismatch() {
     let malformed = RecoveredField::new(
         temperature_definition("temperature.short"),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64("temperature.short", vec![3], vec![1.0, 2.0, 3.0]),
+        AnalysisField::host_f64(
+            "temperature.short",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![3],
+            vec![1.0, 2.0, 3.0],
+        ),
     )
     .unwrap();
     assert_eq!(
@@ -386,6 +403,7 @@ fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_conte
         RecoveredFieldSample::TimeSeconds(1.0),
         AnalysisField::host_f64(
             "temperature.time",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
             vec![4],
             vec![900.0, 901.0, 902.0, 903.0],
         ),
@@ -407,6 +425,7 @@ fn field_storage_partitions_are_canonical_complete_and_reconstruct_exactly() {
         RecoveredFieldSample::Final,
         AnalysisField::host_f64(
             "temperature.large",
+            definition.layout(),
             vec![entity_count],
             (0..entity_count).map(|index| index as f64).collect(),
         ),
@@ -478,6 +497,7 @@ fn integration_point_tensor_storage_pages_and_reconstructs_exactly() {
         RecoveredFieldSample::Final,
         AnalysisField::host_f64(
             crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+            definition.layout(),
             vec![entity_count, 6],
             values,
         ),
@@ -511,7 +531,12 @@ fn physical_storage_admission_retains_quantity_and_rejects_nonfinite_values() {
     let field = RecoveredField::new(
         definition.clone(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64(definition.field_id(), vec![2], vec![273.15, 300.0]),
+        AnalysisField::host_f64(
+            definition.field_id(),
+            definition.layout(),
+            vec![2],
+            vec![273.15, 300.0],
+        ),
     )
     .unwrap();
     let physical = field.physical_host_field().unwrap();
@@ -522,7 +547,12 @@ fn physical_storage_admission_retains_quantity_and_rejects_nonfinite_values() {
     assert!(RecoveredField::new(
         definition.clone(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64(definition.field_id(), vec![1], vec![f64::NAN])
+        AnalysisField::host_f64(
+            definition.field_id(),
+            definition.layout(),
+            vec![1],
+            vec![f64::NAN]
+        )
     )
     .is_err());
     // A diagnostic name alone does not define physical units: modal eigenvalues

@@ -94,4 +94,4 @@ its Joule power matches $I^2R(T)$ integrated along the bar.
 
 See [electromagnetics](./electromagnetic), [heat transfer](./thermal),
 [electromagnetic loads](../loads/electromagnetic), [thermal loads](../loads/thermal), and
-[current status](../status).
+[current status](../validation/status.md).

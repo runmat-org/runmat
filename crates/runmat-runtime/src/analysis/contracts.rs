@@ -728,6 +728,23 @@ pub enum AnalysisFieldKind {
     Unknown,
 }
 
+impl AnalysisFieldKind {
+    /// The result-facing kind of a declared per-entity value shape.
+    pub fn of_value_shape(shape: &runmat_analysis_core::ObservationValueShape) -> Self {
+        use runmat_analysis_core::ObservationValueShape as Shape;
+        match shape {
+            Shape::Scalar => Self::Scalar,
+            Shape::Vector3 => Self::Vector,
+            Shape::SymmetricTensor3 => Self::Tensor,
+            Shape::Tensor { extents } => match extents.as_slice() {
+                [] | [1] => Self::Scalar,
+                [2] | [3] => Self::Vector,
+                _ => Self::Tensor,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisFieldStorage {
@@ -740,6 +757,8 @@ pub enum AnalysisFieldStorage {
 pub enum AnalysisFieldLocation {
     Node,
     Element,
+    /// Values at element quadrature points, one entity per point.
+    IntegrationPoint,
     Edge,
     BoundaryFace,
     InterfaceFace,
@@ -747,6 +766,23 @@ pub enum AnalysisFieldLocation {
     Global,
     #[default]
     Unknown,
+}
+
+impl From<runmat_analysis_core::FieldLocation> for AnalysisFieldLocation {
+    fn from(location: runmat_analysis_core::FieldLocation) -> Self {
+        use runmat_analysis_core::FieldLocation as L;
+        match location {
+            L::Node => Self::Node,
+            L::Cell | L::Element => Self::Element,
+            L::IntegrationPoint => Self::IntegrationPoint,
+            L::Face => Self::BoundaryFace,
+            L::Edge => Self::Edge,
+            L::Interface => Self::InterfaceFace,
+            L::Mode => Self::Mode,
+            L::Global | L::Constraint | L::ReferencePoint => Self::Global,
+            L::Point | L::Connector => Self::Unknown,
+        }
+    }
 }
 
 pub const ANALYSIS_FIELD_DEFAULT_PAGE_SIZE: usize = 4096;
@@ -825,10 +861,9 @@ impl AnalysisRuntimeCapabilities {
 pub fn analysis_authoring_workflow() -> Vec<String> {
     vec![
         "edit <study>.fea with workspace file tools".to_string(),
-        "runmat fea check <study>.fea [--study <id> | --sweep <id>]".to_string(),
-        "runmat fea plan <study>.fea [--study <id> | --sweep <id>] --json".to_string(),
-        "runmat fea run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]"
-            .to_string(),
+        "runmat check <study>.fea [--study <id> | --sweep <id>]".to_string(),
+        "runmat plan <study>.fea [--study <id> | --sweep <id>] --json".to_string(),
+        "runmat run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]".to_string(),
     ]
 }
 
@@ -1108,10 +1143,12 @@ pub struct AnalysisFieldDescriptor {
         Option<runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation>,
     #[serde(default)]
     pub family: String,
-    #[serde(default)]
-    pub quantity: String,
+    /// The publisher's typed declaration: quantity (one typed result vocabulary), location,
+    /// per-entity value shape, complex representation and state ordinal. `location`, `kind`
+    /// and `component_count` below are its result-facing projections.
+    pub layout: runmat_analysis_core::AnalysisFieldLayout,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub statistic: Option<AnalysisFieldStatistic>,
+    pub statistic: Option<runmat_analysis_core::FieldStatistic>,
     #[serde(default)]
     pub topology_id: Option<String>,
     #[serde(default)]
@@ -1152,7 +1189,8 @@ impl AnalysisFieldDescriptor {
             AnalysisFieldValues::HostF64(_) => AnalysisFieldStorage::HostF64,
             AnalysisFieldValues::DeviceRef(_) => AnalysisFieldStorage::DeviceRef,
         };
-        let kind = infer_field_kind(&field.field_id, &field.shape);
+        let layout = &field.layout;
+        let kind = AnalysisFieldKind::of_value_shape(&layout.value_shape);
         // Runtime currently exposes one concrete immutable field value class. The field's
         // scalar/vector/tensor shape is carried by `kind`; advertising subclasses that are not
         // registered would make the public class identity false.
@@ -1162,10 +1200,12 @@ impl AnalysisFieldDescriptor {
             AnalysisFieldStorage::DeviceRef => "gpu",
         }
         .to_string();
-        let location = infer_field_location(&field.field_id);
-        let component_count = infer_component_count(&field.field_id, &field.shape);
+        let location = AnalysisFieldLocation::from(layout.location);
+        let component_count = layout.component_count();
         let value_count = field.element_count();
-        let entity_count = infer_entity_count(&field.shape, location, component_count);
+        // A layout that does not fit its storage is rejected where runs are published
+        // (`AnalysisField::validate_layout`); descriptors of such a field report no entities.
+        let entity_count = layout.entity_count(&field.shape).unwrap_or(0);
         let size_bytes = value_count
             .checked_mul(std::mem::size_of::<f64>())
             .map(|bytes| bytes as u64);
@@ -1174,8 +1214,8 @@ impl AnalysisFieldDescriptor {
             sample: None,
             numeric_representation: None,
             family: infer_field_family(&field.field_id).to_string(),
-            quantity: infer_field_quantity(&field.field_id).to_string(),
-            statistic: infer_field_statistic(&field.field_id),
+            layout: layout.clone(),
+            statistic: layout.statistic,
             topology_id: infer_field_topology_id(&field.field_id, location).map(str::to_string),
             element_kind: infer_field_element_kind(&field.field_id, location).map(str::to_string),
             class_name,
@@ -1204,7 +1244,6 @@ impl AnalysisFieldDescriptor {
     pub fn from_recovered_entry(
         entry: &runmat_analysis_fea::results::field::RecoveredFieldArtifactEntry,
     ) -> Result<Self, String> {
-        use runmat_analysis_core::FieldLocation;
         use runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation;
 
         let component_count = entry
@@ -1232,29 +1271,19 @@ impl AnalysisFieldDescriptor {
             RecoveredFieldNumericRepresentation::Real => 1,
             RecoveredFieldNumericRepresentation::ComplexInterleaved => 2,
         };
-        let location = match entry.definition.location() {
-            FieldLocation::Node => AnalysisFieldLocation::Node,
-            FieldLocation::Cell | FieldLocation::Element | FieldLocation::IntegrationPoint => {
-                AnalysisFieldLocation::Element
+        let location = AnalysisFieldLocation::from(entry.definition.location());
+        let kind = AnalysisFieldKind::of_value_shape(entry.definition.value_shape());
+        let layout = entry.definition.layout();
+        let ordinal = match entry.sample {
+            // The sample numbers modes from 1; the ordinal is the 0-based mode index.
+            runmat_analysis_fea::results::field::RecoveredFieldSample::ModeIndex(mode) => {
+                runmat_analysis_core::FieldOrdinal::Mode(
+                    mode.checked_sub(1)
+                        .ok_or_else(|| "recovered mode numbers start at 1".to_string())?,
+                )
             }
-            FieldLocation::Face => AnalysisFieldLocation::BoundaryFace,
-            FieldLocation::Edge => AnalysisFieldLocation::Edge,
-            FieldLocation::Interface => AnalysisFieldLocation::InterfaceFace,
-            FieldLocation::Mode => AnalysisFieldLocation::Mode,
-            FieldLocation::Global | FieldLocation::Constraint | FieldLocation::ReferencePoint => {
-                AnalysisFieldLocation::Global
-            }
-            FieldLocation::Point | FieldLocation::Connector => AnalysisFieldLocation::Unknown,
+            _ => runmat_analysis_core::FieldOrdinal::Single,
         };
-        let kind = match component_count {
-            1 => AnalysisFieldKind::Scalar,
-            2 | 3 => AnalysisFieldKind::Vector,
-            _ => AnalysisFieldKind::Tensor,
-        };
-        let quantity = serde_json::to_value(entry.definition.quantity())
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_string))
-            .unwrap_or_default();
         let size_bytes = value_count
             .checked_mul(storage_width)
             .and_then(|count| count.checked_mul(std::mem::size_of::<f64>()))
@@ -1263,9 +1292,9 @@ impl AnalysisFieldDescriptor {
             field_id: entry.definition.field_id().to_string(),
             sample: Some(entry.sample),
             numeric_representation: Some(entry.definition.numeric_representation()),
-            family: "structural".to_string(),
-            quantity,
-            statistic: None,
+            family: infer_field_family(entry.definition.field_id()).to_string(),
+            statistic: layout.statistic,
+            layout: layout.with_ordinal(ordinal),
             topology_id: None,
             element_kind: None,
             class_name: "fea.Field".to_string(),
@@ -1276,7 +1305,7 @@ impl AnalysisFieldDescriptor {
                 "double"
             }
             .to_string(),
-            unit: None,
+            unit: infer_field_unit(entry.definition.field_id()).map(str::to_string),
             location,
             shape,
             element_count: value_count,
@@ -1297,153 +1326,10 @@ impl AnalysisFieldDescriptor {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisFieldStatistic {
-    ComponentMagnitudeEnvelope,
-    RootMeanSquare,
-    Variance,
-}
-
-fn infer_entity_count(
-    shape: &[usize],
-    location: AnalysisFieldLocation,
-    component_count: Option<usize>,
-) -> usize {
-    if matches!(
-        location,
-        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
-    ) {
-        return shape.iter().product();
-    }
-    if let Some(first_dim) = shape.first().copied() {
-        if shape.len() > 1 || component_count.is_some() {
-            return first_dim;
-        }
-    }
-    shape.iter().product()
-}
-
 fn infer_field_family(field_id: &str) -> &str {
     field_id
         .split_once('.')
         .map_or("unknown", |(family, _)| family)
-}
-
-fn infer_field_quantity(field_id: &str) -> &str {
-    for prefix in [
-        "structural.response_spectrum.nodal.",
-        "structural.response_spectrum.envelope.",
-        "structural.random_response.rms.",
-        "structural.random_response.variance.",
-    ] {
-        if let Some(quantity) = field_id.strip_prefix(prefix) {
-            return quantity;
-        }
-    }
-    let Some((_, rest)) = field_id.split_once('.') else {
-        return field_id;
-    };
-    let Some((quantity, suffix)) = rest.rsplit_once('.') else {
-        return rest;
-    };
-    if suffix.chars().all(|ch| ch.is_ascii_digit()) {
-        quantity
-    } else {
-        rest
-    }
-}
-
-fn infer_field_statistic(field_id: &str) -> Option<AnalysisFieldStatistic> {
-    if field_id.starts_with("structural.response_spectrum.") {
-        Some(AnalysisFieldStatistic::ComponentMagnitudeEnvelope)
-    } else if field_id.starts_with("structural.random_response.rms.") {
-        Some(AnalysisFieldStatistic::RootMeanSquare)
-    } else if field_id.starts_with("structural.random_response.variance.") {
-        Some(AnalysisFieldStatistic::Variance)
-    } else {
-        None
-    }
-}
-
-fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
-    let normalized = field_id.to_ascii_lowercase();
-    if normalized.contains("nodal_von_mises") {
-        return AnalysisFieldLocation::Node;
-    }
-    if normalized.contains("vector_potential") {
-        return AnalysisFieldLocation::Edge;
-    }
-    if normalized.contains("wall_shear_stress") || normalized.contains("boundary_heat_flux") {
-        return AnalysisFieldLocation::BoundaryFace;
-    }
-    if normalized.contains("interface_")
-        || normalized.contains("contact_pressure")
-        || normalized.contains("contact_gap")
-    {
-        return AnalysisFieldLocation::InterfaceFace;
-    }
-    if normalized.starts_with("modal.")
-        && !normalized.starts_with("modal.mode_shape.")
-        && !normalized.contains("orthogonality")
-    {
-        return AnalysisFieldLocation::Mode;
-    }
-    if normalized.contains("energy_density") {
-        return AnalysisFieldLocation::Element;
-    }
-    if normalized.contains("residual")
-        || normalized.contains("equation_scale")
-        || normalized.contains("energy")
-        || normalized.contains("load_factor")
-        || normalized.contains("coupling_iteration_count")
-        || normalized.contains("orthogonality")
-    {
-        return AnalysisFieldLocation::Global;
-    }
-    if normalized.starts_with("acoustic.") {
-        return AnalysisFieldLocation::Node;
-    }
-    if normalized.contains("beam_") || normalized.contains("shell_") {
-        return AnalysisFieldLocation::Element;
-    }
-    if normalized.starts_with("structural.response_spectrum.nodal.")
-        || normalized.starts_with("structural.response_spectrum.envelope.displacement")
-        || normalized.starts_with("structural.response_spectrum.envelope.rotation")
-        || normalized.starts_with("structural.random_response.rms.displacement")
-        || normalized.starts_with("structural.random_response.rms.rotation")
-        || normalized.starts_with("structural.random_response.variance.displacement")
-        || normalized.starts_with("structural.random_response.variance.rotation")
-    {
-        return AnalysisFieldLocation::Node;
-    }
-    if normalized.contains("temperature_gradient")
-        || normalized.contains("heat_flux")
-        || normalized.contains("heat_source")
-        || normalized.contains("joule_heat")
-        || normalized.contains("magnetic_flux_density")
-        || normalized.contains("magnetic_field")
-        || normalized.contains("electric_field")
-        || normalized.contains("electric_flux_density")
-        || normalized.contains("current_density")
-        || normalized.contains("poynting_vector")
-        || normalized.contains("vorticity")
-        || normalized.contains("pressure")
-        || normalized.contains("stress")
-        || normalized.contains("strain")
-        || normalized.contains("von_mises")
-    {
-        return AnalysisFieldLocation::Element;
-    }
-    if normalized.contains("displacement")
-        || normalized.contains("mode_shape")
-        || normalized.contains("temperature")
-        || normalized.starts_with("acoustic.")
-        || normalized.contains("electric_potential")
-    {
-        return AnalysisFieldLocation::Node;
-    }
-    AnalysisFieldLocation::Element
 }
 
 fn infer_field_topology_id(
@@ -1496,179 +1382,6 @@ fn infer_field_element_kind(
     None
 }
 
-fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
-    let normalized = field_id.to_ascii_lowercase();
-    if normalized.contains("magnitude") {
-        return AnalysisFieldKind::Scalar;
-    }
-    if normalized.contains("heat_flux") {
-        return match shape {
-            [_, components] if (2..=3).contains(components) => AnalysisFieldKind::Vector,
-            _ => AnalysisFieldKind::Scalar,
-        };
-    }
-    if normalized.contains("beam_shear_force")
-        || normalized.contains("beam_bending_moment")
-        || normalized.contains("beam_bending_stress")
-        || normalized.contains("shell_membrane_force")
-        || normalized.contains("shell_bending_moment")
-        || normalized.contains("shell_transverse_shear")
-    {
-        return AnalysisFieldKind::Vector;
-    }
-    if normalized.contains("shell_von_mises") {
-        return AnalysisFieldKind::Scalar;
-    }
-    if normalized.contains("beam_axial_force")
-        || normalized.contains("beam_torsion_moment")
-        || normalized.contains("beam_torsion_stress")
-    {
-        return AnalysisFieldKind::Scalar;
-    }
-    if normalized.contains("temperature_gradient")
-        || normalized.contains("wall_shear_stress")
-        || normalized.contains("vorticity")
-        || normalized.contains("velocity")
-        || normalized.contains("traction")
-        || normalized.contains("magnetic_field")
-        || normalized.contains("electric_field")
-        || normalized.contains("current_density")
-    {
-        return AnalysisFieldKind::Vector;
-    }
-    if normalized.contains("von_mises")
-        || normalized.contains("equivalent_plastic_strain")
-        || normalized.contains("pressure")
-        || normalized.contains("phase")
-        || normalized.contains("reynolds_number")
-        || normalized.contains("temperature")
-        || normalized.contains("energy")
-        || normalized.contains("residual")
-    {
-        return AnalysisFieldKind::Scalar;
-    }
-    if normalized.contains("stress") || normalized.contains("strain") {
-        return AnalysisFieldKind::Tensor;
-    }
-    if normalized.contains("orthogonality") {
-        return AnalysisFieldKind::Tensor;
-    }
-    if normalized.contains("displacement")
-        || normalized.contains("rotation")
-        || normalized.contains("mode_shape")
-        || normalized.contains("reaction_force")
-        || normalized.contains("reaction_moment")
-        || normalized.contains("vector")
-        || normalized.contains("flux")
-    {
-        return AnalysisFieldKind::Vector;
-    }
-    match shape {
-        [] | [_] => AnalysisFieldKind::Scalar,
-        [_, 1] => AnalysisFieldKind::Scalar,
-        [_, 2] | [_, 3] => AnalysisFieldKind::Vector,
-        [_, _, ..] => AnalysisFieldKind::Tensor,
-    }
-}
-
-fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
-    let normalized = field_id.to_ascii_lowercase();
-    if normalized.contains("magnitude") {
-        return None;
-    }
-    if normalized.contains("equivalent_plastic_strain") {
-        return None;
-    }
-    if normalized.contains("heat_flux") {
-        return match shape {
-            [_, components] if (2..=3).contains(components) => Some(*components),
-            _ => None,
-        };
-    }
-    if normalized.contains("beam_shear_force")
-        || normalized.contains("beam_bending_moment")
-        || normalized.contains("beam_bending_stress")
-    {
-        return Some(2);
-    }
-    if normalized.contains("shell_membrane_force") || normalized.contains("shell_bending_moment") {
-        return Some(3);
-    }
-    if normalized.contains("shell_transverse_shear") {
-        return Some(2);
-    }
-    if normalized.contains("shell_von_mises") {
-        return None;
-    }
-    if normalized.contains("beam_axial_force")
-        || normalized.contains("beam_torsion_moment")
-        || normalized.contains("beam_torsion_stress")
-    {
-        return None;
-    }
-    if normalized.contains("temperature_gradient")
-        || normalized.contains("wall_shear_stress")
-        || normalized.contains("vorticity")
-        || normalized.contains("velocity")
-        || normalized.contains("traction")
-        || normalized.contains("magnetic_field")
-        || normalized.contains("electric_field")
-        || normalized.contains("current_density")
-    {
-        return Some(
-            shape
-                .last()
-                .copied()
-                .filter(|value| (2..=3).contains(value))
-                .unwrap_or(3),
-        );
-    }
-    if normalized.contains("von_mises")
-        || normalized.contains("equivalent_plastic_strain")
-        || normalized.contains("pressure")
-        || normalized.contains("phase")
-        || normalized.contains("reynolds_number")
-        || normalized.contains("temperature")
-        || normalized.contains("energy")
-        || normalized.contains("residual")
-    {
-        return None;
-    }
-    if normalized.contains("displacement")
-        || normalized.contains("rotation")
-        || normalized.contains("mode_shape")
-        || normalized.contains("reaction_force")
-        || normalized.contains("reaction_moment")
-        || normalized.contains("particle_velocity")
-        || normalized.contains("vector")
-        || normalized.contains("flux")
-    {
-        return Some(
-            shape
-                .last()
-                .copied()
-                .filter(|value| (2..=6).contains(value))
-                .unwrap_or(3),
-        );
-    }
-    if normalized.contains("stress") || normalized.contains("strain") {
-        return Some(
-            shape
-                .last()
-                .copied()
-                .filter(|value| *value == 6)
-                .unwrap_or(6),
-        );
-    }
-    if normalized.contains("orthogonality") {
-        return None;
-    }
-    match shape {
-        [_, count] if (1..=6).contains(count) => Some(*count),
-        _ => None,
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisResultsSummary {
     pub field_count: usize,
@@ -1686,7 +1399,17 @@ pub struct AnalysisResultsSummary {
     pub frequency_sample_count: usize,
     pub available_frequencies_hz: Vec<f64>,
     pub max_frequency_solver_residual: Option<f64>,
+    /// Largest full-space physical balance error of a direct frequency solve (its acceptance
+    /// criterion). `None` for a modal-reduced solve, which reports its truncation measure below.
     pub max_frequency_balance_error: Option<f64>,
+    /// Largest full-space relative balance error of a modal-reduced frequency solve: the error of
+    /// truncating the response to the reduced space. The solve is accepted on its reduced-space
+    /// residual (`max_frequency_solver_residual`); this measure is published, never gated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modal_truncation_balance_error: Option<f64>,
+    /// Frequency of the largest modal truncation balance error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modal_truncation_balance_frequency_hz: Option<f64>,
     pub snapshot_count: usize,
     pub time_start_s: Option<f64>,
     pub time_end_s: Option<f64>,
@@ -2695,9 +2418,9 @@ mod tests {
     fn agent_authoring_facts_come_from_closed_runtime_catalogs() {
         let workflow = analysis_authoring_workflow();
         assert_eq!(workflow.len(), 4);
-        assert!(workflow[1].starts_with("runmat fea check "));
-        assert!(workflow[2].starts_with("runmat fea plan "));
-        assert!(workflow[3].starts_with("runmat fea run "));
+        assert!(workflow[1].starts_with("runmat check "));
+        assert!(workflow[2].starts_with("runmat plan "));
+        assert!(workflow[3].starts_with("runmat run "));
 
         let procedures = analysis_procedure_ids();
         assert_eq!(procedures.len(), 11);
@@ -2737,6 +2460,19 @@ mod tests {
             AnalysisSolverOptions::defaults_for(&prestressed_frequency),
             Ok(AnalysisSolverOptions::StructuralFrequency(_))
         ));
+
+        // A modal -> harmonic consumer runs in the modal-reduced space with the frequency
+        // options its publication operation is dispatched with.
+        let modal_frequency =
+            ProcedureStep::structural_modal_harmonic("modal_frequency", "modes", "basis");
+        assert_eq!(modal_frequency.solution_space, SolutionSpace::ModalReduced);
+        let options = AnalysisSolverOptions::defaults_for(&modal_frequency)
+            .expect("modal-reduced harmonic defaults");
+        assert!(matches!(
+            options,
+            AnalysisSolverOptions::StructuralFrequency(_)
+        ));
+        assert!(options.supports(&modal_frequency));
 
         let thermal_static = ProcedureStep::thermal_steady("thermal_static");
         assert!(matches!(

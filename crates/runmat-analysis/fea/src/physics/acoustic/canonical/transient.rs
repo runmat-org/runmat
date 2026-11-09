@@ -529,8 +529,8 @@ fn transient_step<'a>(
     }
     if !model.initial_conditions.is_empty() {
         return Err(AcousticHarmonicError::Unsupported(
-            "acoustic transients start from rest; drive them with boundary pressure or velocity \
-             signals"
+            crate::admission::ACOUSTIC_TRANSIENT_INITIAL_CONDITION
+                .message
                 .into(),
         ));
     }
@@ -543,7 +543,9 @@ fn transient_step<'a>(
                 if matches!(constraint.kind, AcousticConstraintKind::PrescribedPressure { .. })
         ) {
             return Err(AcousticHarmonicError::Unsupported(
-                "periodic or non-acoustic constraints in a pressure transient".into(),
+                crate::admission::ACOUSTIC_TRANSIENT_CONSTRAINT
+                    .message
+                    .into(),
             ));
         }
     }

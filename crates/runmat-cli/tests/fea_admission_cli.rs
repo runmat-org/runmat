@@ -76,7 +76,7 @@ study static {
     local_offline::configure(&mut command, project.path());
     let output = command
         .current_dir(project.path())
-        .args(["fea", "run", "study.fea", "--json"])
+        .args(["run", "study.fea", "--json"])
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -90,7 +90,7 @@ study static {
     local_offline::configure(&mut invalid, project.path());
     let output = invalid
         .current_dir(project.path())
-        .args(["fea", "run", "study.fea", "--json"])
+        .args(["run", "study.fea", "--json"])
         .env("RUNMAT_ORG_ID", "invalid-local-test-selector")
         .output()
         .unwrap();

@@ -1,4 +1,5 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
@@ -205,7 +206,14 @@ pub(super) fn recover_modal_core(
             recover_deformation_result_fields(&summary, shape)
                 .map(|fields| ModalRecoveredMode {
                     mode_index: index + 1,
-                    fields,
+                    // Fields recovered from an eigenvector are that mode's normalized shape.
+                    fields: fields
+                        .into_iter()
+                        .map(|mut field| {
+                            field.layout.ordinal = runmat_analysis_core::FieldOrdinal::Mode(index);
+                            field
+                        })
+                        .collect(),
                 })
                 .map_err(|error| FeaRunError::Assembly(error.to_string()))
         })
@@ -223,6 +231,11 @@ pub(super) fn recover_modal_core(
         .unwrap_or_else(|| {
             vec![AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                )
+                .mode(0),
                 mode_shape.clone(),
                 first_translation,
             )]
@@ -237,6 +250,11 @@ pub(super) fn recover_modal_core(
         .map(|(index, shape)| {
             AnalysisField::host_f64(
                 fea_modal_mode_shape_field_id(index + 1),
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                )
+                .mode(index),
                 mode_shape.clone(),
                 shape.translations.clone(),
             )
@@ -248,6 +266,8 @@ pub(super) fn recover_modal_core(
         .map(|(index, shape)| {
             AnalysisField::host_f64(
                 format!("structural.modal.rotation.{}", index + 1),
+                AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node)
+                    .mode(index),
                 mode_shape.clone(),
                 shape.rotations.clone(),
             )

@@ -62,8 +62,12 @@ fn source(
             },
         }],
     };
-    let result =
-        SolverResultIdentity::from_step_result(producer, Digest::sha256("fields")).unwrap();
+    // Each sample is its own solve (one entry of a sweep), so each has its own result.
+    let result = SolverResultIdentity::from_step_result(
+        producer,
+        Digest::sha256(format!("fields-{sample:?}")),
+    )
+    .unwrap();
     let request = FieldRecoveryRequest::new(
         producer,
         FieldRecoverySource::SolverResult(result),
@@ -81,7 +85,7 @@ fn source(
     let field = RecoveredField::new(
         definition.clone(),
         sample,
-        AnalysisField::host_f64(definition.field_id(), shape, values),
+        AnalysisField::host_f64(definition.field_id(), definition.layout(), shape, values),
     )
     .unwrap();
     let artifact = RecoveredFieldArtifact::new(
@@ -307,4 +311,183 @@ fn sound_pressure_level_peak_is_the_rms_level_of_the_largest_pressure_phasor() {
     let level = authority_round_trip(&step, &source, &mesh, &projection);
     let expected = 20.0 * (10.0 / (std::f64::consts::SQRT_2 * 20.0e-6)).log10();
     assert!((level - expected).abs() < 1e-10, "{level} vs {expected}");
+}
+
+// The reduced acoustic result path publishes nodal levels and the distributed observation path
+// evaluates them from the complex pressure; both use the one RMS definition, with no clamp.
+#[test]
+fn reduced_nodal_and_distributed_sound_pressure_levels_agree() {
+    let mesh = slab_mesh(2);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let mut step = ProcedureStep::acoustic_harmonic("sound");
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![100.0]);
+    step.observations = vec![maximum_as(
+        "peak_level",
+        ObservationQuantity::AcousticPressure,
+        Some(ComplexRepresentation::SoundPressureLevel),
+    )];
+    let definition = RecoveredFieldDefinition::new(
+        "acoustic.pressure",
+        ObservationQuantity::AcousticPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+    .unwrap();
+    // Peaks above and below the 20 uPa reference: the second level is negative.
+    for (peak_pa, expected_db) in [
+        (10.0, 110.969_100_130_080_56),
+        (1.0e-5, -9.030_899_869_919_436),
+    ] {
+        let phasors = projection
+            .nodes
+            .iter()
+            .map(|node| {
+                let scale = 0.1 * peak_pa * (1.0 + node.coordinates_m.canonical_value()[0]);
+                [3.0 * scale, 4.0 * scale]
+            })
+            .collect::<Vec<_>>();
+        let magnitudes = phasors
+            .iter()
+            .map(|[real, imaginary]| real.hypot(*imaginary))
+            .collect::<Vec<_>>();
+        let reduced = crate::physics::acoustic::nodal_sound_pressure_levels_db(&magnitudes)
+            .into_iter()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let source = source(
+            &step,
+            &definition,
+            RecoveredFieldSample::FrequencyHertz(100.0),
+            &projection,
+            &mesh,
+            phasors.into_iter().flatten().collect(),
+            2,
+        );
+        let distributed = authority_round_trip(&step, &source, &mesh, &projection);
+        assert!(
+            (reduced - distributed).abs() < 1e-10,
+            "reduced {reduced} dB vs distributed {distributed} dB at {peak_pa} Pa"
+        );
+        assert!(
+            (distributed - expected_db).abs() < 1e-9,
+            "{distributed} vs {expected_db}"
+        );
+    }
+}
+
+/// A sampled study solves each frequency as its own entry. The entry catalogs discharge the
+/// field outputs their frequency schedules; a history spans entries, so only the study-level
+/// catalog over every entry discharges it, and no entry catalog can stand in for it.
+#[test]
+fn entry_scoped_catalogs_leave_histories_to_the_entry_history_catalog() {
+    use crate::execution::ObservationHistorySourceContext;
+    use crate::results::observation::{ObservationPublicationCatalog, ObservationPublicationScope};
+    use runmat_analysis_core::SamplingPolicy;
+    let mesh = slab_mesh(2);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let mut step = ProcedureStep::acoustic_harmonic("sweep");
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![100.0, 200.0]);
+    // A final output (the last frequency, 200 Hz) and a history over both frequencies.
+    let late = maximum("late", ObservationQuantity::AcousticPressure, true);
+    let ObservationRequest::Reduction(mut history) =
+        maximum("sweep_peak", ObservationQuantity::AcousticPressure, true)
+    else {
+        unreachable!()
+    };
+    history.sampling = SamplingPolicy::FrequencyHertz(vec![100.0, 200.0]);
+    history.reduction.as_mut().unwrap().series = SeriesReduction::Maximum;
+    step.observations = vec![late, ObservationRequest::History(history)];
+    let definition = RecoveredFieldDefinition::new(
+        "acoustic.pressure",
+        ObservationQuantity::AcousticPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+    .unwrap();
+    let entries = [100.0, 200.0].map(|frequency| {
+        let values = projection
+            .nodes
+            .iter()
+            .flat_map(|node| [frequency * node.coordinates_m.canonical_value()[0], 0.0])
+            .collect();
+        source(
+            &step,
+            &definition,
+            RecoveredFieldSample::FrequencyHertz(frequency),
+            &projection,
+            &mesh,
+            values,
+            2,
+        )
+    });
+    let catalogs = entries
+        .iter()
+        .map(|entry| {
+            ObservationFieldCatalog::volume_mesh_recovery(
+                entry.request.clone(),
+                entry.artifact.manifest().unwrap(),
+                entry.sequence,
+                step.clone(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let manifest = entries[0].artifact.manifest().unwrap();
+    let definitions = manifest
+        .fields
+        .iter()
+        .map(|entry| entry.definition.clone())
+        .collect::<Vec<_>>();
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        &definitions,
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let producer = entries[0].request.producer;
+    let context = ObservationHistorySourceContext::VolumeMesh { mesh: &mesh };
+    let scoped = |scope, catalog: &ObservationFieldCatalog| {
+        ObservationPublicationCatalog::scoped(
+            scope,
+            producer,
+            plan.clone(),
+            catalog.clone(),
+            &step,
+            Vec::new(),
+            context,
+        )
+    };
+    // 100 Hz schedules only the history: its entry catalog owes no sample.
+    scoped(ObservationPublicationScope::Entry, &catalogs[0]).unwrap();
+    // 200 Hz schedules the field output, which its entry catalog must publish.
+    assert!(scoped(ObservationPublicationScope::Entry, &catalogs[1]).is_err());
+    // A complete catalog of one entry can never discharge the history.
+    assert!(scoped(ObservationPublicationScope::Complete, &catalogs[0]).is_err());
+
+    // The study-level authority spans every entry in increasing frequency order.
+    let history = ObservationFieldCatalog::entry_history(catalogs.clone()).unwrap();
+    history
+        .validate_volume_mesh_history_plan(&plan, producer, &step, &mesh)
+        .unwrap();
+    assert_eq!(
+        ObservationFieldCatalog::from_canonical_bytes(&history.canonical_bytes().unwrap()).unwrap(),
+        history
+    );
+    let mut reversed = catalogs.clone();
+    reversed.reverse();
+    assert!(ObservationFieldCatalog::entry_history(reversed).is_err());
+    assert!(
+        ObservationFieldCatalog::entry_history(vec![catalogs[0].clone(), catalogs[0].clone()])
+            .is_err()
+    );
+    assert!(ObservationFieldCatalog::entry_history(vec![history.clone()]).is_err());
+    // The history catalog owes every history and never a field output; an empty one fails.
+    assert!(scoped(ObservationPublicationScope::EntryHistories, &history).is_err());
+    // Scopes are bound to their source kind.
+    assert!(scoped(ObservationPublicationScope::EntryHistories, &catalogs[0]).is_err());
+    assert!(scoped(ObservationPublicationScope::Entry, &history).is_err());
 }

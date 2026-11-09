@@ -54,7 +54,13 @@ pub enum ObservationQuantity {
     AcousticParticleVelocity,
     /// Mean active acoustic intensity ½Re(p v*), W/m².
     AcousticIntensity,
+    /// Plane-wave power density crossing an acoustic port face, W/m²: the authored incident
+    /// wave entering through an incident-pressure face, or the outgoing wave leaving through an
+    /// anechoic (radiation) face. Zero away from port faces.
+    AcousticPortIntensity,
     SoundPressureLevel,
+    /// Transmission loss between an incident and a transmitted port, dB.
+    TransmissionLoss,
     FluidPressure,
     FluidVelocity,
     Vorticity,
@@ -70,6 +76,48 @@ pub enum ObservationQuantity {
     ConstraintViolation,
     ContactGap,
     ContactPressure,
+    // Result-only quantities: published by solvers, not authored as observations.
+    /// Force carried by a connector element, N.
+    ConnectorForce,
+    /// Interface traction vector, Pa.
+    Traction,
+    /// Volumetric strain-energy density, J/m³.
+    StrainEnergyDensity,
+    KineticEnergy,
+    ExternalWork,
+    SupportWork,
+    DampingDissipation,
+    /// Total acoustic energy in the domain, J.
+    AcousticEnergy,
+    /// Energy absorbed by impedance boundaries, J.
+    AbsorbedEnergy,
+    AngularVelocity,
+    AngularAcceleration,
+    PlasticStrain,
+    EquivalentPlasticStrain,
+    /// Modal or effective mass, kg.
+    ModalMass,
+    /// Generalized modal stiffness, N/m.
+    ModalStiffness,
+    /// Effective-mass fraction of the total free mass.
+    MassRatio,
+    /// Mass-orthogonality check matrix entries.
+    MassOrthogonality,
+    /// Relative separation between neighbouring modal frequencies.
+    FrequencySeparation,
+    /// Load (buckling or continuation) factor.
+    LoadFactor,
+    /// Scale applied to an assembled equation block.
+    EquationScale,
+    ReynoldsNumber,
+    /// Temperature difference across a thermal interface, K.
+    TemperatureJump,
+    /// Number of coupling iterations taken.
+    IterationCount,
+    /// A sampled time coordinate, s.
+    Time,
+    /// A sampled frequency coordinate, Hz.
+    Frequency,
 }
 
 impl ObservationQuantity {
@@ -79,13 +127,24 @@ impl ObservationQuantity {
             Self::Displacement | Self::ContactGap => D::LENGTH,
             Self::Rotation
             | Self::Strain
+            | Self::PlasticStrain
+            | Self::EquivalentPlasticStrain
+            | Self::MassRatio
+            | Self::MassOrthogonality
+            | Self::FrequencySeparation
+            | Self::LoadFactor
+            | Self::EquationScale
+            | Self::ReynoldsNumber
+            | Self::IterationCount
             | Self::ModalParticipation
             | Self::Eigenvalue
             | Self::Residual
             | Self::Balance
             | Self::ConstraintViolation => D::DIMENSIONLESS,
             Self::Velocity | Self::AcousticParticleVelocity | Self::FluidVelocity => D::VELOCITY,
-            Self::AcousticIntensity => D::POWER.divide(D::AREA).expect("static dimension"),
+            Self::AcousticIntensity | Self::AcousticPortIntensity => {
+                D::POWER.divide(D::AREA).expect("static dimension")
+            }
             Self::Acceleration => D::ACCELERATION,
             Self::Stress
             | Self::VonMisesStress
@@ -94,8 +153,25 @@ impl ObservationQuantity {
             | Self::AcousticPressure
             | Self::FluidPressure
             | Self::WallShearStress
+            | Self::Traction
             | Self::ContactPressure => D::PRESSURE,
-            Self::ReactionForce | Self::BeamAxialForce | Self::BeamShearForce => D::FORCE,
+            Self::ReactionForce
+            | Self::ConnectorForce
+            | Self::BeamAxialForce
+            | Self::BeamShearForce => D::FORCE,
+            Self::KineticEnergy
+            | Self::ExternalWork
+            | Self::SupportWork
+            | Self::DampingDissipation
+            | Self::AcousticEnergy
+            | Self::AbsorbedEnergy => D::ENERGY,
+            Self::StrainEnergyDensity => D::ENERGY.divide(D::VOLUME).expect("static dimension"),
+            Self::AngularVelocity | Self::Frequency => D::FREQUENCY,
+            Self::AngularAcceleration => D::FREQUENCY.divide(D::TIME).expect("static dimension"),
+            Self::ModalMass => D::MASS,
+            Self::ModalStiffness => D::FORCE.divide(D::LENGTH).expect("static dimension"),
+            Self::TemperatureJump => D::TEMPERATURE,
+            Self::Time => D::TIME,
             Self::ReactionMoment | Self::BeamTorsionMoment | Self::BeamBendingMoment => D::MOMENT,
             Self::StrainEnergy => D::ENERGY,
             Self::ShellMembraneForce | Self::ShellTransverseShear => {
@@ -141,7 +217,7 @@ impl ObservationQuantity {
             Self::MagneticFieldIntensity => D::ELECTRIC_CURRENT
                 .divide(D::LENGTH)
                 .expect("static dimension"),
-            Self::SoundPressureLevel => D::DIMENSIONLESS,
+            Self::SoundPressureLevel | Self::TransmissionLoss => D::DIMENSIONLESS,
             Self::Vorticity | Self::ModalFrequency => D::FREQUENCY,
             Self::MassFlowRate => D::MASS.divide(D::TIME).expect("static dimension"),
             Self::VolumeFlowRate => D::VOLUME.divide(D::TIME).expect("static dimension"),
@@ -249,7 +325,9 @@ impl ObservationQuantity {
             "acoustic_pressure" => Self::AcousticPressure,
             "acoustic_particle_velocity" => Self::AcousticParticleVelocity,
             "acoustic_intensity" => Self::AcousticIntensity,
+            "acoustic_port_intensity" => Self::AcousticPortIntensity,
             "sound_pressure_level" => Self::SoundPressureLevel,
+            "transmission_loss" => Self::TransmissionLoss,
             "fluid_pressure" => Self::FluidPressure,
             "fluid_velocity" => Self::FluidVelocity,
             "vorticity" => Self::Vorticity,
@@ -293,8 +371,14 @@ impl ObservationQuantity {
             | Self::AcousticIntensity
             | Self::FluidVelocity
             | Self::Vorticity
+            | Self::ConnectorForce
+            | Self::Traction
+            | Self::AngularVelocity
+            | Self::AngularAcceleration
             | Self::WallShearStress => ObservationValueShape::Vector3,
-            Self::Strain | Self::Stress => ObservationValueShape::SymmetricTensor3,
+            Self::Strain | Self::Stress | Self::PlasticStrain => {
+                ObservationValueShape::SymmetricTensor3
+            }
             Self::BeamShearForce
             | Self::BeamBendingMoment
             | Self::BeamBendingStress

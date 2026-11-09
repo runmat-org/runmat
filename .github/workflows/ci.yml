@@ -62,6 +62,25 @@ jobs:
       - name: Verify ordinary test routing and shard coverage
         run: python3 -m unittest discover -s scripts/development -p 'test_run_workspace_test_group.py'
 
+  docs-lint:
+    # FEA docs: capability ledger (ledger↔code↔docs), pending flags, fea highlighting, front matter, links, and generated pages.
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --prefix scripts/docs
+      - name: Lint the FEA docs
+        run: node scripts/docs/docs-lint.mjs
+      - name: Generated docs pages are current
+        run: node scripts/docs/generate-pages.mjs --check
+      - name: Docs tooling tests
+        run: node --test scripts/docs/docs-lint.test.mjs scripts/docs/generate-pages.test.mjs scripts/docs/check-snippets.test.mjs scripts/docs/registry-coverage.test.mjs scripts/docs/fea-grammar.test.mjs
+
   build-and-test:
     name: ${{ matrix.name }}
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs

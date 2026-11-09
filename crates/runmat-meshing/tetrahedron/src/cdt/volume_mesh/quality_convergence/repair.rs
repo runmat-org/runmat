@@ -3,6 +3,7 @@
 use super::*;
 use crate::cdt::volume_sliver::{
     run_in_state, DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind, QualityConvergenceMode,
+    RejectedCompleteRelocations,
 };
 
 pub(super) struct RepairExecution<'a, 'ctx> {
@@ -22,6 +23,7 @@ impl<'ctx> RepairExecution<'_, 'ctx> {
         &self,
         state: WorkingState<'ctx>,
         remaining: u64,
+        rejected: &mut RejectedCompleteRelocations,
     ) -> Result<RepairOutcome<'ctx>, DelaunayVolumeMeshError> {
         if remaining == 0 {
             return Err(error(
@@ -39,6 +41,7 @@ impl<'ctx> RepairExecution<'_, 'ctx> {
             controls,
             self.cancellation,
             QualityConvergenceMode::Coupled,
+            rejected,
         ) {
             Ok(repaired) => Ok(RepairOutcome {
                 state: repaired.state,

@@ -85,7 +85,8 @@ impl ThermalWorkspaceResourceFacts {
             recovery_scratch_bytes,
             excitation_scratch_bytes,
             steady_reference_scratch_bytes,
-            projection_estimated_bytes: ByteCount(scale(projection.0, 2)?),
+            // The assembly retains one projection: a finite-conductance split rewrites it in place.
+            projection_estimated_bytes: projection,
         })
     }
 
@@ -132,7 +133,7 @@ mod tests {
             facts.excitation_scratch_bytes.0,
             10 * (2 + std::mem::size_of::<Option<(f64, &str)>>() as u64)
         );
-        assert_eq!(facts.projection_estimated_bytes.0, 200);
+        assert_eq!(facts.projection_estimated_bytes.0, 100);
         assert_eq!(
             facts.steady_reference_scratch_bytes.0,
             10 * (std::mem::size_of::<bool>() as u64
@@ -140,8 +141,7 @@ mod tests {
                 + std::mem::size_of::<Vec<usize>>() as u64
                 + std::mem::size_of::<Option<f64>>() as u64)
         );
-        for (nodes, elements, projection) in [(u64::MAX, 1, 1), (1, u64::MAX, 1), (1, 1, u64::MAX)]
-        {
+        for (nodes, elements, projection) in [(u64::MAX, 1, 1), (1, u64::MAX, 1)] {
             assert!(ThermalWorkspaceResourceFacts::from_counts(
                 nodes,
                 elements,

@@ -111,7 +111,7 @@ pub(super) fn compile<'a>(input: BoundaryInput<'a, '_>) -> Result<Vec<FaceBounda
             // Gauge authority is compiled separately; it supplies no face law.
             FluidConstraintKind::PressureReference { .. } => continue,
             FluidConstraintKind::Periodic(_) => {
-                return Err(Error::Unsupported("periodic fluid boundary"))
+                return Err(Error::Unsupported(crate::admission::FLUID_PERIODIC.message))
             }
         };
         bind(source, t, &mut out, target, law)?;

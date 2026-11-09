@@ -8,8 +8,8 @@ use thiserror::Error;
 use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
 const CONNECTOR_PREFIX: &[u8] = b"runmat-analysis-structural-connector/v1\0";
-const CONNECTOR_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 64);
+/// Connector sets grow with the model; the run's admitted budget governs their size.
+const CONNECTOR_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(4_000_000, 64);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

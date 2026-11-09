@@ -142,11 +142,7 @@ pub(super) fn matching_elements<'a>(
                 .as_ref()
                 .map_or(index, |indices| indices[index]);
             let element = &projection.elements[source_index];
-            target.matches_persistent_entity(&element.region_id)
-                || element
-                    .provenance
-                    .iter()
-                    .any(|entity| target.matches_persistent_entity(entity))
+            target.selects_volume_element(&element.region_id, &element.provenance)
         }
         None => elements[index].region_id == target.region_id,
     }))

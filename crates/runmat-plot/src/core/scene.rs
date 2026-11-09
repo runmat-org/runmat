@@ -297,6 +297,12 @@ impl BoundingBox {
     }
 }
 
+/// A blended triangle surface: drawn after opaque items when the scene asks for it.
+pub fn is_translucent_surface(data: &RenderData) -> bool {
+    data.pipeline_type == super::PipelineType::Triangles
+        && data.material.alpha_mode == AlphaMode::Blend
+}
+
 /// Scene graph managing hierarchical plot objects
 pub struct Scene {
     nodes: HashMap<NodeId, SceneNode>,
@@ -310,6 +316,9 @@ pub struct Scene {
     // Culling and LOD
     frustum: Option<Frustum>,
     camera_position: Vec3,
+
+    /// Draw blended surfaces after every opaque item (see [`Scene::set_translucent_last`]).
+    translucent_last: bool,
 }
 
 impl Default for Scene {
@@ -328,7 +337,20 @@ impl Scene {
             bounds_dirty: true,
             frustum: None,
             camera_position: Vec3::ZERO,
+            translucent_last: false,
         }
+    }
+
+    /// Draw blended surfaces after every opaque item, without depth writes, so translucent
+    /// context geometry composites over the opaque geometry behind it and never hides it.
+    /// Geometry scenes set this; figures keep their creation order, which MATLAB plots
+    /// depend on in 2-D.
+    pub fn set_translucent_last(&mut self, translucent_last: bool) {
+        self.translucent_last = translucent_last;
+    }
+
+    pub fn translucent_last(&self) -> bool {
+        self.translucent_last
     }
 
     /// Add a new node to the scene
@@ -510,18 +532,26 @@ impl Scene {
         // HashMap iteration is not a draw order. In particular, depth-free
         // annotations must be composited after surfaces, never underneath them.
         // Node IDs preserve insertion order within each layer.
+        // With `translucent_last`, blended surfaces draw between the opaque items and the
+        // overlays.
         nodes.sort_by_key(|node| {
-            let overlay = node
+            let layer = node
                 .render_data
                 .as_ref()
                 .map(|data| {
-                    matches!(
+                    if matches!(
                         data.pipeline_type,
                         super::PipelineType::LinesNoDepth | super::PipelineType::AnnotationStroke
-                    )
+                    ) {
+                        2u8
+                    } else if self.translucent_last && is_translucent_surface(data) {
+                        1
+                    } else {
+                        0
+                    }
                 })
-                .unwrap_or(false);
-            (overlay, node.id)
+                .unwrap_or(0);
+            (layer, node.id)
         });
         nodes
     }

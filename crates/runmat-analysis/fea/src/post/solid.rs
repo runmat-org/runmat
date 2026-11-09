@@ -559,7 +559,7 @@ mod tests {
 
     // witness: FEA-STRUCTURAL-REFERENCE-001/patch_reference_convergence @
     //   linear_structural/tet4/numerical_kernel; coverage: partial;
-    //   boundary: A connected Tet4 affine patch recovers analytic strain, stress and energy.
+    //   check: tet4-affine-patch; boundary: A connected Tet4 affine patch recovers analytic strain, stress and energy.
     #[test]
     fn connected_tet4_affine_patch_recovers_analytic_strain_stress_and_energy() {
         // Four conforming cells share the centroid of the unit tetrahedron. The imposed affine

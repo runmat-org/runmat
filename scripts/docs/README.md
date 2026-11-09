@@ -108,3 +108,24 @@ Desktop example links pin the project manifest and every file; imports install a
 fresh project and do not execute source. A newly built Desktop app registers the
 `runmat://example` handler. Website preview builds alone do not update an already
 installed Desktop app's protocol registration.
+
+## FEA docs checks
+
+The FEA docs under `docs/simulation` describe the complete system. A documented feature that the
+current release does not include is flagged where the docs describe it, with
+`[not yet in the current release](pending:<id>)` in prose or a ```` ```fea pending=<id> ```` fence,
+and has an entry in `docs/simulation/pending-features.json` (schema
+`docs/schema/pending-features.schema.json`). `runmat check` reports the same id, and the docs
+artifact exports the registry as `fea/pending-features.json` for the website badge.
+
+```sh
+node scripts/docs/docs-lint.mjs              # registry ids, landed flags, front matter, links
+node scripts/docs/generate-pages.mjs         # validation/<family>.md, validation/status.md, the procedure table
+node scripts/docs/generate-pages.mjs --check # CI: generated pages are current
+node scripts/docs/check-snippets.mjs --runmat target/release/runmat   # `runmat check` every ```fea block
+```
+
+When a feature lands, set its `landed_in`; the lint then lists every flag to delete. Snippets fenced
+```` ```fea pending=<id> ```` must fail `runmat check` until the feature lands, and the snippet
+checker names the flag once they pass. ```` ```fea fragment ```` marks a syntax illustration that is
+not a whole file. Page front matter follows `docs/schema/doc-front-matter.schema.json`.

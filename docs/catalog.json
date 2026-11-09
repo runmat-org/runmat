@@ -138,8 +138,8 @@
       "path": "docs/simulation/guides/what-is-finite-element-analysis.md"
     },
     {
-      "id": "doc:fea/using-fea",
-      "path": "docs/simulation/using-fea.md"
+      "id": "doc:fea/get-started",
+      "path": "docs/simulation/get-started.md"
     },
     {
       "id": "doc:fea/usage-accounting",
@@ -180,6 +180,10 @@
     {
       "id": "doc:fea/physics/electromagnetic",
       "path": "docs/simulation/physics/electromagnetic.md"
+    },
+    {
+      "id": "doc:fea/physics/trace-impedance",
+      "path": "docs/simulation/physics/trace-impedance.md"
     },
     {
       "id": "doc:fea/physics/acoustic",
@@ -274,16 +278,12 @@
       "path": "docs/simulation/evidence.md"
     },
     {
-      "id": "doc:fea/validation",
-      "path": "docs/simulation/validation.md"
-    },
-    {
       "id": "doc:fea/trust",
       "path": "docs/simulation/trust.md"
     },
     {
-      "id": "doc:fea/status",
-      "path": "docs/simulation/status.md"
+      "id": "doc:fea/glossary",
+      "path": "docs/simulation/glossary.md"
     },
     {
       "id": "doc:fea/operation-reference",
@@ -366,6 +366,10 @@
       "path": "docs/simulation/language/reference/declarations.md"
     },
     {
+      "id": "doc:fea/language/reference/fluid-materials",
+      "path": "docs/simulation/language/reference/fluid-materials.md"
+    },
+    {
       "id": "doc:fea/language/reference/procedures",
       "path": "docs/simulation/language/reference/procedures.md"
     },
@@ -380,6 +384,46 @@
     {
       "id": "doc:fea/language/reference/geometry-features-and-ap242",
       "path": "docs/simulation/language/reference/geometry-features-and-ap242.md"
+    },
+    {
+      "id": "doc:fea/validation/status",
+      "path": "docs/simulation/validation/status.md"
+    },
+    {
+      "id": "doc:fea/validation/structural",
+      "path": "docs/simulation/validation/structural.md"
+    },
+    {
+      "id": "doc:fea/validation/thermal",
+      "path": "docs/simulation/validation/thermal.md"
+    },
+    {
+      "id": "doc:fea/validation/electromagnetic",
+      "path": "docs/simulation/validation/electromagnetic.md"
+    },
+    {
+      "id": "doc:fea/validation/acoustic",
+      "path": "docs/simulation/validation/acoustic.md"
+    },
+    {
+      "id": "doc:fea/validation/fluid",
+      "path": "docs/simulation/validation/fluid.md"
+    },
+    {
+      "id": "doc:fea/validation/thermomechanical",
+      "path": "docs/simulation/validation/thermomechanical.md"
+    },
+    {
+      "id": "doc:fea/validation/electrothermal",
+      "path": "docs/simulation/validation/electrothermal.md"
+    },
+    {
+      "id": "doc:fea/validation/conjugate-heat-transfer",
+      "path": "docs/simulation/validation/conjugate-heat-transfer.md"
+    },
+    {
+      "id": "doc:fea/validation/fluid-structure-interaction",
+      "path": "docs/simulation/validation/fluid-structure-interaction.md"
     },
     {
       "id": "doc:runtime/wasm",

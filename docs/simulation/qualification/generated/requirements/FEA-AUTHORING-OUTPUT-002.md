@@ -8,7 +8,7 @@ Evidence kind: SemanticRealization. Criterion: Outputs are typed named queries o
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:outputs]::integration_point_fields_are_typed_output_locations` (crates/runmat-analysis/language/tests/outputs.rs:131) - Integration-point fields are typed output locations; node, element and constraint locations are covered by sibling tests.<br>`runmat-analysis-language[test:outputs]::recovery_is_an_explicit_typed_element_to_node_operation` (crates/runmat-analysis/language/tests/outputs.rs:310) - Recovery is an explicit typed element-to-node operation. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:outputs]::integration_point_fields_are_typed_output_locations` (crates/runmat-analysis/language/tests/outputs.rs:131) - Integration-point fields are typed output locations; node, element and constraint locations are covered by sibling tests.<br>`runmat-analysis-language[test:outputs]::recovery_is_an_explicit_typed_element_to_node_operation` (crates/runmat-analysis/language/tests/outputs.rs:317) - Recovery is an explicit typed element-to-node operation. |
 
 ## shared_query_catalog
 
@@ -16,7 +16,7 @@ Evidence kind: SemanticRealization. Criterion: `max` is intentionally the ordina
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[lib]::operations::output::tests::output_operations_are_one_shared_public_identity_with_fea_overloads` (crates/runmat-analysis/language/src/operations/output.rs:578) - Output operations are one shared public identity with FEA overloads. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[lib]::operations::output::tests::output_operations_are_one_shared_public_identity_with_fea_overloads` (crates/runmat-analysis/language/src/operations/output.rs:623) - Output operations are one shared public identity with FEA overloads. |
 
 ## attributed_extrema
 
@@ -24,7 +24,7 @@ Evidence kind: SemanticRealization. Criterion: An extremum is not merely a numbe
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:studies]::study_outputs_lower_fields_projections_and_attributed_spatial_extrema` (crates/runmat-analysis/language/tests/studies.rs:144) - Spatial extrema lower with their attributed region; tie policy and independent-domain coordinates are not asserted. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:studies]::study_outputs_lower_fields_projections_and_attributed_spatial_extrema` (crates/runmat-analysis/language/tests/studies.rs:142) - Spatial extrema lower with their attributed region; tie policy and independent-domain coordinates are not asserted. |
 
 ## overload_contract
 

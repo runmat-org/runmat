@@ -18,7 +18,8 @@ use crate::results::field::{
 use crate::topology::AnalysisProjection;
 
 const PREFIX: &[u8] = b"runmat-observation-field-selection/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[cfg(test)]
 mod tests;
@@ -93,6 +94,7 @@ pub(super) use thermal::ThermalFieldSourceAuthority;
 mod sampled;
 mod volume_mesh;
 pub(crate) use sampled::validate_sampled_authority;
+pub use thermal::resources::thermal_source_validation_resident_bytes;
 pub(crate) use volume_mesh::validate_volume_mesh_authority;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

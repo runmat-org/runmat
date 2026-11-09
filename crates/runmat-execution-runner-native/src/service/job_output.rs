@@ -276,10 +276,10 @@ impl DurableCallerOutput {
                 // Release that page before refreshing retirement in this order.
                 // The next pump delivers any bytes in the newer terminal page.
                 drop(page);
-                if bridge
+                let fresh = bridge
                     .raw_output_page(handle.clone(), active.attempt_id, self.cursor)?
-                    .is_some_and(|page| page.retired)
-                {
+                    .ok_or_else(|| invalid("durable output journal disappeared"))?;
+                if fresh.retired || fresh.next != self.cursor {
                     return Ok(true);
                 }
                 return Err(ExecutionServiceError::WorkerLost(

@@ -157,7 +157,13 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
 #[test]
 fn actual_authority_profile_is_reserved_and_rejects_before_binding() {
     let fixture = case(1, ReferenceCase::Duct, false);
-    let base = resources::reserve(&fixture.source, &fixture.topology, fixture.policy).unwrap();
+    let base = resources::reserve_exact(
+        &fixture.source,
+        &fixture.topology,
+        fixture.policy,
+        fixture.topology.cells.len() as u64,
+    )
+    .unwrap();
     let admit = |policy| {
         resources::admit_authority_profile(
             &fixture.source,

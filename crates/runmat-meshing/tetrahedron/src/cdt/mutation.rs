@@ -8,6 +8,7 @@
 mod boundary;
 mod closed_cavity;
 mod edge_changes;
+pub(in crate::cdt) use edge_changes::{EdgeChangeObserver, ObservedCellChanges};
 mod freeze;
 mod interface;
 mod physical_adjacencies;

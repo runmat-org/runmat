@@ -1,6 +1,6 @@
 # FEA-COUPLING-FSI-002: Fluid loads on structures and two-way FSI
 
-0 PASS, 0 PARTIAL, 0 FAIL, 16 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 1 FAIL, 15 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## one_way_fluid_loads
 
@@ -31,7 +31,7 @@ Evidence kind: IndependentReference. Criterion: A compliant channel reproduces l
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | fluid_structure_interaction | tet4 | numerical_kernel | OPEN |  |
-| fluid_structure_interaction | tet4 | public_study | OPEN |  |
+| fluid_structure_interaction | tet4 | public_study | FAIL | `runmat[test:check_cli]::fsi_compliant_tube_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1243) - Steady compliant tube only; no transient ALE run. |
 | fluid_structure_interaction | tet10 | numerical_kernel | OPEN |  |
 | fluid_structure_interaction | tet10 | public_study | OPEN |  |
 

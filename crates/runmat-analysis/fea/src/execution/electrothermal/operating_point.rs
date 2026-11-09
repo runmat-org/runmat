@@ -137,7 +137,7 @@ pub(crate) fn side_element_temperatures(
                 .collect::<Vec<_>>(),
         )
         .map_err(invalid)?;
-    element_temperatures(&dofs.split_projection(projection, &plans), &values)
+    element_temperatures(&dofs.split_projection(projection.clone(), &plans), &values)
 }
 
 /// The conduction side of an electrothermal study, with only its electrical outputs.

@@ -66,7 +66,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         ] },
         BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[
             "Build the inputs with `geometry.load`, `fea.material`, `fea.materialAssignment`, constraint and excitation constructors, a step constructor such as `fea.StructuralStep.static`, and `fea.model`. Pass the study to `fea.validate` to check it, `fea.plan` to see the solver operations it will run, and `fea.run` to solve it. Combine several studies with `fea.sweep`.",
-            "The same study can also be authored in a `.fea` file and run from the command line with `runmat fea run`; the example fixture includes `box_static.fea`, the `.fea` form of the scripted study below.",
+            "The same study can also be authored in a `.fea` file and run from the command line with `runmat run`; the example fixture includes `box_static.fea`, the `.fea` form of the scripted study below.",
         ] },
         BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
             "`RunMat:fea:InvalidInput` reports a missing or wrongly typed argument, an unsupported or repeated option, a geometry mismatch, or a model that fails validation. `RunMat:fea:OperationFailed` reports a failure to persist the supplied mesh into the artifact store. `RunMat:fea:Internal` reports a study that cannot be converted to a RunMat value.",
@@ -78,7 +78,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         BuiltinDocumentationFaq { question: "Which backend runs the study by default?", answer: "Without an `Execution` plan, every procedure step is planned for the CPU backend. Pass a `fea.ExecutionPlan` to request a different backend or formulation maturity." },
         BuiltinDocumentationFaq { question: "Can I reuse a model with a different geometry file?", answer: "No. A model records the geometry id and revision it was built on. Rebuild the model with `fea.model` on the new `geometry.Asset`." },
     ],
-    links: &[doc_links::USING_FEA, doc_links::STUDY_CONTRACTS, doc_links::MESHING],
+    links: &[doc_links::GET_STARTED, doc_links::STUDY_CONTRACTS, doc_links::MESHING],
     implementation: &[doc_links::FEA_MODELING_SOURCE, doc_links::FEA_ENTRYPOINTS_SOURCE],
     verification: &[
         doc_links::STUDY_AND_SWEEP_CONSTRUCTION_TEST,

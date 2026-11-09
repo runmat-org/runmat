@@ -306,11 +306,18 @@ impl Camera {
         self.view_proj_dirty = true;
     }
 
-    pub fn set_view_angles_deg(&mut self, azimuth_deg: f32, elevation_deg: f32) {
-        let distance = (self.position - self.target).length().max(0.1);
+    /// The unit direction from the target to the viewpoint of MATLAB's `view(az, el)`: azimuth
+    /// is measured from the negative y-axis, counterclockwise seen from +z, so `view(0, 0)`
+    /// looks along +y, `view(90, 0)` along -x, and the default `view(-37.5, 30)` from -x, -y.
+    pub fn view_direction_deg(azimuth_deg: f32, elevation_deg: f32) -> Vec3 {
         let az = azimuth_deg.to_radians();
         let el = elevation_deg.to_radians();
-        let dir = Vec3::new(el.cos() * az.cos(), el.cos() * az.sin(), el.sin());
+        Vec3::new(el.cos() * az.sin(), -el.cos() * az.cos(), el.sin())
+    }
+
+    pub fn set_view_angles_deg(&mut self, azimuth_deg: f32, elevation_deg: f32) {
+        let distance = (self.position - self.target).length().max(0.1);
+        let dir = Self::view_direction_deg(azimuth_deg, elevation_deg);
         self.up = Vec3::Z;
         self.position = self.target + dir * distance;
         self.view_proj_dirty = true;
@@ -1390,8 +1397,24 @@ mod tests {
         camera.set_view_angles_deg(90.0, 0.0);
         let offset = camera.position - camera.target;
         assert!((offset.length() - 2.0).abs() < 1e-5);
-        assert!(offset.x.abs() < 1e-4);
-        assert!((offset.y - 2.0).abs() < 1e-4);
+        assert!((offset.x - 2.0).abs() < 1e-4);
+        assert!(offset.y.abs() < 1e-4);
+    }
+
+    #[test]
+    fn view_angles_follow_matlab_azimuth_convention() {
+        let close = |a: Vec3, b: Vec3| (a - b).length() < 1.0e-5;
+        assert!(close(
+            Camera::view_direction_deg(0.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0)
+        ));
+        assert!(close(
+            Camera::view_direction_deg(90.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0)
+        ));
+        assert!(close(Camera::view_direction_deg(0.0, 90.0), Vec3::Z));
+        let default = Camera::view_direction_deg(-37.5, 30.0);
+        assert!(default.x < 0.0 && default.y < 0.0 && default.z > 0.0);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 mod command;
+mod cross_section;
 mod feature;
 mod generated;
 mod regeneration;
@@ -83,20 +84,33 @@ fn definition(
     let construct = named_block(&declaration.statements, "construct");
     let derive = named_block(&declaration.statements, "derive");
     let generated = generated::block(&declaration.statements);
+    let section = named_block(&declaration.statements, "cross_section");
     let source_count = usize::from(imported)
         + usize::from(construct.is_some())
         + usize::from(derive.is_some())
-        + usize::from(generated.is_some());
+        + usize::from(generated.is_some())
+        + usize::from(section.is_some());
     if source_count != 1 {
         error(
             declaration,
             declaration.span,
-            "geometry requires exactly one imported, constructed, derived, or generated source",
+            "geometry requires exactly one imported, constructed, derived, generated, or cross_section source",
             diagnostics,
         );
         return None;
     }
-    let source = if imported {
+    let source = if let Some(statements) = section {
+        if declaration.source.is_some() || !regions.is_empty() {
+            error(
+                declaration,
+                declaration.span,
+                "a cross_section geometry has no `from` source and no regions; its traces are named in the section",
+                diagnostics,
+            );
+            return None;
+        }
+        cross_section::source(bound, declaration, statements, diagnostics)?
+    } else if imported {
         if declaration.source.is_some() {
             error(
                 declaration,
@@ -196,7 +210,6 @@ fn imported_source(
     Some(GeometryDefinitionSource::Imported(Box::new(
         ImportedGeometryDefinition {
             preview_extent_m: inspection.facts.preview_extent_m,
-            named_selections: inspection.facts.named_selections.clone(),
             // Authored units are authoritative over a different file declaration, which the
             // evidence keeps as provenance.
             unit_evidence: match units {
@@ -255,27 +268,6 @@ fn check_authored_names(
         let GeometryRegionSelector::Name(name) = &region.selector else {
             continue;
         };
-        if let Some(metadata) = inspection
-            .facts
-            .named_selections
-            .as_ref()
-            .filter(|metadata| {
-                metadata
-                    .regions
-                    .iter()
-                    .any(|region| region.region_id == *name)
-            })
-        {
-            if let Err(reason) = metadata.selection(name, region.role) {
-                error(
-                    declaration,
-                    declaration.span,
-                    reason.to_string(),
-                    diagnostics,
-                );
-            }
-            continue;
-        }
         let role = match region.role {
             GeometryRegionRole::Vertex => "vertex",
             GeometryRegionRole::Edge => "edge",
@@ -293,9 +285,27 @@ fn check_authored_names(
             .get(role)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        if available.iter().any(|candidate| candidate == name) {
+        let matches = available
+            .iter()
+            .filter(|candidate| *candidate == name)
+            .count();
+        if matches > 1 && region.cardinality == GeometryRegionCardinality::ExactlyOne {
+            error(
+                declaration,
+                declaration.span,
+                format!(
+                    "region `{}` selects {role} name \"{name}\", which {matches} {roles} in `{}` carry; it expects exactly_one (name each entity uniquely in the CAD file, or use expect one_or_more)",
+                    region.region_id, inspection.source_path
+                ),
+                diagnostics,
+            );
             continue;
         }
+        if matches > 0 {
+            continue;
+        }
+        let mut available = available.to_vec();
+        available.dedup();
         let message = if available.is_empty() {
             format!(
                 "region `{}` selects {role} name \"{name}\", but `{}` names no {roles}",

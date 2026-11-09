@@ -3,9 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_meshing_core::{predicate::tetrahedron_volume, MeshingCancellationSignal, StableDigest};
 use sha2::{Digest, Sha256};
 
-use super::admission::{evaluate_candidate, CandidateAdmissionPolicy, CandidateTopologyContract};
+use super::admission::{
+    candidate_quality_is_admissible, evaluate_candidate, evaluate_candidate_unranked,
+    CandidateAdmissionPolicy, CandidateTopologyContract,
+};
 use super::retriangulate::PreparedVertexRemoval;
 use super::work::OptimizationWork;
+use super::working::rejected::{RankedOutCandidate, SearchRecording};
 use super::{
     error, DelaunayVolumeSliverDeletion, DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind,
     DelaunayVolumeSliverMutation, DelaunayVolumeSliverOptions, DelaunayVolumeSliverRelocation,
@@ -25,6 +29,7 @@ use crate::cdt::{
 
 mod block;
 mod cavity;
+mod changes;
 mod collapse;
 mod geometry;
 mod materialization;
@@ -69,6 +74,7 @@ impl RelocationSearchScope {
     }
 }
 
+#[cfg(test)]
 pub(super) fn relocation_candidates(
     input: DelaunayVolumeRefinementInput<'_>,
     source: &DelaunayTetrahedronQuality,
@@ -77,6 +83,56 @@ pub(super) fn relocation_candidates(
     work: &mut OptimizationWork<'_>,
     policy: SliverSearchPolicy,
     scope: RelocationSearchScope,
+) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
+    search(
+        input,
+        source,
+        current_spectrum,
+        cancellation,
+        work,
+        policy,
+        scope,
+        None,
+    )
+}
+
+/// [`relocation_candidates`] that also records, in `recording`, the nodes of every cell a
+/// produced candidate added or removed and the changed cells' quality of every candidate that
+/// lost only the quality ranking, so a caller can tell when a rejected search would decide the
+/// same.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn relocation_candidates_recording_changes(
+    input: DelaunayVolumeRefinementInput<'_>,
+    source: &DelaunayTetrahedronQuality,
+    current_spectrum: &[f64],
+    cancellation: &dyn MeshingCancellationSignal,
+    work: &mut OptimizationWork<'_>,
+    policy: SliverSearchPolicy,
+    scope: RelocationSearchScope,
+    recording: &mut SearchRecording,
+) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
+    search(
+        input,
+        source,
+        current_spectrum,
+        cancellation,
+        work,
+        policy,
+        scope,
+        Some(recording),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn search(
+    input: DelaunayVolumeRefinementInput<'_>,
+    source: &DelaunayTetrahedronQuality,
+    current_spectrum: &[f64],
+    cancellation: &dyn MeshingCancellationSignal,
+    work: &mut OptimizationWork<'_>,
+    policy: SliverSearchPolicy,
+    scope: RelocationSearchScope,
+    mut recording: Option<&mut SearchRecording>,
 ) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
     let SliverSearchPolicy {
         options,
@@ -155,7 +211,9 @@ pub(super) fn relocation_candidates(
                 );
                 continue;
             };
-            let Some(quality) = evaluate_candidate(
+            let Some(quality) = evaluate_recorded(
+                recording.as_deref_mut(),
+                topology,
                 &candidate_topology,
                 input,
                 &protected_faces,
@@ -223,7 +281,9 @@ pub(super) fn relocation_candidates(
             None => None,
         };
         if let Some(candidate_topology) = candidate_topology {
-            if let Some(quality) = evaluate_candidate(
+            if let Some(quality) = evaluate_recorded(
+                recording.as_deref_mut(),
+                topology,
                 &candidate_topology,
                 input,
                 &protected_faces,
@@ -306,7 +366,9 @@ pub(super) fn relocation_candidates(
                     options,
                     cancellation,
                 )? {
-                    if let Some(candidate_quality) = evaluate_candidate(
+                    if let Some(candidate_quality) = evaluate_recorded(
+                        recording.as_deref_mut(),
+                        topology,
                         &candidate_topology,
                         input,
                         &protected_faces,
@@ -371,7 +433,9 @@ pub(super) fn relocation_candidates(
                 );
                 continue;
             };
-            let Some(candidate_quality) = evaluate_candidate(
+            let Some(candidate_quality) = evaluate_recorded(
+                recording.as_deref_mut(),
+                topology,
                 &candidate_topology,
                 input,
                 &protected_faces,
@@ -491,3 +555,74 @@ pub(super) fn relocation_identity_is_valid(relocation: &DelaunayVolumeSliverRelo
 
 #[cfg(test)]
 mod tests;
+
+/// [`evaluate_candidate`] that, with a recording, also records the nodes of the cells the
+/// candidate changed, and the changed cells' quality ratios when the candidate loses only the
+/// quality ranking.
+#[allow(clippy::too_many_arguments)]
+fn evaluate_recorded(
+    recording: Option<&mut SearchRecording>,
+    current: &DelaunayVolumeTopology,
+    candidate: &DelaunayVolumeTopology,
+    input: DelaunayVolumeRefinementInput<'_>,
+    protected_faces: &[[StableDigest; 3]],
+    current_spectrum: &[f64],
+    policy: CandidateAdmissionPolicy,
+    cancellation: &dyn MeshingCancellationSignal,
+    rejection_counts: &mut BTreeMap<&'static str, u64>,
+) -> Result<Option<DelaunayVolumeQuality>, DelaunayVolumeSliverError> {
+    let Some(recording) = recording else {
+        return evaluate_candidate(
+            candidate,
+            input,
+            protected_faces,
+            current_spectrum,
+            policy,
+            cancellation,
+            rejection_counts,
+        );
+    };
+    let changes = changes::changed_cells(current, candidate);
+    changes::record_changed_nodes(current, candidate, &changes, &mut recording.changed);
+    let Some(quality) = evaluate_candidate_unranked(
+        candidate,
+        input,
+        protected_faces,
+        policy.topology_contract,
+        policy.options,
+        cancellation,
+        rejection_counts,
+    )?
+    else {
+        return Ok(None);
+    };
+    if candidate_quality_is_admissible(
+        &quality,
+        input,
+        current_spectrum,
+        policy.refinement,
+        policy.objective,
+        rejection_counts,
+    ) {
+        return Ok(Some(quality));
+    }
+    let ratios = |cell: &DelaunayTetrahedronQuality| {
+        [
+            cell.optimization_violation_ratio,
+            cell.refinement_violation_ratio,
+        ]
+    };
+    recording.ranked_out.push(RankedOutCandidate {
+        removed: changes
+            .removed
+            .iter()
+            .map(|index| ratios(&input.quality.tetrahedra[*index]))
+            .collect(),
+        added: changes
+            .added
+            .iter()
+            .map(|index| ratios(&quality.tetrahedra[*index]))
+            .collect(),
+    });
+    Ok(None)
+}

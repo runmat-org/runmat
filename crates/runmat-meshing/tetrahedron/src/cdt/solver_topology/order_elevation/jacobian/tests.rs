@@ -170,6 +170,7 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
         &Storage(None),
         &mut work,
         1,
+        &mut 0,
     )
     .unwrap();
     // ... but a corner determinant of order 1e-16 has no scale-relative margin, so the shared

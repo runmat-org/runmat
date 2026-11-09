@@ -140,9 +140,10 @@ fn closed_coplanar_cell_pressure_inventory_rejects_without_fake_boundary_samples
     let f = closed(1, [0.0; 3], 0.0);
     assert!(matches!(
         CanonicalFluidProblem::prepare(f.input()),
-        Err(CanonicalFluidError::Invalid(
-            "rank-deficient physical gradient stencil"
-        ))
+        Err(CanonicalFluidError::InvalidCell {
+            reason: "rank-deficient physical gradient stencil",
+            ..
+        })
     ));
 }
 

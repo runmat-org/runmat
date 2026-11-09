@@ -30,6 +30,7 @@ tracing = "0.1"
 [dev-dependencies]
 anyhow = { workspace = true }
 libc = "0.2"
+rayon = "1.11"
 runmat-geometry-fixtures = { workspace = true }
 serde_json = { workspace = true }
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }

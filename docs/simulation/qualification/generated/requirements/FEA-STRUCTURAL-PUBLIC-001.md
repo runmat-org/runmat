@@ -1,6 +1,6 @@
 # FEA-STRUCTURAL-PUBLIC-001: Structural capabilities the page claims
 
-0 PASS, 0 PARTIAL, 0 FAIL, 100 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 3 PARTIAL, 0 FAIL, 97 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## shells_and_beams_run
 
@@ -117,9 +117,9 @@ Evidence kind: PublicationIntegrity. Criterion: Explicit spatial observations wi
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| linear_structural | tet4 | numerical_kernel | OPEN |  |
+| linear_structural | tet4 | numerical_kernel | PARTIAL | `runmat-runtime[lib]::analysis::render_topology::tests::boundary_triangles_face_out_of_their_elements_whatever_the_stored_winding` (crates/runmat-runtime/src/analysis/render_topology/tests.rs:152) - every rendered boundary triangle faces out of its adjacent element whatever the stored face winding; shading and culling are not covered.<br>`runmat-runtime[lib]::analysis::storage::tests::persisted_run_keeps_typed_metadata_as_its_single_content_copy` (crates/runmat-runtime/src/analysis/storage/tests.rs:75) - a persisted run keeps its content once, as typed metadata (no untyped copy), and materializes back to the original fields; observation chunking is covered by pu... |
 | linear_structural | tet4 | public_study | OPEN |  |
-| linear_structural | tet10 | numerical_kernel | OPEN |  |
+| linear_structural | tet10 | numerical_kernel | PARTIAL | `runmat-runtime[lib]::analysis::field_scene::tests::dense_poster_scene_draws_boundary_triangles_and_feature_edges_only` (crates/runmat-runtime/src/analysis/field_scene/tests.rs:304) - a dense poster scene draws only its boundary triangles and, by default, feature edges (the cube's 12 creases) instead of the full mesh wireframe; rendering itse... |
 | linear_structural | tet10 | public_study | OPEN |  |
 | modal_structural | tet4 | numerical_kernel | OPEN |  |
 | modal_structural | tet4 | public_study | OPEN |  |
@@ -127,7 +127,7 @@ Evidence kind: PublicationIntegrity. Criterion: Explicit spatial observations wi
 | modal_structural | tet10 | public_study | OPEN |  |
 | linear_structural_dynamics | tet4 | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | tet4 | public_study | OPEN |  |
-| linear_structural_dynamics | tet10 | numerical_kernel | OPEN |  |
+| linear_structural_dynamics | tet10 | numerical_kernel | PARTIAL | `runmat-runtime[lib]::analysis::storage::field_reader::transient_sample_tests::time_and_index_samples_select_the_retained_transient_state_and_report_its_time` (crates/runmat-runtime/src/analysis/storage/field_reader.rs:401) - a time or one-based state sample resolves to the persisted transient snapshot the integrator retained and reports its exact time; the solve itself is not covere... |
 | linear_structural_dynamics | tet10 | public_study | OPEN |  |
 | structural_stability | tet4 | numerical_kernel | OPEN |  |
 | structural_stability | tet4 | public_study | OPEN |  |

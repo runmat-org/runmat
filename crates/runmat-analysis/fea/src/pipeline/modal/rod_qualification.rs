@@ -35,7 +35,7 @@ use crate::{
 };
 
 const YOUNGS: f64 = 100.0;
-const WAVE_SPEED: f64 = 10.0;
+pub(crate) const WAVE_SPEED: f64 = 10.0;
 const PHASOR: [f64; 2] = [1.0, 0.4];
 
 mod curved;
@@ -43,7 +43,7 @@ mod damped;
 mod damped_modal;
 mod execution;
 
-fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
+pub(crate) fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.material_assignments[0].target =
         PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
@@ -130,7 +130,7 @@ fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
     model
 }
 
-fn assemble(
+pub(crate) fn assemble(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     k: f64,
@@ -185,7 +185,7 @@ fn field_error_with(
 
 // witness: FEA-DYNAMICS-RESPONSE-001/direct_modal_procedures @
 //   linear_structural_dynamics/tet4/numerical_kernel;
-//   boundary: Original axial Tet4 rod harmonic traction matrix at three frequencies on both sides
+//   check: axial-rod-harmonic; boundary: Original axial Tet4 rod harmonic traction matrix at three frequencies on both sides
 //   of resonance; independent complex displacement/reaction refinement and phase resultant checks.
 //   Not transient, spectrum or random-response evidence.
 #[test]
@@ -300,7 +300,7 @@ fn harmonic_continuum(quadratic: bool) {
     }
 }
 
-fn modal_model(model: &AnalysisModel) -> AnalysisModel {
+pub(crate) fn modal_model(model: &AnalysisModel) -> AnalysisModel {
     let mut modal = model.clone();
     modal.sequence.steps = vec![ProcedureStep::structural_modal("rod_basis")];
     replace_fixture_excitations(&mut modal, Vec::new());
@@ -308,7 +308,7 @@ fn modal_model(model: &AnalysisModel) -> AnalysisModel {
 }
 
 // witness: FEA-DYNAMICS-MODAL-001/physical_mass_base_state @ modal_structural/tet4/public_study;
-//   boundary: Axial affine Tet4 slab rod frequency refinement and modal truncation against direct
+//   check: axial-rod-modal; boundary: Axial affine Tet4 slab rod frequency refinement and modal truncation against direct
 //   harmonic response. Does not cover beam/shell modes, repeated eigenspaces, every participation
 //   or remote envelope.
 #[test]
@@ -323,7 +323,7 @@ fn solid_rod_modal_frequency_and_retained_response_have_independent_evidence() {
 //   covered.
 // witness: FEA-DYNAMICS-MODAL-001/references @ modal_structural/tet10/public_study; coverage:
 //   partial;
-//   boundary: Axial rod modal frequency against the continuum reference with retained-response
+//   check: axial-rod-modal; boundary: Axial rod modal frequency against the continuum reference with retained-response
 //   truncation checked against direct harmonic response; no beam modes, repeated modes or
 //   mass-orthogonality series.
 #[test]
@@ -331,7 +331,7 @@ fn solid_rod_tet10_modal_frequency_and_retained_response_have_independent_eviden
     modal_continuum(true);
 }
 
-fn rod_mesh(cells: usize, quadratic: bool) -> SolverMeshArtifact {
+pub(crate) fn rod_mesh(cells: usize, quadratic: bool) -> SolverMeshArtifact {
     if quadratic {
         quadratic_slab_mesh(cells)
     } else {

@@ -231,7 +231,7 @@ mod tests {
 
     // witness: FEA-STRUCTURAL-REFERENCE-001/patch_reference_convergence @
     //   linear_structural/tet10/numerical_kernel; coverage: partial;
-    //   boundary: nodal stress recovery reproduces a linear stress field exactly at every corner
+    //   check: tet10-stress-recovery-patch; boundary: nodal stress recovery reproduces a linear stress field exactly at every corner
     //   and midside node of two Tet10 elements sharing a face (patch test), and does not blend
     //   two regions at their interface node. Curved Tet10 geometry is not exercised.
     #[test]

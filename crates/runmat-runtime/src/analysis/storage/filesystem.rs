@@ -174,9 +174,9 @@ impl access::FilesystemAccess<'_> {
                 |digest, limit| self.read_bounded_artifact(&self.object_path(digest), limit),
             )
             .map(Some),
-            PersistedAnalysisArtifact::AcousticFrequency(_) => Err(AssessmentStoreError::Invalid(
-                "acoustic frequency assessment evidence is unsupported".into(),
-            )),
+            PersistedAnalysisArtifact::AcousticFrequency(run) => {
+                frequency_sample::assessment_evidence(&run, self.remaining_bytes()).map(Some)
+            }
         }
     }
 
@@ -189,13 +189,21 @@ impl access::FilesystemAccess<'_> {
             .map(|run| persisted_field_inventory(&run)))
     }
 
+    /// The render tiles a run saved: a standard run's, or a structural or acoustic frequency
+    /// sweep's.
     pub(in crate::analysis::storage) fn load_render_tile_index(
         &self,
         run_id: &str,
     ) -> Result<Option<RenderTileIndex>, AnalysisPublicationError> {
+        if let Some(run) = self.read_standard(run_id)? {
+            return Ok(run.render_tiles.clone());
+        }
+        if let Some(artifact) = self.load_structural_frequency_artifact(run_id)? {
+            return Ok(artifact.render_tiles);
+        }
         Ok(self
-            .read_standard(run_id)?
-            .and_then(|run| run.render_tiles.clone()))
+            .load_acoustic_frequency_artifact(run_id)?
+            .and_then(|artifact| artifact.render_tiles))
     }
 
     pub(in crate::analysis::storage) fn plan_render_view(
@@ -203,11 +211,7 @@ impl access::FilesystemAccess<'_> {
         run_id: &str,
         view: Option<RenderViewRequest>,
     ) -> Result<Option<RenderViewSelection>, AnalysisPublicationError> {
-        let Some(run) = self.read_standard(run_id)? else {
-            return Ok(None);
-        };
-        run.render_tiles
-            .as_ref()
+        self.load_render_tile_index(run_id)?
             .map(|index| index.select_view_validated(view))
             .transpose()
             .map_err(Into::into)
@@ -219,13 +223,12 @@ impl access::FilesystemAccess<'_> {
         mesh_index: usize,
         tile_index: usize,
     ) -> Result<Option<RenderTile>, AnalysisPublicationError> {
-        let Some(run) = self.read_standard(run_id)? else {
+        let Some(index) = self.load_render_tile_index(run_id)? else {
             return Ok(None);
         };
-        let Some(descriptor) = run
-            .render_tiles
-            .as_ref()
-            .and_then(|index| index.meshes.get(mesh_index))
+        let Some(descriptor) = index
+            .meshes
+            .get(mesh_index)
             .and_then(|mesh| mesh.tiles.get(tile_index))
         else {
             return Ok(None);
@@ -244,13 +247,12 @@ impl access::FilesystemAccess<'_> {
         mesh_index: usize,
         node_index: usize,
     ) -> Result<Option<RenderTile>, AnalysisPublicationError> {
-        let Some(run) = self.read_standard(run_id)? else {
+        let Some(index) = self.load_render_tile_index(run_id)? else {
             return Ok(None);
         };
-        let Some(descriptor) = run
-            .render_tiles
-            .as_ref()
-            .and_then(|index| index.meshes.get(mesh_index))
+        let Some(descriptor) = index
+            .meshes
+            .get(mesh_index)
             .and_then(|mesh| mesh.lod_nodes.get(node_index))
             .map(|node| &node.tile)
         else {

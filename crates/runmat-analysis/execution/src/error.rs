@@ -29,6 +29,8 @@ pub enum AnalysisBridgeError {
     Identity(&'static str),
     #[error("analysis execution bridge artifact failure: {0}")]
     Artifact(#[from] runmat_execution_artifact::ArtifactError),
+    #[error("analysis output exceeds the admitted run budget: {0}")]
+    InventoryCapacity(#[from] runmat_execution_artifact::object::InventoryCapacityError),
     #[error("analysis execution contract failure: {0}")]
     Analysis(#[from] runmat_analysis_fea::execution::AnalysisExecutionError),
     #[error(transparent)]

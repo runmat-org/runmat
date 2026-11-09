@@ -80,7 +80,7 @@ pub(super) async fn load_solver_mesh_artifact_async(
     let oversized = || {
         SolverMeshArtifactLoadError::Invalid(runmat_meshing_core::MeshingContractError::invalid(
             "solver mesh canonical bytes",
-            format!("encoded input exceeds the canonical format limit of {maximum} bytes"),
+            format!("encoded input exceeds the platform ceiling of {maximum} bytes"),
         ))
     };
     // Preflight and verify the provider's returned extent against the original

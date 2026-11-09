@@ -1,4 +1,5 @@
 use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 mod solved;
 pub(crate) use solved::recover_solved_static_fields;
 
@@ -83,22 +84,22 @@ pub(crate) fn recover_physical_static_thermo_mechanical_fields(
     }
     let mut fields = ThermoMechanicalSnapshotFields {
         temperature_snapshots: vec![AnalysisField::host_f64(
-            fea_thermo_mechanical_temperature_field_id(0),
+            fea_thermo_mechanical_temperature_field_id(0), AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Element).step(0),
             vec![element_count],
             element_temperatures_k,
         )],
         thermal_strain_snapshots: vec![AnalysisField::host_f64(
-            fea_thermo_mechanical_thermal_strain_field_id(0),
+            fea_thermo_mechanical_thermal_strain_field_id(0), AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Strain, FieldLocation::Element).step(0),
             vec![element_count, TENSOR_COMPONENT_COUNT],
             thermal_strain,
         )],
         thermal_stress_snapshots: vec![AnalysisField::host_f64(
-            fea_thermo_mechanical_thermal_stress_field_id(0),
+            fea_thermo_mechanical_thermal_stress_field_id(0), AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element).step(0),
             vec![element_count, TENSOR_COMPONENT_COUNT],
             thermal_stress,
         )],
         coupling_residual_snapshots: vec![AnalysisField::host_f64(
-            fea_thermo_mechanical_coupling_residual_field_id(0),
+            fea_thermo_mechanical_coupling_residual_field_id(0), AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global).step(0),
             vec![1],
             vec![residual_norm],
         )],
@@ -180,6 +181,8 @@ pub(crate) fn recover_thermo_mechanical_snapshots(
         temperature_field.observe_temperature(&temperature);
         fields.temperature_snapshots.push(AnalysisField::host_f64(
             fea_thermo_mechanical_temperature_field_id(index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node)
+                .step(index),
             vec![node_count],
             temperature.clone(),
         ));
@@ -212,6 +215,11 @@ pub(crate) fn recover_thermo_mechanical_snapshots(
             .thermal_strain_snapshots
             .push(AnalysisField::host_f64(
                 fea_thermo_mechanical_thermal_strain_field_id(index),
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Strain,
+                    FieldLocation::Element,
+                )
+                .step(index),
                 vec![element_count, TENSOR_COMPONENT_COUNT],
                 thermal_strain,
             ));
@@ -219,6 +227,11 @@ pub(crate) fn recover_thermo_mechanical_snapshots(
             .thermal_stress_snapshots
             .push(AnalysisField::host_f64(
                 fea_thermo_mechanical_thermal_stress_field_id(index),
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Stress,
+                    FieldLocation::Element,
+                )
+                .step(index),
                 vec![element_count, TENSOR_COMPONENT_COUNT],
                 thermal_stress,
             ));
@@ -244,6 +257,8 @@ pub(crate) fn recover_thermo_mechanical_snapshots(
             .coupling_residual_snapshots
             .push(AnalysisField::host_f64(
                 fea_thermo_mechanical_coupling_residual_field_id(index),
+                AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global)
+                    .step(index),
                 vec![1],
                 vec![residual],
             ));

@@ -1,4 +1,5 @@
-//! Requirement declarations are durable acceptance data. Evidence runs are separate.
+//! Requirement declarations are durable acceptance data, kept in the capability ledger
+//! (docs/simulation/ledger.json) and generated into Rust by build.rs. Evidence runs are separate.
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "docs-export", serde(rename_all = "snake_case"))]
@@ -67,6 +68,7 @@ pub enum Formulation {
     ParticleTracing,
     CompressibleLaminarFlow,
     PipeNetwork,
+    QuasiStaticTem,
 }
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +82,7 @@ pub enum MeshOrder {
     Tet4,
     Tet10,
     CanonicalTetrahedra,
+    Tri3,
 }
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,6 +212,7 @@ impl Formulation {
         Formulation::ParticleTracing,
         Formulation::CompressibleLaminarFlow,
         Formulation::PipeNetwork,
+        Formulation::QuasiStaticTem,
     ];
 }
 wire_names!(Formulation);
@@ -222,6 +226,7 @@ impl MeshOrder {
         MeshOrder::Tet4,
         MeshOrder::Tet10,
         MeshOrder::CanonicalTetrahedra,
+        MeshOrder::Tri3,
     ];
 }
 wire_names!(MeshOrder);
@@ -275,69 +280,6 @@ pub struct Requirement {
     pub obligations: &'static [Obligation],
     pub dependencies: &'static [&'static str],
 }
-/// Common declaration constructors keep domain inventories uniform.
-pub const fn envelope(
-    formulation: Formulation,
-    mesh: MeshOrder,
-    execution: ExecutionEnvelope,
-) -> Envelope {
-    Envelope {
-        formulation,
-        mesh,
-        execution,
-    }
-}
-
-/// Cross product of formulations, mesh orders and executions, for compact declarations.
-pub const fn cross<const N: usize>(
-    formulations: &[Formulation],
-    meshes: &[MeshOrder],
-    executions: &[ExecutionEnvelope],
-) -> [Envelope; N] {
-    let mut out = [envelope(formulations[0], meshes[0], executions[0]); N];
-    let mut k = 0;
-    let mut i = 0;
-    while i < formulations.len() {
-        let mut j = 0;
-        while j < meshes.len() {
-            let mut l = 0;
-            while l < executions.len() {
-                out[k] = envelope(formulations[i], meshes[j], executions[l]);
-                k += 1;
-                l += 1;
-            }
-            j += 1;
-        }
-        i += 1;
-    }
-    out
-}
-/// `cells!([formulations], [meshes], [executions])` is the full cross product as a
-/// `&'static [Envelope]`, valid as the initializer of a `const`.
-macro_rules! cells {
-    ([$($f:expr),+ $(,)?], [$($m:expr),+ $(,)?], [$($e:expr),+ $(,)?]) => {
-        &$crate::requirement::cross::<{ [$($f),+].len() * [$($m),+].len() * [$($e),+].len() }>(
-            &[$($f),+],
-            &[$($m),+],
-            &[$($e),+],
-        )
-    };
-}
-pub(crate) use cells;
-pub const fn obligation(
-    id: &'static str,
-    criterion: &'static str,
-    evidence_kind: EvidenceKind,
-    required_envelopes: &'static [Envelope],
-) -> Obligation {
-    Obligation {
-        id,
-        criterion,
-        evidence_kind,
-        required_envelopes,
-    }
-}
-
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Debug, PartialEq, Eq)]
 pub enum RegistryError {

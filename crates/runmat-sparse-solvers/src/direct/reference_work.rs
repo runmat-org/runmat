@@ -16,8 +16,6 @@ pub enum DirectMeasurementCoverage {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExcludedDirectKernel {
-    /// Pivot-dependent sparse LU factorization and substitution on faer.
-    SparseLu,
     /// Pivot-dependent sparse Bunch–Kaufman LBLᴴ factorization and substitution.
     SparseBunchKaufman,
 }
@@ -105,52 +103,94 @@ impl SymbolicFactorization {
     /// never be interpreted as a measured zero.
     pub fn measurement_coverage(&self) -> Result<DirectMeasurementCoverage, ReferenceWorkError> {
         match self.kind {
-            FactorKind::Cholesky | FactorKind::Ldlt => self
+            FactorKind::Cholesky | FactorKind::Ldlt | FactorKind::Lu => self
                 .reference_work()
                 .map(DirectMeasurementCoverage::Measured),
-            FactorKind::Lu => Ok(DirectMeasurementCoverage::Excluded(
-                ExcludedDirectKernel::SparseLu,
-            )),
             FactorKind::BunchKaufman => Ok(DirectMeasurementCoverage::Excluded(
                 ExcludedDirectKernel::SparseBunchKaufman,
             )),
         }
     }
 
-    /// LLT/LDLT reference arithmetic over the stored symbolic fill. This count is
-    /// independent of the floating-point memory/performance planning estimate.
+    /// LLT/LDLT reference arithmetic uses the stored symbolic columns. LU uses
+    /// elimination fill of the symmetrized pattern recorded at analysis. This
+    /// count is independent of the floating-point memory/performance estimate.
     /// Square roots are retained separately for diagnostics and included by
     /// `DirectReferenceWork::factorization_operations` in the measured total.
     pub fn reference_work(&self) -> Result<DirectReferenceWork, ReferenceWorkError> {
-        if !matches!(self.kind, FactorKind::Cholesky | FactorKind::Ldlt) {
-            return Err(ReferenceWorkError::FactorKind(self.kind));
-        }
-        let SymbolicInner::Cholesky(symbolic) = &self.inner else {
-            return Err(ReferenceWorkError::FactorKind(self.kind));
-        };
-        match symbolic.raw() {
-            faer::sparse::linalg::cholesky::SymbolicCholeskyRaw::Simplicial(factor) => {
-                hermitian_columns(
-                    factor.col_ptr().windows(2).map(|pair| pair[1] - pair[0]),
-                    self.complex,
-                    self.kind,
-                )
+        match (&self.inner, self.kind) {
+            (SymbolicInner::Lu { reference, .. }, FactorKind::Lu) => *reference,
+            (SymbolicInner::Cholesky(symbolic), FactorKind::Cholesky | FactorKind::Ldlt) => {
+                hermitian_columns(cholesky_column_heights(symbolic), self.complex, self.kind)
             }
-            faer::sparse::linalg::cholesky::SymbolicCholeskyRaw::Supernodal(factor) => {
-                let begin = factor.supernode_begin();
-                let end = factor.supernode_end();
-                hermitian_columns(
-                    (0..factor.n_supernodes()).flat_map(|node| {
-                        let width = end[node] - begin[node];
-                        let trailing = factor.supernode(node).pattern().len();
-                        (0..width).map(move |column| width - column + trailing)
-                    }),
-                    self.complex,
-                    self.kind,
-                )
-            }
+            _ => Err(ReferenceWorkError::FactorKind(self.kind)),
         }
     }
+}
+
+/// Column heights (diagonal plus stored off-diagonal rows) of a symbolic
+/// Cholesky factor, in elimination order.
+pub(super) fn cholesky_column_heights(
+    symbolic: &faer::sparse::linalg::cholesky::SymbolicCholesky<usize>,
+) -> Box<dyn Iterator<Item = usize> + '_> {
+    match symbolic.raw() {
+        faer::sparse::linalg::cholesky::SymbolicCholeskyRaw::Simplicial(factor) => {
+            Box::new(factor.col_ptr().windows(2).map(|pair| pair[1] - pair[0]))
+        }
+        faer::sparse::linalg::cholesky::SymbolicCholeskyRaw::Supernodal(factor) => {
+            let begin = factor.supernode_begin();
+            let end = factor.supernode_end();
+            Box::new((0..factor.n_supernodes()).flat_map(move |node| {
+                let width = end[node] - begin[node];
+                let trailing = factor.supernode(node).pattern().len();
+                (0..width).map(move |column| width - column + trailing)
+            }))
+        }
+    }
+}
+
+/// LU reference schedule over the symmetrized pattern's elimination fill. A
+/// column whose L part holds p off-diagonal entries has a U row of p entries.
+/// Factorization forms one pivot reciprocal (real 1, complex 6: |d|², two
+/// divisions and a negation), scales p entries of L (real 1, complex 6 each)
+/// and applies p² trailing multiply/subtract updates (real 2, complex 8 each).
+/// One right-hand side costs p multiply/subtract updates in each triangle plus
+/// one pivot scaling. The charge is exact for structurally symmetric matrices
+/// pivoting on the diagonal; numerical pivoting does not change it, so the
+/// same pattern always meters the same work.
+pub(super) fn general_columns(
+    columns: impl Iterator<Item = usize>,
+    complex: bool,
+) -> Result<DirectReferenceWork, ReferenceWorkError> {
+    let (pivot, scale, update) = if complex { (6, 6, 8) } else { (1, 1, 2) };
+    let mut work = DirectReferenceWork::default();
+    for height in columns {
+        let p = height
+            .checked_sub(1)
+            .ok_or(ReferenceWorkError::InvalidColumn)?;
+        let p = u128::try_from(p).map_err(|_| CountOverflow)?;
+        let factor = p
+            .checked_mul(p)
+            .and_then(|square| square.checked_mul(update))
+            .and_then(|value| value.checked_add(p.checked_mul(scale)?))
+            .and_then(|value| value.checked_add(pivot))
+            .ok_or(CountOverflow)?;
+        work.basic_operations =
+            work.basic_operations
+                .checked_add(OperationCount::from_operations(
+                    u64::try_from(factor).map_err(|_| CountOverflow)?,
+                ))?;
+        let solve = p
+            .checked_mul(2 * update)
+            .and_then(|value| value.checked_add(scale))
+            .ok_or(CountOverflow)?;
+        work.solve_operations_per_rhs =
+            work.solve_operations_per_rhs
+                .checked_add(OperationCount::from_operations(
+                    u64::try_from(solve).map_err(|_| CountOverflow)?,
+                ))?;
+    }
+    Ok(work)
 }
 
 /// One column with p off-diagonal entries performs p divisions and p(p+1)/2

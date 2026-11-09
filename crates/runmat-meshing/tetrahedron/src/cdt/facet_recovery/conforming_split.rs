@@ -15,14 +15,32 @@ use super::{
 };
 use crate::cdt::{
     insertion::{
-        legalize_delaunay_volume_topology_with_barriers, topology_access::TetrahedralTopology,
-        validate_constrained_delaunay_volume_topology,
+        legalize_delaunay_volume_topology_with_barriers, legalize_inserted_node_and_check_star,
+        topology_access::TetrahedralTopology, validate_constrained_delaunay_volume_topology,
     },
     mutation::{TopologyMutation, TopologyMutationErrorKind},
-    segment_recovery::{record_recovered_segment_split, recovered_segment_midpoint},
+    segment_recovery::{
+        record_recovered_segment_split, recovered_segment_midpoint, recovered_segment_midpoint_on,
+    },
     topology::{orient_materialized_volume_nodes, orient_volume_nodes},
-    DelaunayInsertionErrorKind, DelaunayVolumeNode,
+    DelaunayInsertionErrorKind, DelaunayVolumeNode, DelaunayVolumeTopology,
 };
+
+mod cascade;
+mod cavity;
+mod corner;
+mod insertion;
+mod local;
+mod pair;
+pub(super) use cascade::segment_edge_location;
+use cascade::*;
+use cavity::*;
+use corner::*;
+use insertion::*;
+use local::*;
+#[cfg(test)]
+pub(super) use pair::shared_vertex_split_points;
+use pair::*;
 
 pub(super) struct ProtectedFacetSplit {
     pub(super) source: DelaunayRecoveredFacetTriangle,
@@ -131,389 +149,47 @@ pub(super) fn try_split_recovered_segment_edge(
     )
 }
 
-fn insert_conformingly(
-    current: &DelaunaySegmentRecovery,
-    node: DelaunayVolumeNode,
-    protected: &[DelaunayRecoveredFacetTriangle],
-    selected_edge: Option<[StableDigest; 2]>,
-    hits: &[(DelaunayRecoveredFacetTriangle, PointLocation)],
-    constraint_index: u32,
-    work: &mut FacetRecoveryWork<'_>,
-) -> Result<Option<ConformingInsertion>, DelaunayFacetRecoveryError> {
-    let mut mutation = TopologyMutation::from_canonical(current.topology.clone());
-    let inserted = mutation.append_node(node).map_err(|failure| {
-        error(
-            DelaunayFacetRecoveryErrorKind::InvalidTopology,
-            Some(constraint_index),
-            failure.to_string(),
-        )
-    })?;
-    let (removed, created, splits) = if let Some(edge) = selected_edge {
-        split_edge(&mutation, inserted, edge, protected, constraint_index)?
-    } else {
-        split_faces(&mutation, inserted, hits, constraint_index)?
-    };
-    if let Some((tetrahedron, _)) = created.iter().find(|(tetrahedron, _)| {
-        orient_materialized_volume_nodes(tetrahedron.map(|index| mutation.nodes[index as usize]))
-            .is_ok_and(|sign| sign == PredicateSign::Zero)
-    }) {
-        work.reject(format!(
-            "conforming facet {:?} split produced exact-zero tetrahedron {:?} at coordinates {:?}; inserted construction {:?}",
-            selected_edge,
-            tetrahedron,
-            tetrahedron.map(|index| mutation.nodes[index as usize].coordinates_m.canonical_value()),
-            node.construction,
-        ));
-        return Ok(None);
-    }
-    if let Err(failure) = mutation.replace_cavity(&removed, created) {
-        work.reject(format!(
-            "conforming facet cavity replacement was rejected: {failure}"
-        ));
-        return Ok(None);
-    }
-    let topology = match mutation.freeze(
-        work.options.segment_recovery.insertion.topology,
-        work.cancellation,
-    ) {
-        Ok(topology) => topology,
-        Err(failure) if failure.kind == TopologyMutationErrorKind::InvalidTopology => {
-            work.reject(format!("conforming facet topology was rejected: {failure}"));
-            return Ok(None);
-        }
-        Err(failure) => {
-            return Err(error(
-                match failure.kind {
-                    TopologyMutationErrorKind::ResourceLimit => {
-                        DelaunayFacetRecoveryErrorKind::ResourceLimit
-                    }
-                    TopologyMutationErrorKind::Cancelled => {
-                        DelaunayFacetRecoveryErrorKind::Cancelled
-                    }
-                    TopologyMutationErrorKind::InvalidTopology => unreachable!(),
-                },
-                Some(constraint_index),
-                failure.to_string(),
-            ))
-        }
-    };
-    let protected_faces = updated_protected_faces(protected, &splits);
-    let topology = match legalize_delaunay_volume_topology_with_barriers(
-        topology,
-        &protected_faces,
-        work.options.segment_recovery.insertion,
-        work.cancellation,
-    ) {
-        Ok(topology) => topology,
-        Err(failure)
-            if matches!(
-                failure.kind,
-                DelaunayInsertionErrorKind::InvalidTopology
-                    | DelaunayInsertionErrorKind::InvalidNode
-                    | DelaunayInsertionErrorKind::PointOutsideTopology
-            ) =>
-        {
-            work.reject(format!(
-                "conforming facet legalization was rejected: {failure}"
-            ));
-            return Ok(None);
-        }
-        Err(failure) => {
-            return Err(insertion_error(
-                failure.kind,
-                failure.to_string(),
-                constraint_index,
-            ))
-        }
-    };
-    if let Err(failure) = validate_constrained_delaunay_volume_topology(
-        &topology,
-        &protected_faces,
-        work.options.segment_recovery.insertion,
-        work.cancellation,
-    ) {
-        return match failure.kind {
-            DelaunayInsertionErrorKind::ResourceLimit | DelaunayInsertionErrorKind::Cancelled => {
-                Err(insertion_error(
-                    failure.kind,
-                    failure.to_string(),
-                    constraint_index,
-                ))
-            }
-            _ => {
-                work.reject(format!(
-                    "conforming facet validation was rejected: {failure}"
-                ));
-                Ok(None)
-            }
-        };
-    }
-    let mut recovery = current.clone();
-    recovery.topology = topology;
-    if let Some(edge) = selected_edge {
-        if let Some((segment_index, interval_index)) =
-            recovered_segment_edge_location(current, edge)
-        {
-            let (_, recovered) = recovered_segment_midpoint(current, segment_index, interval_index)
-                .map_err(super::segment_error)?;
-            record_recovered_segment_split(&mut recovery, segment_index, interval_index, recovered)
-                .map_err(super::segment_error)?;
-        }
-    }
-    if !recovered_segments_exist(&recovery) {
-        work.reject("conforming facet insertion removed a recovered segment edge");
-        return Ok(None);
-    }
-    Ok(Some(ConformingInsertion { recovery, splits }))
-}
-
-fn recovered_segment_edge_location(
-    recovery: &DelaunaySegmentRecovery,
-    mut edge: [StableDigest; 2],
-) -> Option<(usize, usize)> {
-    edge.sort_unstable();
-    recovery
-        .segments
-        .iter()
-        .enumerate()
-        .find_map(|(segment_index, segment)| {
-            segment
-                .nodes
-                .windows(2)
-                .enumerate()
-                .find_map(|(interval_index, interval)| {
-                    let mut candidate = [interval[0].identity, interval[1].identity];
-                    candidate.sort_unstable();
-                    (candidate == edge).then_some((segment_index, interval_index))
-                })
-        })
-}
-
-fn point_location(
-    recovery: &DelaunaySegmentRecovery,
-    node: DelaunayVolumeNode,
-    triangle: DelaunayRecoveredFacetTriangle,
-    constraint_index: u32,
-) -> Result<Option<PointLocation>, DelaunayFacetRecoveryError> {
-    let vertices = triangle.node_identities.map(|identity| {
-        node_index(&recovery.topology, identity)
-            .map(|index| recovery.topology.nodes[index])
-            .ok_or_else(|| invalid(constraint_index, "protected facet node is missing"))
-    });
-    let [first, second, third] = vertices;
-    let vertices = [first?, second?, third?];
-    if orient_volume_nodes([vertices[0], vertices[1], vertices[2], node]).map_err(|failure| {
-        invalid(
-            constraint_index,
-            format!("facet split predicate failed: {failure:?}"),
-        )
-    })? != PredicateSign::Zero
-    {
-        return Ok(None);
-    }
-    let points = vertices.map(DelaunayVolumeNode::predicate_point);
-    let axes = triangle_projection_axes_constructed(points)
-        .map_err(|failure| {
-            invalid(
-                constraint_index,
-                format!("facet split projection failed: {failure:?}"),
-            )
-        })?
-        .ok_or_else(|| invalid(constraint_index, "protected facet is collinear"))?;
-    let query = node.predicate_point();
-    let signs = [
-        projected_orient2d_constructed([points[0], points[1], query], axes),
-        projected_orient2d_constructed([points[1], points[2], query], axes),
-        projected_orient2d_constructed([points[2], points[0], query], axes),
-    ];
-    if signs.iter().any(Result::is_err) {
-        return Err(invalid(
-            constraint_index,
-            "facet split projection predicate failed",
-        ));
-    }
-    let signs = signs.map(Result::unwrap);
-    if signs.contains(&PredicateSign::Positive) && signs.contains(&PredicateSign::Negative) {
-        return Ok(None);
-    }
-    if let Some(slot) = signs.iter().position(|sign| *sign == PredicateSign::Zero) {
-        if !points_collinear_constructed([points[slot], points[(slot + 1) % 3], query]).map_err(
-            |failure| {
-                invalid(
-                    constraint_index,
-                    format!("facet edge classification failed: {failure:?}"),
-                )
-            },
-        )? {
-            return Ok(Some(PointLocation::Interior));
-        }
-        let mut edge = [
-            triangle.node_identities[slot],
-            triangle.node_identities[(slot + 1) % 3],
-        ];
-        edge.sort_unstable();
-        return Ok(Some(PointLocation::Edge(edge)));
-    }
-    Ok(Some(PointLocation::Interior))
-}
-
-type Replacement = (
-    BTreeSet<u32>,
-    Vec<([u32; 4], Option<runmat_geometry_core::PersistentEntityId>)>,
-    Vec<ProtectedFacetSplit>,
-);
-
-fn split_edge(
-    topology: &TopologyMutation,
-    inserted: u32,
+/// Splits a recovered segment edge directly on the working topology: the split, Lawson flips in
+/// the new node's link and an exact admission of every changed cell run in a cavity trial, so
+/// the cost follows the size of the change. Returns `None` with the topology unchanged when the
+/// local repair cannot finish; the caller then runs the canonical split with complete
+/// legalization.
+///
+/// The constrained Bowyer-Watson cavity of the midpoint can contain the whole star of another
+/// recovered segment edge. The midpoint then lies strictly inside every circumsphere around
+/// that edge, so the edge has no empty circumsphere once the midpoint exists and no
+/// constrained-Delaunay complex contains both. That encroached edge is split first (bounded
+/// cascade), and the original split is retried on the refined segments.
+pub(super) fn split_recovered_segment_edge_in_place(
+    working: &mut super::working::FacetRecoveryWorking,
     edge: [StableDigest; 2],
     protected: &[DelaunayRecoveredFacetTriangle],
+    protected_edges: &[[StableDigest; 2]],
     constraint_index: u32,
-) -> Result<Replacement, DelaunayFacetRecoveryError> {
-    let left = node_index_mutation(topology, edge[0])
-        .ok_or_else(|| invalid(constraint_index, "facet split edge node is missing"))?;
-    let right = node_index_mutation(topology, edge[1])
-        .ok_or_else(|| invalid(constraint_index, "facet split edge node is missing"))?;
-    let removed = topology.vertex_stars[left as usize]
-        .iter()
-        .copied()
-        .filter(|index| {
-            topology
-                .tetrahedron(*index)
-                .is_some_and(|tet| tet.vertex_indices.contains(&right))
-        })
-        .collect::<BTreeSet<_>>();
-    let mut created = Vec::new();
-    for index in &removed {
-        let tet = topology
-            .tetrahedron(*index)
-            .expect("edge star remains active");
-        let other = tet
-            .vertex_indices
-            .into_iter()
-            .filter(|v| *v != left && *v != right)
-            .collect::<Vec<_>>();
-        created.push(([left, inserted, other[0], other[1]], tet.region_id.clone()));
-        created.push(([inserted, right, other[0], other[1]], tet.region_id.clone()));
-    }
-    let splits = protected
-        .iter()
-        .filter(|triangle| {
-            edge.iter()
-                .all(|node| triangle.node_identities.contains(node))
-        })
-        .map(|triangle| {
-            let slot = (0..3)
-                .find(|slot| {
-                    let candidate = [
-                        triangle.node_identities[*slot],
-                        triangle.node_identities[(*slot + 1) % 3],
-                    ];
-                    edge.contains(&candidate[0]) && edge.contains(&candidate[1])
-                })
-                .expect("protected edge belongs to triangle");
-            let a = triangle.node_identities[slot];
-            let b = triangle.node_identities[(slot + 1) % 3];
-            let c = triangle.node_identities[(slot + 2) % 3];
-            ProtectedFacetSplit {
-                source: *triangle,
-                children: vec![
-                    DelaunayRecoveredFacetTriangle {
-                        node_identities: [a, topology.nodes[inserted as usize].identity, c],
-                    },
-                    DelaunayRecoveredFacetTriangle {
-                        node_identities: [topology.nodes[inserted as usize].identity, b, c],
-                    },
-                ],
-            }
-        })
-        .collect();
-    Ok((removed, created, splits))
-}
-
-fn split_faces(
-    topology: &TopologyMutation,
-    inserted: u32,
-    hits: &[(DelaunayRecoveredFacetTriangle, PointLocation)],
-    constraint_index: u32,
-) -> Result<Replacement, DelaunayFacetRecoveryError> {
-    let mut removed = BTreeSet::new();
-    let mut created = Vec::new();
-    let mut splits = Vec::new();
-    for (triangle, _) in hits {
-        let face = triangle.node_identities.map(|identity| {
-            node_index_mutation(topology, identity)
-                .ok_or_else(|| invalid(constraint_index, "facet split node is missing"))
-        });
-        let [a, b, c] = face;
-        let face = [a?, b?, c?];
-        for index in 0..topology.tetrahedron_slot_count() {
-            let Some(tet) = topology.tetrahedron(index as u32) else {
-                continue;
-            };
-            if !face.iter().all(|node| tet.vertex_indices.contains(node)) {
-                continue;
-            }
-            removed.insert(index as u32);
-            let apex = *tet
-                .vertex_indices
-                .iter()
-                .find(|node| !face.contains(node))
-                .expect("face tet has apex");
-            created.extend([
-                ([face[0], face[1], inserted, apex], tet.region_id.clone()),
-                ([face[1], face[2], inserted, apex], tet.region_id.clone()),
-                ([face[2], face[0], inserted, apex], tet.region_id.clone()),
-            ]);
-        }
-        let identity = topology.nodes[inserted as usize].identity;
-        splits.push(ProtectedFacetSplit {
-            source: *triangle,
-            children: vec![
-                DelaunayRecoveredFacetTriangle {
-                    node_identities: [
-                        triangle.node_identities[0],
-                        triangle.node_identities[1],
-                        identity,
-                    ],
-                },
-                DelaunayRecoveredFacetTriangle {
-                    node_identities: [
-                        triangle.node_identities[1],
-                        triangle.node_identities[2],
-                        identity,
-                    ],
-                },
-                DelaunayRecoveredFacetTriangle {
-                    node_identities: [
-                        triangle.node_identities[2],
-                        triangle.node_identities[0],
-                        identity,
-                    ],
-                },
-            ],
-        });
-    }
-    Ok((removed, created, splits))
-}
-
-fn updated_protected_faces(
-    protected: &[DelaunayRecoveredFacetTriangle],
-    splits: &[ProtectedFacetSplit],
-) -> Vec<[StableDigest; 3]> {
-    protected
-        .iter()
-        .filter(|triangle| !splits.iter().any(|split| split.source == **triangle))
-        .flat_map(|triangle| vec![*triangle])
-        .chain(splits.iter().flat_map(|split| split.children.clone()))
-        .map(|triangle| {
-            let mut face = triangle.node_identities;
-            face.sort_unstable();
-            face
-        })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Option<Vec<ProtectedFacetSplit>>, DelaunayFacetRecoveryError> {
+    let protected = protected.to_vec();
+    let protected_edges = protected_edges.to_vec();
+    let mut trial_splits = Vec::new();
+    // The cascade edits the working topology through committed splits; a declined cascade
+    // leaves those committed encroachment splits in place, which are themselves valid
+    // constrained-Delaunay refinements of recovered segments.
+    let result = split_with_encroachment_cascade(
+        working,
+        edge,
+        protected,
+        protected_edges,
+        0,
+        None,
+        constraint_index,
+        work,
+        &mut trial_splits,
+    )?;
+    Ok(if result || !trial_splits.is_empty() {
+        Some(trial_splits)
+    } else {
+        None
+    })
 }
 
 fn node_index_mutation(topology: &TopologyMutation, identity: StableDigest) -> Option<u32> {

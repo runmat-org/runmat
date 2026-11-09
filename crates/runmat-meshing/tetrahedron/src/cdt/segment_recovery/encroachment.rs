@@ -191,10 +191,26 @@ fn retained_segment_parameter(
     else {
         return None;
     };
-    if endpoints != [context.first_coordinates, context.last_coordinates]
-        || parameter_exponent >= 63
-    {
+    if parameter_exponent >= 63 || parameter_numerator > 1_u64 << parameter_exponent {
         return None;
+    }
+    // A segment is undirected. Another recovery of the same edge (an adjacent facet's
+    // support triangle walks it the other way) constructs its points from the reversed
+    // endpoints; parameter t from the far end is exactly 1 - t from this one.
+    let (mut parameter_numerator, mut parameter_exponent) =
+        if endpoints == [context.first_coordinates, context.last_coordinates] {
+            (parameter_numerator, parameter_exponent)
+        } else if endpoints == [context.last_coordinates, context.first_coordinates] {
+            (
+                (1_u64 << parameter_exponent) - parameter_numerator,
+                parameter_exponent,
+            )
+        } else {
+            return None;
+        };
+    while parameter_exponent > 0 && parameter_numerator.is_multiple_of(2) {
+        parameter_numerator /= 2;
+        parameter_exponent -= 1;
     }
     let exponent = parameter_exponent.max(left.exponent).max(right.exponent);
     let parameter = u128::from(parameter_numerator) << (exponent - parameter_exponent);
@@ -360,5 +376,42 @@ mod tests {
         };
         assert!(retained_segment_parameter(&witness, foreign, left, right).is_none());
         assert!(retained_segment_parameter(&witness, context, split, right).is_none());
+    }
+
+    #[test]
+    fn a_point_constructed_on_the_reversed_segment_is_reused_at_its_complementary_parameter() {
+        use runmat_meshing_core::quality::predicate::Point3Construction;
+        // An adjacent support triangle walked this edge last-to-first and put a point at
+        // 333/1024 from the far end. The near-collinear witness cannot be cleared by any
+        // off-centre split, so recovery must reuse it at exactly 691/1024.
+        let endpoints = [[0., 0., 0.], [10., 0., 0.]];
+        let mut witness = node(30, [10. * 691. / 1024., 0., 0.]);
+        witness.construction = Point3Construction::Segment {
+            endpoints: [endpoints[1], endpoints[0]],
+            parameter_numerator: 333,
+            parameter_exponent: 10,
+        };
+        let context = SegmentContext {
+            constraint_index: 0,
+            first_identity: StableDigest::from_bytes([10; 32]),
+            last_identity: StableDigest::from_bytes([20; 32]),
+            first_coordinates: endpoints[0],
+            last_coordinates: endpoints[1],
+        };
+        let left = DyadicNode::endpoint(context.first_identity, false);
+        let right = DyadicNode::endpoint(context.last_identity, true);
+        let retained = retained_segment_parameter(&witness, context, left, right).unwrap();
+        assert_eq!(
+            (retained.identity, retained.numerator, retained.exponent),
+            (witness.identity, 691, 10)
+        );
+        // An even complement reduces to the canonical dyadic form.
+        witness.construction = Point3Construction::Segment {
+            endpoints: [endpoints[1], endpoints[0]],
+            parameter_numerator: 256,
+            parameter_exponent: 10,
+        };
+        let retained = retained_segment_parameter(&witness, context, left, right).unwrap();
+        assert_eq!((retained.numerator, retained.exponent), (3, 2));
     }
 }

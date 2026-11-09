@@ -3,6 +3,13 @@ use super::*;
 use std::sync::Arc;
 use storage::AnalysisPublicationError as Error;
 
+/// Resident workspace for persisting immutable objects of at most `largest` bytes: the
+/// object's own buffer plus one existing-content comparison buffer of the same size. Admission
+/// funds this amount and [`StudyEvidenceAccess::persist_immutable_batch`] requires it.
+pub(in crate::analysis) fn immutable_batch_workspace(largest: u64) -> Option<u64> {
+    largest.checked_mul(2)
+}
+
 pub(in crate::analysis) struct StudyEvidenceAccess {
     root: PathBuf,
     provider: Arc<dyn runmat_filesystem::FsProvider>,
@@ -33,24 +40,29 @@ impl StudyEvidenceAccess {
 
     /// One workspace scope and one group commit for a run of immutable objects staged one at
     /// a time, none larger than `largest` bytes: each object's buffer and its existing-content
-    /// comparison stay within `maximum`, as for a single object. The objects become durable
-    /// and visible together once `stage` returns; nothing is published if it fails.
+    /// comparison stay within `maximum`, as for a single object. `maximum` must cover
+    /// [`immutable_batch_workspace`]`(largest)`, the same law admission charges. The objects
+    /// become durable and visible together once `stage` returns; nothing is published if it
+    /// fails.
     pub(in crate::analysis) fn persist_immutable_batch<T>(
         &self,
         maximum: u64,
         largest: u64,
         stage: impl FnOnce(&mut ImmutableObjectBatch<'_>) -> Result<T, Error>,
     ) -> Result<T, Error> {
+        let limited = || {
+            Error::ResourceLimit {
+            message: format!(
+                "immutable object buffers exceed their phase allowance: object {largest} bytes, allowance {maximum} bytes"
+            ),
+        }
+        };
+        let required = immutable_batch_workspace(largest).ok_or_else(limited)?;
+        // The scope quota is the comparison buffer: everything beyond the object's own buffer.
         let available = maximum
             .checked_sub(largest)
-            .filter(|available| *available > 0 && *available >= largest)
-            .ok_or_else(|| {
-                Error::ResourceLimit {
-                    message: format!(
-                        "immutable object buffers exceed their phase allowance: object {largest} bytes, allowance {maximum} bytes"
-                    ),
-                }
-            })?;
+            .filter(|available| maximum >= required && *available > 0)
+            .ok_or_else(limited)?;
         let scope = self
             .provider
             .workspace_access(&self.root, true, available)?;

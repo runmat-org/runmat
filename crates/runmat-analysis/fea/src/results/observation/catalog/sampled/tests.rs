@@ -407,10 +407,11 @@ fn magnetic_publication_context_rejects_coherent_foreign_rule_and_native_field_i
     )
     .unwrap();
     renamed[2] = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
         AnalysisField::host_f64(
             "foreign.flux",
+            definition.layout(),
             old.storage().shape.clone(),
             old.storage().as_host_f64().unwrap().to_vec(),
         ),
@@ -458,6 +459,7 @@ fn magnetic_publication_context_rejects_coherent_foreign_rule_and_native_field_i
                 RecoveredFieldSample::Final,
                 AnalysisField::host_f64(
                     field.definition().field_id(),
+                    field.definition().layout(),
                     shape,
                     vec![0.0; count * components],
                 ),

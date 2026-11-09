@@ -1,4 +1,5 @@
 use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 use crate::{
     assembly::ElectroThermalAssemblySummary,
@@ -150,21 +151,34 @@ pub(crate) fn recover_electro_thermal_fields(
     let static_fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::ElectricPotential,
+                FieldLocation::Node,
+            ),
             vec![node_count],
             solve.potential,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ElectricField, FieldLocation::Edge),
             vec![edge_count, VECTOR_COMPONENT_COUNT],
             edge_electric_field,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
+            AnalysisFieldLayout::vector3(
+                ObservationQuantity::ElectricCurrentDensity,
+                FieldLocation::Edge,
+            ),
             vec![edge_count, VECTOR_COMPONENT_COUNT],
             edge_current_density,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::JoulePowerDensity,
+                FieldLocation::Edge,
+            ),
             vec![edge_count],
             edge_joule_heat,
         ),
@@ -191,6 +205,8 @@ pub(crate) fn recover_electro_thermal_fields(
         final_temperature = temperature.clone();
         temperature_snapshots.push(AnalysisField::host_f64(
             fea_electro_thermal_temperature_field_id(index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node)
+                .step(index),
             vec![node_count],
             temperature,
         ));
@@ -203,6 +219,8 @@ pub(crate) fn recover_electro_thermal_fields(
             * (1.0 + summary.conductivity_spread_ratio.ln().max(0.0));
         thermal_residual_snapshots.push(AnalysisField::host_f64(
             fea_electro_thermal_thermal_residual_field_id(index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global)
+                .step(index),
             vec![1],
             vec![residual],
         ));

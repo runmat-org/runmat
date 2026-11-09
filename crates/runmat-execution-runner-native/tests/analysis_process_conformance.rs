@@ -1019,20 +1019,20 @@ async fn remote_conformance(
         .unwrap();
         pool.add_worker(first_channel.clone()).await.unwrap();
         pool.add_worker(second_channel.clone()).await.unwrap();
-        for object in &program.objects {
-            pool.register_execution_object(object.reference.clone(), object.bytes.clone())
+        for (reference, bytes) in program.objects() {
+            pool.register_execution_object(reference.clone(), bytes.to_vec())
                 .unwrap();
         }
-        for object in &second_program.objects {
-            pool.register_execution_object(object.reference.clone(), object.bytes.clone())
+        for (reference, bytes) in second_program.objects() {
+            pool.register_execution_object(reference.clone(), bytes.to_vec())
                 .unwrap();
         }
-        for object in &mixed_program.objects {
-            pool.register_execution_object(object.reference.clone(), object.bytes.clone())
+        for (reference, bytes) in mixed_program.objects() {
+            pool.register_execution_object(reference.clone(), bytes.to_vec())
                 .unwrap();
         }
-        for object in &explicit_program.objects {
-            pool.register_execution_object(object.reference.clone(), object.bytes.clone())
+        for (reference, bytes) in explicit_program.objects() {
+            pool.register_execution_object(reference.clone(), bytes.to_vec())
                 .unwrap();
         }
         let mut completions = pool

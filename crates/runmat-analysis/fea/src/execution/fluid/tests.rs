@@ -682,3 +682,99 @@ mod checkpoint;
 mod transient_workload;
 
 mod mass_flow;
+mod pressure_drop;
+
+/// Calibration probe (ignored): the steady-fluid reservation pieces for a channel on an
+/// `RM_DIAG_N`³-hexahedra slab (Tet4 cells), then optionally the solve's process peak RSS.
+/// Run alone (`--exact --ignored`) so the RSS belongs to this solve.
+#[test]
+#[ignore]
+fn diagnostic_fluid_reservation_at_scale() {
+    let n: usize = std::env::var("RM_DIAG_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+    let (mut workload, _) = authored();
+    let mesh = fixtures::slab_mesh(n);
+    for constraint in &mut workload.model.constraints {
+        let AnalysisConstraint::Fluid(c) = constraint else {
+            unreachable!()
+        };
+        match &mut c.kind {
+            FluidConstraintKind::NoSlipWall { target } => {
+                rebind(target, &mesh);
+            }
+            FluidConstraintKind::PrescribedVelocity { target, value } => {
+                *value = PrescribedValue::Constant([
+                    Velocity::new(0.01),
+                    Velocity::new(0.0),
+                    Velocity::new(0.0),
+                ]);
+                rebind(target, &mesh);
+            }
+            _ => unreachable!(),
+        }
+    }
+    for b in &mut workload.model.boundaries {
+        rebind(&mut b.target, &mesh);
+    }
+    workload.policy.maximum_outer_iterations = 400;
+    workload.policy.gmres_restart = 32;
+    workload.policy.linear_relative_tolerance = 1e-6;
+    workload.policy.physical_relative_tolerance = 1e-6;
+    workload.policy.maximum_resident_bytes = Some(64_000_000_000);
+    workload.policy.maximum_operator_work = Some(1 << 52);
+    workload.geometry_policy = FiniteVolumeProjectionPolicy {
+        max_cells: None,
+        max_face_incidences: None,
+        max_boundary_faces: None,
+        max_scratch_bytes: None,
+        max_traversal_operations: None,
+    };
+    let projection =
+        crate::planning::resource::derive_fluid_steady_resource_projection(&workload, &mesh)
+            .unwrap();
+    let r = projection.numerical;
+    println!(
+        "cells {} faces {} sparse {} numerical {} verification {} preparation {} decode {} \
+         result {} materialization {} phase {}",
+        r.cells,
+        r.faces,
+        r.sparse_entries,
+        r.resident_bytes_upper_bound,
+        r.verification_resident_bytes_upper_bound,
+        projection.source_preparation_resident_bytes.0,
+        projection.actual_decode_resident_bytes.0,
+        projection.result_payload_bytes_upper_bound.0,
+        projection.result_materialization_resident_bytes.0,
+        projection.phase_resident_bytes_upper_bound.0
+    );
+    if std::env::var("RM_DIAG_SOLVE").is_ok() {
+        let peak = || {
+            let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+            unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+            unsafe { usage.assume_init() }.ru_maxrss
+        };
+        let before = peak();
+        let outcome = workload.execute(&mesh);
+        println!(
+            "rss_peak_before_solve {before} rss_peak_after_solve {} ok {}",
+            peak(),
+            outcome.is_ok()
+        );
+    }
+}
+
+fn rebind(target: &mut RegionTarget, mesh: &SolverMeshArtifact) {
+    let entities = mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .flat_map(|f| f.provenance.iter())
+        .filter(|e| target.matches_persistent_entity(e))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    target.bind_resolved_entities(entities).unwrap();
+}

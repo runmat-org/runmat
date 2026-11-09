@@ -130,6 +130,17 @@ fn quote_subgrant(
     controls: ConsoleLimits,
     max_in_flight: u32,
 ) -> NativeExecutionResult<Budget> {
+    quote_subgrant_within(budget, controls, max_in_flight, u64::MAX)
+}
+
+/// `encoded_cap` bounds the grant's encoded component by the artifact bytes the
+/// receiving task reserved, so the grant never exceeds its own reservation.
+fn quote_subgrant_within(
+    budget: Budget,
+    controls: ConsoleLimits,
+    max_in_flight: u32,
+    encoded_cap: u64,
+) -> NativeExecutionResult<Budget> {
     controls.validate().map_err(invalid)?;
     if max_in_flight == 0 {
         return Err(invalid(
@@ -141,7 +152,9 @@ fn quote_subgrant(
     let scopes = (u64::from(budget.max_scopes) / divisor)
         .min((retained / COPIES) / (METADATA * 2))
         .max(1);
-    let encoded = (budget.max_encoded_bytes / divisor).min(TERMINAL_FRAME - FRAME_OVERHEAD);
+    let encoded = (budget.max_encoded_bytes / divisor)
+        .min(TERMINAL_FRAME - FRAME_OVERHEAD)
+        .min(encoded_cap);
     let metadata = scopes * METADATA;
     let room = (retained / COPIES)
         .checked_sub(metadata)
@@ -222,6 +235,19 @@ impl ConsoleRetentionOwner {
             Budget::for_driver_allocation(memory_bytes),
             controls,
             max_in_flight,
+        )
+    }
+    /// The grant a placed task launches with: quoted from its reserved memory
+    /// and bounded by its reserved artifact bytes, which hold the encoded console.
+    pub(crate) fn reserved_source_subgrant(
+        resources: &runmat_execution::resource::ResourceRequest,
+        controls: ConsoleLimits,
+    ) -> NativeExecutionResult<Budget> {
+        quote_subgrant_within(
+            Budget::for_driver_allocation(resources.memory_bytes),
+            controls,
+            1,
+            resources.max_artifact_bytes,
         )
     }
     pub(crate) fn limits(&self) -> Budget {
@@ -701,6 +727,33 @@ mod tests {
         assert!(owner
             .validate_subtree(identity(1), Some(&changed.finish(true)), &[])
             .is_err());
+    }
+
+    #[test]
+    fn placed_task_grant_fits_its_reserved_artifact_bytes() {
+        let limits = ConsoleLimits {
+            max_records: 4,
+            max_text_bytes: 100,
+        };
+        let resources = runmat_execution::resource::ResourceRequest {
+            cpu_millicores: 1000,
+            memory_bytes: 1024 * 1024 * 1024,
+            scratch_bytes: 0,
+            max_wall_millis: 30_000,
+            max_artifact_bytes: 1024 * 1024,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: vec![],
+            required_capabilities: Default::default(),
+        };
+        let grant = ConsoleRetentionOwner::reserved_source_subgrant(&resources, limits).unwrap();
+        assert!(grant.max_encoded_bytes <= resources.max_artifact_bytes);
+        assert!(grant.minimum_memory_bytes().unwrap() <= resources.memory_bytes);
+        assert_eq!(grant.max_records, 4);
+        assert_eq!(grant.max_text_bytes, 100);
+        let unbounded =
+            ConsoleRetentionOwner::source_subgrant(resources.memory_bytes, limits, 1).unwrap();
+        assert!(unbounded.max_encoded_bytes > resources.max_artifact_bytes);
     }
 
     #[test]

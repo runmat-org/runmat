@@ -36,7 +36,7 @@ fn assert_acceptance(result: &FeaThermalRunResult, solved: usize) {
 }
 
 // witness: FEA-THERMAL-SOLVE-001/steady @ thermal_steady/tet4|tet10/public_study;
-//   boundary: Tet4/Tet10 fixed-hot slab against independent scalar bisection; original fields,
+//   check: hot-slab-radiation; boundary: Tet4/Tet10 fixed-hot slab against independent scalar bisection; original fields,
 //   power and retained nonlinear evidence checked.
 #[test]
 fn fixed_hot_slab_matches_independent_gray_surface_scalar_equilibrium() {
@@ -178,7 +178,7 @@ fn manufactured(intervals: usize, mesh: &SolverMeshArtifact) -> ThermalWorkload 
 }
 
 // witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4|tet10/numerical_kernel; coverage: partial;
-//   boundary: The validation table's radiating-bar check: 1000 W/m^2 into one end of a 1 m steel
+//   check: radiating-bar; boundary: The validation table's radiating-bar check: 1000 W/m^2 into one end of a 1 m steel
 //   bar (k = 45 W/m/K) that radiates from the other (emissivity 0.8, 300 K surroundings) matches
 //   the closed form q = eps sigma (T^4 - 300^4) at the radiating end and q L / k across the bar,
 //   with the applied and radiated power equal; Tet4 and Tet10 slabs.

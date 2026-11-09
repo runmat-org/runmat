@@ -23,6 +23,8 @@ pub(super) struct TetrahedronEvaluationContext {
     pub(super) protected_facet_count: u8,
     /// Edges on protected facets (see `protected_edge_mask`), excluded from the size criterion.
     pub(super) protected_edges: u8,
+    /// Size metrics at the corners, in vertex order (see `node_size`).
+    pub(super) corner_metrics: [runmat_meshing_size::metric::MetricTensor3; 4],
 }
 
 pub(super) fn evaluate_tetrahedron(
@@ -55,6 +57,7 @@ pub(super) fn evaluate_tetrahedron_nodes(
         boundary_node_count,
         protected_facet_count,
         protected_edges,
+        corner_metrics,
     } = context;
     let points = nodes.map(|node| node.coordinates_m.canonical_value());
     let identities = nodes.map(|node| node.identity);
@@ -74,7 +77,11 @@ pub(super) fn evaluate_tetrahedron_nodes(
         )
         })?;
     let (refinement_violation_ratio, optimization_violation_ratio) = violation_ratios(
-        volume_owned_maximum_metric_edge_length(points, metric.metric, protected_edges),
+        super::node_size::volume_owned_maximum_integrated_edge_length(
+            points,
+            corner_metrics,
+            protected_edges,
+        ),
         geometry.metric_radius_edge_ratio,
         geometry.metric_scaled_jacobian,
         boundary_node_count,
@@ -141,6 +148,7 @@ pub(in crate::cdt) fn violation_ratios(
 
 /// Longest metric edge length over the edges not on a protected facet (zero when every edge is
 /// protected). Computed directly as sqrt(d^T M d) per edge.
+#[cfg(test)]
 pub(in crate::cdt) fn volume_owned_maximum_metric_edge_length(
     points: [[f64; 3]; 4],
     metric: runmat_meshing_size::metric::MetricTensor3,

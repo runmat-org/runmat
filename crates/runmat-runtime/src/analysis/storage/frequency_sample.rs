@@ -5,6 +5,8 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::contracts::AnalysisArtifactRecord;
+use crate::analysis::render_tiles::{self, RenderTileIndex};
+use crate::analysis::AnalysisRenderTopology;
 use crate::analysis::FrequencySampleArtifactRootInventory;
 use crate::analysis::{
     result_policy, run_operation_for_identity, AnalysisFieldRequestOptions, AnalysisFieldSelection,
@@ -25,14 +27,32 @@ pub(super) struct PersistedAcousticFrequencyArtifact {
     pub step: AnalysisStudyStepRunData,
     pub object_catalog: PublishedObjectCatalog,
     pub artifact_roots: FrequencySampleArtifactRootInventory,
+    /// Render tiles of the solver mesh the sweep was solved on, saved with the record like a
+    /// standard run's, so a figure or snapshot of the sweep replays without the mesh file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_tiles: Option<RenderTileIndex>,
 }
 
 pub(super) fn prepare_artifact(
     step: &AnalysisStudyStepRunData,
     object_catalog: &PublishedObjectCatalog,
     artifact_roots: &FrequencySampleArtifactRootInventory,
+    render_topology: Option<&AnalysisRenderTopology>,
     created_at: String,
-) -> Result<PersistedAcousticFrequencyArtifact, String> {
+) -> Result<
+    (
+        PersistedAcousticFrequencyArtifact,
+        super::frequency::RenderTileObjects,
+    ),
+    String,
+> {
+    let (render_tiles, tile_objects) = match render_topology {
+        Some(topology) => {
+            let (index, objects) = render_tiles::partition(topology)?;
+            (Some(index), objects)
+        }
+        None => (None, Vec::new()),
+    };
     let artifact = PersistedAcousticFrequencyArtifact {
         schema_version: ACOUSTIC_FREQUENCY_ARTIFACT_SCHEMA_VERSION.to_string(),
         created_at,
@@ -40,9 +60,10 @@ pub(super) fn prepare_artifact(
         step: step.clone(),
         object_catalog: object_catalog.clone(),
         artifact_roots: artifact_roots.clone(),
+        render_tiles,
     };
     validate_artifact(&artifact, &step.run_id)?;
-    Ok(artifact)
+    Ok((artifact, tile_objects))
 }
 
 pub(super) fn decode_artifact(
@@ -237,6 +258,9 @@ pub(super) fn validate_artifact(
             authority,
             object_catalog: &artifact.object_catalog,
         })?;
+    if let Some(index) = &artifact.render_tiles {
+        index.validate()?;
+    }
     let operation = run_operation_for_identity(&artifact.step.identity)
         .ok_or_else(|| "acoustic frequency result identity has no runtime operation".to_string())?;
     if operation.name() != artifact.step.run_operation
@@ -283,6 +307,7 @@ fn native_values_match(
 
 pub(super) fn ingest_objects(
     artifact: &PersistedAcousticFrequencyArtifact,
+    tile_objects: super::frequency::RenderTileObjects,
     source: &dyn PublishedObjectSource,
 ) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
     validate_artifact(artifact, &artifact.step.run_id)?;
@@ -299,6 +324,7 @@ pub(super) fn ingest_objects(
         }
     }
     validate_closure(artifact, |digest| objects.get(&digest).cloned())?;
+    super::frequency::merge_render_tile_objects(&mut objects, tile_objects)?;
     Ok(objects)
 }
 
@@ -332,6 +358,7 @@ pub(super) fn same_content(
         && left.step == right.step
         && left.object_catalog == right.object_catalog
         && left.artifact_roots == right.artifact_roots
+        && left.render_tiles == right.render_tiles
 }
 
 pub(super) fn field_page(
@@ -390,6 +417,7 @@ pub(super) fn artifact_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::analysis::storage::{
         AnalysisArtifactStore, FilesystemAnalysisArtifactStore, InMemoryAnalysisArtifactStore,
     };
@@ -434,7 +462,12 @@ mod tests {
             let original = RecoveredField::new(
                 definition.clone(),
                 sample,
-                AnalysisField::host_f64("native", shape.clone(), accepted.clone()),
+                AnalysisField::host_f64(
+                    "native",
+                    definition.layout(),
+                    shape.clone(),
+                    accepted.clone(),
+                ),
             )
             .unwrap();
             assert!(native_values_match(
@@ -448,7 +481,7 @@ mod tests {
                 let tampered = RecoveredField::new(
                     definition.clone(),
                     sample,
-                    AnalysisField::host_f64("native", shape.clone(), altered),
+                    AnalysisField::host_f64("native", definition.layout(), shape.clone(), altered),
                 )
                 .unwrap();
                 tampered.validate().unwrap();
@@ -461,7 +494,12 @@ mod tests {
             let mut reordered = accepted.clone();
             reordered.swap(0, 1);
             assert!(!native_values_match(
-                &AnalysisField::host_f64("native", shape.clone(), reordered),
+                &AnalysisField::host_f64(
+                    "native",
+                    original.storage().layout.clone(),
+                    shape.clone(),
+                    reordered
+                ),
                 accepted.iter().copied()
             ));
             assert!(!native_values_match(
@@ -477,7 +515,15 @@ mod tests {
 
     #[test]
     fn native_value_comparison_preserves_signed_zero_bits() {
-        let field = runmat_analysis_core::AnalysisField::host_f64("native", vec![1], vec![0.0]);
+        let field = runmat_analysis_core::AnalysisField::host_f64(
+            "native",
+            runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
+            vec![1],
+            vec![0.0],
+        );
         assert!(native_values_match(&field, [0.0].into_iter()));
         assert!(!native_values_match(&field, [-0.0].into_iter()));
     }
@@ -521,4 +567,65 @@ mod tests {
             .unwrap()
             .is_none());
     }
+}
+
+/// Scalar evidence of an acoustic sweep: the scalar outputs each frequency publishes and the
+/// series reductions of the histories over the frequencies. A history sample evaluated at one
+/// entry never stands in for its history. The record was admitted whole, so the copy is
+/// bounded by the caller's admitted workspace.
+pub(super) fn assessment_evidence(
+    artifact: &PersistedAcousticFrequencyArtifact,
+    maximum_resident_bytes: u64,
+) -> Result<super::AssessmentRunEvidence, super::AssessmentStoreError> {
+    use super::AssessmentStoreError as Error;
+    use runmat_analysis_fea::results::assessment::{
+        scalar_observation_evidence, scalar_series_evidence,
+    };
+    validate_artifact(artifact, &artifact.step.run_id).map_err(Error::Invalid)?;
+    let AnalysisStudyStepNumericalResultData::AcousticFrequency(result) =
+        &artifact.step.numerical_result
+    else {
+        return Err(Error::Invalid(
+            "acoustic frequency evidence has another result kind".into(),
+        ));
+    };
+    let histories = result
+        .history_catalog
+        .iter()
+        .flat_map(|catalog| catalog.entries())
+        .filter_map(|entry| match entry {
+            runmat_analysis_fea::results::observation::ObservationPublicationEntry::History(
+                history,
+            ) => Some(&history.history.observation_id),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let scalars = result
+        .entries
+        .iter()
+        .flat_map(|entry| &entry.observations)
+        .filter(|observation| !histories.contains(&observation.observation_id))
+        .filter_map(scalar_observation_evidence)
+        .chain(
+            result
+                .series_reductions
+                .iter()
+                .filter_map(scalar_series_evidence),
+        )
+        .collect::<Vec<_>>();
+    let resident = scalars
+        .len()
+        .checked_mul(std::mem::size_of::<
+            runmat_analysis_fea::results::assessment::ScalarObservationEvidence,
+        >())
+        .and_then(|bytes| u64::try_from(bytes).ok())
+        .ok_or(Error::ResourceLimit)?;
+    if resident > maximum_resident_bytes {
+        return Err(Error::ResourceLimit);
+    }
+    Ok(super::AssessmentRunEvidence {
+        identity: artifact.step.identity.clone(),
+        numerically_acceptable: artifact.step.numerically_acceptable,
+        observation_scalars: scalars,
+    })
 }

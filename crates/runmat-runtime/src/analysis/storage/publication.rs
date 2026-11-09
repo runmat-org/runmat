@@ -393,6 +393,7 @@ impl AnalysisPublicationBuilder {
         step: &AnalysisStudyStepRunData,
         catalog: &runmat_execution::value::PublishedObjectCatalog,
         roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, AnalysisPublicationError> {
         let _source_phase = self.begin_catalog_phase(&catalog.objects)?;
@@ -406,7 +407,7 @@ impl AnalysisPublicationBuilder {
         self.admit(frequency_bytes(step, catalog, roots)?)
             .map_err(|error| error.context("frequency step typed copies and published objects"))?;
         self.store
-            .persist_structural_frequency(step, catalog, roots, source)
+            .persist_structural_frequency(step, catalog, roots, render_topology, source)
             .map_err(Into::into)
     }
     pub fn stage_acoustic_frequency(
@@ -414,6 +415,7 @@ impl AnalysisPublicationBuilder {
         step: &AnalysisStudyStepRunData,
         catalog: &runmat_execution::value::PublishedObjectCatalog,
         roots: &crate::analysis::FrequencySampleArtifactRootInventory,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, AnalysisPublicationError> {
         let _source_phase = self.begin_catalog_phase(&catalog.objects)?;
@@ -427,7 +429,7 @@ impl AnalysisPublicationBuilder {
         self.admit(frequency_bytes(step, catalog, roots)?)
             .map_err(|error| error.context("frequency step typed copies and published objects"))?;
         self.store
-            .persist_acoustic_frequency(step, catalog, roots, source)
+            .persist_acoustic_frequency(step, catalog, roots, render_topology, source)
             .map_err(Into::into)
     }
     /// Reads staged chunks where staging wrote them: records, tiles and histories stay resident
@@ -651,23 +653,13 @@ pub(in crate::analysis) fn typed_resident(
     )
     .map_err(Into::into)
 }
+/// Resident bytes of owned typed publication inputs and their clones. The direct codec builds
+/// no value tree, so these owners are priced as typed storage, not as a materialized tree.
 pub(in crate::analysis) fn resident(
     value: &impl Serialize,
     maximum: u64,
 ) -> Result<u64, AnalysisPublicationError> {
-    profile_serialized(
-        value,
-        CanonicalLimits::new(
-            usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
-                message: "publication budget exceeds address space".into(),
-            })?,
-            100_000_000,
-            65_536,
-            64,
-        ),
-    )
-    .map(|p| p.materialization_resident_bytes_estimate)
-    .map_err(Into::into)
+    typed_resident(value, maximum)
 }
 fn frequency_bytes(
     step: &AnalysisStudyStepRunData,

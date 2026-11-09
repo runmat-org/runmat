@@ -117,7 +117,8 @@ export type AnalysisProcedure = "static"
   | "modal_response_spectrum"
   | "random_response"
   | "nonlinear"
-  | "adaptive";
+  | "adaptive"
+  | "line_parameters";
 
 export interface AnalysisSequence {
   sequence_id: string;
@@ -821,6 +822,12 @@ kind: "recovery" }
   ties: AuthoredExtremaTiePolicy;
 kind: "spatial_reduction" }
   | {
+  reduction: AuthoredPortReduction;
+  source: AuthoredOutputExpression;
+  first: AuthoredRegionSource;
+  second: AuthoredRegionSource;
+kind: "port_reduction" }
+  | {
   source: AuthoredOutputExpression;
   target: AuthoredRegionSource;
 kind: "spatial_selection" }
@@ -888,6 +895,9 @@ export interface AuthoredPly {
   thickness_m: number;
   angle_rad: number;
 }
+
+export type AuthoredPortReduction = "mean_difference"
+  | "transmission_loss";
 
 export interface AuthoredPrescribedStructuralMotion {
   target: AuthoredConstraintTarget;
@@ -1012,7 +1022,7 @@ export interface AuthoredStudy {
   study_id: string;
   geometry: AuthoredGeometryInstance;
   mesh: AuthoredMeshRef;
-  model: AuthoredModelInstance;
+  model?: AuthoredModelInstance;
   inputs: AuthoredInputDefinition[];
   outputs: AuthoredOutput[];
   assessments?: AuthoredAssessment[];
@@ -1273,6 +1283,63 @@ export type CoupledPhysicsFamily = "thermomechanical"
 export interface CrossPowerSpectralDensity {
   values: ComplexSpectralDensity[];
 }
+
+export interface CrossSectionDefinition {
+  layers: CrossSectionLayer[];
+  stackup?: CrossSectionStackupSource;
+  traces: CrossSectionTrace[];
+  enclosure?: CrossSectionEnclosure;
+}
+
+export interface CrossSectionEnclosure {
+  half_width_m: number;
+  air_m: number;
+}
+
+export interface CrossSectionLayer {
+  name: string;
+  thickness_m: number;
+  role: CrossSectionLayerRole;
+}
+
+export type CrossSectionLayerRole = {
+  permittivity: number;
+kind: "dielectric" }
+  | {
+  permittivity: number;
+kind: "solder_mask" }
+  | {
+  fill_permittivity?: number;
+kind: "signal" }
+  | { kind: "plane" };
+
+export interface CrossSectionMeshSettings {
+  edge_size_m?: number;
+  growth?: number;
+  max_size_m?: number;
+}
+
+export interface CrossSectionStackupSource {
+  logical_path: string;
+  stackup_name?: string;
+  content_digest: GeometryDigest;
+}
+
+export interface CrossSectionTrace {
+  name: string;
+  role: CrossSectionTraceRole;
+  layer: string;
+  center_m: number;
+  width_m: number;
+  etch_angle_rad: number;
+  base?: CrossSectionTraceBase;
+}
+
+export type CrossSectionTraceBase = "top"
+  | "bottom";
+
+export type CrossSectionTraceRole = "signal"
+  | "ground";
 
 export interface Curvature {
   per_meter: number;
@@ -1901,7 +1968,8 @@ export interface GeometryDefinitionRef {
 export type GeometryDefinitionSource = ImportedGeometryDefinition & { kind: "imported" }
   | GeometryFeatureGraph & { kind: "constructed" }
   | DerivedGeometryDefinition & { kind: "derived" }
-  | GeneratedGeometryDefinition & { kind: "generated" };
+  | GeneratedGeometryDefinition & { kind: "generated" }
+  | CrossSectionDefinition & { kind: "cross_section" };
 
 export type GeometryDigest = [WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8];
 
@@ -1992,12 +2060,6 @@ export interface GeometryFeatureRegionSelection {
   role: GeometryRegionRole;
   selector: GeometryRegionSelector;
   cardinality: GeometryRegionCardinality;
-}
-
-export interface GeometryNamedSelections {
-  schema_version: WireU16;
-  source_digest: GeometryDigest;
-  regions: GeometryRegionDefinition[];
 }
 
 export interface GeometryParameterDefinition {
@@ -2182,7 +2244,6 @@ export interface ImportedFunctionIdentity {
 }
 
 export interface ImportedGeometryDefinition {
-  named_selections?: GeometryNamedSelections;
   logical_path: string;
   format: GeometrySourceFormat;
   authored_units: LengthUnit | null;
@@ -2454,6 +2515,7 @@ export interface MeshingRequestSettings {
   cancellation: CancellationPolicy;
   cells_across_gap?: WireU32;
   size_controls?: MeshSizeControl[];
+  cross_section?: CrossSectionMeshSettings;
 }
 
 export interface MeshingSizeLimits {
@@ -2466,6 +2528,9 @@ export type ModalCombination = "srss"
   | "complete_quadratic_combination"
   | "ten_percent"
   | "absolute_sum";
+
+export type ModalStaticCorrection = "none"
+  | "applied_loads";
 
 export type ModalTruncationCorrection = "none"
   | "residual_mode"
@@ -2617,7 +2682,9 @@ export type ObservationQuantity = "displacement"
   | "acoustic_pressure"
   | "acoustic_particle_velocity"
   | "acoustic_intensity"
+  | "acoustic_port_intensity"
   | "sound_pressure_level"
+  | "transmission_loss"
   | "fluid_pressure"
   | "fluid_velocity"
   | "vorticity"
@@ -2631,7 +2698,32 @@ export type ObservationQuantity = "displacement"
   | "balance"
   | "constraint_violation"
   | "contact_gap"
-  | "contact_pressure";
+  | "contact_pressure"
+  | "connector_force"
+  | "traction"
+  | "strain_energy_density"
+  | "kinetic_energy"
+  | "external_work"
+  | "support_work"
+  | "damping_dissipation"
+  | "acoustic_energy"
+  | "absorbed_energy"
+  | "angular_velocity"
+  | "angular_acceleration"
+  | "plastic_strain"
+  | "equivalent_plastic_strain"
+  | "modal_mass"
+  | "modal_stiffness"
+  | "mass_ratio"
+  | "mass_orthogonality"
+  | "frequency_separation"
+  | "load_factor"
+  | "equation_scale"
+  | "reynolds_number"
+  | "temperature_jump"
+  | "iteration_count"
+  | "time"
+  | "frequency";
 
 export type ObservationRequest = { field: ObservationSpec }
   | { history: ObservationSpec }
@@ -2667,6 +2759,10 @@ export interface ObservationStoragePolicy {
 }
 
 export type ObservationTarget = { spatial: ExcitationTarget }
+  | { region_pair: {
+  first: RegionTarget;
+  second: RegionTarget;
+} }
   | { point: {
   position: Position;
 } }
@@ -2757,6 +2853,7 @@ export type PhysicalSignal = { displacement: Signal<Displacement> }
   | { temperature_difference: Signal<TemperatureDifference> }
   | { heat_flux: Signal<HeatFlux> }
   | { heat_generation_density: Signal<HeatGenerationDensity> }
+  | { heat_rate: Signal<Power> }
   | { electric_potential: Signal<ElectricPotential> }
   | { electric_current: Signal<ElectricCurrent> }
   | { electric_charge: Signal<ElectricCharge> }
@@ -2809,7 +2906,9 @@ export interface Pressure {
 
 export type ProcedureSettings = "none"
   | { structural_random_response: StructuralRandomResponseSettings }
-  | { structural_nonlinear: StructuralNonlinearSettings };
+  | { structural_nonlinear: StructuralNonlinearSettings }
+  | { structural_modal_basis: StructuralModalBasisSettings }
+  | { structural_modal_frequency: StructuralModalFrequencySettings };
 
 export interface ProcedureStep {
   step_id: ProcedureStepId;
@@ -3396,7 +3495,9 @@ export type SpatialReduction = "none"
   | { moment: {
   about: Position;
 } }
-  | "normal_flux";
+  | "normal_flux"
+  | "mean_difference"
+  | "transmission_loss";
 
 export interface SpecificAcousticImpedance {
   pascal_seconds_per_meter: number;
@@ -3587,6 +3688,14 @@ export type StructuralKinematicHistory = { acceleration_driven: {
 
 export type StructuralKinematics = "small_strain"
   | "large_deformation";
+
+export interface StructuralModalBasisSettings {
+  residual_vector_directions: SpectrumDirection[];
+}
+
+export interface StructuralModalFrequencySettings {
+  static_correction: ModalStaticCorrection;
+}
 
 export type StructuralMotionReconstruction = "piecewise_linear_acceleration_exact";
 

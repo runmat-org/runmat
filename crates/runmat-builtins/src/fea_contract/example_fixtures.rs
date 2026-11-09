@@ -4,7 +4,7 @@
 //! (`docs/simulation/examples/geometry/box.brep`). Face `face_000001` is the
 //! `x = 0` face and `face_000002` the `x = 1 m` face. `box_static.fea` is the
 //! same linear-static study in the `.fea` language, so a reader can run the
-//! example with `runmat fea run box_static.fea` and compare it with the script
+//! example with `runmat run box_static.fea` and compare it with the script
 //! form built by [`fea_box_model_setup`].
 
 use crate::*;

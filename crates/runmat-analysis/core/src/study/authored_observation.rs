@@ -4,15 +4,15 @@ use runmat_geometry_core::GeometryRegionRole;
 
 use crate::{
     AnalysisSequence, AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
-    AuthoredOutput, AuthoredOutputExpression, AuthoredPrincipalSelection, AuthoredRegionSource,
-    AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredVectorComponent,
-    ComplexRepresentation, CompressionPolicy, CoordinateFrame, EntityDimension, ExcitationTarget,
-    ExpectedTopology, ExtremaTiePolicy, FieldLocation, ObservationComponent, ObservationCostPolicy,
-    ObservationId, ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationSpec,
-    ObservationStoragePolicy, ObservationTarget, ObservationValueShape, PartialAccessPolicy,
-    ProcedureStep, ProcedureStepId, RecoveryPolicy, ReductionPolicy, RegionTarget, RetentionPolicy,
-    SamplingPolicy, SeriesReduction, SignConvention, SignalPrecision, SpatialReduction,
-    TargetCardinality,
+    AuthoredOutput, AuthoredOutputExpression, AuthoredPortReduction, AuthoredPrincipalSelection,
+    AuthoredRegionSource, AuthoredSeriesReduction, AuthoredSpatialReduction,
+    AuthoredVectorComponent, ComplexRepresentation, CompressionPolicy, CoordinateFrame,
+    EntityDimension, ExcitationTarget, ExpectedTopology, ExtremaTiePolicy, FieldLocation,
+    ObservationComponent, ObservationCostPolicy, ObservationId, ObservationPurpose,
+    ObservationQuantity, ObservationRequest, ObservationSpec, ObservationStoragePolicy,
+    ObservationTarget, ObservationValueShape, PartialAccessPolicy, ProcedureStep, ProcedureStepId,
+    RecoveryPolicy, ReductionPolicy, RegionTarget, RetentionPolicy, SamplingPolicy,
+    SeriesReduction, SignConvention, SignalPrecision, SpatialReduction, TargetCardinality,
 };
 
 use super::authored_output::field_domain;
@@ -215,6 +215,29 @@ fn lower_expression(
             ) {
                 draft.spec.output_location = FieldLocation::Global;
             }
+            Ok(draft)
+        }
+        AuthoredOutputExpression::PortReduction {
+            reduction,
+            source,
+            first,
+            second,
+        } => {
+            let mut draft = lower_expression(source, steps, outputs)?;
+            draft.kind = ObservationKind::Reduction;
+            draft.spec.target = ObservationTarget::RegionPair {
+                first: region_target(first)?,
+                second: region_target(second)?,
+            };
+            draft.spec.reduction = Some(ReductionPolicy {
+                spatial: match reduction {
+                    AuthoredPortReduction::MeanDifference => SpatialReduction::MeanDifference,
+                    AuthoredPortReduction::TransmissionLoss => SpatialReduction::TransmissionLoss,
+                },
+                series: SeriesReduction::None,
+                extrema_ties: ExtremaTiePolicy::FirstCanonical,
+            });
+            draft.spec.output_location = FieldLocation::Global;
             Ok(draft)
         }
         AuthoredOutputExpression::SpatialSelection { source, target } => {

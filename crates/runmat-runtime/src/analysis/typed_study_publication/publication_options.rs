@@ -187,12 +187,10 @@ fn heterogeneous_options(
             };
             (template.backend, frequency_options(solver))
         }
-        StructuralStepWorkload::ModalFrequency { .. } => {
-            return Err(
-                "ordinary modal-frequency typed publication has no completed study result variant"
-                    .into(),
-            )
-        }
+        StructuralStepWorkload::ModalFrequency { template } => (
+            template.backend,
+            frequency_options(AnalysisStructuralFrequencySolver::ModalReduced),
+        ),
     })
 }
 

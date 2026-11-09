@@ -16,7 +16,7 @@ use super::{
 
 const STUDY_WORKLOADS_PREFIX: &[u8] = b"runmat-structural-study-workloads\0";
 const STUDY_WORKLOADS_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 const MAXIMUM_TRANSIENT_BLOCK_INTERVALS: u64 = 1_000_000;
 
 mod prestress_prefix;

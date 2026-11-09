@@ -9,7 +9,7 @@ Meshing has three entry points:
 
 | Goal | Entry point |
 | --- | --- |
-| Mesh as part of an analysis | Declare `mesh <id> on geometry.<id>` in typed `.fea` source and run `runmat fea run study.fea` |
+| Mesh as part of an analysis | Declare `mesh <id> on geometry.<id>` in typed `.fea` source and run `runmat run study.fea` |
 | Generate canonical artifacts directly from a shell | `runmat mesh part.step` |
 | Generate, inspect, and display a mesh in RunMat code | `part = geometry.load(...); solverMesh = meshing.generate(part); mesh(solverMesh)` |
 
@@ -82,9 +82,9 @@ declaration says how to discretize that geometry. The study selects the mesh; ma
 declared separately on the solid region. Check the complete source before running it:
 
 ```sh
-runmat fea check bracket.fea
-runmat fea plan bracket.fea
-runmat fea run bracket.fea
+runmat check bracket.fea
+runmat plan bracket.fea
+runmat run bracket.fea
 ```
 
 `check` resolves modules, types, units, regions, and declaration contracts. `plan` reports the
@@ -116,8 +116,8 @@ mesh bracket on geometry.bracket {
 Check and run it with:
 
 ```sh
-runmat fea check studies/bracket_static.fea
-runmat fea run studies/bracket_static.fea
+runmat check studies/bracket_static.fea
+runmat run studies/bracket_static.fea
 ```
 
 The [linear static guide](./physics/structural) shows a complete study with its procedure,

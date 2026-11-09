@@ -161,6 +161,9 @@ pub(super) async fn prepare_geometry_source(
         GeometryDefinitionSource::Generated(_) => {
             prepare_generated_source(source, definition, bindings, access).await
         }
+        GeometryDefinitionSource::CrossSection(_) => Err(
+            "a cross-section is meshed and solved by the transmission-line solver; no geometry kernel materializes it".into(),
+        ),
         GeometryDefinitionSource::Derived(derived) => {
             let (dependency_index, dependency) = dependencies
                 .iter()

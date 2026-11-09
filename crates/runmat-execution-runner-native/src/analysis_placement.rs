@@ -12,8 +12,8 @@ use runmat_execution_artifact::{ArtifactAccess, ArtifactPublishedObjectSource};
 use runmat_runtime::analysis::{
     analysis_study_content_digest, AnalysisStudySpec, PreparedStructuralStudy,
     StructuralStudyBucklingNumericalResult, StructuralStudyExecutionFailure,
-    StructuralStudyFrequencyNumericalResult, StructuralStudyModalNumericalResult,
-    StructuralStudyModalResponseSpectrumNumericalResult,
+    StructuralStudyFrequencyNumericalResult, StructuralStudyModalFrequencyNumericalResult,
+    StructuralStudyModalNumericalResult, StructuralStudyModalResponseSpectrumNumericalResult,
     StructuralStudyModalTransientNumericalResult, StructuralStudyNumericalResult,
     StructuralStudyPlacementEntry, StructuralStudyPlacementExecutor,
     StructuralStudyPlacementFuture, StructuralStudyPlacementResult,
@@ -24,8 +24,8 @@ use runmat_runtime::analysis::{
 
 use crate::{
     execute_structural_buckling_study_locally, execute_structural_frequency_locally_with_source,
-    execute_structural_modal_locally, execute_structural_modal_response_spectrum_locally,
-    execute_structural_modal_transient_locally,
+    execute_structural_modal_frequency_study_locally_with_source, execute_structural_modal_locally,
+    execute_structural_modal_response_spectrum_locally, execute_structural_modal_transient_locally,
     execute_structural_prestressed_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_study_locally, execute_structural_random_response_locally,
@@ -233,6 +233,8 @@ pub async fn execute_structural_workloads_locally(
             .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?,
     };
     let maximum_resident_bytes = authored_resident_bytes.min(machine_resident_bytes);
+    // Every structural task's output inventory derives from this same admitted budget.
+    let inventory = ObjectInventoryLimits::admitted(maximum_resident_bytes);
     let mut required_capabilities = BTreeSet::new();
     required_capabilities.insert(Capability::ProcessIsolation);
     execution_config.max_workers = workers.max(1);
@@ -247,7 +249,7 @@ pub async fn execute_structural_workloads_locally(
             memory_bytes: maximum_resident_bytes,
             scratch_bytes: maximum_resident_bytes,
             max_wall_millis: maximum_wall_millis,
-            max_artifact_bytes: ObjectInventoryLimits::default().max_total_bytes,
+            max_artifact_bytes: inventory.max_total_bytes,
             max_egress_bytes: 0,
             max_relay_bytes: 0,
             accelerators: accelerator_requests.clone(),
@@ -281,7 +283,7 @@ pub async fn execute_structural_workloads_locally(
                         artifact_access: access,
                         program_revision: revision,
                         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                        inventory_limits: ObjectInventoryLimits::default(),
+                        inventory_limits: inventory,
                         required_capabilities: BTreeSet::new(),
                         accelerator_requests,
                         local_execution,
@@ -330,7 +332,7 @@ pub async fn execute_structural_workloads_locally(
                             artifact_access: access.clone(),
                             program_revision: revision,
                             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                            inventory_limits: ObjectInventoryLimits::default(),
+                            inventory_limits: inventory,
                             required_capabilities: BTreeSet::new(),
                             accelerator_requests,
                             local_execution,
@@ -416,6 +418,15 @@ pub async fn execute_structural_workloads_locally(
                 ),
                 _ => false,
             };
+            let consumer_is_modal_frequency = match &authored {
+                StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
+                    workloads.get(consumer_step_id),
+                    Some(
+                        runmat_analysis_fea::execution::StructuralStepWorkload::ModalFrequency { .. }
+                    )
+                ),
+                _ => false,
+            };
             let consumer_is_random_response = match &authored {
                 StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
                     workloads.get(consumer_step_id),
@@ -441,7 +452,7 @@ pub async fn execute_structural_workloads_locally(
                                 artifact_access: access.clone(),
                                 program_revision: revision,
                                 chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                                inventory_limits: ObjectInventoryLimits::default(),
+                                inventory_limits: inventory,
                                 required_capabilities: BTreeSet::new(),
                                 accelerator_requests,
                                 local_execution,
@@ -488,7 +499,7 @@ pub async fn execute_structural_workloads_locally(
                             artifact_access: access,
                             program_revision: revision,
                             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                            inventory_limits: ObjectInventoryLimits::default(),
+                            inventory_limits: inventory,
                             required_capabilities: BTreeSet::new(),
                             accelerator_requests,
                             local_execution,
@@ -520,7 +531,7 @@ pub async fn execute_structural_workloads_locally(
                         artifact_access: access,
                         program_revision: revision,
                         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                        inventory_limits: ObjectInventoryLimits::default(),
+                        inventory_limits: inventory,
                         required_capabilities: BTreeSet::new(),
                         accelerator_requests,
                         local_execution,
@@ -554,7 +565,7 @@ pub async fn execute_structural_workloads_locally(
                         artifact_access: access,
                         program_revision: revision,
                         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                        inventory_limits: ObjectInventoryLimits::default(),
+                        inventory_limits: inventory,
                         required_capabilities: BTreeSet::new(),
                         accelerator_requests,
                     },
@@ -586,6 +597,49 @@ pub async fn execute_structural_workloads_locally(
                     )),
                 );
             }
+            if consumer_is_modal_frequency {
+                let (completed, source) =
+                    execute_structural_modal_frequency_study_locally_with_source(
+                        execution_config,
+                        runmat_analysis_execution::StructuralModalFrequencyStudyPreparation {
+                            local_execution,
+                            authored_study_digest: study_digest,
+                            frozen_project_digest,
+                            workloads: authored,
+                            mesh: (*mesh).clone(),
+                            artifact_access: access.clone(),
+                            program_revision: revision,
+                            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                            inventory_limits: inventory,
+                            required_capabilities: BTreeSet::new(),
+                            accelerator_requests,
+                        },
+                        policy,
+                    )
+                    .await?;
+                let (catalog, artifact_roots) = completed.frequency.published_artifacts(&access)?;
+                let frequency = StructuralStudyFrequencyNumericalResult::new(
+                    frozen_project_digest,
+                    completed.resolved_workload,
+                    completed.frequency.result.result,
+                    completed.frequency.publication,
+                    catalog,
+                    artifact_roots,
+                    ArtifactPublishedObjectSource::new(source),
+                )
+                .map_err(crate::NativeExecutionError::Configuration)?;
+                return Ok(StructuralStudyNumericalResult::StructuralModalFrequency(
+                    Box::new(StructuralStudyModalFrequencyNumericalResult {
+                        frozen_project_digest,
+                        modal_step_id: producer_step_id.clone(),
+                        frequency_step_id: consumer_step_id.clone(),
+                        modal_result: completed.modal.result,
+                        modal_numerical_receipt: completed.modal.numerical_receipt,
+                        basis_state: completed.basis_state.state,
+                        frequency,
+                    }),
+                ));
+            }
             if consumer_is_random_response {
                 let completed = execute_structural_random_response_locally(
                     execution_config,
@@ -598,7 +652,7 @@ pub async fn execute_structural_workloads_locally(
                         artifact_access: access,
                         program_revision: revision,
                         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                        inventory_limits: ObjectInventoryLimits::default(),
+                        inventory_limits: inventory,
                         required_capabilities: BTreeSet::new(),
                         accelerator_requests,
                     },
@@ -639,7 +693,7 @@ pub async fn execute_structural_workloads_locally(
                     artifact_access: access,
                     program_revision: revision,
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                    inventory_limits: ObjectInventoryLimits::default(),
+                    inventory_limits: inventory,
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests,
                 },
@@ -672,7 +726,7 @@ pub async fn execute_structural_workloads_locally(
                     workloads,
                     mesh: Some((*mesh).clone()),
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                    inventory_limits: ObjectInventoryLimits::default(),
+                    inventory_limits: inventory,
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests,
                     local_execution,
@@ -720,7 +774,7 @@ pub async fn execute_structural_workloads_locally(
                     program_revision: revision,
                     artifact_access: access.clone(),
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                    inventory_limits: ObjectInventoryLimits::default(),
+                    inventory_limits: inventory,
                     observation_limits:
                         runmat_analysis_fea::results::observation::ObservationLimits::default(),
                 },
@@ -757,7 +811,7 @@ pub async fn execute_structural_workloads_locally(
                     mesh: (*mesh).clone(),
                     prestress_state: None,
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                    inventory_limits: ObjectInventoryLimits::default(),
+                    inventory_limits: inventory,
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests,
                 },
@@ -789,7 +843,7 @@ pub async fn execute_structural_workloads_locally(
                     artifact_access: access,
                     program_revision: revision,
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                    inventory_limits: ObjectInventoryLimits::default(),
+                    inventory_limits: inventory,
                 },
             )
             .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;

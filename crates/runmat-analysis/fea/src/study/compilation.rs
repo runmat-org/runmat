@@ -196,7 +196,8 @@ pub fn compile_analysis_study(
         regions,
         materials,
     })?;
-    let model = realize_formulation_properties(realized, mesh)?;
+    let mut model = realize_formulation_properties(realized, mesh)?;
+    heat_rate::distribute_heat_rate_sources(&mut model, mesh)?;
     let properties = compile_study_properties(&model, mesh)?;
     let compiled = CompiledAnalysisStudy {
         module_path: study.module_path.clone(),
@@ -324,7 +325,14 @@ pub enum AnalysisStudyCompilationError {
     Formulation(#[from] PropertyRealizationError),
     #[error(transparent)]
     Properties(#[from] PropertyCompilationError),
+    #[error("heat generation `{excitation_id}`: {reason}")]
+    HeatRate {
+        excitation_id: String,
+        reason: String,
+    },
 }
+
+mod heat_rate;
 
 #[cfg(test)]
 mod tests;

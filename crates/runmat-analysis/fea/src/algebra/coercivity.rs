@@ -14,8 +14,11 @@ const RHS_DOMAIN: &str = "fea-coercivity-rhs";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 const SYMMETRY_RELATIVE_TOLERANCE: f64 = 1.0e-12;
 
+mod conduction;
 mod elastic;
 mod energy;
+
+pub use conduction::{ScalarConductionError, ScalarConductionProof};
 mod symbolic;
 
 pub(crate) use symbolic::CoercivityWorkEnvelope;
@@ -126,6 +129,8 @@ pub enum CoercivityError {
     SymbolicOrdering,
     #[error("coercivity proof was cancelled")]
     Cancelled,
+    #[error("coercivity factorization usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
     #[error("coercivity evidence does not match its prepared operator or right-hand side")]
     BindingMismatch,
     #[error("coercivity evidence identity encoding failed: {0}")]
@@ -134,6 +139,8 @@ pub enum CoercivityError {
     Energy(#[from] super::EnergyError),
     #[error(transparent)]
     ElasticRigidity(#[from] super::ElasticRigidityError),
+    #[error(transparent)]
+    ScalarConduction(#[from] ScalarConductionError),
     #[error("anchored local energy did not establish coercivity: graph lower bound {}, error upper bound {}", f64::from_bits(*.graph_lower_bits), f64::from_bits(*.error_upper_bits))]
     EnergyIndeterminate {
         graph_lower_bits: u64,
@@ -177,6 +184,16 @@ enum CoercivityProof {
         components: u64,
         element_margin_rounding_factor_bits: u64,
         anchor_rank_ratio_bits: u64,
+        scalar_operations: u64,
+        resident_bytes: u64,
+    },
+    /// Positive conductivity, nonnegative convection and interface conductance, and an anchor on
+    /// every component of the operator graph ([`ScalarConductionProof`]): positive definite in
+    /// exact arithmetic, with no eigenvalue bound. The normwise backward error accepts the solve.
+    ScalarConduction {
+        components: u64,
+        prescribed_components: u64,
+        convection_components: u64,
         scalar_operations: u64,
         resident_bytes: u64,
     },
@@ -224,6 +241,11 @@ impl CoercivityCertificate {
                 scalar_operations,
                 resident_bytes,
                 ..
+            }
+            | CoercivityProof::ScalarConduction {
+                scalar_operations,
+                resident_bytes,
+                ..
             } => (dimension, 0, scalar_operations, resident_bytes),
         }
     }
@@ -268,30 +290,7 @@ impl CoercivityCertificate {
         {
             return Err(CoercivityError::IncompatibleOperator.into());
         }
-        let diagonal = matrix.diagonal_values();
-        if let Some(pivot) = diagonal
-            .iter()
-            .position(|value| !value.is_finite() || *value <= 0.0)
-        {
-            return Err(CoercivityError::NonPositivePivot { pivot }.into());
-        }
-        for row in 0..dimension {
-            for entry in matrix.pattern().row_range(row) {
-                let column = matrix.pattern().column(entry);
-                let value = matrix.values()[entry];
-                let transpose = matrix.get(column, row);
-                // An entry of a symmetric positive operator is bounded by sqrt(a_ii a_jj); the
-                // roundoff of an assembled or reduced entry scales with that bound, not with the
-                // entry, which cancellation can make arbitrarily small.
-                let symmetry_scale = value
-                    .abs()
-                    .max(transpose.abs())
-                    .max((diagonal[row] * diagonal[column]).sqrt());
-                if (value - transpose).abs() > symmetry_scale * SYMMETRY_RELATIVE_TOLERANCE {
-                    return Err(CoercivityError::AsymmetricValues.into());
-                }
-            }
-        }
+        let diagonal = require_symmetric(matrix)?;
         let arrays = crate::solve::shared_sparse::CsrArrays::of(matrix);
         let options = DirectOptions {
             refinement_steps: 2,
@@ -376,6 +375,7 @@ impl CoercivityCertificate {
                 }
             }
             runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
+            runmat_sparse_solvers::SolverError::Usage(error) => CoercivityError::Usage(error),
             _ => CoercivityError::SymbolicOrdering,
         })?;
         // Scaled pivots l_jj² / a_jj are the pivots of D^{-1/2} A D^{-1/2}; a tiny one is a
@@ -433,6 +433,15 @@ impl CoercivityCertificate {
 
     fn proof_is_positive(&self) -> bool {
         let bits = match self.proof {
+            CoercivityProof::ScalarConduction {
+                components,
+                prescribed_components,
+                convection_components,
+                ..
+            } => {
+                return components > 0
+                    && prescribed_components.checked_add(convection_components) == Some(components)
+            }
             CoercivityProof::SparseCholesky {
                 minimum_scaled_pivot_bits,
                 ..
@@ -606,6 +615,36 @@ impl PreparedSolverAdmissibility {
             ),
         )
     }
+}
+
+/// The diagonal of `matrix` after checking it positive and the values symmetric to a
+/// roundoff-relative tolerance.
+pub(super) fn require_symmetric(matrix: &RealSparseMatrix) -> Result<Vec<f64>, CoercivityError> {
+    let diagonal = matrix.diagonal_values();
+    if let Some(pivot) = diagonal
+        .iter()
+        .position(|value| !value.is_finite() || *value <= 0.0)
+    {
+        return Err(CoercivityError::NonPositivePivot { pivot });
+    }
+    for row in 0..matrix.rows() {
+        for entry in matrix.pattern().row_range(row) {
+            let column = matrix.pattern().column(entry);
+            let value = matrix.values()[entry];
+            let transpose = matrix.get(column, row);
+            // An entry of a symmetric positive operator is bounded by sqrt(a_ii a_jj); the
+            // roundoff of an assembled or reduced entry scales with that bound, not with the
+            // entry, which cancellation can make arbitrarily small.
+            let symmetry_scale = value
+                .abs()
+                .max(transpose.abs())
+                .max((diagonal[row] * diagonal[column]).sqrt());
+            if (value - transpose).abs() > symmetry_scale * SYMMETRY_RELATIVE_TOLERANCE {
+                return Err(CoercivityError::AsymmetricValues);
+            }
+        }
+    }
+    Ok(diagonal)
 }
 
 fn digest<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CoercivityError> {

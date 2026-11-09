@@ -6,7 +6,9 @@ mod authoring_feature_validation;
 mod authoring_tests;
 mod authoring_value;
 mod canonical;
+mod cross_section;
 pub use canonical::GeometryCanonicalControl;
+pub use cross_section::*;
 mod document;
 mod exact_artifact;
 mod exact_contacts;
@@ -69,7 +71,3 @@ pub use units::LengthUnit;
 
 #[cfg(test)]
 mod exact_topology_tests;
-mod named_selections;
-pub use named_selections::{
-    geometry_selection_metadata_path, is_geometry_selection_metadata_path, GeometryNamedSelections,
-};

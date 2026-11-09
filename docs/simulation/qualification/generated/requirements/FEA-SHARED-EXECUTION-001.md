@@ -1,6 +1,6 @@
 # FEA-SHARED-EXECUTION-001: Placement-independent logical studies and governed scheduling
 
-0 PASS, 6 PARTIAL, 0 FAIL, 138 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 7 PARTIAL, 0 FAIL, 137 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## logical_study_identity
 
@@ -10,7 +10,7 @@ Evidence kind: ExecutionEquivalence. Criterion: A canonical logical study identi
 |---|---|---|---|---|
 | shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | native_process | PARTIAL | `runmat[test:check_cli]::a_script_running_the_same_study_twice_publishes_two_attempts` (crates/runmat-cli/tests/check_cli.rs:1069) - Two executions of one random-response study from a script keep one definition run id, publish distinct attempts, and the definition id resolves to the latest at... |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
@@ -132,7 +132,7 @@ Evidence kind: ExecutionEquivalence. Criterion: A failed independent task may re
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | PARTIAL | `runmat-execution-runner-native[lib]::remote::pool_tests::remote_rank_failure_releases_a_peer_blocked_in_a_collective` (crates/runmat-execution-runner-native/src/remote/pool_tests.rs:2013) - A remote rank failure releases a peer blocked in a collective within five seconds and surfaces the primary structured error with its source ordinal; SPMD runtim... |
+| shared_infrastructure | canonical_mixed_topology | remote_execution | PARTIAL | `runmat-execution-runner-native[lib]::remote::pool_tests::remote_rank_failure_releases_a_peer_blocked_in_a_collective` (crates/runmat-execution-runner-native/src/remote/pool_tests.rs:2186) - A remote rank failure releases a peer blocked in a collective within five seconds and surfaces the primary structured error with its source ordinal; SPMD runtim... |
 | shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | domain_decomposed | PARTIAL | `runmat-execution-runner-native[lib]::driver::collective::tests::failure_before_submission_fences_a_late_collective_request` (crates/runmat-execution-runner-native/src/driver/collective.rs:314) - A collective request submitted after a rank failure is fenced and fails with the original reason; the gang then completes a later barrier. In-process broker onl... |
 | shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
@@ -178,7 +178,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Parallel element/cell assembly i
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::algebra::element_assembly::tests::assembly_is_bitwise_identical_to_the_serial_element_loop_for_every_thread_count` (crates/runmat-analysis/fea/src/algebra/element_assembly/tests.rs:134) - Parallel element assembly into partition-local buffers merges to a bit-identical result for every thread count; memory ceilings are not asserted. |
+| shared_infrastructure | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::algebra::element_assembly::tests::assembly_is_bitwise_identical_to_the_serial_element_loop_for_every_thread_count` (crates/runmat-analysis/fea/src/algebra/element_assembly/tests.rs:331) - Parallel element assembly into partition-local buffers merges to a bit-identical result for every thread count; memory ceilings are not asserted. |
 | shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
 
@@ -208,7 +208,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Begin with embarrassingly parall
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::algebra::element_assembly::tests::assembly_is_bitwise_identical_to_the_serial_element_loop_for_every_thread_count` (crates/runmat-analysis/fea/src/algebra/element_assembly/tests.rs:134) - Parallel assembly equals the serial reference bit for bit; the policy for remote and distributed equivalence is not exercised.<br>`runmat-analysis-fea[lib]::algebra::reference::persistent_pool_tests::installed_pool_csr_rows_preserve_serial_bits_and_output_shape` (crates/runmat-analysis/fea/src/algebra/reference.rs:532) - Pooled CSR products equal the serial reference bitwise. |
+| shared_infrastructure | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::algebra::element_assembly::tests::assembly_is_bitwise_identical_to_the_serial_element_loop_for_every_thread_count` (crates/runmat-analysis/fea/src/algebra/element_assembly/tests.rs:331) - Parallel assembly equals the serial reference bit for bit; the policy for remote and distributed equivalence is not exercised.<br>`runmat-analysis-fea[lib]::algebra::reference::persistent_pool_tests::installed_pool_csr_rows_preserve_serial_bits_and_output_shape` (crates/runmat-analysis/fea/src/algebra/reference.rs:534) - Pooled CSR products equal the serial reference bitwise. |
 | shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
 

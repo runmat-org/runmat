@@ -4,7 +4,7 @@ use runmat_analysis_core::{
     LaminatePlyModel, LaminateShellSectionModel, MaterialCapability, PlyOrderDirection,
     PropertyRegionTarget, ShellReferenceSurface, ShellSectionModel,
 };
-use runmat_canonical_codec::serialized_materialization_resident_bytes_estimate;
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::fixtures::{
     canonical_tetrahedron_solver_mesh, three_region_tetrahedron_solver_mesh_with_order,
 };
@@ -17,14 +17,17 @@ fn solid_model(mesh: &SolverMeshArtifact) -> AnalysisModel {
     model
 }
 
-fn assert_profile_envelope(compiled: &CompiledPropertyMap, estimated_resident_bytes: u64) {
-    let owned_profile = serialized_materialization_resident_bytes_estimate(
-        compiled,
-        CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
-    )
-    .unwrap();
-    // Comparison of shared-codec projections, not an allocator-exact peak measurement.
-    assert!(estimated_resident_bytes >= owned_profile);
+/// Materializes `prepared` (owned inventories and both identities) and checks the measured
+/// requested-heap peak against the prepared estimate.
+fn materialize_within_estimate(prepared: PreparedProperties<'_>) -> CompiledPropertyMap {
+    let estimate = prepared.estimated_resident_bytes;
+    let (compiled, _, peak) =
+        crate::topology::measure_test_allocations(|| prepared.materialize().unwrap());
+    assert!(
+        peak as u64 <= estimate,
+        "materialization peak {peak} exceeds the estimate {estimate}"
+    );
+    compiled
 }
 
 #[test]
@@ -34,8 +37,7 @@ fn exact_admission_boundary_preserves_owned_properties_and_identities() {
         let model = solid_model(&mesh);
         let prepared = PreparedProperties::prepare(&model, Some(&mesh), u64::MAX).unwrap();
         let required = prepared.estimated_resident_bytes;
-        let expected = prepared.materialize().unwrap();
-        assert_profile_envelope(&expected, required);
+        let expected = materialize_within_estimate(prepared);
         assert!(matches!(
             PreparedProperties::prepare(&model, Some(&mesh), required - 1),
             Err(PropertyCompilationError::ResourceCeiling {
@@ -137,7 +139,7 @@ fn heterogeneous_model(mesh: &SolverMeshArtifact, large_occurrences: usize) -> A
 }
 
 #[test]
-fn selected_metadata_scales_with_actual_material_occurrences() {
+fn selected_metadata_charges_one_element_encoding_per_shared_material() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = three_region_tetrahedron_solver_mesh_with_order(order);
         assert_eq!(mesh.topology.volume_elements.len(), 3);
@@ -150,9 +152,7 @@ fn selected_metadata_scales_with_actual_material_occurrences() {
             model.materials[1].name = "x".repeat(1025);
             let grown = PreparedProperties::prepare(&model, Some(&mesh), u64::MAX).unwrap();
             deltas.push(grown.selected_metadata_bytes - baseline);
-            let required = grown.estimated_resident_bytes;
-            let compiled = grown.materialize().unwrap();
-            assert_profile_envelope(&compiled, required);
+            let compiled = materialize_within_estimate(grown);
             for (index, element) in mesh.topology.volume_elements.iter().enumerate() {
                 let expected = if index < occurrences {
                     "mat_large"
@@ -170,10 +170,11 @@ fn selected_metadata_scales_with_actual_material_occurrences() {
             }
             super::super::identity::tests::assert_reference_identity(&compiled);
         }
-        // The direct encoding writes the grown name once per selected occurrence; held-buffer
-        // peaks are not additive, so growth is bounded below by the written bytes.
+        // Solid occurrences share one material owner, and identity encodes one element at a
+        // time: the grown name is charged once, in the largest element's encoding, however many
+        // elements select it.
         assert!(deltas[0] >= 1000);
-        assert!(deltas[1] >= 3 * 1000 && deltas[1] > deltas[0]);
+        assert_eq!(deltas[1], deltas[0]);
     }
 }
 
@@ -274,9 +275,7 @@ fn explicit_profile_envelopes_cover_beam_shell_and_repeated_laminate_materials()
     ] {
         let model = fixture_model(fixture);
         let prepared = PreparedProperties::prepare(&model, None, u64::MAX).unwrap();
-        let required = prepared.estimated_resident_bytes;
-        let compiled = prepared.materialize().unwrap();
-        assert_profile_envelope(&compiled, required);
+        let compiled = materialize_within_estimate(prepared);
         super::super::identity::tests::assert_reference_identity(&compiled);
     }
     let model = laminate_model();
@@ -289,9 +288,7 @@ fn explicit_profile_envelopes_cover_beam_shell_and_repeated_laminate_materials()
         grown_model.materials[material_index].name = "x".repeat(1025);
         let grown = PreparedProperties::prepare(&grown_model, None, u64::MAX).unwrap();
         deltas.push(grown.selected_metadata_bytes - baseline);
-        let required = grown.estimated_resident_bytes;
-        let compiled = grown.materialize().unwrap();
-        assert_profile_envelope(&compiled, required);
+        let compiled = materialize_within_estimate(grown);
         super::super::identity::tests::assert_reference_identity(&compiled);
     }
     // Material 0 fills two plies and material 1 one ply of every element.

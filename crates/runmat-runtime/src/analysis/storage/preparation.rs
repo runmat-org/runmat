@@ -96,6 +96,7 @@ pub(super) fn prepare_run_artifact_with_admission(
                     shape: field.shape.clone(),
                     template: AnalysisField::host_f64(
                         &field.field_id,
+                        field.layout.clone(),
                         field.shape.clone(),
                         Vec::new(),
                     ),

@@ -39,7 +39,8 @@ pub struct RealizedStudy {
     pub study_id: String,
     pub geometry: RealizedGeometryInstance,
     pub mesh: AuthoredMeshRef,
-    /// The realized root model selected by the study.
+    /// The realized root model selected by the study. A study without a model (a
+    /// `line_parameters` study) realizes an empty model named after the study.
     pub model: AuthoredModel,
     /// Transitive included models in dependency-first order. The root model is not repeated here.
     pub included_models: Vec<AuthoredModel>,
@@ -73,9 +74,16 @@ impl AuthoredStudy {
         geometry: &GeometryDefinition,
         provided_inputs: &[AuthoredStudyInputBinding],
     ) -> Result<RealizedStudy, AuthoredStudyRealizationError> {
-        let model = models
-            .get(&self.model.model)
-            .ok_or_else(|| AuthoredStudyRealizationError::MissingModel(self.model.model.clone()))?;
+        let empty;
+        let model = match &self.model {
+            Some(instance) => models.get(&instance.model).ok_or_else(|| {
+                AuthoredStudyRealizationError::MissingModel(instance.model.clone())
+            })?,
+            None => {
+                empty = AuthoredModel::empty(&self.module_path, &self.study_id);
+                &empty
+            }
+        };
         self.validate(model, geometry)
             .map_err(AuthoredStudyRealizationError::InvalidStudy)?;
         let included_models = resolve_included_models(model, models)?;
@@ -296,8 +304,8 @@ fn bind_model_inputs(
 ) -> Result<BTreeMap<String, AuthoredInputValue>, AuthoredStudyRealizationError> {
     let arguments = study
         .model
-        .arguments
         .iter()
+        .flat_map(|model| &model.arguments)
         .map(|argument| (argument.input_id.as_str(), &argument.value))
         .collect::<BTreeMap<_, _>>();
     let mut values = BTreeMap::new();
@@ -414,6 +422,16 @@ fn substitute_output_regions(
         | crate::AuthoredOutputExpression::SpatialSelection { source, target } => {
             substitute_output_regions(source, inputs)?;
             substitute_region(target, inputs)
+        }
+        crate::AuthoredOutputExpression::PortReduction {
+            source,
+            first,
+            second,
+            ..
+        } => {
+            substitute_output_regions(source, inputs)?;
+            substitute_region(first, inputs)?;
+            substitute_region(second, inputs)
         }
         crate::AuthoredOutputExpression::AnalysisField { .. }
         | crate::AuthoredOutputExpression::OutputReference { .. } => Ok(()),

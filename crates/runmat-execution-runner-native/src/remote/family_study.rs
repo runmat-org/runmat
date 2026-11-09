@@ -59,6 +59,16 @@ pub(super) async fn execute(
             ))
         }
     };
+    // The remote worker's admitted task memory is the budget its plan selects within.
+    let task_resources = match super::exact_structural_study::admit_analysis_task_resources(
+        resources,
+        &decoded.analysis_accelerator_requests,
+        decoded.local_execution,
+        decoded.memory_per_worker_bytes,
+    ) {
+        Ok(resources) => resources,
+        Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error)),
+    };
     let mut terminal = None;
     let mut completed_inputs = Vec::new();
     let planned = crate::study_family::plan_family_study(
@@ -74,6 +84,7 @@ pub(super) async fn execute(
             artifact_access: &decoded.artifact_access,
             program_revision: &request.recipe.program_revision,
             local_execution: decoded.local_execution,
+            worker_memory: &|| Ok(task_resources.memory_bytes),
         },
         &mut |model| match super::input_materialization::apply_to_model(
             model,
@@ -95,15 +106,6 @@ pub(super) async fn execute(
     }
     let planned = match planned {
         Ok(planned) => planned,
-        Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error)),
-    };
-    let task_resources = match super::exact_structural_study::admit_analysis_task_resources(
-        resources,
-        &decoded.analysis_accelerator_requests,
-        decoded.local_execution,
-        decoded.memory_per_worker_bytes,
-    ) {
-        Ok(resources) => resources,
         Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error)),
     };
     let policy = crate::study_family::FamilyStudyExecutionPolicy {

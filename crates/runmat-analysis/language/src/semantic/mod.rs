@@ -10,6 +10,7 @@ mod material;
 mod mesh;
 mod model;
 mod procedure;
+mod pending;
 mod program;
 mod resolution;
 mod scope;

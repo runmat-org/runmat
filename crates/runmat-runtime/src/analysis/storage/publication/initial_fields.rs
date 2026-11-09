@@ -97,7 +97,16 @@ impl AnalysisPublicationBuilder {
             let recovered = RecoveredField::new(
                 entry.definition.clone(),
                 entry.sample,
-                AnalysisField::host_f64(&field.field_id, field.shape.clone(), values),
+                AnalysisField::host_f64(
+                    &field.field_id,
+                    // The staged field keeps the published state (ordinal) its producer stored.
+                    entry
+                        .definition
+                        .layout()
+                        .with_ordinal(field.template.layout.ordinal),
+                    field.shape.clone(),
+                    values,
+                ),
             )
             .map_err(|e| e.to_string())?;
             if recovered.identity() != entry.field {

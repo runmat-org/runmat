@@ -2,6 +2,7 @@ use runmat_analysis_core::{
     AnalysisField, AnalysisInterfaceKind, AnalysisModel, AnalysisProcedure, CfdDomain,
     CoupledPhysicsFamily, PhysicsFamily, ThermalInterfaceTransfer,
 };
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 use crate::{
     diagnostics::FeaDiagnostic, fea_cht_energy_residual_field_id,
@@ -102,11 +103,13 @@ pub fn couple_thermal_flow(
     let mut fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_CHT_FLUID_VELOCITY,
+            AnalysisFieldLayout::vector3(ObservationQuantity::FluidVelocity, FieldLocation::Node),
             vec![topology.node_count, 3],
             fluid_velocity,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_CHT_FLUID_PRESSURE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::FluidPressure, FieldLocation::Node),
             vec![topology.node_count],
             fluid_pressure,
         ),
@@ -167,11 +170,15 @@ pub fn couple_thermal_flow(
         );
         fields.push(AnalysisField::host_f64(
             fea_cht_fluid_temperature_field_id(step_index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node)
+                .step(step_index),
             vec![base_temperature.len().max(1)],
             solution.fluid_temperature.into_canonical_values(),
         ));
         fields.push(AnalysisField::host_f64(
             fea_cht_solid_temperature_field_id(step_index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node)
+                .step(step_index),
             vec![base_temperature.len().max(1)],
             solution.solid_temperature.into_canonical_values(),
         ));
@@ -183,16 +190,25 @@ pub fn couple_thermal_flow(
             .max(solution.thermal_network_residual_ratio);
         fields.push(AnalysisField::host_f64(
             fea_cht_interface_heat_flux_field_id(step_index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::HeatFlux, FieldLocation::Interface)
+                .step(step_index),
             vec![interface_count],
             solution.coupled_heat_flux.into_canonical_values(),
         ));
         fields.push(AnalysisField::host_f64(
             fea_cht_interface_temperature_jump_field_id(step_index),
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::TemperatureJump,
+                FieldLocation::Interface,
+            )
+            .step(step_index),
             vec![interface_count],
             solution.temperature_jump.into_canonical_values(),
         ));
         fields.push(AnalysisField::host_f64(
             fea_cht_energy_residual_field_id(step_index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global)
+                .step(step_index),
             vec![1],
             vec![energy_residual],
         ));

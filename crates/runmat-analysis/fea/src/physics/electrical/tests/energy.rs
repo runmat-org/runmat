@@ -56,7 +56,18 @@ fn original_electrical_operators_have_verified_anchored_local_energy_bounds() {
                 certificate.validate_for(&prepared).unwrap();
                 let (_, _, operations, resident) = certificate.work_counts();
                 assert!(operations <= envelope.update_limit());
-                assert!(resident <= envelope.resident_bytes_limit());
+                let admitted = crate::algebra::anchored_energy::SourceEnergyDemand::derive(
+                    envelope,
+                    prescribed.len(),
+                    prescribed.len() as u64,
+                    assembly
+                        .projection
+                        .elements
+                        .iter()
+                        .map(|element| element.node_indices.len()),
+                )
+                .unwrap();
+                assert!(resident <= admitted.resident_bytes());
                 eprintln!(
                     "energy {equation:?}/{order:?}/cells{cells}: ops={operations},bytes={resident}"
                 );

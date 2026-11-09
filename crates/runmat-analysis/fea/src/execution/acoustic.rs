@@ -18,7 +18,10 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 mod fields;
-pub use fields::{acoustic_native_field_definitions, ACOUSTIC_INTENSITY_FIELD_ID};
+pub use fields::{
+    acoustic_native_field_definitions, ACOUSTIC_INTENSITY_FIELD_ID,
+    ACOUSTIC_PORT_INTENSITY_FIELD_ID,
+};
 pub(in crate::execution) use fields::{
     native_acoustic_entity_counts, native_acoustic_field_definition, native_acoustic_field_plan,
 };
@@ -39,7 +42,8 @@ pub use frequency_assembly::{
 #[cfg(test)]
 pub(in crate::execution) mod tests;
 const PREFIX: &[u8] = b"runmat-acoustic-harmonic-workload/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
