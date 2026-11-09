@@ -33,6 +33,7 @@ pub(in crate::cdt::solver_topology::order_elevation) fn repair_corner_star(
         cancellation,
         jacobian_work,
         candidate_work,
+        counters: _,
     } = work;
     let element = topology
         .volume_elements

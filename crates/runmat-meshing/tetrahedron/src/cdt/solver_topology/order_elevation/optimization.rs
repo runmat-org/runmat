@@ -19,9 +19,11 @@ mod candidates;
 mod incidence;
 mod indexes;
 mod node;
+mod repair_state;
 mod transaction;
 pub(super) use indexes::OptimizationTopology;
 use node::NodeOptimizer;
+pub(super) use repair_state::RepairState;
 
 // These fractions deliberately exclude the initial parameter midpoint. They form a
 // stable, bounded search set and preserve the source edge's closed parameter domain.
@@ -85,12 +87,14 @@ pub(in crate::cdt::solver_topology::order_elevation) struct OptimizationWork<'a>
     pub cancellation: &'a dyn MeshingCancellationSignal,
     pub jacobian_work: &'a mut u64,
     pub candidate_work: &'a mut u64,
+    pub counters: &'a super::counters::ElevationCounters,
 }
 
-pub(super) struct OptimizationTargets<'a> {
+pub(super) struct OptimizationTargets<'a, 'state> {
     pub improve_valid_nodes: bool,
     pub invalid_elements: &'a [usize],
     pub indexes: &'a OptimizationTopology<'a>,
+    pub repair: &'a mut RepairState<'state>,
 }
 
 pub(super) fn optimize<'source>(
@@ -99,18 +103,20 @@ pub(super) fn optimize<'source>(
     midpoint_by_edge: &MidpointMap<'_>,
     evaluation: PreparedEvaluation<'source, '_>,
     work: OptimizationWork<'_>,
-    targets: OptimizationTargets<'_>,
+    targets: OptimizationTargets<'_, '_>,
 ) -> Result<u64, DelaunaySolverTopologyError> {
     let OptimizationTargets {
         improve_valid_nodes,
         invalid_elements,
         indexes,
+        repair,
     } = targets;
     let OptimizationWork {
         options,
         cancellation,
         jacobian_work,
         candidate_work,
+        counters,
     } = work;
     let scratch_scope = runmat_geometry_core::GeometryAllocationScope::new(evaluation.control);
     let scratch = crate::cdt::solver_topology::storage::Storage(Some(&scratch_scope));
@@ -139,6 +145,8 @@ pub(super) fn optimize<'source>(
         candidate_work,
         improve_valid_nodes,
         invalid_elements,
+        counters,
+        repair,
     };
 
     let mut moved = 0_u64;

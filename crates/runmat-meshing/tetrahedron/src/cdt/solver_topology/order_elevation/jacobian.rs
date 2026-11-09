@@ -74,13 +74,15 @@ pub(super) fn validate_elements(
     let rule = shared_rule_results(&certified, cancellation)?;
     for ((element_index, _, jacobian), rule) in certified.into_iter().zip(rule) {
         let element = &topology.volume_elements[element_index];
-        jacobian.and(rule).map_err(|failure| DelaunaySolverTopologyError {
-            kind: failure.kind,
-            reason: format!(
-                "Tet10 element {} (stable identity {:?}) failed certification: {}",
-                element.element_id, element.stable_identity, failure.reason
-            ),
-        })?;
+        jacobian
+            .and(rule)
+            .map_err(|failure| DelaunaySolverTopologyError {
+                kind: failure.kind,
+                reason: format!(
+                    "Tet10 element {} (stable identity {:?}) failed certification: {}",
+                    element.element_id, element.stable_identity, failure.reason
+                ),
+            })?;
     }
     Ok(())
 }
@@ -110,6 +112,8 @@ fn shared_rule_results(
     ))
 }
 
+/// Certifies every element; the reference the incremental inventory is tested against.
+#[cfg(test)]
 pub(super) fn invalid_element_indices<'storage>(
     topology: &SolverMeshTopology,
     maximum_search_work: u64,
@@ -118,35 +122,75 @@ pub(super) fn invalid_element_indices<'storage>(
     cancellation: &dyn MeshingCancellationSignal,
     work: ValidationWork<'storage, '_>,
 ) -> Result<ReservedBuffer<'storage, usize>, DelaunaySolverTopologyError> {
-    let mut invalid_indices = ReservedBuffer::new(topology.volume_elements.len(), work.storage)?;
-    let mut certified = Vec::with_capacity(topology.volume_elements.len());
-    for (element_index, element) in topology.volume_elements.iter().enumerate() {
-        let coordinates = element_coordinates_from_topology(element, topology)?;
+    let storage = work.storage;
+    let indices = (0..topology.volume_elements.len()).collect::<Vec<_>>();
+    let invalid = certify_indices(
+        topology,
+        &indices,
+        maximum_search_work,
+        maximum_recursion_depth,
+        cancellation_check_interval,
+        cancellation,
+        work,
+    )?;
+    let mut invalid_indices = ReservedBuffer::new(topology.volume_elements.len(), storage)?;
+    for (element_index, invalid) in indices.into_iter().zip(invalid) {
+        if invalid {
+            invalid_indices.push(element_index)?;
+        }
+    }
+    Ok(invalid_indices)
+}
+
+/// Whether each listed element fails Jacobian certification or the shared Tet10 rule, in input
+/// order. Elements are independent, so they certify on all admitted cores; a failure other than
+/// invalidity is returned for the first such element in input order.
+pub(super) fn certify_indices(
+    topology: &SolverMeshTopology,
+    indices: &[usize],
+    maximum_search_work: u64,
+    maximum_recursion_depth: u32,
+    cancellation_check_interval: u64,
+    cancellation: &dyn MeshingCancellationSignal,
+    work: ValidationWork<'_, '_>,
+) -> Result<Vec<bool>, DelaunaySolverTopologyError> {
+    let mut coordinates = Vec::with_capacity(indices.len());
+    for &element_index in indices {
+        let element = topology
+            .volume_elements
+            .get(element_index)
+            .ok_or_else(|| invalid("Tet10 Jacobian element index is out of bounds"))?;
+        coordinates.push(element_coordinates_from_topology(element, topology)?);
+    }
+    let storage = work.storage;
+    let results = runmat_cpu_execution::ordered_map(&coordinates, |coordinates| {
+        let mut element_work = 0_u64;
         let jacobian = certify_jacobian(
-            coordinates,
+            *coordinates,
             maximum_search_work,
             maximum_recursion_depth,
             cancellation_check_interval,
             cancellation,
             ValidationWork {
-                counter: work.counter,
-                storage: work.storage,
+                counter: &mut element_work,
+                storage,
             },
         );
-        match jacobian {
+        let result = match jacobian {
             Err(failure) if failure.kind != DelaunaySolverTopologyErrorKind::InvalidMesh => {
-                return Err(failure)
+                Err(failure)
             }
-            jacobian => certified.push((element_index, coordinates, jacobian)),
-        }
+            Err(_) => Ok(true),
+            Ok(()) => Ok(shared_element_rule(coordinates).is_err()),
+        };
+        (result, element_work)
+    });
+    let mut invalid_flags = Vec::with_capacity(results.len());
+    for (result, element_work) in results {
+        *work.counter = work.counter.saturating_add(element_work);
+        invalid_flags.push(result?);
     }
-    let rule = shared_rule_results(&certified, cancellation)?;
-    for ((element_index, _, jacobian), rule) in certified.into_iter().zip(rule) {
-        if jacobian.is_err() || rule.is_err() {
-            invalid_indices.push(element_index)?;
-        }
-    }
-    Ok(invalid_indices)
+    Ok(invalid_flags)
 }
 
 pub(super) fn optimization_margin_profile_elements<'storage>(
@@ -203,6 +247,29 @@ pub(super) fn worst_invalid_element(
 pub(super) fn margin_priority_key(margin: f64) -> u64 {
     const DISCARDED_MANTISSA_BITS: u32 = 12;
     crate::cdt::volume_quality::ordered_float_key(margin) >> DISCARDED_MANTISSA_BITS
+}
+
+/// The ten node coordinates of one element, in its node order.
+pub(super) fn element_coordinates(
+    topology: &SolverMeshTopology,
+    element_index: usize,
+) -> Result<[[f64; 3]; 10], DelaunaySolverTopologyError> {
+    let element = topology
+        .volume_elements
+        .get(element_index)
+        .ok_or_else(|| invalid("Tet10 optimization element index is out of bounds"))?;
+    element_coordinates_from_topology(element, topology)
+}
+
+/// The optimization priority key of one element's Bernstein margin.
+pub(super) fn margin_key(
+    coordinates: [[f64; 3]; 10],
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<u64, DelaunaySolverTopologyError> {
+    Ok(margin_priority_key(bernstein_margin(
+        coordinates,
+        cancellation,
+    )?))
 }
 
 fn element_coordinates_from_topology(
@@ -282,6 +349,45 @@ fn margin_checkpoint(
     Ok(())
 }
 
+/// Process-wide Jacobian certification diagnostics: certified elements, their summed search
+/// work, the deepest subdivision cell reached and how many elements hit their work limit. They
+/// are reported with the Tet10 optimization counters and decide nothing.
+pub(super) struct SubdivisionStats {
+    pub elements: std::sync::atomic::AtomicU64,
+    pub work: std::sync::atomic::AtomicU64,
+    pub deepest: std::sync::atomic::AtomicU64,
+    pub work_limited: std::sync::atomic::AtomicU64,
+}
+
+pub(super) static SUBDIVISION: SubdivisionStats = SubdivisionStats {
+    elements: std::sync::atomic::AtomicU64::new(0),
+    work: std::sync::atomic::AtomicU64::new(0),
+    deepest: std::sync::atomic::AtomicU64::new(0),
+    work_limited: std::sync::atomic::AtomicU64::new(0),
+};
+
+impl SubdivisionStats {
+    fn record(&self, work: u64, deepest: u32, work_limited: bool) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.elements.fetch_add(1, Relaxed);
+        self.work.fetch_add(work, Relaxed);
+        self.deepest.fetch_max(u64::from(deepest), Relaxed);
+        if work_limited {
+            self.work_limited.fetch_add(1, Relaxed);
+        }
+    }
+
+    pub fn snapshot(&self) -> [u64; 4] {
+        use std::sync::atomic::Ordering::Relaxed;
+        [
+            self.elements.load(Relaxed),
+            self.work.load(Relaxed),
+            self.deepest.load(Relaxed),
+            self.work_limited.load(Relaxed),
+        ]
+    }
+}
+
 /// Subdivision work one element may spend to certify its Jacobian. Certification is charged per
 /// element, so total work scales with the mesh and one hard element cannot exhaust the others'.
 /// It is a property of the algorithm, not of the machine: an element that cannot be certified
@@ -307,6 +413,7 @@ fn certify_jacobian(
     );
     let total_work = work.counter;
     let mut element_work = 0_u64;
+    let mut deepest = 0_u32;
     let result = certify_element_within(
         coordinates,
         maximum_search_work,
@@ -315,8 +422,14 @@ fn certify_jacobian(
         &storage,
         &mut element_work,
         cancellation_check_interval,
+        &mut deepest,
     );
     *total_work = total_work.saturating_add(element_work);
+    SUBDIVISION.record(
+        element_work,
+        deepest,
+        matches!(&result, Err(failure) if failure.kind == DelaunaySolverTopologyErrorKind::ResourceLimit),
+    );
     match result {
         Err(failure)
             if failure.kind == DelaunaySolverTopologyErrorKind::ResourceLimit
@@ -372,6 +485,7 @@ fn certify_element_within(
     storage: &Storage<'_>,
     work: &mut u64,
     cancellation_check_interval: u64,
+    deepest: &mut u32,
 ) -> Result<(), DelaunaySolverTopologyError> {
     if cancellation_check_interval == 0 {
         return Err(error::failure(
@@ -394,6 +508,7 @@ fn certify_element_within(
     let mut exact_reference_jacobians = None;
     let mut pending = storage.collect(std::iter::once((REFERENCE_TETRAHEDRON, 0_u32)))?;
     while let Some((cell, depth)) = pending.pop() {
+        *deepest = (*deepest).max(depth);
         *work = work
             .checked_add(4)
             .ok_or_else(|| resource("Tet10 Jacobian work counter overflowed"))?;
