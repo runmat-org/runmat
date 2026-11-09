@@ -16,6 +16,7 @@ assert.equal(manifest.product, "native-cli");
 const binary = resolveArtifactPath(manifest, manifestPath, "runmat-binary");
 const directory = mkdtempSync(join(tmpdir(), "runmat-native-acceptance-"));
 const results = [];
+const processDiagnostics = [];
 let status = "failed";
 try {
   const configuration = join(directory, "runmat.toml");
@@ -74,13 +75,13 @@ try {
   }
   const probe = runNativeEmbeddedAotProbe({ artifactManifest: manifest,
     artifactManifestPath: manifestPath, sourceRevision: manifest.sourceRevision,
-    environment });
+    environment, onProcessFailure: diagnostic => processDiagnostics.push(diagnostic) });
   results.push(probe);
   assert.equal(probe.result.status, "passed", JSON.stringify(probe));
   validateArtifactManifest(manifest, { verifyFiles: true, manifestPath });
   status = "passed";
   console.log("Cold launch, three staged CLI cases and native-image compile/execute passed.");
 } finally {
-  writeFileSync(output, JSON.stringify({ status, artifactManifestDigest: manifest.artifactManifestDigest, results }, null, 2) + "\n");
+  writeFileSync(output, JSON.stringify({ status, artifactManifestDigest: manifest.artifactManifestDigest, results, processDiagnostics }, null, 2) + "\n");
   rmSync(directory, { recursive: true, force: true });
 }

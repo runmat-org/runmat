@@ -65,7 +65,7 @@ export function runNativeEmbeddedAotProbe(fields) {
             timeout: fields.timeoutMs ?? 120_000
         });
         compileExitCode = processExitCode(compilation.status);
-        reportProcessFailure("native compile", compilation);
+        reportProcessFailure("native compile", compilation, fields.onProcessFailure);
         if (compileExitCode === 0) {
             if (process.platform !== "win32") chmodSync(output, 0o700);
             const execution = spawnSync(output, [], {
@@ -76,7 +76,7 @@ export function runNativeEmbeddedAotProbe(fields) {
                 timeout: fields.timeoutMs ?? 120_000
             });
             executeExitCode = processExitCode(execution.status);
-            reportProcessFailure("native execute", execution);
+            reportProcessFailure("native execute", execution, fields.onProcessFailure);
             stdout = Buffer.isBuffer(execution.stdout) ? execution.stdout : Buffer.alloc(0);
         }
         // Re-read the complete staged product after execution. This makes a probe
@@ -111,11 +111,14 @@ export function runNativeEmbeddedAotProbe(fields) {
     }
 }
 
-function reportProcessFailure(phase, result) {
+function reportProcessFailure(phase, result, onFailure) {
     if (result.status === 0 && !result.error && !result.signal) return;
     const stderr = Buffer.isBuffer(result.stderr) ? result.stderr.toString("utf8") : "";
     const stdout = Buffer.isBuffer(result.stdout) ? result.stdout.toString("utf8") : "";
-    console.error(`${phase} failed: exit=${result.status}, signal=${result.signal ?? "none"}, error=${result.error?.message ?? "none"}\n${stderr.slice(-32768)}\n${stdout.slice(-32768)}`);
+    const diagnostic = { phase, exitCode: result.status, signal: result.signal,
+        error: result.error?.message ?? null, stderr: stderr.slice(-32768), stdout: stdout.slice(-32768) };
+    onFailure?.(diagnostic);
+    console.error(`${phase} failed: exit=${result.status}, signal=${result.signal ?? "none"}, error=${result.error?.message ?? "none"}\n${diagnostic.stderr}\n${diagnostic.stdout}`);
 }
 
 export async function runDesktopHostProtocolProbe(fields) {

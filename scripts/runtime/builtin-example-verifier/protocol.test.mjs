@@ -446,6 +446,21 @@ test("native product probes execute the manifested entrypoint and reject bytes c
         const passed = runNativeEmbeddedAotProbe({ artifactManifest: manifest, artifactManifestPath: manifestPath, sourceRevision: SOURCE });
         assert.equal(passed.result.status, "passed");
 
+        writeFileSync(binary, "#!/bin/sh\necho 'original linker diagnostic' >&2\nexit 7\n", { mode: 0o755 });
+        const failedManifest = buildArtifactManifestFromTree({
+            product: "native-cli", artifactProfile: "embedded-aot", sourceRevision: SOURCE,
+            manifestPath, root: product, entrypoints: { "runmat-binary": "runmat" }
+        });
+        writeFileSync(manifestPath, JSON.stringify(failedManifest));
+        const diagnostics = [];
+        const failed = runNativeEmbeddedAotProbe({ artifactManifest: failedManifest,
+            artifactManifestPath: manifestPath, sourceRevision: SOURCE,
+            onProcessFailure: diagnostic => diagnostics.push(diagnostic) });
+        assert.equal(failed.result.failureKind, "prepare-process");
+        assert.equal(diagnostics.length, 1);
+        assert.equal(diagnostics[0].exitCode, 7);
+        assert.equal(diagnostics[0].stderr, "original linker diagnostic\n");
+
         writeFakeCompiler(binary, true);
         const mutatingManifest = buildArtifactManifestFromTree({
             product: "native-cli", artifactProfile: "embedded-aot", sourceRevision: SOURCE,
