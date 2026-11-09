@@ -1000,7 +1000,9 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/home_study_check/cantilever.fea"),
     )
-    .unwrap();
+    .unwrap()
+    .replace("\r\n", "\n")
+    .replace('\n', "\r\n");
     fs::write(temp.path().join("cantilever.fea"), &source).unwrap();
 
     let output = runmat_with_env(

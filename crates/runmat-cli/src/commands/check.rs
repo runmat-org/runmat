@@ -715,7 +715,13 @@ fn source_line(source: &str, offset: usize) -> (usize, usize, usize, &str) {
         .count()
         + 1;
     let column = source[line_start..offset].chars().count() + 1;
-    (line, column, line_start, &source[line_start..line_end])
+    let text = &source[line_start..line_end];
+    (
+        line,
+        column,
+        line_start,
+        text.strip_suffix('\r').unwrap_or(text),
+    )
 }
 
 fn is_matlab_file(path: &Path) -> bool {
@@ -775,10 +781,15 @@ mod script_check_tests {
 
     #[test]
     fn source_coordinates_count_unicode_columns() {
-        let source = "% π\nvalue = 1;";
-        let offset = source.find("value").unwrap();
-        let (line, column, line_start, text) = source_line(source, offset);
-        assert_eq!((line, column, line_start, text), (2, 1, 5, "value = 1;"));
+        for newline in ["\n", "\r\n"] {
+            let source = format!("% π{newline}value = 1;{newline}");
+            let offset = source.find("value").unwrap();
+            let (line, column, line_start, text) = source_line(&source, offset);
+            assert_eq!(
+                (line, column, line_start, text),
+                (2, 1, offset, "value = 1;")
+            );
+        }
     }
 
     fn strip_ansi(value: &str) -> String {
