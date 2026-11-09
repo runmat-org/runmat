@@ -47,6 +47,16 @@ pub struct SnapshotPresentationArgs {
     /// frame keeps some of the surrounding context in view
     #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
     pub frame_padding: f32,
+    /// Frame the framed bounds to this share of the poster width (0.05 to 0.84), beside the
+    /// legend when there is room, instead of filling the poster less its 8% margin. With
+    /// `--frame result` the solved bodies are the framing target.
+    #[arg(long, value_name = "SHARE")]
+    pub frame_width: Option<f32>,
+    /// Draw only the context parts that lie wholly inside the poster frame, so the context
+    /// shows what surrounds the result and nothing is cut at the poster's edges. Needs
+    /// `--frame result`. The saved scenes hold the same cropped context.
+    #[arg(long)]
+    pub crop_context: bool,
     /// Leave the floor grid out of posters and scenes
     #[arg(long)]
     pub no_grid: bool,
@@ -57,9 +67,11 @@ pub struct SnapshotPresentationArgs {
     /// shown small, such as a website hero on a phone, uses about 2
     #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
     pub text_scale: f32,
-    /// Poster theme: `dark` or `light`, the app's dark or light plot theme for the background,
-    /// grid, text, legend and triad. Scenes are the same in both; only the posters differ.
-    #[arg(long, default_value = "dark", value_name = "dark|light")]
+    /// Poster theme: the app's dark or light plot theme for the background, grid, text, legend
+    /// and triad. `both` writes the dark poster `<view>.png` and the light one beside it,
+    /// `<view>.light.png`; `dark` or `light` writes that one as `<view>.png`. Scenes are the
+    /// same in both; only the posters differ.
+    #[arg(long, default_value = "both", value_name = "both|dark|light")]
     pub theme: String,
     /// Cut section views normal to this axis at this fraction of the result's extent along it
     /// (0 at its minimum, 1 at its maximum; default 0.5). Default: through the center, across

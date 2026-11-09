@@ -3155,19 +3155,24 @@ impl PlotOverlay {
         legend: &GeometrySceneScalarLegend,
         scale: f32,
     ) {
+        let panel = crate::scalar_legend::ScalarLegendPanel::for_plot(
+            plot_rect.width(),
+            scale,
+            legend.note.is_some(),
+        );
         let scale = scale.max(0.75);
-        let width = (plot_rect.width() * 0.34).clamp(190.0, 300.0);
-        let pad = 12.0 * scale;
-        let bar_height = 7.0 * scale;
-        let note_height = if legend.note.is_some() { 16.0 * scale } else { 0.0 };
+        let bar_height = panel.bar_height;
         let rect = Rect::from_min_size(
-            egui::pos2(plot_rect.max.x - width - pad, plot_rect.min.y + pad),
-            egui::vec2(width, 56.0 * scale + note_height),
+            egui::pos2(
+                plot_rect.max.x - panel.width - panel.pad,
+                plot_rect.min.y + panel.pad,
+            ),
+            egui::vec2(panel.width, panel.height),
         );
         // Keep the figure-owned scale legible over scene annotations and mesh
         // imagery; the mesh counts belong in the viewport information control.
         ui.painter().rect_filled(
-            rect.expand(6.0 * scale),
+            rect.expand(panel.halo),
             4.0 * scale,
             self.theme_background_color(),
         );
@@ -3179,10 +3184,10 @@ impl PlotOverlay {
             (text.z.clamp(0.0, 1.0) * 255.0) as u8,
         );
         let muted = text_color.gamma_multiply(0.85);
-        let label_font = FontId::proportional(11.0 * scale);
+        let label_font = FontId::proportional(panel.label_points);
         // The range values are the data the legend exists for: as large as its label, so they
         // stay readable when a poster is shown small.
-        let detail_font = FontId::proportional(11.0 * scale);
+        let detail_font = FontId::proportional(panel.label_points);
         ui.painter().text(
             rect.right_top(),
             Align2::RIGHT_TOP,
@@ -3191,7 +3196,7 @@ impl PlotOverlay {
             text_color,
         );
         let bar_rect = Rect::from_min_size(
-            egui::pos2(rect.min.x, rect.min.y + 23.0 * scale),
+            egui::pos2(rect.min.x, rect.min.y + panel.bar_offset),
             egui::vec2(rect.width(), bar_height),
         );
         let stops = [
