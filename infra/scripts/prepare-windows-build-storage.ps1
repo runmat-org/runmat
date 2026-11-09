@@ -16,21 +16,29 @@ if ($ReclaimUnusedRunnerTools) {
         'C:\Android\android-sdk',
         'C:\ghcup',
         'C:\Miniconda',
+        'C:\ProgramData\Package Cache',
         'C:\hostedtoolcache\windows\CodeQL',
         'C:\hostedtoolcache\windows\go',
         'C:\hostedtoolcache\windows\PyPy',
         'C:\hostedtoolcache\windows\Ruby'
     )
-    foreach ($path in $unused) {
+    :runnerTools foreach ($path in $unused) {
         if (!(Test-Path -LiteralPath $path)) { continue }
         $item = Get-Item -LiteralPath $path -Force
         if (!$item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            throw "Runner tool cleanup refuses a redirected/non-directory target: $path"
+            Write-Host "Preserving redirected/non-directory runner tool: $path"
+            continue
         }
         for ($parent = $item.Parent; $null -ne $parent; $parent = $parent.Parent) {
             if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                throw "Runner tool cleanup refuses a redirected parent: $path"
+                Write-Host "Preserving runner tool with redirected parent: $path"
+                continue runnerTools
             }
+        }
+        if ($path -eq 'C:\ProgramData\Package Cache' -and
+            @(Get-Process msiexec -ErrorAction SilentlyContinue).Count) {
+            Write-Host 'Preserving installer payloads while Windows Installer is active'
+            continue
         }
         Write-Host "Removing unused ephemeral runner tool: $path"
         Remove-Item -LiteralPath $path -Recurse -Force
@@ -40,7 +48,7 @@ if ($ReclaimUnusedRunnerTools) {
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         $containers = & docker ps --all --quiet 2>&1
         if ($LASTEXITCODE -eq 0 -and !$containers) {
-            & docker image prune --all --force
+            & docker image prune --all --force | Out-Host
             if ($LASTEXITCODE -ne 0) { throw 'Unused runner Docker image cleanup failed' }
         } else {
             Write-Host 'Docker image cleanup skipped: containers exist or daemon is unavailable'
