@@ -146,14 +146,52 @@ pub(super) fn add(catalog: &mut Catalog) {
         }
     }
     catalog.add_commands(commands);
+    catalog.add_commands(fea_commands());
     catalog.rows.push(fea_rows());
 }
 
-/// The .fea study view's viewport toolbar: the 3D view cluster with the items a meshed study
-/// supports. It has no command tabs; setup and results controls stay in the study view.
-/// Visibility hides picked regions, or bodies when the filter selects bodies.
+/// The .fea study view's own commands: each opens Source at the declaration it names, shows or
+/// hides a kind of setup symbol, runs the study or shows its results. Loads, supports and the
+/// mesh are written in Source; the study view draws what the checked study holds.
+fn fea_commands() -> Vec<CommandDescriptor> {
+    let source = |id: &str, label: &str, icon: &str, item: &str, desc: &str| {
+        cmd(id, label, icon, &[Fea]).desc(desc).edit(view_action(item))
+    };
+    let show = |id: &str, label: &str, icon: &str, item: &str, desc: &str| {
+        cmd(id, label, icon, &[Fea])
+            .desc(desc)
+            .kw(&["show", "hide", "visibility", "symbols"])
+            .inputs(vec![flag("show", label, true)])
+            .edit(view_action(item))
+    };
+    vec![
+        source("fea.geometry", "Geometry", "body", "source_geometry", "Open the geometry declaration: the CAD file and its named regions."),
+        source("fea.materials", "Materials", "material", "source_material", "Open the material declarations and their assignments."),
+        source("fea.source", "Edit source", "source", "source", "Open the selected item's declaration in Source, or the study's."),
+        source("fea.mesh", "Mesh settings", "settings", "source_mesh", "Open the mesh declaration: element order, target size and deviation."),
+        source("fea.loads", "Edit loads", "edit", "source_loads", "Open the model's loads, supports and conditions in Source."),
+        show("fea.show-loads", "Loads", "pull", "show_loads", "Show the load arrows and their values on the model."),
+        show("fea.show-supports", "Supports", "fix", "show_supports", "Show the ground symbols on held faces."),
+        show("fea.show-conditions", "Other conditions", "heat", "show_conditions", "Show thermal, electrical and other boundary symbols."),
+        show("fea.show-tints", "Region tints", "highlight", "show_tints", "Tint each loaded, held or bonded face by its role."),
+        source("fea.analysis", "Analysis", "study", "source_analysis", "Open the study's analysis, outputs and assessments."),
+        cmd("fea.run", "Run study", "simulate", &[Fea])
+            .desc("Mesh and solve the study.")
+            .kw(&["solve", "simulate", "start"])
+            .edit(view_action("run")),
+        cmd("fea.results", "Results", "visualization", &[Fea])
+            .desc("Show the last run's result fields.")
+            .kw(&["fields", "stress", "displacement"])
+            .edit(view_action("results")),
+    ]
+}
+
+/// The .fea study view's rows, built like the part editor's: tabs for setup, mesh, loads and
+/// supports, the study and its results, and the 3D view cluster with the items a meshed study
+/// supports. Visibility hides picked regions, or bodies when the filter selects bodies, and shows
+/// or hides each kind of setup symbol. Results-only controls stay in the results view.
 fn fea_rows() -> EditorRows {
-    let view_cluster = vec![
+    let mut view_cluster = vec![
         variants(
             "view.display.menu",
             "Shaded",
@@ -211,11 +249,32 @@ fn fea_rows() -> EditorRows {
         ),
         c("view.measure"),
     ];
+    // Visibility also shows or hides each kind of setup symbol.
+    if let Some(RowItem::Menu { entries, .. }) = view_cluster
+        .iter_mut()
+        .find(|item| matches!(item, RowItem::Menu { id, .. } if id == "view.visibility.menu"))
+    {
+        entries.extend(["fea.show-loads", "fea.show-supports", "fea.show-conditions", "fea.show-tints"].map(e));
+    }
+    let tabs = vec![
+        tab("setup", "Setup", vec![group("declarations", "Declarations", vec![c("fea.geometry"), c("fea.materials"), c("fea.source")])]),
+        tab("mesh", "Mesh", vec![group("mesh", "Mesh", vec![c("fea.mesh")])]),
+        tab(
+            "loads",
+            "Loads and supports",
+            vec![
+                group("show", "Show", vec![c("fea.show-loads"), c("fea.show-supports"), c("fea.show-conditions"), c("fea.show-tints")]),
+                group("edit", "Edit", vec![c("fea.loads")]),
+            ],
+        ),
+        tab("study", "Study", vec![group("study", "Study", vec![c("fea.analysis"), c("fea.run")])]),
+        tab("results", "Results", vec![group("results", "Results", vec![c("fea.results")])]),
+    ];
     EditorRows {
         editor: Fea,
         mode: EditMode::Model,
-        tabs: Vec::new(),
-        default_tab: String::new(),
+        tabs,
+        default_tab: "setup".to_owned(),
         view_cluster,
         document_bar: Vec::new(),
         shortcut_box: Vec::new(),
