@@ -29,12 +29,14 @@ pub fn cross_section_digest(
     definition: &CrossSectionDefinition,
     mesh: Option<&CrossSectionMeshSettings>,
 ) -> Result<StableDigest, CrossSectionError> {
-    let bytes = serde_json::to_vec(&(definition, mesh))
-        .map_err(|error| CrossSectionError::Invalid(format!("section encoding: {error}")))?;
-    let mut hasher = Sha256::new();
-    hasher.update(SECTION_DOMAIN);
-    hasher.update(bytes);
-    Ok(StableDigest::from_bytes(hasher.finalize().into()))
+    let digest = crate::contracts::canonical_digest::canonical_contract_digest(
+        SECTION_DOMAIN,
+        "analysis.fea.cross-section",
+        &(definition, mesh),
+        runmat_canonical_codec::CanonicalLimits::new(1 << 20, 1 << 16, 4096, 32),
+    )
+    .map_err(|error| CrossSectionError::Invalid(format!("section encoding: {error}")))?;
+    Ok(StableDigest::from_bytes(*digest.bytes()))
 }
 
 /// The geometry revision of a section: the leading digest bytes, never zero.
