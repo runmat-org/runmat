@@ -154,7 +154,7 @@ pub fn material_member(name: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     /// The ids this crate reports; each must be a pending row of docs/simulation/ledger.json
-    /// (`language.keyword-names` is reported by the parser in runmat-fea-syntax). The docs lint
+    /// (`language.keyword-names` is reported by the parser in runmat-design-syntax). The docs lint
     /// checks the same for every crate.
     #[test]
     fn reported_ids_are_the_registry_keys() {

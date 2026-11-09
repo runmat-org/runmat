@@ -1,0 +1,24 @@
+runmat 0.7
+std 1
+
+assembly frame {
+    use part frame_std from "../library" as web {
+        configuration = {
+            select = switch,
+            cases = [
+                {
+                    when = { when = range, axis = msn, min = 41 },
+                    select = { select = named, name = heavy }
+                }
+            ],
+            otherwise = { select = named, name = std }
+        }
+    }
+    use part clip from "../library" as clip {
+        placement = { placement = offset, offset = { translation = [20 mm, -1500 mm, 1900 mm] } }
+    }
+
+    pattern clips = linear(seeds = [clip], direction = [0, 1, 0], spacing = 750 mm, count = 4)
+
+    part_number = "FA-110"
+}

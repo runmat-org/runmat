@@ -1,0 +1,86 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    feature tap = hole(
+        face = feature.body.face.end,
+        at = { m6 = point(40 mm, 25 mm, 10 mm) },
+        diameter = 5 mm,
+        through_all
+    )
+    feature m6_thread = thread(
+        face = feature.tap.face.wall(m6),
+        spec = { designation = M6x1, pitch = 1 mm, depth = 0.54 mm, class = "6H" }
+    )
+    feature boss1 = library(def = "feature_def.boss", args = { h = 8 mm }, mode = add)
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+
+    feature_def boss = {
+        params = [{ name = h, kind = length, default = 5 mm }],
+        features = [
+            {
+                id = s,
+                kind = {
+                    feature = sketch,
+                    plane = origin.xy,
+                    entities = [
+                        {
+                            id = q1,
+                            geometry = {
+                                entity = line,
+                                start = { point = coords, x = 60 mm, y = 10 mm },
+                                end = { point = coords, x = 70 mm, y = 10 mm }
+                            }
+                        },
+                        {
+                            id = q2,
+                            geometry = {
+                                entity = line,
+                                start = { point = coords, x = 70 mm, y = 10 mm },
+                                end = { point = coords, x = 70 mm, y = 20 mm }
+                            }
+                        },
+                        {
+                            id = q3,
+                            geometry = {
+                                entity = line,
+                                start = { point = coords, x = 70 mm, y = 20 mm },
+                                end = { point = coords, x = 60 mm, y = 20 mm }
+                            }
+                        },
+                        {
+                            id = q4,
+                            geometry = {
+                                entity = line,
+                                start = { point = coords, x = 60 mm, y = 20 mm },
+                                end = { point = coords, x = 60 mm, y = 10 mm }
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                id = e,
+                kind = {
+                    feature = extrude,
+                    profile = sketch.s,
+                    extent = blind(distance = input.h),
+                    reverse = true,
+                    mode = add
+                }
+            }
+        ]
+    }
+}

@@ -356,9 +356,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: NativeInterfaceCommand,
     },
-    /// Check a MATLAB script or .fea document without running it
+    /// Check a MATLAB script or .fea document without running it, or run a circuit's checks
+    /// (ERC, the review suites, DRC and its simulations' limits)
     Check {
-        /// .m or .fea file to check
+        /// .m, .fea, .circuit or .circuit.layout file to check
         file: PathBuf,
         #[command(flatten)]
         root: FeaRootArgs,
@@ -374,6 +375,9 @@ pub enum Commands {
         /// Add a MATLAB lookup root while checking this source
         #[arg(long = "path", value_name = "DIRECTORY")]
         search_paths: Vec<PathBuf>,
+        /// Circuits: leave out the simulation sections
+        #[arg(long = "no-simulate")]
+        no_simulate: bool,
     },
     /// Print the logical phases and analysis definition for one .fea study or sweep
     Plan {
@@ -557,7 +561,7 @@ pub enum Commands {
         #[command(subcommand)]
         package_command: PackageCommand,
     },
-    /// Discover and run MATLAB-compatible tests
+    /// Discover and run MATLAB-compatible tests, and the checks of the circuit files named
     Test(Box<TestArgs>),
     /// Submit and manage durable local batch jobs
     Batch {

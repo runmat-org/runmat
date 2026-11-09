@@ -219,6 +219,7 @@ async fn execute_command(
             verbose,
             deny,
             search_paths,
+            no_simulate,
         } => {
             boxed_command(|| {
                 check::execute_check(
@@ -231,6 +232,7 @@ async fn execute_command(
                         verbose,
                         deny,
                         search_paths,
+                        no_simulate,
                     },
                 )
             })

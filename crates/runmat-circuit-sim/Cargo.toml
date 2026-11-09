@@ -1,0 +1,17 @@
+[package]
+name = "runmat-circuit-sim"
+version = "0.7.0"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "RunMat circuit simulation: a clean-room SPICE-class engine (modified nodal analysis, sparse LU, damped Newton with gmin and source stepping, adaptive trapezoidal and Gear-2 transient, AC small-signal, DC sweeps, Monte Carlo) with SPICE .model and .subckt netlists and measured operation counts"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+# Written from the published algorithms (Nagel's SPICE2 thesis, Ho/Ruehli/Brennan MNA, Gilbert-Peierls
+# LU, Gummel-Poon and Shichman-Hodges papers); no simulator source was consulted or copied.
+# Dependencies: rayon (MIT/Apache-2.0) for Monte Carlo runs; the operation counter is the
+# workspace's runmat-simulation-usage.
+[dependencies]
+runmat-simulation-usage = { workspace = true }
+rayon = "1.11"

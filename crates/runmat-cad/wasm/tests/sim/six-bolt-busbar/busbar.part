@@ -1,0 +1,84 @@
+runmat 0.7
+std 1
+
+// A six-bolt EV module busbar in Cu-ETP copper (C11000): a 200 x 30 x 2 mm strap with R5 corners
+// that collects six cells on M8 terminal bolts at a 27 mm pitch and hands their current to the
+// module's output cable on one M10 bolt at its far end.
+//
+// Sizing at 400 A: the strap's 60 mm^2 section carries 6.7 A/mm^2 past the last cell bolt. It
+// loses about 3.4 W, which still air (10 W/m^2/K over its 12,400 mm^2) carries off at about
+// 31 K over ambient: about 56 degC at 25 degC, under the 85 degC limit.
+// Change `thickness`, `width` or the bolt pitch and re-run the study.
+part busbar {
+    input length : length = 200 mm
+    input width : length = 30 mm
+    input thickness : length = 2 mm
+    input corner : length = 5 mm
+    // The cell bolts: M8 clearance holes from `first_bolt` along the strap at `pitch`.
+    input cell_hole : length = 8.5 mm
+    input first_bolt : length = 15 mm
+    input pitch : length = 27 mm
+    // The output bolt: an M10 clearance hole `output_inset` from the far end.
+    input output_hole : length = 10.5 mm
+    input output_inset : length = 18 mm
+
+    let r = input.corner
+    let mid = input.width / 2
+
+    sketch strap_s on origin.xy {
+        bottom = line(start = [let.r, 0 mm], end = [input.length - let.r, 0 mm])
+        corner_br = arc(center = [input.length - let.r, let.r], start = [input.length - let.r, 0 mm], end = [input.length, let.r])
+        right = line(start = [input.length, let.r], end = [input.length, input.width - let.r])
+        corner_tr = arc(center = [input.length - let.r, input.width - let.r], start = [input.length, input.width - let.r], end = [input.length - let.r, input.width])
+        top = line(start = [input.length - let.r, input.width], end = [let.r, input.width])
+        corner_tl = arc(center = [let.r, input.width - let.r], start = [let.r, input.width], end = [0 mm, input.width - let.r])
+        left = line(start = [0 mm, input.width - let.r], end = [0 mm, let.r])
+        corner_bl = arc(center = [let.r, let.r], start = [0 mm, let.r], end = [let.r, 0 mm])
+    }
+    feature strap = extrude(profile = sketch.strap_s, distance = input.thickness)
+    feature cell_bolts = hole(
+        face = feature.strap.face.end,
+        at = {
+            c1 = point(input.first_bolt, let.mid, input.thickness),
+            c2 = point(input.first_bolt + input.pitch, let.mid, input.thickness),
+            c3 = point(input.first_bolt + input.pitch * 2, let.mid, input.thickness),
+            c4 = point(input.first_bolt + input.pitch * 3, let.mid, input.thickness),
+            c5 = point(input.first_bolt + input.pitch * 4, let.mid, input.thickness),
+            c6 = point(input.first_bolt + input.pitch * 5, let.mid, input.thickness)
+        },
+        diameter = input.cell_hole,
+        through_all
+    )
+    feature output_bolt = hole(
+        face = feature.strap.face.end,
+        at = { out = point(input.length - input.output_inset, let.mid, input.thickness) },
+        diameter = input.output_hole,
+        through_all
+    )
+
+    region cell_bolt_1 : face = { select = [feature.cell_bolts.face.wall(c1)], expect = exactly_one, label = "Cell bolt 1" }
+    region cell_bolt_2 : face = { select = [feature.cell_bolts.face.wall(c2)], expect = exactly_one, label = "Cell bolt 2" }
+    region cell_bolt_3 : face = { select = [feature.cell_bolts.face.wall(c3)], expect = exactly_one, label = "Cell bolt 3" }
+    region cell_bolt_4 : face = { select = [feature.cell_bolts.face.wall(c4)], expect = exactly_one, label = "Cell bolt 4" }
+    region cell_bolt_5 : face = { select = [feature.cell_bolts.face.wall(c5)], expect = exactly_one, label = "Cell bolt 5" }
+    region cell_bolt_6 : face = { select = [feature.cell_bolts.face.wall(c6)], expect = exactly_one, label = "Cell bolt 6" }
+    region output_bolt : face = { select = [feature.output_bolt.face.wall(out)], expect = exactly_one, label = "Output bolt" }
+    region exterior : face = {
+        select = [
+            feature.strap.face.start,
+            feature.strap.face.end,
+            feature.strap.face.side(strap_s.bottom),
+            feature.strap.face.side(strap_s.corner_br),
+            feature.strap.face.side(strap_s.right),
+            feature.strap.face.side(strap_s.corner_tr),
+            feature.strap.face.side(strap_s.top),
+            feature.strap.face.side(strap_s.corner_tl),
+            feature.strap.face.side(strap_s.left),
+            feature.strap.face.side(strap_s.corner_bl)
+        ],
+        expect = at_least_one,
+        label = "Exterior"
+    }
+
+    output busbar = { body = feature.strap.body, label = "Busbar", part_number = "BB-0604", material = "copper_c11000", color = "#C8794A" }
+}

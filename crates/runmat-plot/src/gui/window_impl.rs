@@ -349,6 +349,7 @@ impl<'window> PlotWindow<'window> {
             ),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         self.plot_renderer.scene.add_node(node);

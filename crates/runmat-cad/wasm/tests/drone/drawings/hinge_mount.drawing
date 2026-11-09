@@ -1,0 +1,30 @@
+runmat 0.7
+std 1
+
+// The hinge mount's detail drawing at 2:1 on A3, third-angle projection: the plan view with the
+// pin bore to the two M2 mounting holes, the elevation with the lugs' thickness and the clevis
+// height, and an isometric.
+drawing hinge_mount {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [
+            { label = "Title", source = { source = literal, text = "Arm hinge mount (clevis)" } },
+            { label = "Part number", source = { source = property, name = part_number } },
+            { label = "Material", source = { source = property, name = material } },
+            { label = "Scale", source = { source = scale } },
+            { label = "Sheet", source = { source = sheet_number } },
+            { label = "Rev", source = { source = revision } }
+        ]
+    }
+
+    sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
+
+    view front = standard(orientation = front, sheet = "1", model = { part = hinge_mount, from = "../mechanical/arm" }, at = [150, 200], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = hinge_mount, from = "../mechanical/arm" }, at = [150, 105], display = hidden_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { part = hinge_mount, from = "../mechanical/arm" }, at = [330, 115], display = visible_lines)
+
+    annotation clevis_height = dimension(style = linear, references = [feature.back.face.start, feature.back.face.end], view = front)
+    annotation lug_thickness = dimension(style = linear, references = [feature.upper.face.start, feature.upper.face.end], view = front)
+    annotation pin_to_screw = dimension(style = linear, references = [feature.upper.face.side(upper_s.pin), feature.bores.face.side(bore_s.s1)], view = top)
+    annotation screw_pitch = dimension(style = linear, references = [feature.bores.face.side(bore_s.s1), feature.bores.face.side(bore_s.s2)], view = top)
+}

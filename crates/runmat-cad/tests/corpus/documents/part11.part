@@ -1,0 +1,10 @@
+runmat 0.7
+std 1
+
+part duct {
+    sketch c on origin.zx {
+        floor = line(start = [0 mm, 0 mm], end = [30 mm, 0 mm])
+        wall = line(start = [30 mm, 0 mm], end = [30 mm, 20 mm])
+    }
+    feature skin = surface.extrude(profile = sketch.c, start = 0 mm, end = 25 mm)
+}

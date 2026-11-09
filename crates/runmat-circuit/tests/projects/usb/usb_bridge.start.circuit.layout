@@ -1,0 +1,10 @@
+runmat 0.7
+std 1
+
+use circuit usb_bridge
+
+layout usb_bridge {
+    outline = [[-15, -10], [15, -10], [15, 10], [-15, 10]]
+    limits = { capability = advanced }
+    net_class supply = { track_width = 0.25 mm, clearance = 0.1 mm }
+}

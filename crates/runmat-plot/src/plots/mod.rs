@@ -11,6 +11,7 @@ mod color_data;
 pub mod contour;
 pub mod contour_fill;
 pub mod errorbar;
+pub mod legend_swatch;
 mod export_error;
 pub mod figure;
 pub mod line;

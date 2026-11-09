@@ -1,0 +1,55 @@
+runmat 0.7
+std 1
+
+// An angle bracket machined from 6061-T6 plate: a base that bolts down through two counterbored
+// M6 holes, an upright that carries a part on two M5 clearance holes, a 6 mm radius inside the
+// corner and a 2 mm chamfer along the upright's top edge.
+part angle_bracket {
+    input width : length = 100 mm
+    input depth : length = 50 mm
+    input base : length = 10 mm
+    input height : length = 60 mm
+    input wall : length = 10 mm
+
+    sketch profile on origin.yz {
+        p1 = line(start = [0 mm, 0 mm], end = [input.depth, 0 mm])
+        p2 = line(start = [input.depth, 0 mm], end = [input.depth, input.height])
+        p3 = line(start = [input.depth, input.height], end = [input.depth - input.wall, input.height])
+        p4 = line(start = [input.depth - input.wall, input.height], end = [input.depth - input.wall, input.base + 6 mm])
+        r = arc(center = [input.depth - input.wall - 6 mm, input.base + 6 mm], start = [input.depth - input.wall - 6 mm, input.base], end = [input.depth - input.wall, input.base + 6 mm])
+        p5 = line(start = [input.depth - input.wall - 6 mm, input.base], end = [0 mm, input.base])
+        p6 = line(start = [0 mm, input.base], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.profile, distance = input.width)
+    feature mount = hole(
+        face = feature.body.face.side(profile.p5),
+        at = { a = point(20 mm, 20 mm, 10 mm), b = point(80 mm, 20 mm, 10 mm) },
+        through_all,
+        form = counterbore(diameter = 11 mm, depth = 6.5 mm),
+        diameter = 6.6 mm
+    )
+    feature carry = hole(
+        face = feature.body.face.side(profile.p4),
+        at = { a = point(30 mm, 40 mm, 40 mm), b = point(70 mm, 40 mm, 40 mm) },
+        diameter = 5.5 mm,
+        through_all
+    )
+    feature break = chamfer(edges = [edges_between(feature.body.face.side(profile.p3), feature.body.face.side(profile.p4))], distance = 2 mm)
+
+    output angle_bracket = { body = feature.body.body, part_number = "AB-6061-100", material = "Aluminum 6061-T6", properties = [{ name = description, value = { type = text, value = "Angle bracket" } }] }
+
+    datum A = { on = feature.body.face.side(profile.p1) }
+    datum B = { on = feature.body.face.side(profile.p2) }
+    datum C = { on = feature.body.face.start }
+    tolerance base_flat = { characteristic = flatness, on = [feature.body.face.side(profile.p1)], tolerance = 0.05 mm }
+    tolerance wall_square = { characteristic = perpendicularity, on = [feature.body.face.side(profile.p2)], tolerance = 0.1 mm, datums = [{ label = "A" }] }
+    tolerance mount_position = { characteristic = position, on = [feature.mount.face.wall(a), feature.mount.face.wall(b)], tolerance = 0.2 mm, diametral = true, modifier = mmc, datums = [{ label = "A" }, { label = "B" }, { label = "C" }] }
+    tolerance carry_position = { characteristic = position, on = [feature.carry.face.wall(a), feature.carry.face.wall(b)], tolerance = 0.2 mm, diametral = true, modifier = mmc, datums = [{ label = "B" }, { label = "A" }, { label = "C" }] }
+    size mount_bore = { on = [feature.mount.face.wall(a)], size = 6.6 mm ± [0.1 mm, 0 mm] }
+    size carry_bore = { on = [feature.carry.face.wall(a)], size = 5.5 mm ± [0.1 mm, 0 mm] }
+    location mount_pitch = { from = feature.mount.face.wall(a), to = feature.mount.face.wall(b), distance = 60 mm ± 0.1 mm }
+    location carry_pitch = { from = feature.carry.face.wall(a), to = feature.carry.face.wall(b), distance = 40 mm ± 0.1 mm }
+    location overall_width = { from = feature.body.face.start, to = feature.body.face.end, distance = 100 mm ± 0.2 mm }
+    finish seat = { on = [feature.body.face.side(profile.p1)], ra = 1.6 um, process = "milled" }
+    finish face = { on = [feature.body.face.side(profile.p2)], ra = 1.6 um }
+}

@@ -1,0 +1,12 @@
+[package]
+name = "runmat-rules"
+version = "0.7.0"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "CSS-like selector, precedence and explain engine shared by RunMat circuit design rules and CAD check packs"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+# Dependency-free and deterministic: ordered maps only, no hashing, no threads.
+[dependencies]

@@ -1,0 +1,63 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+    input md : length = 3 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    feature top_plane = plane.offset(base = origin.xy, distance = input.thickness)
+    sketch s_pk2 on plane.top_plane {
+        l1 = line(start = [25 mm, 5 mm], end = [35 mm, 5 mm])
+        l2 = line(start = [35 mm, 5 mm], end = [35 mm, 15 mm])
+        l3 = line(start = [35 mm, 15 mm], end = [25 mm, 15 mm])
+        l4 = line(start = [25 mm, 15 mm], end = [25 mm, 5 mm])
+    }
+    feature pk2 = extrude(profile = sketch.s_pk2, distance = input.md, reverse, mode = cut)
+    feature mp = plane.angle(base = origin.yz, axis = origin.z, angle = -45 deg)
+    feature mir = mirror(features = [pk2], plane = plane.mp, suppressed)
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+
+    region mir_floor : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = {
+                    form = copy,
+                    base = bf3eb921d0db60d7cabf7d22fd055413,
+                    whole = bf3eb921d0db60d7cabf7d22fd055413,
+                    pattern = mir,
+                    instance = { instance = mirror }
+                }
+            }
+        ],
+        expect = exactly_one
+    }
+    region mir_wall : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = {
+                    form = copy,
+                    base = "493373e2750901efc3fa5741797dfab1",
+                    whole = "493373e2750901efc3fa5741797dfab1",
+                    pattern = mir,
+                    instance = { instance = mirror }
+                }
+            }
+        ],
+        expect = exactly_one
+    }
+    region seed_floor : face = { select = [feature.pk2.face.end], expect = exactly_one }
+}

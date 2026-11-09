@@ -7,7 +7,7 @@ use crate::{
     FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey, GeometryInspectionSource,
     LogicalSourcePath,
 };
-use runmat_fea_syntax::{
+use runmat_design_syntax::{
     FeaBlock, FeaDeclaration, FeaModelDefinitionKind, FeaModuleItem, FeaStatementKind,
 };
 use runmat_types::Span;
@@ -71,7 +71,7 @@ pub fn check_program<
                 let FeaModuleItem::Declaration(declaration) = item else {
                     continue;
                 };
-                if (declaration.kind == runmat_fea_syntax::FeaDeclarationKind::Sweep)
+                if (declaration.kind == runmat_design_syntax::FeaDeclarationKind::Sweep)
                     != checking_sweeps
                 {
                     continue;
@@ -240,7 +240,7 @@ impl<C: AnalysisOperationCatalog + ?Sized> InputCheck<'_, C> {
     fn check(
         &self,
         input: &super::scope::InputSyntax,
-        expression: Option<&runmat_fea_syntax::FeaExpression>,
+        expression: Option<&runmat_design_syntax::FeaExpression>,
         member: &'static str,
         diagnostics: &mut Vec<FeaDiagnostic>,
     ) -> Option<CheckedExpression> {
@@ -546,7 +546,7 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                     // `include model.m(name = value, ...)`: the model reference checks as usual;
                     // binding its inputs by name is a planned feature.
                     let value = match &value.kind {
-                        runmat_fea_syntax::FeaExpressionKind::Call { callee, .. } => {
+                        runmat_design_syntax::FeaExpressionKind::Call { callee, .. } => {
                             diagnostics.push(FeaDiagnostic::error(
                                 "fea.semantic.include_arguments",
                                 super::pending::with_pending(
@@ -598,7 +598,7 @@ fn check_value<C: AnalysisOperationCatalog + ?Sized>(
     path: &LogicalSourcePath,
     source: &str,
     scope: &ExpressionScope,
-    value: &runmat_fea_syntax::FeaExpression,
+    value: &runmat_design_syntax::FeaExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> CheckedExpression {
     let (checked, mut found) = check_expression(

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_fea_syntax::{FeaAssignmentRelation, FeaModelDefinitionKind};
+use runmat_design_syntax::{FeaAssignmentRelation, FeaModelDefinitionKind};
 use runmat_types::Span;
 use runmat_types::{OperationIdentity, OperationOverloadIdentity, OperationSignature};
 

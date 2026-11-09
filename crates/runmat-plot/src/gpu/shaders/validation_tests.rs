@@ -59,7 +59,39 @@ fn plotting_shader_sources_parse_and_validate_for_every_declared_variant() {
         validate(name, source, &mut failures);
         variants += 1;
     }
-    assert_eq!(variants, 72, "the declared shader inventory changed");
+    for (depth_tested, reversed_z) in [(true, true), (true, false), (false, true)] {
+        validate(
+            &format!("vertex/edge-stroke depth={depth_tested} reversed={reversed_z}"),
+            &vertex::edge_stroke::source(depth_tested, reversed_z),
+            &mut failures,
+        );
+        variants += 1;
+    }
+    validate(
+        "vertex/triangle-instanced",
+        &vertex::triangle::instanced(),
+        &mut failures,
+    );
+    variants += 1;
+    for instanced in [false, true] {
+        for depth_probe in [None, Some(false), Some(true)] {
+            for reversed_z in [true, false] {
+                let shader = vertex::edge_stroke::EdgeStrokeShader {
+                    depth_tested: true,
+                    reversed_z,
+                    instanced,
+                    depth_probe,
+                };
+                validate(
+                    &format!("vertex/edge-stroke {shader:?}"),
+                    &vertex::edge_stroke::source_for(shader),
+                    &mut failures,
+                );
+                variants += 1;
+            }
+        }
+    }
+    assert_eq!(variants, 88, "the declared shader inventory changed");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 

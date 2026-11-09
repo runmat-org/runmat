@@ -1,0 +1,46 @@
+runmat 0.7
+std 1
+
+// The camera drone's assembly drawing at 1:2 on A2, third-angle projection: the front view with
+// the plan view above it, an isometric at 1:1.6 beside them, balloons on the main items, the
+// parts list beside the title block and the general notes above it.
+drawing drone {
+    format a2 = {
+        size = { size = iso, name = A2 },
+        title_block = [
+            { label = "Title", source = { source = literal, text = "Foldable camera drone" } },
+            { label = "Part number", source = { source = literal, text = "CD-100" } },
+            { label = "Scale", source = { source = scale } },
+            { label = "Sheet", source = { source = sheet_number } },
+            { label = "Rev", source = { source = revision } }
+        ]
+    }
+
+    sheet "1" = { format = a2, scale = [1, 2], projection = third_angle }
+
+    view front = standard(orientation = front, sheet = "1", model = { assembly = drone, from = ".." }, at = [121, 80], display = visible_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { assembly = drone, from = ".." }, at = [121, 215], display = visible_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { assembly = drone, from = ".." }, at = [400, 325], scale = [5, 8], display = visible_lines)
+
+    annotation b1 = balloon(occurrence = [{ name = body_top }], table = parts, view = iso)
+    annotation b2 = balloon(occurrence = [{ name = body_bottom }], table = parts, view = front)
+    annotation b3 = balloon(occurrence = [{ name = battery }], table = parts, view = top)
+    annotation b4 = balloon(occurrence = [{ name = arm_front_left }, { name = unit }, { name = arm }], table = parts, view = top)
+    annotation b5 = balloon(occurrence = [{ name = arm_rear_right }, { name = unit }, { name = motor }, { name = motor }], table = parts, view = top)
+    annotation b6 = balloon(occurrence = [{ name = gimbal }, { name = camera }], table = parts, view = front)
+    annotation b7 = balloon(occurrence = [{ name = vision_front_left }], table = parts, view = iso)
+    annotation b8 = balloon(occurrence = [{ name = light_pipe }], table = parts, view = iso)
+
+    table parts = bom(view = iso, sheet = "1", at = [228, 225.5])
+    table notes = notes(
+        rows = [
+            "DIMENSIONS IN MILLIMETERS. GENERAL TOLERANCES ISO 2768-mK UNLESS STATED.",
+            "THIRD-ANGLE PROJECTION: SEE THE PROJECTION SYMBOL LEFT OF THE TITLE BLOCK.",
+            "DEBURR ALL PARTS AND BREAK SHARP EDGES 0.2 TO 0.5 MM.",
+            "MATERIAL AND FINISH OF EACH ITEM PER THE PARTS LIST.",
+            "TOLERANCING TO ISO 8015. DRAWN TO ISO 128 AND ISO 5456-2."
+        ],
+        sheet = "1",
+        at = [0, 0]
+    )
+}

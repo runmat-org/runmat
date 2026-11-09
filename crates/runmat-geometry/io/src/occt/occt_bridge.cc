@@ -13,6 +13,7 @@
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <BRep_Tool.hxx>
+#include <BRepLib_CheckCurveOnSurface.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -67,6 +68,7 @@
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
@@ -1313,10 +1315,23 @@ struct EdgeToleranceAdmission {
   bool within_bound = false;
 };
 
-double measured_edge_gap(const TopoDS_Edge& edge) {
+double measured_edge_gap(
+    const TopoDS_Edge& edge,
+    const TopTools_IndexedDataMapOfShapeListOfShape& edge_faces,
+    double written_tolerance) {
   ShapeAnalysis_Edge analysis;
   Standard_Real deviation = 0.0;
   analysis.CheckSameParameter(edge, deviation, 101);
+  // Resolve narrow pcurve peaks between samples before applying the request's admission bound.
+  if (deviation > 0.5 * written_tolerance && edge_faces.Contains(edge)) {
+    for (const TopoDS_Shape& face : edge_faces.FindFromKey(edge)) {
+      BRepLib_CheckCurveOnSurface exact(edge, TopoDS::Face(face));
+      exact.Perform();
+      if (exact.IsDone() && std::isfinite(exact.MaxDistance())) {
+        deviation = std::max(deviation, exact.MaxDistance());
+      }
+    }
+  }
   return deviation;
 }
 
@@ -1355,6 +1370,8 @@ static std::vector<EdgeToleranceAdmission> admit_measured_edge_tolerances(
   std::vector<EdgeToleranceAdmission> admissions;
   TopTools_IndexedMapOfShape edges;
   TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+  TopExp::MapShapesAndUniqueAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
   BRep_Builder builder;
   for (Standard_Integer index = 1; index <= edges.Extent(); ++index) {
     if ((index & 63) == 0) {
@@ -1365,7 +1382,7 @@ static std::vector<EdgeToleranceAdmission> admit_measured_edge_tolerances(
       continue;
     }
     const double written = BRep_Tool::Tolerance(edge);
-    const double before = measured_edge_gap(edge);
+    const double before = measured_edge_gap(edge, edge_faces, written);
     if (!std::isfinite(before) || before * 1.05 <= written) {
       continue;
     }
@@ -1384,7 +1401,7 @@ static std::vector<EdgeToleranceAdmission> admit_measured_edge_tolerances(
     Handle(ShapeFix_Edge) repair = new ShapeFix_Edge;
     repair->FixSameParameter(edge, written);
     builder.SameParameter(edge, Standard_True);
-    const double after = measured_edge_gap(edge);
+    const double after = measured_edge_gap(edge, edge_faces, written);
     admission.gap_after = std::isfinite(after) ? after : before;
     admission.repaired = admission.gap_after < before;
     for (std::size_t vertex = 0; vertex < vertices.size(); ++vertex) {

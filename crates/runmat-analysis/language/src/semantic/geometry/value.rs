@@ -66,10 +66,12 @@ pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpressi
         CheckedExpressionKind::Unary { operator, operand } => {
             let operand = scalar(operand)?;
             Some(match operator {
-                runmat_fea_syntax::FeaUnaryOperator::Positive => operand,
-                runmat_fea_syntax::FeaUnaryOperator::Negative => GeometryScalarExpression::Negate {
-                    value: Box::new(operand),
-                },
+                runmat_design_syntax::FeaUnaryOperator::Positive => operand,
+                runmat_design_syntax::FeaUnaryOperator::Negative => {
+                    GeometryScalarExpression::Negate {
+                        value: Box::new(operand),
+                    }
+                }
             })
         }
         CheckedExpressionKind::Binary {
@@ -78,10 +80,14 @@ pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpressi
             right,
         } => Some(GeometryScalarExpression::Binary {
             operator: match operator {
-                runmat_fea_syntax::FeaBinaryOperator::Add => GeometryScalarOperator::Add,
-                runmat_fea_syntax::FeaBinaryOperator::Subtract => GeometryScalarOperator::Subtract,
-                runmat_fea_syntax::FeaBinaryOperator::Multiply => GeometryScalarOperator::Multiply,
-                runmat_fea_syntax::FeaBinaryOperator::Divide => GeometryScalarOperator::Divide,
+                runmat_design_syntax::FeaBinaryOperator::Add => GeometryScalarOperator::Add,
+                runmat_design_syntax::FeaBinaryOperator::Subtract => {
+                    GeometryScalarOperator::Subtract
+                }
+                runmat_design_syntax::FeaBinaryOperator::Multiply => {
+                    GeometryScalarOperator::Multiply
+                }
+                runmat_design_syntax::FeaBinaryOperator::Divide => GeometryScalarOperator::Divide,
                 _ => return None,
             },
             left: Box::new(scalar(left)?),

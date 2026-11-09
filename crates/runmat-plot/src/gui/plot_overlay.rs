@@ -190,16 +190,10 @@ impl PlotOverlay {
         font_size: f32,
         color: Color32,
         bold: bool,
-        shadow_alpha: u8,
     ) {
+        // One fill per glyph: a drop shadow doubles text on a light page, so plot
+        // text draws without one.
         let font = FontId::proportional(font_size);
-        painter.text(
-            pos + egui::vec2(1.0, 1.0),
-            align,
-            text,
-            font.clone(),
-            Color32::from_rgba_premultiplied(0, 0, 0, shadow_alpha),
-        );
         painter.text(pos, align, text, font.clone(), color);
         if bold {
             painter.text(pos + egui::vec2(0.6, 0.0), align, text, font.clone(), color);
@@ -1395,8 +1389,7 @@ impl PlotOverlay {
                         );
                     }
                     if plot_renderer.overlay_show_legend_for_axes(i) {
-                        let entries = plot_renderer.overlay_legend_entries_for_axes(i);
-                        self.draw_legend(ui, r, &entries, config.font_scale);
+                        self.draw_axes_legend(ui, r, plot_renderer, i, config.font_scale);
                     }
                     self.draw_colorbar(
                         ui,
@@ -1495,8 +1488,7 @@ impl PlotOverlay {
                     self.draw_pie_label(ui, r, plot_renderer, i, &label, pos, config.font_scale);
                 }
                 if plot_renderer.overlay_show_legend_for_axes(i) {
-                    let entries = plot_renderer.overlay_legend_entries_for_axes(i);
-                    self.draw_legend(ui, r, &entries, config.font_scale);
+                    self.draw_axes_legend(ui, r, plot_renderer, i, config.font_scale);
                 }
             }
         } else {
@@ -1696,8 +1688,7 @@ impl PlotOverlay {
         // Draw legend if enabled and entries available
         if rows * cols <= 1 && axes_count <= 1 && plot_renderer.overlay_show_legend_for_axes(0) {
             // Per-axes entries include each pie slice.
-            let entries = plot_renderer.overlay_legend_entries_for_axes(0);
-            self.draw_legend(ui, centered_plot_rect, &entries, config.font_scale);
+            self.draw_axes_legend(ui, centered_plot_rect, plot_renderer, 0, config.font_scale);
         }
 
         if let Some(legend) = plot_renderer
@@ -2626,8 +2617,6 @@ impl PlotOverlay {
         let scale = font_scale.max(0.75);
         let base = plot_rect.width().min(plot_rect.height()).max(1.0);
         let gizmo_size = (base * 0.16).clamp(44.0, 110.0) * scale;
-        let pad = (30.0 * scale).round();
-        let origin = Pos2::new(plot_rect.min.x + pad, plot_rect.max.y - pad);
 
         struct AxisItem {
             label: &'static str,
@@ -2677,12 +2666,30 @@ impl PlotOverlay {
 
         let painter = ui.painter();
 
-        painter.circle_filled(origin, 2.0 * scale, Color32::from_gray(210));
-
         let axis_len = gizmo_size * 0.65;
         let head_len = (8.0 * scale).min(axis_len * 0.35);
         let head_w = 5.0 * scale;
         let font = FontId::proportional(11.0 * scale);
+        // Inset the origin so every arm and its label stays whole, with a margin: the label
+        // sits 10 px past the tip, is about 11 px tall, and keeps 8 px clear of the edge.
+        let dirs: Vec<[f32; 2]> = axes
+            .iter()
+            .filter_map(|a| {
+                let d = egui::Vec2::new(a.dir_world.x, -a.dir_world.y);
+                let m = d.length();
+                (m.is_finite() && m >= 1e-4).then(|| [d.x / m, d.y / m])
+            })
+            .collect();
+        let [ox, oy] = crate::core::triad::triad_origin(
+            [plot_rect.min.x, plot_rect.min.y],
+            [plot_rect.max.x, plot_rect.max.y],
+            (30.0 * scale).round(),
+            axis_len + 24.0 * scale,
+            &dirs,
+        );
+        let origin = Pos2::new(ox, oy);
+
+        painter.circle_filled(origin, 2.0 * scale, Color32::from_gray(210));
 
         for a in axes.iter() {
             let dir2 = egui::Vec2::new(a.dir_world.x, -a.dir_world.y);
@@ -2806,7 +2813,6 @@ impl PlotOverlay {
                     Self::style_font_size(&style, 12.0, scale),
                     Self::style_color(&style, col_x),
                     Self::style_is_bold(&style),
-                    110,
                 );
             }
         }
@@ -2826,7 +2832,6 @@ impl PlotOverlay {
                     Self::style_font_size(&style, 12.0, scale),
                     Self::style_color(&style, col_y),
                     Self::style_is_bold(&style),
-                    110,
                 );
             }
         }
@@ -2845,7 +2850,6 @@ impl PlotOverlay {
                     Self::style_font_size(&style, 12.0, scale),
                     Self::style_color(&style, col_z),
                     Self::style_is_bold(&style),
-                    110,
                 );
             }
         }
@@ -2864,13 +2868,6 @@ impl PlotOverlay {
                 let offset =
                     outward_offset(pos, 7.0 * scale) + egui::Vec2::new(3.0 * scale, -3.0 * scale);
                 let text = plot_utils::format_tick_label(value);
-                painter.text(
-                    pos + offset + egui::vec2(1.0, 1.0),
-                    Align2::LEFT_CENTER,
-                    &text,
-                    font.clone(),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 90),
-                );
                 painter.text(pos + offset, Align2::LEFT_CENTER, text, font.clone(), color);
             }
         };
@@ -2903,7 +2900,6 @@ impl PlotOverlay {
                 font_size,
                 Self::style_color(&style, self.theme_text_color()),
                 Self::style_is_bold(&style),
-                110,
             );
         }
     }
@@ -2946,7 +2942,6 @@ impl PlotOverlay {
                 Self::style_font_size(&first_style, 16.0, scale),
                 Self::style_color(&first_style, self.theme_text_color()),
                 Self::style_is_bold(&first_style),
-                110,
             );
             Self::paint_styled_text(
                 ui.painter(),
@@ -2956,11 +2951,129 @@ impl PlotOverlay {
                 Self::style_font_size(&second_style, 13.0, scale),
                 Self::style_color(&second_style, self.theme_text_color()),
                 Self::style_is_bold(&second_style),
-                110,
             );
         } else {
             self.draw_title_in_rect(ui, rect, first_text, first_style, scale);
         }
+    }
+
+    /// An axes' drawn data on screen in `plot_rect`, for a legend placed `best`: lines as their
+    /// segments and filled marks as their triangles. Log axes keep data units in the scene and
+    /// map by their logarithm, as the ticks do.
+    /// Maps an axes' data coordinates to screen points in `plot_rect`. Log axes keep data units
+    /// in the scene and map by their logarithm, as the ticks do; a value a log axis can't show
+    /// (zero or negative) maps to nothing.
+    fn data_to_screen(
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        plot_rect: Rect,
+    ) -> Option<impl Fn([f32; 2]) -> Option<Pos2>> {
+        let (l, r, b, t) = plot_renderer.view_bounds_for_axes(axes_index)?;
+        let along = |log: bool, lo: f64, hi: f64| -> Option<Box<dyn Fn(f32) -> Option<f32>>> {
+            if log {
+                if lo <= 0.0 || hi <= 0.0 {
+                    return None;
+                }
+                let (a, z) = (lo.log10(), hi.log10());
+                ((z - a).abs() > f64::EPSILON).then(|| {
+                    Box::new(move |v: f32| {
+                        (v > 0.0).then(|| ((f64::from(v).log10() - a) / (z - a)) as f32)
+                    }) as Box<dyn Fn(f32) -> Option<f32>>
+                })
+            } else {
+                ((hi - lo).abs() > f64::EPSILON).then(|| {
+                    Box::new(move |v: f32| Some(((f64::from(v) - lo) / (hi - lo)) as f32))
+                        as Box<dyn Fn(f32) -> Option<f32>>
+                })
+            }
+        };
+        let fx = along(plot_renderer.overlay_x_log_for_axes(axes_index), l, r)?;
+        let fy = along(plot_renderer.overlay_y_log_for_axes(axes_index), b, t)?;
+        Some(move |[x, y]: [f32; 2]| -> Option<Pos2> {
+            let (u, v) = (fx(x)?, fy(y)?);
+            Some(Pos2::new(
+                plot_rect.min.x + u * plot_rect.width(),
+                plot_rect.max.y - v * plot_rect.height(),
+            ))
+        })
+    }
+
+    fn legend_obstacles(
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        plot_rect: Rect,
+    ) -> super::legend_placement::Obstacles {
+        use crate::core::plot_renderer::DataPrimitive;
+        let mut obstacles = super::legend_placement::Obstacles::new(plot_rect);
+        let (Some((l, r, b, t)), Some(screen)) = (
+            plot_renderer.view_bounds_for_axes(axes_index),
+            Self::data_to_screen(plot_renderer, axes_index, plot_rect),
+        ) else {
+            return obstacles;
+        };
+        for primitive in plot_renderer.overlay_data_primitives_for_axes(axes_index, 200_000) {
+            match primitive {
+                DataPrimitive::Point(p) => {
+                    if let Some(p) = screen(p) {
+                        obstacles.point(p);
+                    }
+                }
+                DataPrimitive::Segment([a, b]) => {
+                    if let (Some(a), Some(b)) = (screen(a), screen(b)) {
+                        obstacles.segment(a, b);
+                    }
+                }
+                DataPrimitive::Triangle([a, b, c]) => {
+                    if let (Some(a), Some(b), Some(c)) = (screen(a), screen(b), screen(c)) {
+                        obstacles.triangle(a, b, c);
+                    }
+                }
+            }
+        }
+        // Reference lines (spec limits, a mean) are data too: each spans the axes.
+        for (orientation, value) in plot_renderer.overlay_reference_lines_for_axes(axes_index) {
+            let v = value as f32;
+            let (p, q) = match orientation {
+                crate::plots::ReferenceLineOrientation::Vertical => ([v, b as f32], [v, t as f32]),
+                crate::plots::ReferenceLineOrientation::Horizontal => {
+                    ([l as f32, v], [r as f32, v])
+                }
+            };
+            if let (Some(p), Some(q)) = (screen(p), screen(q)) {
+                obstacles.segment(p, q);
+            }
+        }
+        obstacles
+    }
+
+    fn draw_axes_legend(
+        &self,
+        ui: &mut egui::Ui,
+        plot_rect: Rect,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        scale: f32,
+    ) {
+        let entries = plot_renderer.overlay_legend_entries_for_axes(axes_index);
+        let location = plot_renderer
+            .overlay_legend_style_for_axes(axes_index)
+            .and_then(|s| s.location.clone());
+        let obstacles = if location
+            .as_deref()
+            .is_some_and(|l| l.trim().to_ascii_lowercase().starts_with("best"))
+        {
+            Self::legend_obstacles(plot_renderer, axes_index, plot_rect)
+        } else {
+            super::legend_placement::Obstacles::new(plot_rect)
+        };
+        self.draw_legend(
+            ui,
+            plot_rect,
+            &entries,
+            scale,
+            location.as_deref(),
+            &obstacles,
+        );
     }
 
     fn draw_legend(
@@ -2969,6 +3082,8 @@ impl PlotOverlay {
         plot_rect: Rect,
         entries: &[crate::plots::figure::LegendEntry],
         scale: f32,
+        location: Option<&str>,
+        obstacles: &super::legend_placement::Obstacles,
     ) {
         if entries.is_empty() {
             return;
@@ -3011,12 +3126,15 @@ impl PlotOverlay {
         let legend_w = (text_x_gap + widest_label + pad)
             .max(92.0)
             .min((plot_rect.width() - 2.0 * pad).max(92.0));
-        let x = plot_rect.max.x - legend_w - pad;
-        let mut y = plot_rect.min.y + pad + 4.0 * scale;
-        let legend_rect = Rect::from_min_max(
-            egui::pos2(x - pad, plot_rect.min.y + pad),
-            egui::pos2(x + legend_w, y + entries.len() as f32 * row_h + pad),
+        let size = egui::vec2(
+            legend_w + pad,
+            4.0 * scale + entries.len() as f32 * row_h + pad,
         );
+        let origin =
+            super::legend_placement::legend_origin(plot_rect, size, pad, location, obstacles);
+        let x = origin.x + pad;
+        let mut y = origin.y + 4.0 * scale;
+        let legend_rect = Rect::from_min_size(origin, size);
         ui.painter().rect_filled(legend_rect, 4.0, legend_bg);
         y += 10.0 * scale;
         for e in entries {
@@ -3036,13 +3154,19 @@ impl PlotOverlay {
                 | crate::plots::figure::PlotType::ReferenceLine => {
                     let ymid = swatch_rect.center().y;
                     if e.line_visible {
-                        ui.painter().line_segment(
-                            [
-                                Pos2::new(swatch_rect.min.x, ymid),
-                                Pos2::new(swatch_rect.max.x, ymid),
-                            ],
-                            Stroke::new(2.0_f32, c),
-                        );
+                        // The swatch repeats the series' dash pattern, so a dashed spec limit
+                        // reads dashed in the legend too.
+                        for (a, b) in crate::plots::legend_swatch::legend_dashes(
+                            e.line_style,
+                            swatch_rect.min.x,
+                            swatch_rect.max.x,
+                            scale,
+                        ) {
+                            ui.painter().line_segment(
+                                [Pos2::new(a, ymid), Pos2::new(b, ymid)],
+                                Stroke::new(2.0_f32, c),
+                            );
+                        }
                     }
                     // The series' marker in the middle of the swatch, as MATLAB draws it.
                     if let Some(marker) = &e.marker {
@@ -3387,14 +3511,30 @@ impl PlotOverlay {
         };
         let annotations = plot_renderer.world_text_annotations_for_axes(axes_index);
         let is_3d = Self::axes_is_3d(plot_renderer, axes_index);
+        // On a 2D axes with a log scale, the scene keeps data units and the shaders map them by
+        // their logarithm; text maps the same way, so `text(1.5e5, y, …)` sits at 1.5e5.
+        let log_2d = !is_3d
+            && (plot_renderer.overlay_x_log_for_axes(axes_index)
+                || plot_renderer.overlay_y_log_for_axes(axes_index));
+        let to_screen = if log_2d {
+            Self::data_to_screen(plot_renderer, axes_index, plot_rect)
+        } else {
+            None
+        };
         for (position, text, style) in annotations {
             if !style.visible || text.trim().is_empty() {
                 continue;
             }
-            let position = plot_renderer
-                .axes_model_matrix(axes_index)
-                .transform_point3(position);
-            let Some(screen) = self.project_world_to_screen(plot_rect, camera, position) else {
+            let screen = match &to_screen {
+                Some(map) => map([position.x, position.y]),
+                None => {
+                    let position = plot_renderer
+                        .axes_model_matrix(axes_index)
+                        .transform_point3(position);
+                    self.project_world_to_screen(plot_rect, camera, position)
+                }
+            };
+            let Some(screen) = screen else {
                 continue;
             };
             let color = Self::style_color(&style, self.theme_text_color());
@@ -3418,7 +3558,6 @@ impl PlotOverlay {
                 font_size,
                 color,
                 Self::style_is_bold(&style),
-                if is_3d { 120 } else { 90 },
             );
         }
     }
@@ -3531,9 +3670,11 @@ impl PlotOverlay {
         else {
             return;
         };
-        let camera = plot_renderer
-            .axes_camera(axes_index)
-            .unwrap_or_else(|| plot_renderer.camera());
+        // The label sits at its line's value through the axes' own scale, so a line on a log
+        // axis is labelled where it is drawn.
+        let Some(to_screen) = Self::data_to_screen(plot_renderer, axes_index, plot_rect) else {
+            return;
+        };
         let scale = scale.max(0.75);
         let pad = 4.0 * scale;
         let painter = ui.painter().with_clip_rect(plot_rect);
@@ -3553,8 +3694,8 @@ impl PlotOverlay {
             let size = galley.size();
             match orientation {
                 crate::plots::ReferenceLineOrientation::Vertical => {
-                    let mid = glam::Vec3::new(value as f32, ((y_min + y_max) * 0.5) as f32, 0.0);
-                    let Some(at) = self.project_world_to_screen(plot_rect, camera, mid) else {
+                    let mid = [value as f32, ((y_min + y_max) * 0.5) as f32];
+                    let Some(at) = to_screen(mid) else {
                         continue;
                     };
                     let pos = Pos2::new(at.x + 2.0 * scale, plot_rect.min.y + pad + size.x);
@@ -3564,8 +3705,8 @@ impl PlotOverlay {
                     painter.add(shape);
                 }
                 crate::plots::ReferenceLineOrientation::Horizontal => {
-                    let mid = glam::Vec3::new(((x_min + x_max) * 0.5) as f32, value as f32, 0.0);
-                    let Some(at) = self.project_world_to_screen(plot_rect, camera, mid) else {
+                    let mid = [((x_min + x_max) * 0.5) as f32, value as f32];
+                    let Some(at) = to_screen(mid) else {
                         continue;
                     };
                     let pos =

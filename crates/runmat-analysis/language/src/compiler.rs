@@ -4,7 +4,7 @@ use crate::{
     GeometryInspectionSource, ModuleGraphRequest, ParsedFeaModule, RunMatFunctionSource,
     SourceModule,
 };
-use runmat_fea_syntax::parse_fea;
+use runmat_design_syntax::parse_fea;
 
 pub trait FeaCompilerHost:
     FeaModuleSource

@@ -18,7 +18,7 @@ required-features = ["native"]
 
 [features]
 default = ["native"]
-native = ["tokio", "tower-lsp", "env_logger"]
+native = ["tokio", "tower-lsp", "env_logger", "runmat-design-tools/occt"]
 wasm = ["wasm-bindgen", "runmat-runtime/occt-wasm-host"]
 
 [dependencies]
@@ -29,7 +29,12 @@ runmat-hir = { workspace = true }
 runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-builtins = { workspace = true }
 runmat-lexer = { workspace = true }
-runmat-fea-syntax = { workspace = true }
+runmat-design-syntax = { workspace = true }
+# The design compilers: `.part`, `.assembly`, `.drawing`, `.circuit` and `.circuit.layout` diagnostics,
+# hover values and completion come from their front ends and regeneration.
+runmat-cad = { path = "../runmat-cad", version = "=0.7.0" }
+runmat-circuit = { path = "../runmat-circuit", version = "=0.7.0" }
+runmat-design-tools = { path = "../runmat-design-tools", version = "=0.7.0", default-features = false }
 runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
 runmat-package = { workspace = true }

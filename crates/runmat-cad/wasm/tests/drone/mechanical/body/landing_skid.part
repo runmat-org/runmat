@@ -1,0 +1,88 @@
+runmat 0.7
+std 1
+
+// A landing skid under the body: a moulded glass-filled nylon rail on two tapered struts that
+// flare into the belly. The struts' tops are trimmed by the body's own loft, so each skid seats
+// flush on the lower shell (bonded and screwed from inside). The two skids stand either side of
+// the heatsink's fins and hold the gimbal camera 3 mm off the ground. `side` places the skid's
+// centre line (y); its origin is the body origin.
+part landing_skid {
+    input side : length = 34 mm
+    // The rail's depth under the struts: the wall the landing load bends.
+    input rail_thickness : length = 3.5 mm
+    feature sole_plane = plane.offset(base = origin.xy, distance = -21 mm)
+    sketch rail_s on plane.sole_plane {
+        c = spline(points = [[48.5 mm, -3.5 mm + input.side], [50.019 mm, -3.153 mm + input.side], [51.236 mm, -2.182 mm + input.side], [51.912 mm, -0.779 mm + input.side], [51.912 mm, 0.779 mm + input.side], [51.236 mm, 2.182 mm + input.side], [50.019 mm, 3.153 mm + input.side], [48.5 mm, 3.5 mm + input.side], [-42.5 mm, 3.5 mm + input.side], [-44.019 mm, 3.153 mm + input.side], [-45.236 mm, 2.182 mm + input.side], [-45.912 mm, 0.779 mm + input.side], [-45.912 mm, -0.779 mm + input.side], [-45.236 mm, -2.182 mm + input.side], [-44.019 mm, -3.153 mm + input.side], [-42.5 mm, -3.5 mm + input.side]], closed)
+    }
+    feature rail = extrude(profile = sketch.rail_s, distance = input.rail_thickness)
+    feature front_st0 = plane.offset(base = origin.xy, distance = input.rail_thickness - 22.5 mm)
+    sketch front_s0 on plane.front_st0 {
+        c = spline(points = [[30.5 mm, -2.5 mm + input.side], [31.585 mm, -2.252 mm + input.side], [32.455 mm, -1.559 mm + input.side], [32.937 mm, -0.556 mm + input.side], [32.937 mm, 0.556 mm + input.side], [32.455 mm, 1.559 mm + input.side], [31.585 mm, 2.252 mm + input.side], [30.5 mm, 2.5 mm + input.side], [25.5 mm, 2.5 mm + input.side], [24.415 mm, 2.252 mm + input.side], [23.545 mm, 1.559 mm + input.side], [23.063 mm, 0.556 mm + input.side], [23.063 mm, -0.556 mm + input.side], [23.545 mm, -1.559 mm + input.side], [24.415 mm, -2.252 mm + input.side], [25.5 mm, -2.5 mm + input.side]], closed)
+    }
+    feature front_st1 = plane.offset(base = origin.xy, distance = -7 mm)
+    sketch front_s1 on plane.front_st1 {
+        c = spline(points = [[31.5 mm, -3 mm + input.side], [32.802 mm, -2.703 mm + input.side], [33.845 mm, -1.87 mm + input.side], [34.425 mm, -0.668 mm + input.side], [34.425 mm, 0.668 mm + input.side], [33.845 mm, 1.87 mm + input.side], [32.802 mm, 2.703 mm + input.side], [31.5 mm, 3 mm + input.side], [24.5 mm, 3 mm + input.side], [23.198 mm, 2.703 mm + input.side], [22.155 mm, 1.87 mm + input.side], [21.575 mm, 0.668 mm + input.side], [21.575 mm, -0.668 mm + input.side], [22.155 mm, -1.87 mm + input.side], [23.198 mm, -2.703 mm + input.side], [24.5 mm, -3 mm + input.side]], closed)
+    }
+    feature front_st2 = plane.offset(base = origin.xy, distance = 16 mm)
+    sketch front_s2 on plane.front_st2 {
+        c = spline(points = [[33.5 mm, -4.5 mm + input.side], [35.452 mm, -4.054 mm + input.side], [37.018 mm, -2.806 mm + input.side], [37.887 mm, -1.001 mm + input.side], [37.887 mm, 1.001 mm + input.side], [37.018 mm, 2.806 mm + input.side], [35.452 mm, 4.054 mm + input.side], [33.5 mm, 4.5 mm + input.side], [22.5 mm, 4.5 mm + input.side], [20.548 mm, 4.054 mm + input.side], [18.982 mm, 2.806 mm + input.side], [18.113 mm, 1.001 mm + input.side], [18.113 mm, -1.001 mm + input.side], [18.982 mm, -2.806 mm + input.side], [20.548 mm, -4.054 mm + input.side], [22.5 mm, -4.5 mm + input.side]], closed)
+    }
+    feature front = loft(profiles = [sketch.front_s0, sketch.front_s1, sketch.front_s2], mode = add)
+    feature rear_st0 = plane.offset(base = origin.xy, distance = input.rail_thickness - 22.5 mm)
+    sketch rear_s0 on plane.rear_st0 {
+        c = spline(points = [[-27.5 mm, -2.5 mm + input.side], [-26.415 mm, -2.252 mm + input.side], [-25.545 mm, -1.559 mm + input.side], [-25.063 mm, -0.556 mm + input.side], [-25.063 mm, 0.556 mm + input.side], [-25.545 mm, 1.559 mm + input.side], [-26.415 mm, 2.252 mm + input.side], [-27.5 mm, 2.5 mm + input.side], [-32.5 mm, 2.5 mm + input.side], [-33.585 mm, 2.252 mm + input.side], [-34.455 mm, 1.559 mm + input.side], [-34.937 mm, 0.556 mm + input.side], [-34.937 mm, -0.556 mm + input.side], [-34.455 mm, -1.559 mm + input.side], [-33.585 mm, -2.252 mm + input.side], [-32.5 mm, -2.5 mm + input.side]], closed)
+    }
+    feature rear_st1 = plane.offset(base = origin.xy, distance = -7 mm)
+    sketch rear_s1 on plane.rear_st1 {
+        c = spline(points = [[-26.5 mm, -3 mm + input.side], [-25.198 mm, -2.703 mm + input.side], [-24.155 mm, -1.87 mm + input.side], [-23.575 mm, -0.668 mm + input.side], [-23.575 mm, 0.668 mm + input.side], [-24.155 mm, 1.87 mm + input.side], [-25.198 mm, 2.703 mm + input.side], [-26.5 mm, 3 mm + input.side], [-33.5 mm, 3 mm + input.side], [-34.802 mm, 2.703 mm + input.side], [-35.845 mm, 1.87 mm + input.side], [-36.425 mm, 0.668 mm + input.side], [-36.425 mm, -0.668 mm + input.side], [-35.845 mm, -1.87 mm + input.side], [-34.802 mm, -2.703 mm + input.side], [-33.5 mm, -3 mm + input.side]], closed)
+    }
+    feature rear_st2 = plane.offset(base = origin.xy, distance = 16 mm)
+    sketch rear_s2 on plane.rear_st2 {
+        c = spline(points = [[-24.5 mm, -4.5 mm + input.side], [-22.548 mm, -4.054 mm + input.side], [-20.982 mm, -2.806 mm + input.side], [-20.113 mm, -1.001 mm + input.side], [-20.113 mm, 1.001 mm + input.side], [-20.982 mm, 2.806 mm + input.side], [-22.548 mm, 4.054 mm + input.side], [-24.5 mm, 4.5 mm + input.side], [-35.5 mm, 4.5 mm + input.side], [-37.452 mm, 4.054 mm + input.side], [-39.018 mm, 2.806 mm + input.side], [-39.887 mm, 1.001 mm + input.side], [-39.887 mm, -1.001 mm + input.side], [-39.018 mm, -2.806 mm + input.side], [-37.452 mm, -4.054 mm + input.side], [-35.5 mm, -4.5 mm + input.side]], closed)
+    }
+    feature rear = loft(profiles = [sketch.rear_s0, sketch.rear_s1, sketch.rear_s2], mode = add)
+    feature belly_st0 = plane.offset(base = origin.yz, distance = -94 mm)
+    sketch belly_s0 on plane.belly_st0 {
+        c = spline(points = [[0 mm, 48 mm], [14.09 mm, 47.535 mm], [22.552 mm, 46.145 mm], [28.886 mm, 43.833 mm], [33.387 mm, 40.581 mm], [36.095 mm, 36.235 mm], [37 mm, 29 mm], [36.095 mm, 21.765 mm], [33.387 mm, 17.419 mm], [28.886 mm, 14.167 mm], [22.552 mm, 11.855 mm], [14.09 mm, 10.465 mm], [0 mm, 10 mm], [-14.09 mm, 10.465 mm], [-22.552 mm, 11.855 mm], [-28.886 mm, 14.167 mm], [-33.387 mm, 17.419 mm], [-36.095 mm, 21.765 mm], [-37 mm, 29 mm], [-36.095 mm, 36.235 mm], [-33.387 mm, 40.581 mm], [-28.886 mm, 43.833 mm], [-22.552 mm, 46.145 mm], [-14.09 mm, 47.535 mm]], closed)
+    }
+    feature belly_st1 = plane.offset(base = origin.yz, distance = -80 mm)
+    sketch belly_s1 on plane.belly_st1 {
+        c = spline(points = [[0 mm, 53 mm], [15.613 mm, 52.425 mm], [24.99 mm, 50.705 mm], [32.009 mm, 47.847 mm], [36.997 mm, 43.823 mm], [39.997 mm, 38.449 mm], [41 mm, 29.5 mm], [39.997 mm, 20.551 mm], [36.997 mm, 15.177 mm], [32.009 mm, 11.153 mm], [24.99 mm, 8.295 mm], [15.613 mm, 6.575 mm], [0 mm, 6 mm], [-15.613 mm, 6.575 mm], [-24.99 mm, 8.295 mm], [-32.009 mm, 11.153 mm], [-36.997 mm, 15.177 mm], [-39.997 mm, 20.551 mm], [-41 mm, 29.5 mm], [-39.997 mm, 38.449 mm], [-36.997 mm, 43.823 mm], [-32.009 mm, 47.847 mm], [-24.99 mm, 50.705 mm], [-15.613 mm, 52.425 mm]], closed)
+    }
+    feature belly_st2 = plane.offset(base = origin.yz, distance = -50 mm)
+    sketch belly_s2 on plane.belly_st2 {
+        c = spline(points = [[0 mm, 57 mm], [17.137 mm, 56.34 mm], [27.428 mm, 54.364 mm], [35.132 mm, 51.079 mm], [40.606 mm, 46.457 mm], [43.899 mm, 40.282 mm], [45 mm, 30 mm], [43.899 mm, 19.718 mm], [40.606 mm, 13.543 mm], [35.132 mm, 8.921 mm], [27.428 mm, 5.636 mm], [17.137 mm, 3.66 mm], [0 mm, 3 mm], [-17.137 mm, 3.66 mm], [-27.428 mm, 5.636 mm], [-35.132 mm, 8.921 mm], [-40.606 mm, 13.543 mm], [-43.899 mm, 19.718 mm], [-45 mm, 30 mm], [-43.899 mm, 40.282 mm], [-40.606 mm, 46.457 mm], [-35.132 mm, 51.079 mm], [-27.428 mm, 54.364 mm], [-17.137 mm, 56.34 mm]], closed)
+    }
+    feature belly_st3 = plane.offset(base = origin.yz, distance = -10 mm)
+    sketch belly_s3 on plane.belly_st3 {
+        c = spline(points = [[0 mm, 58 mm], [17.517 mm, 57.315 mm], [28.037 mm, 55.266 mm], [35.913 mm, 51.86 mm], [41.508 mm, 47.066 mm], [44.875 mm, 40.663 mm], [46 mm, 30 mm], [44.875 mm, 19.337 mm], [41.508 mm, 12.934 mm], [35.913 mm, 8.14 mm], [28.037 mm, 4.734 mm], [17.517 mm, 2.685 mm], [0 mm, 2 mm], [-17.517 mm, 2.685 mm], [-28.037 mm, 4.734 mm], [-35.913 mm, 8.14 mm], [-41.508 mm, 12.934 mm], [-44.875 mm, 19.337 mm], [-46 mm, 30 mm], [-44.875 mm, 40.663 mm], [-41.508 mm, 47.066 mm], [-35.913 mm, 51.86 mm], [-28.037 mm, 55.266 mm], [-17.517 mm, 57.315 mm]], closed)
+    }
+    feature belly_st4 = plane.offset(base = origin.yz, distance = 30 mm)
+    sketch belly_s4 on plane.belly_st4 {
+        c = spline(points = [[0 mm, 57 mm], [16.756 mm, 56.34 mm], [26.818 mm, 54.364 mm], [34.351 mm, 51.079 mm], [39.704 mm, 46.457 mm], [42.924 mm, 40.282 mm], [44 mm, 30 mm], [42.924 mm, 19.718 mm], [39.704 mm, 13.543 mm], [34.351 mm, 8.921 mm], [26.818 mm, 5.636 mm], [16.756 mm, 3.66 mm], [0 mm, 3 mm], [-16.756 mm, 3.66 mm], [-26.818 mm, 5.636 mm], [-34.351 mm, 8.921 mm], [-39.704 mm, 13.543 mm], [-42.924 mm, 19.718 mm], [-44 mm, 30 mm], [-42.924 mm, 40.282 mm], [-39.704 mm, 46.457 mm], [-34.351 mm, 51.079 mm], [-26.818 mm, 54.364 mm], [-16.756 mm, 56.34 mm]], closed)
+    }
+    feature belly_st5 = plane.offset(base = origin.yz, distance = 60 mm)
+    sketch belly_s5 on plane.belly_st5 {
+        c = spline(points = [[0 mm, 53 mm], [14.471 mm, 52.437 mm], [23.161 mm, 50.754 mm], [29.667 mm, 47.956 mm], [34.29 mm, 44.019 mm], [37.071 mm, 38.759 mm], [38 mm, 30 mm], [37.071 mm, 21.241 mm], [34.29 mm, 15.981 mm], [29.667 mm, 12.044 mm], [23.161 mm, 9.246 mm], [14.471 mm, 7.563 mm], [0 mm, 7 mm], [-14.471 mm, 7.563 mm], [-23.161 mm, 9.246 mm], [-29.667 mm, 12.044 mm], [-34.29 mm, 15.981 mm], [-37.071 mm, 21.241 mm], [-38 mm, 30 mm], [-37.071 mm, 38.759 mm], [-34.29 mm, 44.019 mm], [-29.667 mm, 47.956 mm], [-23.161 mm, 50.754 mm], [-14.471 mm, 52.437 mm]], closed)
+    }
+    feature belly_st6 = plane.offset(base = origin.yz, distance = 82 mm)
+    sketch belly_s6 on plane.belly_st6 {
+        c = spline(points = [[0 mm, 47 mm], [10.663 mm, 46.584 mm], [17.066 mm, 45.34 mm], [21.86 mm, 43.272 mm], [25.266 mm, 40.362 mm], [27.315 mm, 36.474 mm], [28 mm, 30 mm], [27.315 mm, 23.526 mm], [25.266 mm, 19.638 mm], [21.86 mm, 16.728 mm], [17.066 mm, 14.66 mm], [10.663 mm, 13.416 mm], [0 mm, 13 mm], [-10.663 mm, 13.416 mm], [-17.066 mm, 14.66 mm], [-21.86 mm, 16.728 mm], [-25.266 mm, 19.638 mm], [-27.315 mm, 23.526 mm], [-28 mm, 30 mm], [-27.315 mm, 36.474 mm], [-25.266 mm, 40.362 mm], [-21.86 mm, 43.272 mm], [-17.066 mm, 45.34 mm], [-10.663 mm, 46.584 mm]], closed)
+    }
+    feature belly_st7 = plane.offset(base = origin.yz, distance = 95 mm)
+    sketch belly_s7 on plane.belly_st7 {
+        c = spline(points = [[0 mm, 40 mm], [6.093 mm, 39.755 mm], [9.752 mm, 39.024 mm], [12.491 mm, 37.807 mm], [14.438 mm, 36.095 mm], [15.609 mm, 33.808 mm], [16 mm, 30 mm], [15.609 mm, 26.192 mm], [14.438 mm, 23.905 mm], [12.491 mm, 22.193 mm], [9.752 mm, 20.976 mm], [6.093 mm, 20.245 mm], [0 mm, 20 mm], [-6.093 mm, 20.245 mm], [-9.752 mm, 20.976 mm], [-12.491 mm, 22.193 mm], [-14.438 mm, 23.905 mm], [-15.609 mm, 26.192 mm], [-16 mm, 30 mm], [-15.609 mm, 33.808 mm], [-14.438 mm, 36.095 mm], [-12.491 mm, 37.807 mm], [-9.752 mm, 39.024 mm], [-6.093 mm, 39.755 mm]], closed)
+    }
+    feature belly_st8 = plane.offset(base = origin.yz, distance = 99 mm)
+    sketch belly_s8 on plane.belly_st8 {
+        c = spline(points = [[0 mm, 35 mm], [3.047 mm, 34.878 mm], [4.876 mm, 34.512 mm], [6.246 mm, 33.904 mm], [7.219 mm, 33.048 mm], [7.804 mm, 31.904 mm], [8 mm, 30 mm], [7.804 mm, 28.096 mm], [7.219 mm, 26.952 mm], [6.246 mm, 26.096 mm], [4.876 mm, 25.488 mm], [3.047 mm, 25.122 mm], [0 mm, 25 mm], [-3.047 mm, 25.122 mm], [-4.876 mm, 25.488 mm], [-6.246 mm, 26.096 mm], [-7.219 mm, 26.952 mm], [-7.804 mm, 28.096 mm], [-8 mm, 30 mm], [-7.804 mm, 31.904 mm], [-7.219 mm, 33.048 mm], [-6.246 mm, 33.904 mm], [-4.876 mm, 34.512 mm], [-3.047 mm, 34.878 mm]], closed)
+    }
+    feature belly = loft(profiles = [sketch.belly_s0, sketch.belly_s1, sketch.belly_s2, sketch.belly_s3, sketch.belly_s4, sketch.belly_s5, sketch.belly_s6, sketch.belly_s7, sketch.belly_s8], mode = cut)
+    // The sole's edges are rounded, so the skid doesn't catch when it lands with drift.
+    feature sole_round = fillet(edges = [edges_between(feature.rail.face.side(rail_s.c), feature.rail.face.start)], radius = 1.2 mm)
+    // The struts' tops, where the skid is bonded and screwed to the belly, and the sole that meets
+    // the ground.
+    region mount : face = { select = [feature.belly.face.side(belly_s0.c)], expect = at_least_one }
+    region sole : face = { select = [feature.rail.face.start], expect = exactly_one }
+    output landing_skid = { body = feature.rail.body, part_number = "CD-BD-140", material = "glass_filled_nylon", color = "#4A4F57" }
+}

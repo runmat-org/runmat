@@ -1,0 +1,74 @@
+runmat 0.7
+std 1
+
+// The air inside a compact sedan's cabin, from the firewall to the rear parcel shelf: 1.9 m
+// long, 1.15 m from floor to headliner, 1.4 m wide at the doors and 1.25 m across the side
+// glass above the belt line. The faces carry the cabin's linings, so a study gives each its
+// own absorption: the headliner, the glazing (windshield, rear and side windows), the floor
+// carpet, and the trim (door panels, dash, firewall and seat backs).
+// Hand check: the first lengthwise mode is c / 2L = 343 / (2 x 1.9 m) = 90 Hz, the first
+// vertical about 150 Hz and the first lateral about 125 Hz.
+// The car's length is y, up is z and x is across it. Change the profile's points and re-run.
+part cabin {
+    input length : length = 1900 mm
+    input belt : length = 600 mm
+    input roof : length = 1150 mm
+    input width : length = 1400 mm
+    input glass_width : length = 1250 mm
+    input dash : length = 350 mm
+    input dash_depth : length = 150 mm
+    input windshield_top : length = 850 mm
+    input roof_end : length = 1550 mm
+    input rear_glass_base : length = 700 mm
+
+    // Below the belt line: firewall, dash, floor, seat backs, doors.
+    feature lower_plane = plane.offset(base = origin.yz, distance = -input.width / 2)
+    sketch lower_s on plane.lower_plane {
+        floor = line(start = [0 mm, 0 mm], end = [input.length, 0 mm])
+        seat_back = line(start = [input.length, 0 mm], end = [input.length, input.belt])
+        sill = line(start = [input.length, input.belt], end = [input.dash_depth, input.belt])
+        dash = line(start = [input.dash_depth, input.belt], end = [0 mm, input.dash])
+        firewall = line(start = [0 mm, input.dash], end = [0 mm, 0 mm])
+    }
+    feature lower = extrude(profile = sketch.lower_s, distance = input.width)
+
+    // Above the belt line: the greenhouse, narrower by the doors' tumblehome.
+    feature upper_plane = plane.offset(base = origin.yz, distance = -input.glass_width / 2)
+    sketch upper_s on plane.upper_plane {
+        base = line(start = [input.dash_depth, input.belt], end = [input.length, input.belt])
+        parcel = line(start = [input.length, input.belt], end = [input.length, input.rear_glass_base])
+        rear_glass = line(start = [input.length, input.rear_glass_base], end = [input.roof_end, input.roof])
+        roof_line = line(start = [input.roof_end, input.roof], end = [input.windshield_top, input.roof])
+        windshield = line(start = [input.windshield_top, input.roof], end = [input.dash_depth, input.belt])
+    }
+    feature upper = extrude(profile = sketch.upper_s, distance = input.glass_width)
+    feature cabin_air = boolean.union(target = feature.lower.body, tools = [feature.upper.body])
+
+    region headliner : face = { select = [feature.upper.face.side(upper_s.roof_line)], expect = exactly_one, label = "Headliner" }
+    region glazing : face = {
+        select = [
+            feature.upper.face.side(upper_s.windshield),
+            feature.upper.face.side(upper_s.rear_glass),
+            feature.upper.face.start,
+            feature.upper.face.end
+        ],
+        expect = at_least_one,
+        label = "Glazing"
+    }
+    region floor : face = { select = [feature.lower.face.side(lower_s.floor)], expect = exactly_one, label = "Floor" }
+    region trim : face = {
+        select = [
+            feature.lower.face.side(lower_s.seat_back),
+            feature.lower.face.side(lower_s.sill),
+            feature.lower.face.side(lower_s.dash),
+            feature.lower.face.side(lower_s.firewall),
+            feature.lower.face.start,
+            feature.lower.face.end,
+            feature.upper.face.side(upper_s.parcel)
+        ],
+        expect = at_least_one,
+        label = "Trim"
+    }
+
+    output air = { body = feature.lower.body, label = "Cabin air", color = "#CFE3F5" }
+}

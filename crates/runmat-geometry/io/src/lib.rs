@@ -40,6 +40,10 @@ pub use import::{
     feature = "occt-native"
 ))]
 pub use occt::evaluator::OcctExactEvaluator;
+/// K1: RunMat CAD's geometry engine on OCCT.
+pub use occt::kernel::{
+    occt_kernel_live_bodies, ImportSource, NamedBox, OcctBody, OcctKernel, SharedOcctKernel,
+};
 pub use preview::{
     close_cad_preview_session, read_cad_preview_session_chunk, start_cad_preview_session,
     CadPreviewSessionChunk, CadPreviewSessionStart,

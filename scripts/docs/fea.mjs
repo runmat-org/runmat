@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readJson, copyInput } from "./documents.mjs";
 import { loadLedger, pendingView } from "./ledger.mjs";
-import { COMMITTED_GRAMMAR } from "./fea-grammar.mjs";
+import { COMMITTED_GRAMMAR, DESIGN_DIALECTS, committedDesignGrammar } from "./fea-grammar.mjs";
 export function collectFea(source, output, register, examples, evidence, validate) {
     if (register.schema_version !== 1 || register.posture !== "discovery_only" || !Array.isArray(register.requirements))
         throw new Error("Unsupported requirement export");
@@ -44,7 +44,26 @@ export function collectFea(source, output, register, examples, evidence, validat
     mkdirSync(join(output, "fea"), { recursive: true });
     for (const [name, value] of [["requirements", register], ["manual", manual], ["evidence-index", evidence], ["ledger", ledger], ["pending-features", pendingView(ledger)]])
         writeFileSync(join(output, `fea/${name}.json`), JSON.stringify(value, null, 2) + "\n");
-    // The one `.fea` grammar (committed in runmat-fea-syntax and kept current by fea-grammar.test.mjs),
+    // The one `.fea` grammar (committed in runmat-design-syntax and kept current by fea-grammar.test.mjs),
     // so the site colors code exactly as the language server does. Fixture trees carry no compiler.
     if (existsSync(join(source, COMMITTED_GRAMMAR))) copyFileSync(join(source, COMMITTED_GRAMMAR), join(output, "fea/fea.tmLanguage.json"));
+    // The design formats' grammars beside it (`design/part.tmLanguage.json`, …), the same copies
+    // the language server and the Desktop color with.
+    const grammars = [];
+    if (existsSync(join(source, COMMITTED_GRAMMAR))) grammars.push({ extension: "fea", scopeName: "source.fea", path: "fea/fea.tmLanguage.json" });
+    for (const entry of DESIGN_DIALECTS) {
+        const committed = join(source, committedDesignGrammar(entry));
+        if (!existsSync(committed)) continue;
+        mkdirSync(join(output, "design"), { recursive: true });
+        const path = `design/${entry.extension}.tmLanguage.json`;
+        copyFileSync(committed, join(output, path));
+        grammars.push({ extension: entry.extension, scopeName: readJson(committed).scopeName, path });
+    }
+    // The site picks a code window's grammar by its file extension. The longest extension wins,
+    // so `.circuit.layout` is matched before `.circuit`.
+    if (grammars.length > 0) {
+        mkdirSync(join(output, "design"), { recursive: true });
+        grammars.sort((a, b) => b.extension.length - a.extension.length || a.extension.localeCompare(b.extension));
+        writeFileSync(join(output, "design/grammars.json"), JSON.stringify({ schema_version: 1, grammars }, null, 2) + "\n");
+    }
 }

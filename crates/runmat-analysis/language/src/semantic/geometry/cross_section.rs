@@ -446,8 +446,8 @@ fn scalar(value: &CheckedExpression) -> Option<f64> {
         CheckedExpressionKind::Unary { operator, operand } => {
             let scalar = scalar(operand)?;
             Some(match operator {
-                runmat_fea_syntax::FeaUnaryOperator::Positive => scalar,
-                runmat_fea_syntax::FeaUnaryOperator::Negative => -scalar,
+                runmat_design_syntax::FeaUnaryOperator::Positive => scalar,
+                runmat_design_syntax::FeaUnaryOperator::Negative => -scalar,
             })
         }
         _ => None,

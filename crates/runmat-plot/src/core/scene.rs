@@ -37,6 +37,10 @@ pub struct SceneNode {
     // Level of detail settings
     pub lod_levels: Vec<LodLevel>,
     pub current_lod: usize,
+
+    /// Placements when the node is instanced: `render_data` is then in the placed mesh's own
+    /// coordinates and draws once per visible placement.
+    pub instances: Option<std::sync::Arc<crate::core::NodeInstances>>,
 }
 
 /// Rendering data for a scene node
@@ -529,29 +533,23 @@ impl Scene {
                 node.visible && node.render_data.is_some() && self.is_node_in_frustum(node)
             })
             .collect();
-        // HashMap iteration is not a draw order. In particular, depth-free
-        // annotations must be composited after surfaces, never underneath them.
-        // Node IDs preserve insertion order within each layer.
-        // With `translucent_last`, blended surfaces draw between the opaque items and the
-        // overlays.
+        // HashMap iteration is not a draw order. See-through surfaces (glass, a clear lid)
+        // blend over what is behind them, so they draw after every opaque node; depth-free
+        // annotations must be composited after surfaces, never underneath them. Node IDs
+        // preserve insertion order within each layer.
         nodes.sort_by_key(|node| {
-            let layer = node
-                .render_data
-                .as_ref()
+            let data = node.render_data.as_ref();
+            let overlay = data
+                .map(|data| data.pipeline_type.is_depth_free_overlay())
+                .unwrap_or(false);
+            let see_through = data
                 .map(|data| {
-                    if matches!(
-                        data.pipeline_type,
-                        super::PipelineType::LinesNoDepth | super::PipelineType::AnnotationStroke
-                    ) {
-                        2u8
-                    } else if self.translucent_last && is_translucent_surface(data) {
-                        1
-                    } else {
-                        0
-                    }
+                    data.pipeline_type == crate::core::PipelineType::Triangles
+                        && (data.material.albedo.w < 0.95
+                            || matches!(data.material.alpha_mode, crate::core::AlphaMode::Blend))
                 })
-                .unwrap_or(0);
-            (layer, node.id)
+                .unwrap_or(false);
+            (overlay, see_through, node.id)
         });
         nodes
     }
@@ -767,6 +765,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let parent_id = scene.add_node(parent_node);
@@ -785,6 +784,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let child_id = scene.add_node(child_node);
@@ -816,6 +816,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let inserted_id = scene.add_node_preserving_id(node);
@@ -837,6 +838,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         });
 
         assert_ne!(generated_id, explicit_id);

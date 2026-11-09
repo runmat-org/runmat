@@ -1,0 +1,24 @@
+runmat 0.7
+std 1
+
+// A gimbal motor: a flat brushless outrunner with a machined face ring. Its origin is the motor's
+// centre and it turns about z. Each axis takes its own motor size, and each size is its own
+// part number: yaw 20 x 6 mm, roll 17 x 5 mm, pitch 15 x 4.5 mm.
+part gimbal_motor {
+    input radius : length = 10 mm
+    input height : length = 6 mm
+    feature base = plane.offset(base = origin.xy, distance = -input.height / 2)
+    sketch s on plane.base {
+        c = circle(center = [0 mm, 0 mm], radius = input.radius)
+    }
+    feature can = extrude(profile = sketch.s, distance = input.height)
+    feature ring_base = plane.offset(base = origin.xy, distance = input.height / 2 - 0.6 mm)
+    sketch ring_s on plane.ring_base {
+        c = circle(center = [0 mm, 0 mm], radius = input.radius - 1.6 mm)
+    }
+    feature ring = extrude(profile = sketch.ring_s, distance = 0.6 mm, mode = cut)
+    configuration yaw = { radius = 10 mm, height = 6 mm, part_number = "CD-GB-510", description = "Gimbal motor, yaw, 20 x 6 mm" }
+    configuration roll = { radius = 8.5 mm, height = 5 mm, part_number = "CD-GB-511", description = "Gimbal motor, roll, 17 x 5 mm" }
+    configuration pitch = { radius = 7.5 mm, height = 4.5 mm, part_number = "CD-GB-512", description = "Gimbal motor, pitch, 15 x 4.5 mm" }
+    output gimbal_motor = { body = feature.can.body, part_number = "CD-GB-510", material = "aluminum_6061", color = "#2A2D32" }
+}

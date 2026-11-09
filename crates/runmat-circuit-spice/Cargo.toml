@@ -1,0 +1,27 @@
+[package]
+name = "runmat-circuit-spice"
+version = "0.7.0"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "RunMat PCB circuit simulation: SPICE netlists from the circuit IR, analyses and results, an ngspice shared-library engine loaded at run time, and the operating-point power map for board FEA"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+# The native engine is runmat-circuit-sim; ngspice (BSD) remains an optional engine, loaded at run time through libloading (MIT/Apache); nothing links to it.
+[dependencies]
+runmat-circuit = { path = "../runmat-circuit", version = "=0.7.0" }
+# The native engine (clean-room, ours).
+runmat-circuit-sim = { path = "../runmat-circuit-sim", version = "=0.7.0" }
+serde = { workspace = true }
+# JSON Schema of the report for design.simulate's tool definition (MIT/Apache-2.0).
+schemars = { version = "0.8", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libloading = "0.8"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[features]
+schema = ["dep:schemars"]

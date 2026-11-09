@@ -5,6 +5,15 @@ members = [
     "crates/runmat-simulation-usage",
     "crates/runmat-sparse-solvers",
     "crates/runmat-sparse-accelerate",
+    "crates/runmat-constraint",
+    "crates/runmat-cad",
+    "crates/runmat-cad/wasm",
+    "crates/runmat-design-commands",
+    "crates/runmat-rules",
+    "crates/runmat-circuit",
+    "crates/runmat-circuit/wasm",
+    "crates/runmat-circuit-spice",
+    "crates/runmat-circuit-sim",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
@@ -28,7 +37,9 @@ members = [
     "crates/runmat-builtins",
     "crates/runmat-value",
     "crates/runmat-types",
-    "crates/runmat-fea-syntax",
+    "crates/runmat-design-syntax",
+    "crates/runmat-design-tools",
+    "crates/runmat-design-tools/wasm",
     "crates/runmat-fea-source",
     "crates/runmat-runtime",
     "crates/runmat-clarabel",
@@ -68,6 +79,7 @@ members = [
     "crates/runmat-geometry/core",
     "crates/runmat-geometry/fixtures",
     "crates/runmat-geometry/io",
+    "crates/runmat-geometry/kernel",
     "crates/runmat-geometry/wasm-host",
     "crates/runmat-geometry/ops",
     "crates/runmat-analysis/core",
@@ -143,7 +155,7 @@ url = { version = "2", features = ["serde"] }
 # Internal workspace crates
 runmat-lexer = { version = "=0.7.0", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.7.0", path = "crates/runmat-parser" }
-runmat-fea-syntax = { version = "=0.7.0", path = "crates/runmat-fea-syntax" }
+runmat-design-syntax = { version = "=0.7.0", path = "crates/runmat-design-syntax" }
 runmat-hir = { version = "=0.7.0", path = "crates/runmat-hir" }
 runmat-mir = { version = "=0.7.0", path = "crates/runmat-mir", default-features = false }
 runmat-native-codegen = { version = "=0.7.0", path = "crates/runmat-native-codegen", default-features = false }
@@ -198,6 +210,7 @@ runmat-thread-local = { version = "=0.7.0", path = "crates/runmat-thread-local" 
 runmat-geometry-core = { version = "=0.7.0", path = "crates/runmat-geometry/core" }
 runmat-geometry-fixtures = { path = "crates/runmat-geometry/fixtures" }
 runmat-geometry-io = { version = "=0.7.0", path = "crates/runmat-geometry/io" }
+runmat-geometry-kernel = { version = "=0.7.0", path = "crates/runmat-geometry/kernel" }
 runmat-geometry-ops = { version = "=0.7.0", path = "crates/runmat-geometry/ops" }
 runmat-analysis-core = { version = "=0.7.0", path = "crates/runmat-analysis/core" }
 runmat-analysis-language = { version = "=0.7.0", path = "crates/runmat-analysis/language" }

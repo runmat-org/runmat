@@ -5,7 +5,7 @@ use crate::{
     FeaDiagnostic,
 };
 use runmat_analysis_core::{AuthoredModel, ExcitationCaseId, ExcitationCaseSelection};
-use runmat_fea_syntax::FeaAssignmentRelation;
+use runmat_design_syntax::FeaAssignmentRelation;
 use std::collections::BTreeSet;
 
 pub(super) fn is_selection(statement: &CheckedFeaStatement) -> bool {

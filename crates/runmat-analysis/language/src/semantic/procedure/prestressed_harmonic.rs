@@ -1,7 +1,7 @@
 use super::{header::ProcedureHeader, lower::error, requirements, values};
 use crate::{CheckedFeaDeclaration, CheckedFeaStatement, CheckedFeaStatementKind, FeaDiagnostic};
 use runmat_analysis_core::{ProcedureStep, SolutionSpace};
-use runmat_fea_syntax::FeaAssignmentRelation;
+use runmat_design_syntax::FeaAssignmentRelation;
 use std::collections::BTreeSet;
 
 pub(super) fn lower(

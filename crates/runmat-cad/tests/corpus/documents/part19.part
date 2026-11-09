@@ -1,0 +1,33 @@
+runmat 0.7
+std 1
+
+part rib {
+    sketch s on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 10 mm])
+        l3 = line(start = [80 mm, 10 mm], end = [0 mm, 10 mm])
+        l4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])
+    }
+    feature rib = extrude(profile = sketch.s, distance = 20 mm)
+    feature fr = full_round(
+        first = [feature.rib.face.side(s.l1)],
+        center = [feature.rib.face.end],
+        second = [feature.rib.face.side(s.l3)]
+    )
+
+    region round : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = {
+                    form = generated,
+                    feature = fr,
+                    role = blend,
+                    tag = { tag = face, face = "4c37207b7632566bf8547d88b1232114" }
+                }
+            }
+        ],
+        expect = exactly_one
+    }
+}

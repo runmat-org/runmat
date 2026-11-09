@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "release": "0.7.1",
+  "about": "Design features the design docs describe that are not built yet (status pending), and those that have landed since (status release, landed_in). Each pending row is flagged where the docs describe it: [not yet in the current release](pending:<id>). docs/design/language/status.md is generated from this file (node scripts/docs/design.mjs --write-status).",
+  "capabilities": [
+    {
+      "id": "design.language.volatile-lock",
+      "title": "Volatile values recorded in runmat.lock at release",
+      "kind": "language",
+      "area": "language",
+      "status": "pending",
+      "acceptance": "Releasing a design snapshots every volatile value it used into runmat.lock under [values], and regenerating the released design reads the snapshot."
+    },
+    {
+      "id": "design.language.m-quantities",
+      "title": "Values with units across the .m boundary",
+      "kind": "language",
+      "area": "language",
+      "status": "pending",
+      "acceptance": "A design value function receives quantities for parameters declared quantity.<Kind> in its arguments block and may return a quantity, which the call converts and checks without `as`."
+    },
+    {
+      "id": "design.ecad.m-values",
+      "title": "Circuit component values from .m functions",
+      "kind": "language",
+      "area": "ecad",
+      "status": "release",
+      "acceptance": "A .circuit component value or param may call a .m function in the circuit's folder, with the same resolution, units, determinism and cache rules as a .part value.",
+      "landed_in": "0.7.1"
+    },
+    {
+      "id": "design.tools.cli-check-mcad",
+      "title": "runmat-design check on parts, assemblies and drawings",
+      "kind": "tooling",
+      "area": "tooling",
+      "status": "pending",
+      "acceptance": "runmat-design check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error."
+    },
+    {
+      "id": "design.tools.runmat-check-design",
+      "title": "runmat check and runmat test on parts, assemblies and drawings",
+      "kind": "tooling",
+      "area": "tooling",
+      "status": "pending",
+      "acceptance": "runmat check and runmat test delegate .part, .assembly and .drawing files to the design checks, as they do .circuit and .circuit.layout files, beside .m and .fea files."
+    },
+    {
+      "id": "design.tools.export-set",
+      "title": "Input values for one export",
+      "kind": "tooling",
+      "area": "tooling",
+      "status": "release",
+      "acceptance": "design.export takes set (input values for one run), with minimum and maximum range checks, so a study's geometry can come from a part at chosen inputs.",
+      "landed_in": "0.7.1"
+    },
+    {
+      "id": "design.tools.cad-matlab-api",
+      "title": "cad.evaluate, cad.study, cad.check and cad.inputs in MATLAB-language code",
+      "kind": "tooling",
+      "area": "tooling",
+      "status": "pending",
+      "acceptance": "A .m script regenerates a part or an assembly at input values with cad.evaluate and reads its mass properties, bounding box and published values; cad.study runs a .fea study at its inputs; cad.check judges limits and throws cad:limitFailed, which runmat test reports as a failure; cad.inputs lists the inputs; parfor runs one regeneration per worker."
+    },
+    {
+      "id": "design.mcad.mate.cam",
+      "title": "Cam mates",
+      "kind": "feature",
+      "area": "mcad",
+      "status": "release",
+      "acceptance": "An assembly writes kind = { mate = cam, profile = <published profile> }; the solver keeps the follower point on the cam's profile path as the cam turns (a path-tangent residual), with its Jacobian checked.",
+      "landed_in": "0.7.1"
+    },
+    {
+      "id": "design.mcad.drawing.auto",
+      "title": "Drawings laid out automatically",
+      "kind": "feature",
+      "area": "mcad",
+      "status": "release",
+      "acceptance": "A command writes a .drawing for a part or an assembly with standard views, dimensions from its PMI and a title block, and the result checks clean.",
+      "landed_in": "0.7.1"
+    },
+    {
+      "id": "design.mcad.drawing.standards",
+      "title": "Drawing standards",
+      "kind": "feature",
+      "area": "mcad",
+      "status": "pending",
+      "acceptance": "A sheet format selects an ISO or ASME standard that sets line weights, text, arrowheads and tolerance display in the Desktop sheet and the DXF, DWG and PDF exports."
+    },
+    {
+      "id": "design.mcad.evaluate.surface-analysis",
+      "title": "Surface and shape analysis",
+      "kind": "feature",
+      "area": "mcad",
+      "status": "pending",
+      "acceptance": "Evaluate runs section, thickness, undercut, curvature, zebra and deviation analyses on a part in the Desktop and through design.inspect, coloring the model by result as draft analysis does."
+    },
+    {
+      "id": "design.fea.part-geometry",
+      "title": "Studies that name a design",
+      "kind": "language",
+      "area": "mcad",
+      "status": "pending",
+      "acceptance": "A .fea geometry block takes part = <name> or assembly = <name> with inputs, resolved through the folder scope, and the study regenerates the design at those inputs without a STEP export."
+    },
+    {
+      "id": "design.ecad.enclosure",
+      "title": "Boards in their enclosures",
+      "kind": "feature",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "An assembly that places a board and its enclosure checks fit and clearance between the board's components and the enclosure's parts."
+    },
+    {
+      "id": "design.ecad.board-studies",
+      "title": "Board studies through the pcb source",
+      "kind": "simulation",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "A .fea study reads a board's stackup, copper and component power through its pcb source and runs thermal and vibration studies of it."
+    },
+    {
+      "id": "design.ecad.fab.assembly-drawing",
+      "title": "Polarity marks on assembly drawings",
+      "kind": "exchange",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "The assembly drawing of each side marks pin 1 and the polarity of polarized parts (diodes, LEDs, polarized capacitors, ICs) beside their outlines and designators, in the Gerber and PDF."
+    },
+    {
+      "id": "design.ecad.import.other-tools",
+      "title": "Imports from other electronics tools",
+      "kind": "exchange",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "Clean-room readers for the other common tools' binary, text and JSON schematic and board formats write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus."
+    },
+    {
+      "id": "design.ecad.import.kicad-roundtrip",
+      "title": "KiCad round-trip gate",
+      "kind": "exchange",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "A corpus of KiCad projects reads in and writes back with hierarchy, symbols, footprints, net classes and rules intact, and the not-carried report is empty or explained."
+    },
+    {
+      "id": "design.ecad.use-library",
+      "title": "Shared part libraries",
+      "kind": "language",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "A circuit writes use library <name> to read part declarations from a shared library package, and part declarations propagate through circuits it uses."
+    },
+    {
+      "id": "design.ecad.field-solved-impedance",
+      "title": "Field-solved trace impedance beside the closed form",
+      "kind": "feature",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "A board study solves each controlled line's cross-section (from the pcb source's lines) for Z0, Zdiff, delay and per-length L and C, and the layer-stack view shows the solved value beside the closed form."
+    }
+  ]
+}

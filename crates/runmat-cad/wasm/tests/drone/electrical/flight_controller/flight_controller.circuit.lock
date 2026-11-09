@@ -1,0 +1,263 @@
+entry dfa6c71e-f772-8160-a6d7-36d950874922 net /+3V3
+entry 64cbcf8c-26f1-80ca-bb7b-0dbe512ec7c4 net /+5V
+entry 71f86306-16e5-85a4-8f37-12d3e1f711cb net /CURR
+entry 4b439ec7-20c4-837a-a84f-83a9233472f9 net /GND
+entry 19cb3968-23fa-8991-9eed-11fe0bd0fbd7 net /GPS_RX
+entry 2a83e2a8-1b72-80a9-b57b-baa708a22961 net /GPS_TX
+entry cc9578b4-5ef0-8870-b0cc-16fa83597701 net /GPS_VCC
+entry a7857f5b-0d80-85f0-9880-08d1ddbc30d6 net /I2C_SCL
+entry 6dc4dc63-7838-8d40-8e0d-1b7e60a74939 net /I2C_SDA
+entry 13c6ff91-a4b4-845b-a6c7-779702f31e6f net /IMU_CS
+entry fc4b2130-c156-81ff-840f-707b4452e028 net /IMU_INT
+entry e442674a-f770-8709-8b72-47884247f526 net /M1
+entry f8212676-48ed-8ab4-a469-86b9a58f5453 net /M2
+entry d75432c1-4960-8e57-a263-8588cdf9e845 net /M3
+entry eaa55ccc-58f5-8730-a1cf-263a3857392b net /M4
+entry 50898321-2257-8558-8105-d5f8879012c3 net /RC_RX
+entry 4b062f87-a2dc-8580-94c3-027eb49203c9 net /RC_TX
+entry ef153776-16c0-8276-93ef-0cccdc7a13f4 net /SPI_MISO
+entry 675684c6-cfdc-8bf3-8130-f63c4ec7e21b net /SPI_MOSI
+entry bcee5128-2d04-8954-810f-cdd7c64f9733 net /SPI_SCK
+entry 396f5db5-3bb7-8325-844e-11e97b9b45d8 net /TLM
+entry 69449008-fcde-83ba-b5c2-72d14e835272 net /USB_DN
+entry f853b6b3-1030-80c0-9545-9dd4c66d7650 net /USB_DP
+entry 3758197d-0b35-8a37-bf1e-a3b87114d932 net /VBAT
+entry 08bfa164-66e8-891e-8650-16db9845d34e net /VBAT_SENSE
+entry 2d83ce59-631b-8a92-826f-4091fc2e4a07 net /VTX_RX
+entry a470a52f-d6e0-830b-a26e-b0f3547db122 net /VTX_TX
+entry 6bd9e6cc-ca75-8b1d-b60a-2492a8bd5f66 sheet /conn
+entry b470430a-b0be-80df-a9c4-ee91bf0b48d6 net /conn/CC1
+entry 144ef042-10b4-8e01-9e72-02c00308b875 net /conn/CC2
+entry fc7b7f09-5510-8b11-b262-7e7d429aec0b component /conn/D3 designator=D3
+entry 44f319b3-cc0c-8b7f-b1e3-227e18df66df component /conn/H1 designator=H1
+entry db9a33ac-82e5-83cd-9cb5-9a7aedaab3b6 component /conn/H2 designator=H2
+entry 84df3e25-dce4-8675-ba4e-41bbfd3a9c14 component /conn/H3 designator=H3
+entry 27ac09ed-fb8e-84fe-becd-34fb302cc1b8 component /conn/H4 designator=H4
+entry f4249c8f-9455-8e54-8328-5dad1c59cc64 component /conn/J1 designator=J1
+entry 524868a8-45da-8d55-9a53-a24a23ed46bb component /conn/J2 designator=J2
+entry 4545051e-ee85-877d-b4b1-3971225bbc65 component /conn/J3 designator=J3
+entry c2045e61-2112-8bc0-9e82-6cf4545f84e0 component /conn/J4 designator=J4
+entry c9a16a4f-003a-826f-bc59-8675bdb27be1 component /conn/J5 designator=J5
+entry 6dbbc19b-1c95-8ffa-b2ce-b8a41c6fd631 component /conn/R2 designator=R2
+entry 2b695442-d674-801b-af90-afeef09f844e component /conn/R3 designator=R3
+entry 8544a78c-cc4d-8dee-a894-f5903221e379 net /conn/VBUS
+entry 7fd66c01-04c4-81aa-b3e8-c528cf6a96b6 sheet /mcu
+entry af97cdde-6540-8f39-a765-aecfdcdf7535 net /mcu/BOOT0
+entry 0aba2668-af47-8ef4-9801-127278123861 component /mcu/C1 designator=C1
+entry 4162d714-9661-8f90-b1f9-6c6d57f3dfe5 component /mcu/C10 designator=C10
+entry 3895cc8f-cc0c-89e6-8ae3-d1454541f212 component /mcu/C11 designator=C11
+entry 66d2c5f6-289a-8bca-b984-80f7e8be8761 component /mcu/C2 designator=C2
+entry 21f9efd6-cdec-8a25-bbf2-7aa53b9ffa6a component /mcu/C3 designator=C3
+entry 780b108b-40c5-8cdf-b618-00a19d699ce9 component /mcu/C4 designator=C4
+entry c68d48eb-8f0c-8238-b53b-b5098c1e4798 component /mcu/C5 designator=C5
+entry 7760316d-bb36-8d07-b239-a3a87fed6e0a component /mcu/C6 designator=C6
+entry 10f5bb20-ff8e-884e-b1fd-83bbe485c44b component /mcu/C7 designator=C7
+entry cbd1ad37-c2ea-8bc9-9136-19405a201636 component /mcu/C8 designator=C8
+entry 947a3f7b-d404-8b92-800f-a55a65e0ac61 component /mcu/C9 designator=C9
+entry 81038467-d340-864f-adaa-acc877dd88ea component /mcu/D1 designator=D1
+entry 641bb398-fe32-8027-acbe-b0f0da4e5fff component /mcu/D2 designator=D2
+entry 1dcbbec2-8e64-84ca-acee-b6ceaa3e960c net /mcu/LED1
+entry c88fe6dd-a05c-8516-8ce6-ee28898f8b1f net /mcu/LED1_K
+entry e486c096-a40f-8291-8cc6-d90af3d61e50 net /mcu/LED2
+entry bc183a47-f5f4-85fb-81e2-993f054544e9 net /mcu/LED2_K
+entry e4a32fdd-509c-8279-a552-f3b82abb2d2b net /mcu/NRST
+entry f66579e8-0ef6-86a2-9f00-9a5240c19c63 net /mcu/OSC_IN
+entry a5130e84-b267-8bac-aba3-c09b2217794e net /mcu/OSC_OUT
+entry b3b643dc-dbd8-8d2a-9829-07af73b74254 component /mcu/R1 designator=R1
+entry 63aae9b9-1256-854f-895c-91b29c656fcf component /mcu/R13 designator=R13
+entry 929febcc-5f61-8ed3-be8e-6ebc28e24387 component /mcu/R4 designator=R4
+entry 8649098f-43c7-84b6-b4fa-50ea5a8bd682 component /mcu/R5 designator=R5
+entry 5005c5f4-d7b0-8517-8e38-6cfc13e5a5a3 component /mcu/U1 designator=U1
+entry 84f93fa7-dc5a-87f1-8299-eae53d3fbdb3 net /mcu/VCAP
+entry 7e28bd85-6a3b-83ef-ad73-fb083d4891cb component /mcu/Y1 designator=Y1
+entry a968abfa-cbf9-8f6f-bb15-cc4abf8e5f57 sheet /pwr
+entry ca6c9b16-a151-89bf-ac52-787bb6a9b106 net /pwr/BST
+entry 744dfdda-312d-8ec3-9b5f-d3f285ce8510 component /pwr/C12 designator=C12
+entry 951af18f-30ba-8b39-8919-e26561d45e80 component /pwr/C13 designator=C13
+entry 3d155601-5b49-8999-9fac-b00db1d81083 component /pwr/C14 designator=C14
+entry 65ccd872-8ba7-84db-9333-a9ad8b0f183a component /pwr/C15 designator=C15
+entry 9084400e-f366-85b7-878a-524d02f4ac5c component /pwr/C16 designator=C16
+entry b9448057-eff9-869e-b43f-aaaa75e31cca component /pwr/C17 designator=C17
+entry 09426d45-125f-8f8b-bf00-dd416375eb02 component /pwr/C18 designator=C18
+entry 66570643-8d3c-8d7c-b897-d8b298187f05 component /pwr/C19 designator=C19
+entry a0eb457d-432e-88bb-8e71-e4bc0e4da265 component /pwr/C20 designator=C20
+entry a66d9058-e373-8d84-b131-ff3a42eb4a86 net /pwr/EN
+entry 3055188c-65ad-8dcf-b19b-ef4e75801949 net /pwr/FB
+entry 9f43977c-98c4-86fc-8af0-2af9d67870c1 component /pwr/L1 designator=L1
+entry 236b3991-43dc-8b73-9648-2e356c24c4f0 component /pwr/R10 designator=R10
+entry ab5f9b21-9d43-8ecb-a67b-25e884d0ec6b component /pwr/R6 designator=R6
+entry ccf8167f-02ea-8efa-83c1-b995e045a56e component /pwr/R7 designator=R7
+entry 65e2c114-c1b3-8a53-a8cc-6ec87ad0740e component /pwr/R8 designator=R8
+entry 3aa0e376-6872-86a9-a351-507044039691 component /pwr/R9 designator=R9
+entry 68b8a0b4-e550-843b-aef1-01d8efe67163 net /pwr/SW
+entry 04d37866-8bec-8f5c-bd78-59459397dc1d component /pwr/U2 designator=U2
+entry 867a0ae5-6d50-8286-818f-464f97f65e87 component /pwr/U3 designator=U3
+entry 1d355f33-9720-8aa4-8cad-ba69c24b16c7 sheet /sens
+entry ac531465-3cd4-8dbe-b6fb-bb67dbf4d35b component /sens/C21 designator=C21
+entry 23e6162e-070f-8503-999c-23fa411b44b5 component /sens/C22 designator=C22
+entry 2bafb1c1-94ab-882d-a99c-1e1f44b7edad component /sens/C23 designator=C23
+entry 13c59ece-4d5d-8bf8-9e24-a1786aabde20 component /sens/R11 designator=R11
+entry 608cfa70-beea-84c7-b943-a7fd70d526fc component /sens/R12 designator=R12
+entry 42a591ea-d78d-8e7a-8e88-4cec8bcca0ec component /sens/U4 designator=U4
+entry a5349962-ccd7-8b87-a132-e221e460a364 component /sens/U5 designator=U5
+fp /+3V3 /mcu/C3.1,/mcu/C4.1,/mcu/C5.1,/mcu/C6.1,/mcu/C7.1,/mcu/C8.1,/mcu/C9.1,/mcu/R13.2,/mcu/U1.VDD,/mcu/U1.VDDA,/pwr/C19.1,/pwr/U3.VOUT,/sens/C21.1,/sens/C22.1,/sens/C23.1,/sens/R11.1,/sens/R12.1,/sens/U4.VDD,/sens/U4.VDDIO,/sens/U5.CSB,/sens/U5.VDD,/sens/U5.VDDIO
+fp /+5V /conn/D3.K,/conn/J2.1,/conn/J4.1,/pwr/C15.1,/pwr/C16.1,/pwr/C17.1,/pwr/C18.1,/pwr/L1.2,/pwr/R6.1,/pwr/U3.EN,/pwr/U3.VIN
+fp /CURR /conn/J3.3,/mcu/U1.PB1
+fp /GND /conn/J1.GND,/conn/J1.SHIELD,/conn/J2.2,/conn/J3.2,/conn/J4.2,/conn/J5.6,/conn/R2.2,/conn/R3.2,/mcu/C1.2,/mcu/C10.2,/mcu/C11.2,/mcu/C2.2,/mcu/C3.2,/mcu/C4.2,/mcu/C5.2,/mcu/C6.2,/mcu/C7.2,/mcu/C8.2,/mcu/C9.2,/mcu/D1.K,/mcu/D2.K,/mcu/R1.2,/mcu/U1.VSS,/mcu/U1.VSSA,/pwr/C12.2,/pwr/C13.2,/pwr/C15.2,/pwr/C16.2,/pwr/C18.2,/pwr/C19.2,/pwr/C20.2,/pwr/R10.2,/pwr/R7.2,/pwr/U2.GND,/pwr/U3.GND,/sens/C21.2,/sens/C22.2,/sens/C23.2,/sens/U4.GND,/sens/U5.GND,/sens/U5.SDO
+fp /GPS_RX /conn/J5.3,/mcu/U1.PB13
+fp /GPS_TX /conn/J5.2,/mcu/U1.PB12
+fp /GPS_VCC /conn/J5.1
+fp /I2C_SCL /conn/J5.4,/mcu/U1.PB8,/sens/R11.2,/sens/U5.SCL
+fp /I2C_SDA /conn/J5.5,/mcu/U1.PB9,/sens/R12.2,/sens/U5.SDA
+fp /IMU_CS /mcu/U1.PA4,/sens/U4.CS
+fp /IMU_INT /mcu/U1.PA1,/sens/U4.INT1
+fp /M1 /conn/J3.5,/mcu/U1.PB6
+fp /M2 /conn/J3.6,/mcu/U1.PB7
+fp /M3 /conn/J3.7,/mcu/U1.PB4
+fp /M4 /conn/J3.8,/mcu/U1.PB5
+fp /RC_RX /conn/J2.3,/mcu/U1.PA3
+fp /RC_TX /conn/J2.4,/mcu/U1.PA2
+fp /SPI_MISO /mcu/U1.PA6,/sens/U4.SDO
+fp /SPI_MOSI /mcu/U1.PA7,/sens/U4.SDI
+fp /SPI_SCK /mcu/U1.PA5,/sens/U4.SCLK
+fp /TLM /conn/J3.4,/mcu/U1.PB10
+fp /USB_DN /conn/J1.DN,/mcu/U1.PA11
+fp /USB_DP /conn/J1.DP,/mcu/U1.PA12
+fp /VBAT /conn/J3.1,/pwr/C12.1,/pwr/C13.1,/pwr/R8.1,/pwr/R9.1,/pwr/U2.VIN
+fp /VBAT_SENSE /mcu/U1.PA0,/pwr/C20.1,/pwr/R10.1,/pwr/R9.2
+fp /VTX_RX /conn/J4.4,/mcu/U1.PA10
+fp /VTX_TX /conn/J4.3,/mcu/U1.PA9
+fp /conn connectors
+fp /conn/CC1 /conn/J1.CC1,/conn/R2.1
+fp /conn/CC2 /conn/J1.CC2,/conn/R3.1
+fp /conn/D3 49a7694f-9611-8e48-8fd1-ae69be42a9b2|+5V,/conn/VBUS
+fp /conn/H1 e62c74e7-20a6-8538-bc85-5a35dc091f12|
+fp /conn/H2 e62c74e7-20a6-8538-bc85-5a35dc091f12|
+fp /conn/H3 e62c74e7-20a6-8538-bc85-5a35dc091f12|
+fp /conn/H4 e62c74e7-20a6-8538-bc85-5a35dc091f12|
+fp /conn/J1 1701c1b9-5140-84ac-b448-1c8c57db5f3f|/conn/CC1,/conn/CC2,/conn/VBUS,GND,USB_DN,USB_DP
+fp /conn/J2 4f4faabc-3a4d-89e5-b2ea-1658a08fb24d|+5V,GND,RC_RX,RC_TX
+fp /conn/J3 718714a5-4e06-8e0c-be1d-b7b2c2c3423b|CURR,GND,M1,M2,M3,M4,TLM,VBAT
+fp /conn/J4 4f4faabc-3a4d-89e5-b2ea-1658a08fb24d|+5V,GND,VTX_RX,VTX_TX
+fp /conn/J5 b3d1aac8-96d5-87f6-8a97-9ec392921312|GND,GPS_RX,GPS_TX,GPS_VCC,I2C_SCL,I2C_SDA
+fp /conn/R2 f9f3252b-5119-8001-9d17-ab24998ffbb4|/conn/CC1,GND
+fp /conn/R3 f9f3252b-5119-8001-9d17-ab24998ffbb4|/conn/CC2,GND
+fp /conn/VBUS /conn/D3.A,/conn/J1.VBUS
+fp /mcu mcu
+fp /mcu/BOOT0 /mcu/R1.1,/mcu/U1.BOOT0
+fp /mcu/C1 487c9fa2-8806-85e9-a8e7-c76ab2c775f2|/mcu/OSC_IN,GND
+fp /mcu/C10 e6517d62-caf2-8354-a15d-4ec7c594d6b3|/mcu/VCAP,GND
+fp /mcu/C11 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/mcu/NRST,GND
+fp /mcu/C2 487c9fa2-8806-85e9-a8e7-c76ab2c775f2|/mcu/OSC_OUT,GND
+fp /mcu/C3 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /mcu/C4 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /mcu/C5 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /mcu/C6 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /mcu/C7 5884b3d6-4fd9-87f3-a37a-bfdf5d04441d|+3V3,GND
+fp /mcu/C8 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /mcu/C9 5884b3d6-4fd9-87f3-a37a-bfdf5d04441d|+3V3,GND
+fp /mcu/D1 2859cb87-a523-8b87-9a37-d891b91c04b9|/mcu/LED1_K,GND
+fp /mcu/D2 2859cb87-a523-8b87-9a37-d891b91c04b9|/mcu/LED2_K,GND
+fp /mcu/LED1 /mcu/R4.1,/mcu/U1.PC13
+fp /mcu/LED1_K /mcu/D1.A,/mcu/R4.2
+fp /mcu/LED2 /mcu/R5.1,/mcu/U1.PC14
+fp /mcu/LED2_K /mcu/D2.A,/mcu/R5.2
+fp /mcu/NRST /mcu/C11.1,/mcu/R13.1,/mcu/U1.NRST
+fp /mcu/OSC_IN /mcu/C1.1,/mcu/U1.OSC_IN,/mcu/Y1.1
+fp /mcu/OSC_OUT /mcu/C2.1,/mcu/U1.OSC_OUT,/mcu/Y1.2
+fp /mcu/R1 f0b7343f-4c49-88f7-8a3b-7c46bf087762|/mcu/BOOT0,GND
+fp /mcu/R13 f0b7343f-4c49-88f7-8a3b-7c46bf087762|+3V3,/mcu/NRST
+fp /mcu/R4 5cad3456-7f51-8bcd-9bf4-5cf482812887|/mcu/LED1,/mcu/LED1_K
+fp /mcu/R5 5cad3456-7f51-8bcd-9bf4-5cf482812887|/mcu/LED2,/mcu/LED2_K
+fp /mcu/U1 8a5fb81d-61d0-86be-936c-76caa4bd5a2c|+3V3,/mcu/BOOT0,/mcu/LED1,/mcu/LED2,/mcu/NRST,/mcu/OSC_IN,/mcu/OSC_OUT,/mcu/VCAP,CURR,GND,GPS_RX,GPS_TX,I2C_SCL,I2C_SDA,IMU_CS,IMU_INT,M1,M2,M3,M4,RC_RX,RC_TX,SPI_MISO,SPI_MOSI,SPI_SCK,TLM,USB_DN,USB_DP,VBAT_SENSE,VTX_RX,VTX_TX
+fp /mcu/VCAP /mcu/C10.1,/mcu/U1.VCAP
+fp /mcu/Y1 354e5a70-798a-8d7c-8d48-bf24989866c3|/mcu/OSC_IN,/mcu/OSC_OUT
+fp /pwr power
+fp /pwr/BST /pwr/C14.1,/pwr/U2.BST
+fp /pwr/C12 a22177b3-379c-8ce8-8f64-9c3857a4d708|GND,VBAT
+fp /pwr/C13 a22177b3-379c-8ce8-8f64-9c3857a4d708|GND,VBAT
+fp /pwr/C14 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/pwr/BST,/pwr/SW
+fp /pwr/C15 6a379792-55b5-8250-99f1-82a456234a1e|+5V,GND
+fp /pwr/C16 6a379792-55b5-8250-99f1-82a456234a1e|+5V,GND
+fp /pwr/C17 0f2acd91-41b5-8709-bcfe-e23c5862a0f1|+5V,/pwr/FB
+fp /pwr/C18 5884b3d6-4fd9-87f3-a37a-bfdf5d04441d|+5V,GND
+fp /pwr/C19 5884b3d6-4fd9-87f3-a37a-bfdf5d04441d|+3V3,GND
+fp /pwr/C20 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|GND,VBAT_SENSE
+fp /pwr/EN /pwr/R8.2,/pwr/U2.EN
+fp /pwr/FB /pwr/C17.2,/pwr/R6.2,/pwr/R7.1,/pwr/U2.FB
+fp /pwr/L1 9d230dbe-6451-81ad-a530-0803fa78362c|+5V,/pwr/SW
+fp /pwr/R10 f0b7343f-4c49-88f7-8a3b-7c46bf087762|GND,VBAT_SENSE
+fp /pwr/R6 bc7913a8-7964-80e5-b860-7e16a7b09969|+5V,/pwr/FB
+fp /pwr/R7 f0b7343f-4c49-88f7-8a3b-7c46bf087762|/pwr/FB,GND
+fp /pwr/R8 4c1fba02-a319-8d52-bb34-c5a664ea31c5|/pwr/EN,VBAT
+fp /pwr/R9 050fd933-fbbb-864b-a9e4-2f69d1e6e4c0|VBAT,VBAT_SENSE
+fp /pwr/SW /pwr/C14.2,/pwr/L1.1,/pwr/U2.SW
+fp /pwr/U2 24f0b3c4-5267-89ee-8c63-f21cf74b2086|/pwr/BST,/pwr/EN,/pwr/FB,/pwr/SW,GND,VBAT
+fp /pwr/U3 5fef276e-5d9f-87b7-a405-8a5aeef03e55|+3V3,+5V,GND
+fp /sens sensors
+fp /sens/C21 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /sens/C22 5884b3d6-4fd9-87f3-a37a-bfdf5d04441d|+3V3,GND
+fp /sens/C23 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /sens/R11 16272300-3f5a-830a-aaa6-785c25d2a4f8|+3V3,I2C_SCL
+fp /sens/R12 16272300-3f5a-830a-aaa6-785c25d2a4f8|+3V3,I2C_SDA
+fp /sens/U4 c9fe0507-9bfe-8c53-862d-98a56732af8a|+3V3,GND,IMU_CS,IMU_INT,SPI_MISO,SPI_MOSI,SPI_SCK
+fp /sens/U5 1feca7e2-e662-8ad7-a8ab-f5bbda13cee1|+3V3,GND,I2C_SCL,I2C_SDA
+place connectors/D3 139.7 83.82 0
+place connectors/H1 104.14 133.35 0
+place connectors/H2 113.03 133.35 0
+place connectors/H3 121.92 133.35 0
+place connectors/H4 130.81 133.35 0
+place connectors/J1 104.14 83.82 0 mirror
+place connectors/J2 226.06 74.93 0
+place connectors/J3 181.61 77.47 0
+place connectors/J4 67.31 135.89 0
+place connectors/J5 232.41 93.98 0
+place connectors/R2 52.07 85.09 270
+place connectors/R3 64.77 87.63 270
+place main/conn 106.68 52.07 0
+place main/mcu 167.64 52.07 0
+place main/pwr 106.68 102.87 0
+place main/sens 106.68 133.35 0
+place mcu/C1 185.42 80.01 270
+place mcu/C10 44.45 72.39 270
+place mcu/C11 57.15 74.93 270
+place mcu/C2 172.72 71.12 270
+place mcu/C3 81.28 139.7 270
+place mcu/C4 96.52 139.7 270
+place mcu/C5 111.76 139.7 270
+place mcu/C6 127 139.7 270
+place mcu/C7 142.24 139.7 270
+place mcu/C8 81.28 161.29 270
+place mcu/C9 96.52 161.29 270
+place mcu/D1 236.22 99.06 270
+place mcu/D2 248.92 115.57 270
+place mcu/R1 69.85 77.47 270
+place mcu/R13 57.15 57.15 90
+place mcu/R4 207.01 90.17 0
+place mcu/R5 207.01 106.68 0
+place mcu/U1 111.76 86.36 0
+place mcu/Y1 207.01 71.12 0
+place power/C12 86.36 130.81 270
+place power/C13 101.6 130.81 270
+place power/C14 93.98 76.2 0
+place power/C15 133.35 114.3 270
+place power/C16 148.59 114.3 270
+place power/C17 57.15 93.98 270
+place power/C18 181.61 129.54 270
+place power/C19 196.85 129.54 270
+place power/C20 237.49 99.06 270
+place power/L1 129.54 102.87 0
+place power/R10 222.25 99.06 270
+place power/R6 69.85 93.98 270
+place power/R7 69.85 111.76 270
+place power/R8 44.45 96.52 270
+place power/R9 222.25 81.28 270
+place power/U2 93.98 102.87 0
+place power/U3 189.23 102.87 0
+place sensors/C21 195.58 129.54 270
+place sensors/C22 105.41 124.46 270
+place sensors/C23 210.82 129.54 270
+place sensors/R11 67.31 86.36 270
+place sensors/R12 149.86 86.36 270
+place sensors/U4 203.2 97.79 0
+place sensors/U5 105.41 95.25 0

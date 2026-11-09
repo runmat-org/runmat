@@ -1,0 +1,151 @@
+runmat 0.7
+std 1
+
+drawing bracket {
+    format a3 = { size = { size = iso, name = A3 }, title_block = [], standard = asme }
+    format a4 = { size = { size = iso, name = A4 }, title_block = [], standard = asme }
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+    sheet "2" = { format = a4, scale = [1, 1], projection = third_angle }
+    view front = standard(
+        orientation = front,
+        sheet = "1",
+        model = { part = bracket },
+        at = [100, 95],
+        display = hidden_lines
+    )
+    view top = projected(
+        from = front,
+        direction = up,
+        sheet = "1",
+        model = { part = bracket },
+        at = [100, 155],
+        display = hidden_lines
+    )
+    view right = projected(
+        from = front,
+        direction = right,
+        sheet = "1",
+        model = { part = bracket },
+        at = [195, 95],
+        display = hidden_lines
+    )
+    view a_a = section(
+        from = top,
+        plane = feature.h.face.wall(a),
+        label = A,
+        sheet = "1",
+        model = { part = bracket },
+        at = [210, 155],
+        display = visible_lines
+    )
+    view detail_b = detail(
+        from = front,
+        center = feature.body.face.end,
+        radius = 6 mm,
+        label = B,
+        sheet = "1",
+        model = { part = bracket },
+        at = [194, 95],
+        scale = [4, 1],
+        display = hidden_lines
+    )
+    view view_c = auxiliary(
+        from = front,
+        edge = feature.body.face.side(s1.l2),
+        label = C,
+        sheet = "1",
+        model = { part = bracket },
+        at = [210, 135],
+        display = hidden_lines
+    )
+    view front_broken = broken_out(
+        from = front,
+        boundary = [[-12, -4], [12, -4], [12, 4], [-12, 4]],
+        depth = 5 mm,
+        sheet = "1",
+        model = { part = bracket },
+        at = [210, 95],
+        display = hidden_lines
+    )
+    view isometric = standard(
+        orientation = isometric,
+        sheet = "1",
+        model = { part = bracket },
+        at = [340, 220],
+        scale = [1, 2],
+        display = visible_lines
+    )
+    view bottom = standard(
+        orientation = bottom,
+        sheet = "1",
+        model = { part = bracket },
+        at = [433.1, 115],
+        display = shaded
+    )
+    view bottom2 = projected(
+        from = front,
+        direction = down,
+        sheet = "1",
+        model = { part = bracket },
+        at = [100, 35],
+        display = hidden_lines
+    )
+    annotation dim = dimension(
+        style = linear,
+        references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l2)],
+        pmi = distance1,
+        view = front
+    )
+    annotation dia = dimension(style = diameter, references = [feature.h.face.wall(a)], pmi = size1, view = top)
+    annotation rad = dimension(style = radius, references = [feature.h.face.wall(a)], view = top)
+    annotation angle = dimension(
+        style = angular,
+        references = [feature.body.face.side(s1.l4), feature.body.face.end],
+        view = front
+    )
+    annotation ordinate = dimension(
+        style = ordinate,
+        references = [feature.body.face.side(s1.l4), feature.h.face.wall(a)],
+        view = top
+    )
+    annotation ordinate2 = dimension(
+        style = ordinate,
+        references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l2)],
+        view = top
+    )
+    annotation baseline = dimension(
+        style = baseline,
+        references = [feature.body.face.side(s1.l1), feature.h.face.wall(a), feature.body.face.side(s1.l3)],
+        view = top
+    )
+    annotation chain = dimension(
+        style = chain,
+        references = [feature.body.face.side(s1.l4), feature.h.face.wall(a), feature.body.face.side(s1.l2)],
+        view = top
+    )
+    annotation datum_a = datum_symbol(label = A, view = front)
+    annotation position1 = gdt(tolerance = position1, view = top, at = [150, 200])
+    annotation hole = hole_callout(hole = feature.h.face.wall(a), view = top)
+    annotation target_a1 = datum_target(label = A1, view = front)
+    annotation finish = surface_finish(on = feature.body.face.end, view = front)
+    annotation weld = weld(on = feature.body.face.side(s1.l2), symbol = fillet, size = 3 mm, view = front)
+    annotation note = note(text = "BREAK SHARP EDGES {part_number}", view = bottom2, at = [30, 60])
+    annotation note2 = note(text = DEBURR, leader = feature.body.face.end, view = front)
+    annotation center = center_mark(on = feature.h.face.wall(a), view = top)
+    annotation centerline = centerline(between = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l2)], view = front)
+    table holes = hole(
+        view = top,
+        origin = feature.body.face.side(s1.l4),
+        spec = { features = [h] },
+        sheet = "1",
+        at = [0, 0]
+    )
+    table revisions = revision(
+        rows = [
+            { rev = A, description = "Initial release", date = "2026-11-06" },
+            { rev = B, description = "Hole to H7" }
+        ],
+        sheet = "1",
+        at = [0, 0]
+    )
+}

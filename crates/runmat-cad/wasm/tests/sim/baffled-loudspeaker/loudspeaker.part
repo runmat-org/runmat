@@ -1,0 +1,54 @@
+runmat 0.7
+std 1
+
+// A 5-inch cone driver in a flat baffle, and the air in front of it. The diaphragm is the
+// cone's front face, 130 mm across at the baffle and 25 mm deep to its 50 mm dust cap; the
+// baffle is the rest of the plane it sits in; the air is a 600 x 600 x 400 mm box in front.
+// Hand check: a piston of radius a = 55 mm (the cone's effective radius) radiates evenly up
+// to ka = 1, about 990 Hz, and beams above it; the box's faces stand 300 mm (about one
+// wavelength at 1.1 kHz) from the driver's axis.
+// Change `cone_diameter` or `cone_depth` and re-run the study.
+part loudspeaker {
+    input cone_diameter : length = 130 mm
+    input cone_depth : length = 25 mm
+    input cap_diameter : length = 50 mm
+    input air_width : length = 600 mm
+    input air_depth : length = 400 mm
+
+    let a = input.air_width / 2
+
+    sketch air_s on origin.xy {
+        bottom = line(start = [-let.a, -let.a], end = [let.a, -let.a])
+        right = line(start = [let.a, -let.a], end = [let.a, let.a])
+        top = line(start = [let.a, let.a], end = [-let.a, let.a])
+        left = line(start = [-let.a, let.a], end = [-let.a, -let.a])
+    }
+    feature air = extrude(profile = sketch.air_s, distance = input.air_depth)
+
+    // The cone: from the dust cap behind the baffle out to the cone's rim in the baffle plane.
+    feature cap_plane = plane.offset(base = origin.xy, distance = -input.cone_depth)
+    sketch cap_s on plane.cap_plane {
+        cap = circle(center = [0 mm, 0 mm], radius = input.cap_diameter / 2)
+    }
+    sketch rim_s on origin.xy {
+        rim = circle(center = [0 mm, 0 mm], radius = input.cone_diameter / 2)
+    }
+    feature cone = loft(profiles = [sketch.cap_s, sketch.rim_s])
+    feature front = boolean.union(target = feature.air.body, tools = [feature.cone.body])
+
+    region diaphragm : face = { select = [feature.cone.face.start, feature.cone.face.side(cap_s.cap)], expect = at_least_one, label = "Diaphragm" }
+    region baffle : face = { select = [feature.air.face.start], expect = at_least_one, label = "Baffle" }
+    region outer_boundary : face = {
+        select = [
+            feature.air.face.end,
+            feature.air.face.side(air_s.bottom),
+            feature.air.face.side(air_s.right),
+            feature.air.face.side(air_s.top),
+            feature.air.face.side(air_s.left)
+        ],
+        expect = at_least_one,
+        label = "Outer boundary"
+    }
+
+    output air = { body = feature.air.body, label = "Air", color = "#CFE3F566" }
+}

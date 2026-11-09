@@ -1,0 +1,69 @@
+runmat 0.7
+std 1
+
+circuit io {
+    net_class analog = { clearance = "0.20 mm" }
+    net_class power = { track_width = "0.40 mm" }
+    variant lite = { overrides = { "/ch[0]/CD2" = not_fitted } }
+
+    sheet channel {
+        port IN : in
+        port OUT : out
+        component U = { part = OPA4171 }
+        component RG = { part = "R0402-10K" }
+        component RF = { part = "R0402-10K" }
+        component RS = { part = "R0402-10K" }
+        component CF = { part = "C0402-100N" }
+        component CD1 = { part = "C0402-100N" }
+        component CD2 = { part = "C0402-100N" }
+        net GND = { class = power, global = true }
+        net "+5V" = { class = power, global = true }
+        net VNEG = { class = power, global = true, renamed_from = "-5V" }
+        connect = [net.IN, "RS.1"]
+        connect = [net.INF, "RS.2", "CF.1", "U.A.IN+"]
+        connect = [net.FBK, "U.A.IN-", "RG.1", "RF.1"]
+        connect = [net.OUT, U.A.OUT, "RF.2"]
+        connect = [port.IN, net.IN]
+        connect = [port.OUT, net.OUT]
+        connect = [net.GND, "RG.2", "CF.2", "CD1.2", "CD2.1"]
+        connect = ["net.+5V", "U.V+", "CD1.1"]
+        connect = [net.VNEG, "U.V-", "CD2.2"]
+        connect = [net.TIE_B, U.B.OUT, "U.B.IN-"]
+        connect = [net.GND, "U.B.IN+"]
+        connect = [net.TIE_C, U.C.OUT, "U.C.IN-"]
+        connect = [net.GND, "U.C.IN+"]
+        connect = [net.TIE_D, U.D.OUT, "U.D.IN-"]
+        connect = [net.GND, "U.D.IN+"]
+    }
+
+    sheet main {
+        component U9000 = { part = "FPGA-BGA256" }
+        component J1 = { part = "HDR-2x05", renamed_from = J100 }
+        component C900 = { part = "C0805-10U" }
+        net GND = { class = power, global = true }
+        net "+5V" = { class = power, global = true }
+        net VNEG = { class = power, global = true, renamed_from = "-5V" }
+        net SHIELD
+        bus AIN = [AIN0, AIN1, AIN2]
+        bus ADC = [ADC0, ADC1, ADC2]
+        instance ch = {
+            sheet = channel,
+            repeat = 3,
+            bind = { IN = { bus = AIN, offset = 0 }, OUT = { bus = ADC, offset = 0 } }
+        }
+        connect = [net.ADC0, U9000.IO0]
+        connect = [net.ADC1, U9000.IO1]
+        connect = [net.ADC2, U9000.IO2]
+        connect = [net.GND, U9000.GND]
+        connect = ["net.+5V", U9000.VCCINT, U9000.VCCIO]
+        connect = [net.AIN0, "J1.1"]
+        connect = [net.AIN1, "J1.2"]
+        connect = [net.AIN2, "J1.3"]
+        connect = [net.GND, "J1.10"]
+        connect = ["net.+5V", "C900.1"]
+        connect = [net.GND, "C900.2"]
+        connect = [net.SHIELD, "J1.9"]
+        no_erc = ["J100.4", "J100.5", "J100.6", "J100.7", "J100.8"]
+        diff_pair AIN01 = { p = AIN0, n = AIN1 }
+    }
+}

@@ -1,6 +1,6 @@
 use crate::{BoundFeaProgram, CheckedFeaDeclaration, CheckedFeaStatementKind, FeaDiagnostic};
 use runmat_analysis_core::{RandomExcitationSpectrum, ResponseSpectrum};
-use runmat_fea_syntax::FeaModelDefinitionKind;
+use runmat_design_syntax::FeaModelDefinitionKind;
 
 mod random;
 mod response;

@@ -1,0 +1,29 @@
+runmat 0.7
+std 1
+
+use circuit esc
+
+layout esc {
+    stackup rigid {
+        finish = ENIG
+        layer "F.Mask" = { kind = mask, thickness = 0.02, material = solder_mask }
+        layer "F.Cu" = { kind = copper, thickness = 0.06958, weight = 2, material = copper }
+        layer "dielectric 1" = { kind = prepreg, thickness = 0.11, material = { name = "FR-4 prepreg", dk = 4.1, df = 0.02, conductivity = 0, k_inplane = 0.8, k_through = 0.3, density = 1850, cp = 1100, cte_ppm = 14 } }
+        layer "In1.Cu" = { kind = copper, thickness = 0.03479, weight = 1, material = copper }
+        layer "dielectric 2" = { kind = core, thickness = 0.36, material = fr4 }
+        layer "In2.Cu" = { kind = copper, thickness = 0.03479, weight = 1, material = copper }
+        layer "dielectric 3" = { kind = prepreg, thickness = 0.34, material = { name = "FR-4 prepreg", dk = 4.1, df = 0.02, conductivity = 0, k_inplane = 0.8, k_through = 0.3, density = 1850, cp = 1100, cte_ppm = 14 } }
+        layer "In3.Cu" = { kind = copper, thickness = 0.03479, weight = 1, material = copper }
+        layer "dielectric 4" = { kind = core, thickness = 0.36, material = fr4 }
+        layer "In4.Cu" = { kind = copper, thickness = 0.03479, weight = 1, material = copper }
+        layer "dielectric 5" = { kind = prepreg, thickness = 0.11, material = { name = "FR-4 prepreg", dk = 4.1, df = 0.02, conductivity = 0, k_inplane = 0.8, k_through = 0.3, density = 1850, cp = 1100, cte_ppm = 14 } }
+        layer "B.Cu" = { kind = copper, thickness = 0.06958, weight = 2, material = copper }
+        layer "B.Mask" = { kind = mask, thickness = 0.02, material = solder_mask }
+    }
+    outline = [[-24, -26], [24, -26], [26, -24], [26, 24], [24, 26], [-24, 26], [-26, 24], [-26, -24]]
+    limits = { clearance = 0.15, track = 0.15, via_diameter = 0.45, drill = 0.2, annular = 0.1, hole_to_hole = 0.25, copper_to_edge = 0.3, silk_to_pad = 0.1, microvia_drill = 0.1 }
+    net_class power = { track_width = 1.0 mm, clearance = 0.2 mm }
+    net_class phase = { track_width = 0.3 mm, clearance = 0.2 mm }
+    net_class gate = { track_width = 0.25 mm, clearance = 0.15 mm }
+    net_class logic_supply = { track_width = 0.3 mm, clearance = 0.15 mm }
+}

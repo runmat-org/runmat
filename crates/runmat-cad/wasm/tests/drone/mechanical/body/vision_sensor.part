@@ -1,0 +1,18 @@
+runmat 0.7
+std 1
+
+// A vision sensor: a stereo camera's lens in its bezel (the obstacle-sensing pairs at the nose
+// and under the belly). Its origin is the lens centre on the shell, looking along +z.
+part vision_sensor {
+    feature base = plane.offset(base = origin.xy, distance = -1.6 mm)
+    sketch s on plane.base {
+        c = circle(center = [0 mm, 0 mm], radius = 4 mm)
+    }
+    feature bezel = extrude(profile = sketch.s, distance = 2.2 mm)
+    feature glass_base = plane.offset(base = origin.xy, distance = 0.2 mm)
+    sketch g on plane.glass_base {
+        c = circle(center = [0 mm, 0 mm], radius = 2.6 mm)
+    }
+    feature well = extrude(profile = sketch.g, distance = 0.4 mm, mode = cut)
+    output vision_sensor = { body = feature.bezel.body, part_number = "CD-VS-610", material = "glass", color = "#101216" }
+}

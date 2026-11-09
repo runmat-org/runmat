@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 #[derive(Args, Clone, Debug)]
 pub struct TestArgs {
-    /// Test files or directories; defaults to manifest test roots
+    /// Test files or directories (defaults to manifest test roots); a .circuit or .circuit.layout
+    /// runs its circuit checks
     #[arg(value_name = "PATH")]
     pub targets: Vec<PathBuf>,
 

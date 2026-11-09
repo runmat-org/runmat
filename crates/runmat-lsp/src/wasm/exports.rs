@@ -18,6 +18,9 @@ use crate::core::analysis::{
     hover_at, quick_information_at, references_locations_at_async, semantic_document_facts,
     semantic_tokens_full, semantic_tokens_lexical, signature_help_at, CompatMode, DocumentAnalysis,
 };
+use crate::core::design::{
+    design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues,
+};
 use crate::core::fea::{is_fea_uri, resolve_project_facts, FeaDocumentAnalysis};
 use crate::core::workspace::workspace_symbols_with_project_async;
 
@@ -35,6 +38,7 @@ struct DocEntry {
     analysis: Option<DocumentAnalysis>,
     fea_analysis: Option<FeaDocumentAnalysis>,
     fea_error: Option<String>,
+    design_analysis: Option<DesignDocumentAnalysis>,
     compat: CompatMode,
 }
 
@@ -49,6 +53,22 @@ runmat_thread_local! {
 runmat_thread_local! {
     static NEXT_DOCUMENT_REVISION: Cell<u64> = Cell::new(0);
 }
+
+runmat_thread_local! {
+    /// Texts of the files design documents read that aren't open (their circuit, lock, parts),
+    /// as the host supplied them with `setDesignFiles`.
+    static DESIGN_FILES: RefCell<DesignFiles> = RefCell::new(DesignFiles::new());
+}
+
+runmat_thread_local! {
+    /// `.m` call results by call key, as the host ran them in the RunMat runtime and supplied
+    /// them with `setDesignValues`.
+    static DESIGN_VALUES: RefCell<DesignValues> = RefCell::new(DesignValues::new());
+}
+
+/// The most call results the server keeps. Keys carry the sources' text, so edits leave old
+/// results behind; past this many, the oldest-keyed go first.
+const DESIGN_VALUES_LIMIT: usize = 4096;
 
 runmat_thread_local! {
     static WORKSPACE_REVISION: Cell<u64> = Cell::new(0);
@@ -202,8 +222,12 @@ pub fn update_document_lexical(
         revision
     });
     WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
-    let is_fea = Url::parse(&uri).ok().as_ref().is_some_and(is_fea_uri);
-    let lexical_tokens = if is_fea {
+    let parsed_uri = Url::parse(&uri).ok();
+    let is_fea = parsed_uri.as_ref().is_some_and(is_fea_uri);
+    let design = parsed_uri.as_ref().and_then(design_dialect);
+    let lexical_tokens = if let Some(dialect) = design {
+        DesignDocumentAnalysis::lexical_semantic_tokens(dialect, &text)
+    } else if is_fea {
         FeaDocumentAnalysis::lexical_semantic_tokens(&text)
     } else {
         semantic_tokens_lexical(&text).unwrap_or_else(|| SemanticTokens {
@@ -222,6 +246,7 @@ pub fn update_document_lexical(
                 analysis: None,
                 fea_analysis: None,
                 fea_error: None,
+                design_analysis: None,
                 compat,
             },
         );
@@ -244,6 +269,34 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
     let workspace_revision = WORKSPACE_REVISION.with(Cell::get);
     let parsed_uri = Url::parse(&uri).ok();
     let is_fea = parsed_uri.as_ref().is_some_and(is_fea_uri);
+    if let Some(dialect) = parsed_uri.as_ref().and_then(design_dialect) {
+        let files = design_files();
+        let values = DESIGN_VALUES.with(|v| v.borrow().clone());
+        let analysis = DesignDocumentAnalysis::analyze(
+            parsed_uri.as_ref().expect("a parsed design uri"),
+            dialect,
+            &entry.text,
+            &files,
+            &values,
+        );
+        let tokens = analysis.semantic_tokens();
+        let committed = DOCS.with(|d| {
+            let mut docs = d.borrow_mut();
+            let Some(current) = docs.docs.get_mut(&uri) else {
+                return false;
+            };
+            if current.version != version || current.revision != entry.revision {
+                return false;
+            }
+            current.design_analysis = Some(analysis);
+            true
+        });
+        return if committed {
+            to_js(&tokens)
+        } else {
+            Ok(JsValue::NULL)
+        };
+    }
     let (analysis, fea_analysis, fea_error, tokens) = if is_fea {
         match analyze_fea_document(&uri, &entry) {
             Ok(analysis) => {
@@ -287,6 +340,74 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
     } else {
         Ok(JsValue::NULL)
     }
+}
+
+/// The files design documents read: open documents' current text over the files the host
+/// supplied.
+fn design_files() -> DesignFiles {
+    let mut files = DESIGN_FILES.with(|f| f.borrow().clone());
+    DOCS.with(|documents| {
+        for (uri, document) in documents.borrow().docs.iter() {
+            if let Some(path) = Url::parse(uri).ok().as_ref().and_then(wasm_file_path) {
+                files.insert(path.to_string_lossy().into_owned(), document.text.clone());
+            }
+        }
+    });
+    files
+}
+
+/// The files a design document reads beyond itself (workspace paths), so the host can supply
+/// those that aren't open with `setDesignFiles`.
+#[wasm_bindgen(js_name = "designDependencies")]
+pub fn design_dependencies_of(uri: String, text: String) -> Result<JsValue, JsValue> {
+    let Some(parsed) = Url::parse(&uri).ok() else {
+        return to_js(&Vec::<String>::new());
+    };
+    let Some(dialect) = design_dialect(&parsed) else {
+        return to_js(&Vec::<String>::new());
+    };
+    to_js(&design_dependencies(dialect, parsed.path(), &text))
+}
+
+/// Supplies `.m` call results the host ran (`{ "<call key>": [6.58e-3] }`, or
+/// `{ "<call key>": { "error": "…" } }`), over the ones supplied before. A design document's
+/// next analysis reads them: the hover shows a value computed by an `.m` function.
+#[wasm_bindgen(js_name = "setDesignValues")]
+pub fn set_design_values(values: JsValue) -> Result<JsValue, JsValue> {
+    let values: DesignValues = serde_wasm_bindgen::from_value(values)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_VALUES.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        stored.extend(values);
+        while stored.len() > DESIGN_VALUES_LIMIT {
+            stored.pop_first();
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
+}
+
+/// Supplies the texts of files design documents read (`{ "/p/io.circuit": "…" }`); a `null`
+/// text forgets a file. Open documents always win over these.
+#[wasm_bindgen(js_name = "setDesignFiles")]
+pub fn set_design_files(files: JsValue) -> Result<JsValue, JsValue> {
+    let files: BTreeMap<String, Option<String>> = serde_wasm_bindgen::from_value(files)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_FILES.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        for (path, text) in files {
+            match text {
+                Some(text) => {
+                    stored.insert(path, text);
+                }
+                None => {
+                    stored.remove(&path);
+                }
+            }
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
 }
 
 fn analyze_fea_document(uri: &str, entry: &DocEntry) -> Result<FeaDocumentAnalysis, String> {
@@ -393,6 +514,12 @@ pub fn completion(_uri: String, _line: u32, _character: u32) -> Result<JsValue, 
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&CompletionList {
+            is_incomplete: false,
+            items: analysis.completion_items(&position),
+        });
+    }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return to_js(&CompletionList {
             is_incomplete: false,
@@ -421,6 +548,11 @@ pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsVal
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return analysis
+            .hover(&position)
+            .map_or(Ok(JsValue::NULL), |hover| to_js(&hover));
+    }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return analysis
             .hover(&doc.text, &position)
@@ -443,7 +575,7 @@ pub fn quick_information(uri: String, line: u32, character: u32) -> Result<JsVal
     let Some(document) = entry else {
         return Ok(JsValue::NULL);
     };
-    if document.fea_analysis.is_some() {
+    if document.fea_analysis.is_some() || document.design_analysis.is_some() {
         return Ok(JsValue::NULL);
     }
     let Some(analysis) = document.analysis.as_ref() else {
@@ -461,7 +593,7 @@ pub fn semantic_facts(uri: String) -> Result<JsValue, JsValue> {
     let Some(document) = entry else {
         return Ok(JsValue::NULL);
     };
-    if document.fea_analysis.is_some() {
+    if document.fea_analysis.is_some() || document.design_analysis.is_some() {
         return Ok(JsValue::NULL);
     }
     let Some(analysis) = document.analysis.as_ref() else {
@@ -479,6 +611,14 @@ pub async fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsV
     };
     let position = Position::new(_line, _character);
     let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(
+            &analysis
+                .definition(&position)
+                .into_iter()
+                .collect::<Vec<_>>(),
+        );
+    }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return to_js(
             &analysis
@@ -503,6 +643,9 @@ pub async fn references(_uri: String, _line: u32, _character: u32) -> Result<JsV
     };
     let position = Position::new(_line, _character);
     let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&analysis.references(&position, true));
+    }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return to_js(&analysis.references(&doc.text, &position));
     }
@@ -521,6 +664,9 @@ pub fn signature_help(_uri: String, _line: u32, _character: u32) -> Result<JsVal
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
+    if doc.design_analysis.is_some() {
+        return Ok(JsValue::NULL);
+    }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return analysis
             .signature_help(&doc.text, &position)
@@ -544,9 +690,14 @@ pub fn semantic_tokens(_uri: String) -> Result<JsValue, JsValue> {
         return Ok(JsValue::NULL);
     };
     let tokens = doc
-        .fea_analysis
+        .design_analysis
         .as_ref()
-        .and_then(|analysis| analysis.semantic_tokens(&doc.text))
+        .map(DesignDocumentAnalysis::semantic_tokens)
+        .or_else(|| {
+            doc.fea_analysis
+                .as_ref()
+                .and_then(|analysis| analysis.semantic_tokens(&doc.text))
+        })
         .or_else(|| {
             doc.analysis
                 .as_ref()
@@ -563,6 +714,9 @@ pub fn document_symbols(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&analysis.document_symbols());
+    }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return to_js(&analysis.document_symbols(&doc.text));
     }
@@ -596,8 +750,15 @@ pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
             .values()
             .filter_map(|document| document.fea_analysis.clone())
             .collect::<Vec<_>>();
-        (docs, fea_analyses)
+        let design_symbols = documents
+            .docs
+            .values()
+            .filter_map(|document| document.design_analysis.as_ref())
+            .flat_map(|analysis| analysis.workspace_symbols(None))
+            .collect::<Vec<_>>();
+        (docs, (fea_analyses, design_symbols))
     });
+    let (fea_analyses, design_symbols) = fea_analyses;
     let mut syms: Vec<SymbolInformation> =
         workspace_symbols_with_project_async(&docs, compat, None).await;
     syms.extend(
@@ -605,6 +766,7 @@ pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
             .iter()
             .flat_map(|analysis| analysis.workspace_symbols(None)),
     );
+    syms.extend(design_symbols);
     syms.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
@@ -626,6 +788,9 @@ pub fn formatting(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&analysis.formatting_edits());
+    }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return to_js(&analysis.formatting_edits(&doc.text));
     }
@@ -643,6 +808,9 @@ pub fn diagnostics(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&analysis.diagnostics());
+    }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return to_js(&analysis.diagnostics(&doc.text));
     }
@@ -663,6 +831,44 @@ pub fn diagnostics(_uri: String) -> Result<JsValue, JsValue> {
     };
     let diags: Vec<Diagnostic> = diagnostics_for_document(&doc.text, analysis);
     to_js(&diags)
+}
+
+/// The renamable name under the cursor in a design document: `{ range, placeholder }`.
+#[wasm_bindgen(js_name = "prepareRename")]
+pub fn prepare_rename(uri: String, line: u32, character: u32) -> Result<JsValue, JsValue> {
+    let entry = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
+    let Some(analysis) = entry.and_then(|doc| doc.design_analysis) else {
+        return Ok(JsValue::NULL);
+    };
+    match analysis.prepare_rename(&Position::new(line, character)) {
+        Some((range, placeholder)) => to_js(&serde_json::json!({
+            "range": range,
+            "placeholder": placeholder,
+        })),
+        None => Ok(JsValue::NULL),
+    }
+}
+
+/// Renames a design document's symbol at its declaration and every use (a workspace edit).
+#[wasm_bindgen]
+pub fn rename(
+    uri: String,
+    line: u32,
+    character: u32,
+    new_name: String,
+) -> Result<JsValue, JsValue> {
+    let entry = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
+    let Some(analysis) = entry.and_then(|doc| doc.design_analysis) else {
+        return Ok(JsValue::NULL);
+    };
+    match analysis.rename(&Position::new(line, character), &new_name) {
+        // `changes` is a map keyed by URI: a plain object, as LSP clients read a WorkspaceEdit.
+        Ok(Some(edit)) => edit
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|e| JsValue::from_str(&e.to_string())),
+        Ok(None) => Ok(JsValue::NULL),
+        Err(message) => Err(JsValue::from_str(&message)),
+    }
 }
 
 #[wasm_bindgen(js_name = "setCompatMode")]

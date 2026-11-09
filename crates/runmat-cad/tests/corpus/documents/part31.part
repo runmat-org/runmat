@@ -1,0 +1,39 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+    input rise : length = 20 mm
+    input run : length = 10 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    feature swp = plane.offset(base = origin.xy, distance = 20 mm)
+    sketch s_swp on plane.swp {
+        l1 = line(start = [60 mm, 20 mm], end = [66 mm, 20 mm])
+        l2 = line(start = [66 mm, 20 mm], end = [66 mm, 26 mm])
+        l3 = line(start = [66 mm, 26 mm], end = [60 mm, 26 mm])
+        l4 = line(start = [60 mm, 26 mm], end = [60 mm, 20 mm])
+    }
+    feature pathp = plane.offset(base = origin.zx, distance = 23 mm)
+    sketch s_path on plane.pathp {
+        p1 = line(start = [20 mm, 63 mm], end = [20 mm + input.rise, 63 mm])
+        p2 = line(start = [20 mm + input.rise, 63 mm], end = [20 mm + input.rise + 10 mm, 63 mm + input.run])
+    }
+    feature sw = sweep(profile = sketch.s_swp, path = sketch.s_path, suppressed)
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+
+    region sw_l2_0 : face = { select = [feature.sw.face.side(s_swp.l2, ordinal = 0)], expect = exactly_one }
+    region sw_l2_1 : face = { select = [feature.sw.face.side(s_swp.l2, ordinal = 1)], expect = exactly_one }
+    region sw_l2 : face = { select = [feature.sw.face.side(s_swp.l2)], expect = at_least_one }
+    region sw_start : face = { select = [feature.sw.face.start], expect = exactly_one }
+    region sw_end : face = { select = [feature.sw.face.end], expect = exactly_one }
+}

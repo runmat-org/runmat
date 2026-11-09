@@ -1,0 +1,19 @@
+[package]
+name = "runmat-design-commands"
+version = "0.7.0"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "RunMat design command descriptors: the one schema for CAD and PCB commands, rows, item schemas and the Desktop's design-commands.json"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+# Schema only: owned by neither the CAD nor the circuit crate, which both depend on it.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# The merged-catalog test writes and checks the Desktop's design-commands.json.
+[dev-dependencies]
+runmat-cad = { path = "../runmat-cad" }
+runmat-circuit = { path = "../runmat-circuit" }

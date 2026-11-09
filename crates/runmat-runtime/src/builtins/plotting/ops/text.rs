@@ -395,6 +395,48 @@ mod tests {
         assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 0.0]);
     }
 
+    /// MATLAB's anchors: `text(x, y, s, 'HorizontalAlignment', 'left', 'VerticalAlignment',
+    /// 'bottom')` keeps them on the annotation's style, which the overlay places by; a value
+    /// outside MATLAB's set is refused.
+    #[test]
+    fn text_keeps_its_alignment() {
+        let _guard = setup();
+        text_builtin(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::String("f3db".into()),
+            Value::String("HorizontalAlignment".into()),
+            Value::String("Left".into()),
+            Value::String("VerticalAlignment".into()),
+            Value::String("bottom".into()),
+        ])
+        .unwrap();
+        let figure =
+            crate::builtins::plotting::clone_figure(current_figure_handle()).expect("figure");
+        let annotation = figure.axes_text_annotation(0, 0).expect("annotation");
+        assert_eq!(
+            annotation.style.horizontal_alignment.as_deref(),
+            Some("left")
+        );
+        assert_eq!(
+            annotation.style.vertical_alignment.as_deref(),
+            Some("bottom")
+        );
+        let err = text_builtin(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::String("x".into()),
+            Value::String("HorizontalAlignment".into()),
+            Value::String("middle".into()),
+        ])
+        .expect_err("middle is a vertical alignment");
+        assert!(
+            err.to_string()
+                .contains("HorizontalAlignment must be one of left, center, right"),
+            "{err}"
+        );
+    }
+
     #[test]
     fn text_supports_3d_form() {
         let _guard = setup();

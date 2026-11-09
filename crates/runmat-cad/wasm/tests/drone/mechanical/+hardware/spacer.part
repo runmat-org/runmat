@@ -1,0 +1,18 @@
+runmat 0.7
+std 1
+
+// A nylon M3 spacer between the stack's boards. Its height is an input.
+part spacer {
+    input height : length = 6 mm
+
+    sketch s on origin.xy {
+        c = circle(center = [0 mm, 0 mm], radius = 2.5 mm)
+    }
+    feature body = extrude(profile = sketch.s, distance = input.height)
+    sketch bore_s on origin.xy {
+        c = circle(center = [0 mm, 0 mm], radius = 1.6 mm)
+    }
+    feature bore = extrude(profile = sketch.bore_s, through_all, mode = cut)
+
+    output spacer = { body = feature.body.body, part_number = "QX-HW-NY-6", material = "nylon", color = "#ECECEC" }
+}

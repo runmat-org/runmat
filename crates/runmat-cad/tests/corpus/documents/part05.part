@@ -1,0 +1,31 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    sketch s_logo on feature.body.face.end {
+        g1 = line(start = [10 mm, 10 mm], end = [20 mm, 10 mm])
+        g2 = line(start = [20 mm, 10 mm], end = [20 mm, 15 mm])
+        g3 = line(start = [20 mm, 15 mm], end = [10 mm, 15 mm])
+        g4 = line(start = [10 mm, 15 mm], end = [10 mm, 10 mm])
+    }
+    feature logo = emboss(profile = sketch.s_logo, face = feature.body.face.end, height = 1 mm)
+    feature coil = curve.helix(axis = origin.z, start = point(10 mm, 0 mm, 0 mm), pitch = 2 mm, turns = 3)
+    feature tilted = plane.three_point(a = point(0 mm, 0 mm, 0 mm), b = point(10 mm, 0 mm, 0 mm), c = point(0 mm, 10 mm, 10 mm))
+    feature mc = mate_connector(
+        placement = { on = frame, frame = { frame = on_face, face = feature.body.face.end } },
+        offset = [0 mm, 0 mm, 2 mm]
+    )
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+}

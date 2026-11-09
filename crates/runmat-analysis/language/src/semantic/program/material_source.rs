@@ -1,4 +1,4 @@
-use runmat_fea_syntax::{FeaCallArgument, FeaExpression, FeaExpressionKind};
+use runmat_design_syntax::{FeaCallArgument, FeaExpression, FeaExpressionKind};
 
 use crate::{
     CheckedCadMaterialSource, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,

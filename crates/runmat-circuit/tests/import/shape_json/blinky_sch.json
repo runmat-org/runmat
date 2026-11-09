@@ -1,0 +1,19 @@
+{
+ "head": {
+  "docType": "1",
+  "editorVersion": "6.5.0"
+ },
+ "canvas": "CA~1000~1000~#FFFFFF~yes~#CCCCCC~10~1000~1000~line~10~pixel~5~0~0",
+ "shape": [
+  "LIB~80~105~package`HDR-1x2`~0~0~gge10~0#@$T~P~80~95~0~#000080~Arial~~~~~comment~J1~1~start~gge11~0#@$P~show~0~1~90~100~0~gge12~0^^90~100^^M 90 100 h -5~#880000^^1~84~100~0~VCC~end~~~#0000FF^^1~86~96~0~1~start~~~#0000FF#@$P~show~0~2~90~110~0~gge13~0^^90~110^^M 90 110 h -5~#880000^^1~84~110~0~GND~end~~~#0000FF^^1~86~106~0~2~start~~~#0000FF",
+  "LIB~140~100~package`0603`Value`1k`Manufacturer Part`R0603-1K00`~0~0~gge20~0#@$T~P~140~92~0~#000080~Arial~~~~~comment~R1~1~start~gge21~0#@$T~N~140~108~0~#000080~Arial~~~~~comment~1k~1~start~gge22~0#@$P~show~0~1~130~100~180~gge23~0^^130~100^^M 130 100 h 5~#880000^^0~134~100~0~1~start~~~#0000FF^^0~134~96~0~1~start~~~#0000FF#@$P~show~0~2~150~100~0~gge24~0^^150~100^^M 150 100 h -5~#880000^^0~146~100~0~2~end~~~#0000FF^^0~146~96~0~2~end~~~#0000FF",
+  "LIB~180~100~package`LED0603`Value`red`~0~0~gge30~0#@$T~P~180~92~0~#000080~Arial~~~~~comment~D1~1~start~gge31~0#@$T~N~180~108~0~#000080~Arial~~~~~comment~red~1~start~gge32~0#@$P~show~0~1~170~100~180~gge33~0^^170~100^^M 170 100 h 5~#880000^^0~174~100~0~A~start~~~#0000FF^^0~174~96~0~1~start~~~#0000FF#@$P~show~0~2~190~100~0~gge34~0^^190~100^^M 190 100 h -5~#880000^^0~186~100~0~K~end~~~#0000FF^^0~186~96~0~2~end~~~#0000FF",
+  "W~90 100 130 100~#008800~1~0~none~gge40~0",
+  "N~110~100~0~#000080~VCC~gge41~start~110~100~Times New Roman~7pt",
+  "W~150 100 170 100~#008800~1~0~none~gge42~0",
+  "N~160~100~0~#000080~LED_A~gge43~start~160~100~Times New Roman~7pt",
+  "W~190 100 190 120 90 120 90 110~#008800~1~0~none~gge44~0",
+  "F~part_netLabel_gnD~140~120~0~gge45~~0^^140~120^^GND~#000000~127~135~0~start~1~Times New Roman~9pt~flag_gge46^^PL~140 120 140 125~#000000~1~0~transparent~gge47~0",
+  "J~190~100~2.5~#CC0000~gge48~0"
+ ]
+}

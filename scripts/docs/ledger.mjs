@@ -60,7 +60,7 @@ export function pendingView(ledger) {
 
 // Pending ids the code reports (`runmat check` diagnostics and admission rules). The ledger owns
 // their status; the code only maps a construct to its id.
-const CODE_ROOTS = ["crates/runmat-analysis", "crates/runmat-fea-syntax"];
+const CODE_ROOTS = ["crates/runmat-analysis", "crates/runmat-design-syntax"];
 const CODE_PATTERNS = [
     /\[pending:([a-z0-9._-]+)\]/g, // a literal diagnostic suffix
     /pending:\s*Some\("([a-z0-9._-]+)"\)/g, // StaticRule { pending: Some("id") }

@@ -36,9 +36,8 @@ pub struct ImageExportSettings {
     pub quality: f32,
     /// Include metadata in output (reserved)
     pub include_metadata: bool,
-    /// Device pixels per layout point for text and overlays (titles, legends, colorbars).
-    /// A poster meant to be shown scaled down, such as on a phone, uses 2 or more so its
-    /// labels stay readable. Geometry-scene exports with a camera honour it.
+    /// Device pixels per point. 2 draws a 2x picture: text, lines, markers and margins at
+    /// twice their size in a `width` x `height` image, as a 2x screen shows the figure.
     pub pixels_per_point: f32,
 }
 
@@ -107,7 +106,18 @@ impl ImageExporter {
     pub async fn render_png_bytes(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
         let width = self.settings.width.max(1);
         let height = self.settings.height.max(1);
-        let gpu = if let Some(theme) = &self.theme {
+        let gpu = if self.settings.pixels_per_point != 1.0 {
+            crate::export::native_surface::render_figure_rgba_bytes_scaled(
+                figure.clone(),
+                width,
+                height,
+                self.theme.clone(),
+                self.textmark.as_deref(),
+                self.settings.pixels_per_point,
+            )
+            .await
+            .and_then(|rgba| crate::export::native_surface::encode_png_bytes(width, height, &rgba))
+        } else if let Some(theme) = &self.theme {
             crate::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
                 figure.clone(),
                 width,
@@ -147,7 +157,17 @@ impl ImageExporter {
     pub async fn render_rgba_bytes(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
         let width = self.settings.width.max(1);
         let height = self.settings.height.max(1);
-        let gpu = if let Some(theme) = &self.theme {
+        let gpu = if self.settings.pixels_per_point != 1.0 {
+            crate::export::native_surface::render_figure_rgba_bytes_scaled(
+                figure.clone(),
+                width,
+                height,
+                self.theme.clone(),
+                self.textmark.as_deref(),
+                self.settings.pixels_per_point,
+            )
+            .await
+        } else if let Some(theme) = &self.theme {
             crate::export::native_surface::render_figure_rgba_bytes_interactive_and_theme(
                 figure.clone(),
                 width,

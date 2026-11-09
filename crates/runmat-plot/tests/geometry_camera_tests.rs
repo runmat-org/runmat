@@ -100,3 +100,74 @@ async fn imported_geometry_remains_spatial_after_fit_and_reset() {
         .unwrap();
     assert!(!renderer.axes_has_3d_content(0));
 }
+
+/// A geometry scene is true-scale: fitting a 180 x 50 x 10 box keeps its proportions (one scale
+/// on every axis) instead of stretching each extent to a cube.
+#[tokio::test]
+async fn geometry_scene_fit_keeps_true_proportions() {
+    if std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").as_deref() != Ok("1") {
+        eprintln!("set RUNMAT_PLOT_FORCE_GPU_TESTS=1 to exercise the real renderer");
+        return;
+    }
+    let instance = wgpu::Instance::default();
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions::default())
+        .await
+        .expect("GPU adapter");
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .await
+        .unwrap();
+    let config = wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        width: 760,
+        height: 475,
+        present_mode: wgpu::PresentMode::Fifo,
+        alpha_mode: wgpu::CompositeAlphaMode::Auto,
+        view_formats: vec![],
+        desired_maximum_frame_latency: 2,
+    };
+    let access = runmat_accelerate_api::WgpuDeviceAccess::new(device, queue);
+    let mut renderer = PlotRenderer::new(access, config).await.unwrap();
+    let (x, y, z) = (180.0, 50.0, 10.0);
+    let corners: Vec<Vec3> = (0..8)
+        .map(|i| {
+            Vec3::new(
+                if i & 1 == 0 { 0.0 } else { x },
+                if i & 2 == 0 { 0.0 } else { y },
+                if i & 4 == 0 { 0.0 } else { z },
+            )
+        })
+        .collect();
+    let quads = [
+        [0, 1, 3, 2],
+        [4, 6, 7, 5],
+        [0, 4, 5, 1],
+        [2, 3, 7, 6],
+        [0, 2, 6, 4],
+        [1, 5, 7, 3],
+    ];
+    let triangles: Vec<[u32; 3]> = quads
+        .iter()
+        .flat_map(|[a, b, c, d]| [[*a, *b, *c], [*a, *c, *d]])
+        .collect();
+    let mut figure = Figure::new();
+    figure.add_mesh_plot(MeshPlot::new(corners, triangles).unwrap());
+    let scene = FigureScene::capture(&figure)
+        .into_geometry_scene("box".to_string(), 1)
+        .unwrap();
+    renderer.set_geometry_scene(scene);
+    renderer.fit_extents();
+    let camera = renderer.axes_camera(0).unwrap();
+    let s = camera.axis_scale;
+    assert!(
+        (s.x - s.y).abs() <= 1e-6 * s.x && (s.x - s.z).abs() <= 1e-6 * s.x,
+        "{s:?}"
+    );
+    assert!((s.x - 1.0 / x).abs() <= 1e-6 / x * 10.0, "{s:?}");
+    // The fitted box keeps its 180:50:10 shape in scaled space.
+    let scaled = Vec3::new(x, y, z) * s;
+    assert!((scaled.x / scaled.y - x / y).abs() < 1e-4, "{scaled:?}");
+    assert!((scaled.y / scaled.z - y / z).abs() < 1e-4, "{scaled:?}");
+}

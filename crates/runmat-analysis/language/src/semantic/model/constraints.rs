@@ -8,7 +8,7 @@ use runmat_analysis_core::{
     AuthoredTargetCardinality, ElectricCurrent, ElectricPotential, MagneticVectorPotential,
     PhysicalQuantityKind, PhysicalSignal, Pressure, Temperature, Velocity,
 };
-use runmat_fea_syntax::FeaModelDefinitionKind;
+use runmat_design_syntax::FeaModelDefinitionKind;
 
 mod motion;
 mod relational;
