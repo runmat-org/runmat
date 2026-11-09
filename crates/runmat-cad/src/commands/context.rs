@@ -54,8 +54,15 @@ pub(super) fn add(catalog: &mut Catalog) {
             .when(selected(shown))
             .edit(view_action("hide")),
         cmd("part.isolate", "Isolate", "isolate", P)
-            .desc("Show only the selected items until isolate ends.")
-            .when(selected(shown))
+            .desc("Show only the selected items until isolate ends; a face, edge or vertex isolates its body.")
+            .when(selected(&[
+                K::Feature,
+                K::Sketch,
+                K::Body,
+                K::Face,
+                K::Edge,
+                K::Vertex,
+            ]))
             .edit(view_action("isolate")),
         cmd("part.edit-sketch-plane", "Edit plane", "plane", P)
             .desc("Move the sketch to another plane or planar face.")
@@ -257,7 +264,118 @@ pub(super) fn add(catalog: &mut Catalog) {
         "style",
     );
 
+    // What every 3D pick offers for the view: hide or show what it belongs to, show everything
+    // again, frame it, and measure from it.
+    let visibility = || {
+        variants(
+            "context.visibility",
+            "Visibility",
+            "visibility",
+            "view.visibility",
+            "action",
+            &[
+                ("hide", "Hide selected"),
+                ("show", "Show selected"),
+                ("show_all", "Show all"),
+            ],
+        )
+    };
+    let look = || vec![c("view.zoom-selection"), c("view.measure")];
+
     catalog.context_menus.extend([
+        // Topology picked in a part's view: a face, an edge or a vertex.
+        context_menu(
+            K::Face,
+            P,
+            &[
+                "part.isolate",
+                "view.zoom-selection",
+                "view.normal-to",
+                "view.measure",
+            ],
+            vec![
+                vec![c("view.normal-to"), c("part.section-here")],
+                vec![c("part.isolate"), visibility()],
+                look(),
+                vec![c("design.copy-reference")],
+            ],
+        ),
+        context_menu(
+            K::Edge,
+            P,
+            &[
+                "part.isolate",
+                "view.zoom-selection",
+                "view.measure",
+                "design.copy-reference",
+            ],
+            vec![
+                vec![c("part.isolate"), visibility()],
+                look(),
+                vec![c("design.copy-reference")],
+            ],
+        ),
+        context_menu(
+            K::Vertex,
+            P,
+            &[
+                "part.isolate",
+                "view.zoom-selection",
+                "view.measure",
+                "design.copy-reference",
+            ],
+            vec![
+                vec![c("part.isolate"), visibility()],
+                look(),
+                vec![c("design.copy-reference")],
+            ],
+        ),
+        context_menu(
+            K::SketchEntity,
+            P,
+            &[
+                "sketch.constraint",
+                "sketch.construction",
+                "view.zoom-selection",
+                "view.measure",
+            ],
+            vec![
+                vec![c("sketch.constraint"), c("sketch.construction")],
+                look(),
+                vec![c("design.copy-reference")],
+            ],
+        ),
+        context_menu(
+            K::SketchPoint,
+            P,
+            &[
+                "sketch.constraint",
+                "view.zoom-selection",
+                "view.measure",
+                "design.copy-reference",
+            ],
+            vec![
+                vec![c("sketch.constraint")],
+                look(),
+                vec![c("design.copy-reference")],
+            ],
+        ),
+        context_menu(
+            K::Plane,
+            P,
+            &[
+                "view.normal-to",
+                "part.section-here",
+                "view.zoom-selection",
+                "view.measure",
+            ],
+            vec![
+                vec![c("view.normal-to"), c("part.section-here")],
+                look(),
+                vec![c("part.rename"), c("design.copy-reference")],
+                vec![c("part.delete")],
+            ],
+        ),
         context_menu(
             K::Feature,
             P,
@@ -284,7 +402,8 @@ pub(super) fn add(catalog: &mut Catalog) {
                     c("part.move-down"),
                 ],
                 vec![c("part.parents-children"), c("part.where-used")],
-                vec![c("part.hide"), c("part.isolate"), appearance.clone()],
+                vec![c("part.hide"), c("part.isolate"), visibility(), appearance.clone()],
+                look(),
                 vec![c("design.copy-reference")],
                 vec![c("part.delete")],
             ],
@@ -301,7 +420,8 @@ pub(super) fn add(catalog: &mut Catalog) {
             ],
             vec![
                 vec![c("part.edit-sketch"), c("part.edit-sketch-plane")],
-                vec![c("part.hide")],
+                vec![c("part.hide"), c("part.isolate"), visibility()],
+                look(),
                 vec![c("sketch.fully-define"), c("sketch.check")],
                 vec![
                     c("part.rename"),
@@ -322,9 +442,10 @@ pub(super) fn add(catalog: &mut Catalog) {
                 "evaluate.mass-properties",
             ],
             vec![
-                vec![c("part.hide"), c("part.isolate")],
+                vec![c("part.hide"), c("part.isolate"), visibility()],
                 vec![appearance, material],
                 vec![c("part.body-move"), c("part.section-here")],
+                look(),
                 vec![c("evaluate.mass-properties")],
                 vec![c("part.body-promote"), c("part.export-body")],
                 vec![c("part.rename"), c("design.copy-reference")],
@@ -347,8 +468,10 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![
                     c("assembly.hide"),
                     c("assembly.isolate"),
+                    visibility(),
                     c("assembly.transparency"),
                 ],
+                look(),
                 vec![c("assembly.fix"), configuration, representation],
                 vec![c("assembly.replace"), c("assembly.pattern")],
                 vec![c("assembly.mate"), c("assembly.show-mates")],
@@ -372,6 +495,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                     c("assembly.flip-mate"),
                 ],
                 vec![c("assembly.show-mate-entities"), c("design.show-source")],
+                look(),
                 vec![c("assembly.delete")],
             ],
         ),
