@@ -27,6 +27,7 @@
 //! its ends). A mitre cut adds 6 (at the chain's earlier corner) or 7 (at the later one).
 
 mod convert;
+mod convert_loops;
 mod corners;
 mod forms;
 mod lofted;

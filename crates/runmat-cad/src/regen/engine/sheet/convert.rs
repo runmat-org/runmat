@@ -1,18 +1,26 @@
 //! Convert to sheet metal: a thin solid (a shelled box, a bent bracket modelled solid) becomes a
 //! sheet plate with a bend at each picked edge of its fixed face.
 //!
-//! The fixed face is flat, bounded by straight edges in one loop, with a parallel face one
-//! sheet thickness behind it; the plate is that face's outline through the thickness. At each
+//! The fixed face is flat, with a parallel face one sheet thickness behind it; the plate is
+//! that face's outline through the thickness, holes and all. Its edges are lines or circular
+//! arcs ([`super::convert_loops`]): an arc stays in the outline and never bends (a wall along a
+//! curved edge, a rolled wall, stretches as it bends, so it is refused by name), and a hole
+//! goes through the plate and the blank alike, refused by name when it reaches into a bend
+//! zone or stops short of the face behind. At each
 //! bend edge a wall stands on the face across the edge (the edge's other face): its angle to
 //! the plate is the bend's angle and its extent away from the edge is the wall's height. The
 //! wall becomes a bend of the sheet's radius and a flat, placed so the face the wall stood on
 //! stays where it was (the inner face for an edge on the inside of the bend, the outer face for
 //! one on the outside), and the plate stops where the bend starts.
 //!
-//! Where two bent walls meet at a corner of the outline, each wall stops short of the corner
+//! Where two bent walls meet at a convex corner of the outline, each wall stops short of the corner
 //! by the other's bend setback and the plate gives up the corner inside both setbacks: the
 //! corner opens into a square relief through the sheet, so the walls are ripped apart there,
-//! the bends never overlap and the flat blank has the same notch. Walls at edges that are not picked are left off;
+//! the bends never overlap and the flat blank has the same notch. At a concave corner (or two
+//! walls in line) the walls run on into the corner and meet on the plane through it that
+//! bisects them, as a miter flange's sides meet, so the converted part keeps the walls whole;
+//! its blank needs the same sheet twice there, and the flat pattern refuses it by the sides
+//! that cross. Walls at edges that are not picked are left off;
 //! with no edges picked, every edge with a wall on it bends.
 //!
 //! The converted plate records its outline and, per bend, the strip it develops to, so the
@@ -21,6 +29,7 @@
 
 use super::super::families::{labeled, line_seg, plane_normal, polygon};
 use super::*;
+use super::convert_loops::{face_loops, Piece};
 use crate::regen::records::ConvertedPlate;
 
 /// One bent wall, in world coordinates.
@@ -88,11 +97,11 @@ impl<'a, 'b> Run<'a, 'b> {
                     return None;
                 }
                 let d = dot(sub(f.geom.centroid, cj), nj);
-                ((d.abs() - t).abs() <= 1e3 * tol).then_some(d)
+                ((d.abs() - t).abs() <= 1e3 * tol).then_some((q, d))
             })
         };
         let behind = behind_of(fi, raw);
-        let Some(d) = behind else {
+        let Some((back, d)) = behind else {
             return Err(refuse(
                 self,
                 &format!(
@@ -102,18 +111,39 @@ impl<'a, 'b> Run<'a, 'b> {
             ));
         };
         let n = if d < 0.0 { raw } else { scale(raw, -1.0) };
-        // The fixed face's outline: one loop of straight edges.
+        // The fixed face's outline and holes, of lines and circular arcs.
         let mine: Vec<usize> = (0..topo.edges.len())
             .filter(|&k| topo.edges[k].faces.contains(&(fi as _)))
             .collect();
-        let Some(loop_) = outline_loop(&topo, &mine, n, tol) else {
-            return Err(self.not_lowered(
-                id,
-                "converting a face with holes or curved edges (the fixed face is one loop of straight edges)",
-            ));
+        let loops = match face_loops(&topo, fi, &mine, n, tol) {
+            Ok(l) => l,
+            Err(m) => return Err(refuse(self, &m)),
         };
+        let loop_ = &loops.outer;
         let m = loop_.len();
-        let pts: Vec<[f64; 3]> = loop_.iter().map(|(_, p)| *p).collect();
+        let pts: Vec<[f64; 3]> = loop_.iter().map(|e| e.from).collect();
+        // The face across an edge of the fixed face.
+        let across = |edge: usize| {
+            let e = &topo.edges[edge];
+            (if e.faces[0] as usize == fi { e.faces[1] } else { e.faces[0] }) as usize
+        };
+        // A hole must go through the sheet: its sides reach the face behind.
+        for hole in &loops.holes {
+            let through = hole.iter().all(|e| {
+                let g = across(e.edge);
+                topo.edges.iter().any(|x| x.faces.contains(&(g as _)) && x.faces.contains(&(back as _)))
+            });
+            if !through {
+                let c = scale(hole[0].from, 1e3);
+                return Err(refuse(
+                    self,
+                    &format!(
+                        "the recess in the fixed face at ({:.2}, {:.2}, {:.2}) mm stops short of the face behind; only holes through the sheet convert",
+                        c[0], c[1], c[2]
+                    ),
+                ));
+            }
+        }
         let dir = |k: usize| normalize(sub(pts[(k + 1) % m], pts[k]));
         let len = |k: usize| {
             let v = sub(pts[(k + 1) % m], pts[k]);
@@ -127,7 +157,7 @@ impl<'a, 'b> Run<'a, 'b> {
             let set = self.list(i, id, "bend_edges", bend_edges, Some(TopoKind::Edge))?;
             let mut ks = Vec::new();
             for e in &set {
-                match loop_.iter().position(|(edge, _)| *edge == e.index as usize && e.body as usize == body) {
+                match loop_.iter().position(|le| le.edge == e.index as usize && e.body as usize == body) {
                     Some(k) => ks.push(k),
                     None => {
                         return Err(self.error(
@@ -143,12 +173,47 @@ impl<'a, 'b> Run<'a, 'b> {
             Some(ks)
         };
         let mut walls: Vec<Option<Wall>> = (0..m).map(|_| None).collect();
-        for (k, (edge, p)) in loop_.iter().enumerate() {
+        for (k, le) in loop_.iter().enumerate() {
             if picked.as_ref().is_some_and(|ks| !ks.contains(&k)) {
                 continue;
             }
-            let e = &topo.edges[*edge];
-            let g = if e.faces[0] as usize == fi { e.faces[1] } else { e.faces[0] } as usize;
+            let (edge, p) = (&le.edge, &le.from);
+            let g = across(*edge);
+            // A wall on a curved edge (a rolled wall) stretches as it bends, so it has no flat
+            // blank: refused by name when picked, or when it is a sheet and nothing is picked.
+            if let Piece::Arc { radius, .. } = le.piece {
+                let rolled = match topo.faces[g].geom.surface {
+                    crate::refs::history::SurfaceKind::Cylinder { axis_point, axis_direction, .. } => {
+                        topo.faces.iter().any(|f| match f.geom.surface {
+                            crate::refs::history::SurfaceKind::Cylinder { axis_point: q, axis_direction: a2, radius: r2 } => {
+                                let off = sub(q, axis_point);
+                                let a = normalize(axis_direction);
+                                let perp = sub(off, scale(a, dot(off, a)));
+                                dot(normalize(a2), a).abs() > 1.0 - 1e-9
+                                    && dot(perp, perp).sqrt() <= 1e3 * tol
+                                    && ((r2 - radius).abs() - t).abs() <= 1e3 * tol
+                            }
+                            _ => false,
+                        })
+                    }
+                    _ => false,
+                };
+                if picked.is_some() || rolled {
+                    return Err(self.error(
+                        id,
+                        Some("bend_edges"),
+                        DiagCode::RegenInvalid,
+                        format!(
+                            "outline edge {} of the fixed face is a circular arc (radius {:.2} mm): a wall along a curved edge stretches as it bends, so it has no flat blank; {}",
+                            k + 1,
+                            radius * 1e3,
+                            if picked.is_some() { "bend straight edges only" } else { "pick the straight edges to bend and the rolled wall is left off" }
+                        ),
+                        Vec::new(),
+                    ));
+                }
+                continue;
+            }
             // A wall is a sheet as thick as the plate: an end cap or a block's side is not.
             let wall = plane_normal(&topo.faces[g].geom).filter(|&ng| behind_of(g, ng).is_some()).and_then(|ng| {
                 let w0 = normalize(cross(ng, dir(k)));
@@ -207,24 +272,24 @@ impl<'a, 'b> Run<'a, 'b> {
             (convex && sin_phi > 1e-6).then(|| (b.setback + a.setback * cos_phi.max(0.0)) / sin_phi)
         };
         let turns_left = |from: usize, to: usize| dot(cross(dir(from), dir(to)), n) > 1e-9;
+        // A corner between two bent walls that is not convex (concave, or straight on): the
+        // walls run to the corner and meet on the plane through it that bisects them, as a
+        // miter flange's sides do, and the plate stops where both setback lines cross.
+        let mitred = |k: usize| {
+            let prev = (k + m - 1) % m;
+            walls[k].is_some() && walls[prev].is_some() && !turns_left(prev, k)
+        };
         let mut spans = vec![(0.0, 0.0); m];
         for k in 0..m {
             let Some(a) = &walls[k] else { continue };
             let prev = (k + m - 1) % m;
             let next = (k + 1) % m;
-            let concave = || "bends on both sides of a concave corner of the fixed face";
             let g0 = match &walls[prev] {
-                Some(b) => match relief(a, b, dir(k), scale(dir(prev), -1.0), turns_left(prev, k)) {
-                    Some(g) => g,
-                    None => return Err(self.not_lowered(id, concave())),
-                },
+                Some(b) => relief(a, b, dir(k), scale(dir(prev), -1.0), turns_left(prev, k)).unwrap_or(0.0),
                 None => 0.0,
             };
             let g1 = match &walls[next] {
-                Some(b) => match relief(a, b, scale(dir(k), -1.0), dir(next), turns_left(k, next)) {
-                    Some(g) => g,
-                    None => return Err(self.not_lowered(id, concave())),
-                },
+                Some(b) => relief(a, b, scale(dir(k), -1.0), dir(next), turns_left(k, next)).unwrap_or(0.0),
                 None => 0.0,
             };
             if len(k) - g0 - g1 <= 1e3 * tol {
@@ -261,7 +326,22 @@ impl<'a, 'b> Run<'a, 'b> {
         // A corner between two bent walls loses the plate inside both bends' setbacks: a square
         // relief through the sheet, folded and flat (each wall's bend zone would otherwise
         // hold the corner on by its end face alone).
-        let cut = |k: usize| walls[k].is_some() && walls[(k + m - 1) % m].is_some();
+        let cut = |k: usize| walls[k].is_some() && walls[(k + m - 1) % m].is_some() && !mitred(k);
+        // Where the setback lines of the walls meeting at mitred corner `k` cross.
+        let meet = |k: usize| -> [f64; 2] {
+            let prev = (k + m - 1) % m;
+            let (a, b) = (walls[prev].as_ref().expect("a wall"), walls[k].as_ref().expect("a wall"));
+            let (oa, ob) = (to2d(add(fr.origin, out(prev))), to2d(add(fr.origin, out(k))));
+            let p = to2d(pts[k]);
+            // (x − p)·oa = −sa and (x − p)·ob = −sb.
+            let det = oa[0] * ob[1] - oa[1] * ob[0];
+            if det.abs() < 1e-12 {
+                // Straight on: both lines are one.
+                return [p[0] - a.setback * oa[0], p[1] - a.setback * oa[1]];
+            }
+            let (ra, rb) = (-a.setback, -b.setback);
+            [p[0] + (ra * ob[1] - rb * oa[1]) / det, p[1] + (oa[0] * rb - ob[0] * ra) / det]
+        };
         // The outline (the flat blank's plate) and the folded plate, each as the vertices it
         // passes with the name of the side that reaches each one.
         let mut flat_at: Vec<(String, [f64; 2])> = Vec::new();
@@ -278,42 +358,115 @@ impl<'a, 'b> Run<'a, 'b> {
                 flat_at.push((name(k, "relief"), r0));
                 flat_at.push((name(k, "s0"), a0));
                 fold_at.push((name(k, "relief"), r0));
+            } else if mitred(k) {
+                fold_at.push((name(k, "s0"), meet(k)));
             } else {
                 fold_at.push((name(k, "r0"), a0));
                 fold_at.push((name(k, "s0"), r0));
             }
-            fold_at.push((name(k, "root"), r1));
+            let next_mitred = mitred((k + 1) % m);
+            fold_at.push((name(k, "root"), if next_mitred { meet((k + 1) % m) } else { r1 }));
             if next_cut {
                 flat_at.push((key(k), a1));
                 flat_at.push((name(k, "s1"), r1));
+            } else if next_mitred {
+                flat_at.push((key(k), q));
             } else {
                 flat_at.push((key(k), q));
                 fold_at.push((name(k, "s1"), a1));
                 fold_at.push((key(k), q));
             }
         }
+        // The outline's circular arcs, by the name of the side that reaches their end.
+        let arcs: std::collections::HashMap<String, SegmentKind> = loop_
+            .iter()
+            .enumerate()
+            .filter_map(|(k, e)| match e.piece {
+                Piece::Arc { center, clockwise, .. } => Some((key(k), SegmentKind::Arc { center: to2d(center), clockwise })),
+                _ => None,
+            })
+            .collect();
         let sides = |at: &[(String, [f64; 2])]| {
             let mut segs = Vec::new();
             let mut from = at.last().expect("an outline vertex").1;
             for (side, to) in at {
                 if (to[0] - from[0]).hypot(to[1] - from[1]) > tol {
-                    segs.push(line_seg(side, from, *to));
+                    let mut seg = line_seg(side, from, *to);
+                    if let Some(kind) = arcs.get(side) {
+                        seg.kind = kind.clone();
+                    }
+                    segs.push(seg);
                     from = *to;
                 }
             }
             segs
         };
-        let outline = CanonicalProfile {
+        let mut outline = CanonicalProfile {
             frame: fr,
             loops: vec![sides(&flat_at)],
             merge_collinear: false,
         };
         let notched = sides(&fold_at);
-        let plate_profile = CanonicalProfile {
+        let mut plate_profile = CanonicalProfile {
             frame: fr,
             loops: vec![notched],
             merge_collinear: false,
         };
+        // The holes, through the plate and the blank alike. Each stays clear of every bend: a
+        // hole reaching past a wall's setback line would cut into its bend zone.
+        for (j, hole) in loops.holes.iter().enumerate() {
+            let hn = hole.len();
+            let segs: Vec<ProfileSegment> = (0..hn)
+                .map(|q| {
+                    let e = hole[q];
+                    let curve = format!("h{j}.{q}");
+                    let (a, b) = (to2d(e.from), to2d(hole[(q + 1) % hn].from));
+                    let mut seg = line_seg(&curve, a, b);
+                    match e.piece {
+                        Piece::Line => {}
+                        Piece::Arc { center, clockwise, .. } => seg.kind = SegmentKind::Arc { center: to2d(center), clockwise },
+                        Piece::Circle { center, radius } => {
+                            let c = to2d(center);
+                            seg.kind = SegmentKind::Circle { center: c, radius };
+                            seg.start = [c[0] + radius, c[1]];
+                            seg.end = seg.start;
+                        }
+                    }
+                    seg
+                })
+                .collect();
+            // The hole's reach: its vertices, and each arc's or circle's whole circle.
+            let reach: Vec<([f64; 3], f64)> = hole
+                .iter()
+                .map(|e| match e.piece {
+                    Piece::Line => (e.from, 0.0),
+                    Piece::Arc { center, radius, .. } | Piece::Circle { center, radius } => (center, radius),
+                })
+                .collect();
+            for w in walls.iter().flatten() {
+                let k = w.k;
+                let clear = reach.iter().all(|(p, rad)| {
+                    let v = sub(*p, pts[k]);
+                    let (u, inward) = (dot(v, dir(k)), -dot(v, out(k)));
+                    u + rad < 0.0 || u - rad > len(k) || inward - rad >= w.setback - 10.0 * tol
+                });
+                if !clear {
+                    let c = scale(reach[0].0, 1e3);
+                    return Err(self.error(
+                        id,
+                        Some("bend_edges"),
+                        DiagCode::RegenInvalid,
+                        format!(
+                            "the hole at ({:.2}, {:.2}, {:.2}) mm reaches into the bend at outline edge {}: keep it at least the bend's setback, {:.3} mm, inside the edge",
+                            c[0], c[1], c[2], k + 1, w.setback * 1e3
+                        ),
+                        Vec::new(),
+                    ));
+                }
+            }
+            outline.loops.push(segs.clone());
+            plate_profile.loops.push(segs);
+        }
         let mut plate = LabeledTool::new(ToolShape::prism(plate_profile.clone(), 0.0, t));
         for seg in plate_profile.loops.iter().flatten() {
             plate.sides.push((seg.curve.clone(), FaceLabel::key(Role::SheetEdge, seg.curve.0.clone())));
@@ -322,8 +475,19 @@ impl<'a, 'b> Run<'a, 'b> {
         plate.end = Some(FaceLabel::key(Role::SheetFace, "plate").with_ordinal(1));
         let mut tools = vec![plate];
         let mut developed = Vec::new();
+        // The plane two walls meet on at mitred corner `k`, its normal along the earlier
+        // wall's edge (that wall keeps the side behind it).
+        let bisector = |k: usize| {
+            let prev = (k + m - 1) % m;
+            let mut nrm = normalize(cross(add(out(prev), out(k)), n));
+            if dot(nrm, dir(prev)) < 0.0 {
+                nrm = scale(nrm, -1.0);
+            }
+            nrm
+        };
         for w in walls.iter().flatten() {
             let k = w.k;
+            let next = (k + 1) % m;
             let (g0, g1) = spans[k];
             let x = out(k);
             let on = add(pts[k], scale(w.y, w.c));
@@ -331,7 +495,26 @@ impl<'a, 'b> Run<'a, 'b> {
             let end = add(on, scale(dir(k), len(k) - g1));
             let shift = -w.setback;
             let frame = super::super::families::frame_of(add(start, scale(x, shift)), x, w.y);
-            tools.extend(bend_and_flat(&frame, start, end, w.theta, r, t, w.flat, &key(k)));
+            // At a mitred corner the bend and flat run past the corner and are clipped on the
+            // bisecting plane.
+            let past = |other: &Option<Wall>| other.as_ref().map_or(0.0, |o| o.setback) + w.setback + r + t;
+            let mut clip = Vec::new();
+            let mut from = start;
+            let mut to = end;
+            if mitred(k) {
+                from = sub(start, scale(dir(k), past(&walls[(k + m - 1) % m])));
+                let nrm = scale(bisector(k), -1.0);
+                clip.push(ClipPlane { origin: pts[k], normal: nrm, label: FaceLabel::key(Role::SheetEdge, key(k)).with_ordinal(9) });
+            }
+            if mitred(next) {
+                to = add(end, scale(dir(k), past(&walls[next])));
+                clip.push(ClipPlane { origin: pts[next], normal: bisector(next), label: FaceLabel::key(Role::SheetEdge, key(k)).with_ordinal(10) });
+            }
+            let mut made = bend_and_flat(&frame, from, to, w.theta, r, t, w.flat, &key(k));
+            for tool in &mut made {
+                tool.clip = clip.clone();
+            }
+            tools.extend(made);
             developed.push(FlangeEdgeIn { start, end, frame, shift, theta: w.theta, radius: r, flat: w.flat });
         }
         let edges = self.developed_flange_edges(i, id, body, id, &outline, &rules, developed)?;
@@ -348,70 +531,6 @@ impl<'a, 'b> Run<'a, 'b> {
         self.st.replays.insert(id.clone(), made.clone());
         Ok(self.in_place(op(made, Vec::new(), simple.clone()), body))
     }
-}
-
-/// The edges `mine` (indices into `topo.edges`) as one closed loop of straight edges,
-/// counter-clockwise about `n`, starting at the least vertex: each entry is the edge and its
-/// first point along the loop.
-fn outline_loop(
-    topo: &crate::refs::history::Topology,
-    mine: &[usize],
-    n: [f64; 3],
-    tol: f64,
-) -> Option<Vec<(usize, [f64; 3])>> {
-    if mine.len() < 3 {
-        return None;
-    }
-    let close = |a: [f64; 3], b: [f64; 3]| {
-        let d = sub(a, b);
-        dot(d, d).sqrt() <= 1e3 * tol
-    };
-    for &k in mine {
-        let g = topo.edges[k].geom;
-        let chord = sub(g.end, g.start);
-        if (dot(chord, chord).sqrt() - g.length).abs() > 1e3 * tol {
-            return None;
-        }
-    }
-    let least = |a: &[f64; 3], b: &[f64; 3]| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
-    let first = mine
-        .iter()
-        .flat_map(|&k| [topo.edges[k].geom.start, topo.edges[k].geom.end])
-        .min_by(least)?;
-    let mut out: Vec<(usize, [f64; 3])> = Vec::new();
-    let mut at = first;
-    let mut used = vec![false; mine.len()];
-    // Two edges leave the first vertex; take either and fix the turn afterwards.
-    loop {
-        let next = (0..mine.len()).find(|&j| {
-            let g = topo.edges[mine[j]].geom;
-            !used[j] && (close(g.start, at) || close(g.end, at))
-        });
-        let Some(j) = next else { break };
-        used[j] = true;
-        let g = topo.edges[mine[j]].geom;
-        out.push((mine[j], at));
-        at = if close(g.start, at) { g.end } else { g.start };
-        if close(at, first) {
-            break;
-        }
-    }
-    if out.len() != mine.len() || !close(at, first) {
-        return None;
-    }
-    // Counter-clockwise about n: the shoelace area along n is positive.
-    let area: f64 = (0..out.len())
-        .map(|k| dot(cross(out[k].1, out[(k + 1) % out.len()].1), n))
-        .sum();
-    if area < 0.0 {
-        // Reverse: edge k of the reversed loop is edge m-1-k, starting where it used to end.
-        let m = out.len();
-        let rev: Vec<(usize, [f64; 3])> = (0..m)
-            .map(|k| (out[m - 1 - k].0, out[(m - k) % m].1))
-            .collect();
-        out = rev;
-    }
-    Some(out)
 }
 
 /// A bend (inner radius `r`, turning by `theta` towards the frame's y) and its flat, along an

@@ -468,6 +468,17 @@ impl<'a, 'b> Run<'a, 'b> {
                 ));
             }
         }
+        if let Some((a, b)) = out.loops.first().and_then(|lp| first_crossing(lp, tol)) {
+            return Err(self.error(
+                id,
+                None,
+                DiagCode::RegenInvalid,
+                format!(
+                    "the flat blank overlaps itself where its sides {a} and {b} cross (walls that meet at a concave corner need the same sheet when flat), so it can't be cut from one sheet; rip one of the walls there or make it a separate part"
+                ),
+                Vec::new(),
+            ));
+        }
         Ok(out)
     }
 
@@ -478,4 +489,25 @@ impl<'a, 'b> Run<'a, 'b> {
             .map(|e| e.line)
             .collect()
     }
+}
+
+/// The first two straight sides of a closed outline that cross each other (each through the
+/// other's interior), by curve name; `None` when the outline is simple.
+pub(super) fn first_crossing(lp: &[ProfileSegment], tol: f64) -> Option<(String, String)> {
+    let lines: Vec<&ProfileSegment> = lp.iter().filter(|s| matches!(s.kind, SegmentKind::Line)).collect();
+    let orient = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    let strict = |x: f64, y: f64, e: f64| (x > e && y < -e) || (x < -e && y > e);
+    for i in 0..lines.len() {
+        for j in i + 1..lines.len() {
+            let (p, q) = (lines[i], lines[j]);
+            let lp_ = (p.end[0] - p.start[0]).hypot(p.end[1] - p.start[1]);
+            let lq = (q.end[0] - q.start[0]).hypot(q.end[1] - q.start[1]);
+            let (d1, d2) = (orient(p.start, p.end, q.start), orient(p.start, p.end, q.end));
+            let (d3, d4) = (orient(q.start, q.end, p.start), orient(q.start, q.end, p.end));
+            if strict(d1, d2, tol * lp_.max(1e-9)) && strict(d3, d4, tol * lq.max(1e-9)) {
+                return Some((p.curve.0.clone(), q.curve.0.clone()));
+            }
+        }
+    }
+    None
 }
