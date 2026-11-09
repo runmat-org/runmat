@@ -221,7 +221,7 @@ mod tests {
             .iter()
             .find(|member| member.name() == b"import.obj")
             .unwrap();
-        assert_eq!(imported.data(&prepared.archive).unwrap(), b"import");
+        assert_eq!(imported.data(prepared.archive.as_slice()).unwrap(), b"import");
         for (name, bytes) in [
             ("../windows.lib", imports.as_slice()),
             ("windows.lib", b"invalid".as_slice()),
