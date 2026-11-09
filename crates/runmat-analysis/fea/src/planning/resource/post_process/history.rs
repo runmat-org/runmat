@@ -31,9 +31,8 @@ pub fn build_observation_history_checkpoint_resource_plan(
         .ok_or(ResourcePlanningError::Overflow(
             "retained history sample count",
         ))?;
-    let output_payload_upper_bound = observation_history_checkpoint_payload_bytes_upper_bound(
-        request, previous, sample, &inputs,
-    )?;
+    let output_payload_upper_bound =
+        observation_history_checkpoint_payload_bytes_upper_bound(request, previous, sample)?;
     validate_projected_output(&output, output_payload_upper_bound, "observation history")?;
     let workspace = checked_add(
         byte_len(
@@ -80,7 +79,6 @@ pub fn observation_history_checkpoint_payload_bytes_upper_bound(
     request: &ObservationHistoryCheckpointRequest,
     previous: Option<&ObservationHistoryCheckpoint>,
     sample: &ObservationResult,
-    inputs: &PreparedInputResourceFacts,
 ) -> Result<u64, ResourcePlanningError> {
     let observation = request
         .plan
@@ -99,8 +97,19 @@ pub fn observation_history_checkpoint_payload_bytes_upper_bound(
         .ok_or(ResourcePlanningError::Overflow(
             "retained history sample count",
         ))?;
-    let base = derived_output_payload_bytes_upper_bound(
-        inputs,
+    // The next checkpoint keeps at most the previous checkpoint's samples and manifest plus the
+    // new sample, with one record envelope per retained sample and one for the manifest.
+    let copied = checked_add(
+        previous.map_or(Ok(0), observation_history_checkpoint_payload_bytes)?,
+        byte_len(
+            &sample
+                .canonical_bytes()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        )?,
+        "history checkpoint copied bytes",
+    )?;
+    let base = copied_output_payload_bytes_upper_bound(
+        copied,
         checked_add(
             count(retained_sample_count, "retained history samples")?,
             1,
@@ -115,7 +124,7 @@ pub fn observation_history_checkpoint_payload_bytes_upper_bound(
     )
 }
 
-fn observation_history_checkpoint_payload_bytes(
+pub(in crate::planning::resource) fn observation_history_checkpoint_payload_bytes(
     checkpoint: &ObservationHistoryCheckpoint,
 ) -> Result<u64, ResourcePlanningError> {
     let manifest = checkpoint

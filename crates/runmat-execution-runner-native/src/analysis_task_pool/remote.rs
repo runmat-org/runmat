@@ -63,16 +63,15 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
     }
 
     fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()> {
-        for object in &program.objects {
+        for (reference, bytes) in program.objects() {
             self.pool
-                .register_execution_object(object.reference.clone(), object.bytes.clone())?;
+                .register_execution_object(reference.clone(), bytes.to_vec())?;
         }
         self.pool.register_program_input_inventory(
             &program.request,
             program
-                .objects
-                .iter()
-                .map(|object| object.reference.clone())
+                .objects()
+                .map(|(reference, _)| reference.clone())
                 .collect(),
         )
     }

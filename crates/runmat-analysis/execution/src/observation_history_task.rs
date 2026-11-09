@@ -115,7 +115,6 @@ pub fn prepare_observation_history_checkpoint_task(
         &request,
         previous.as_ref(),
         &sample,
-        &input_facts,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan = build_observation_history_checkpoint_resource_plan(

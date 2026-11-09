@@ -42,15 +42,9 @@ fn typed_series_bounds_cover_statistics_extrema_and_all_ties() {
                 context,
             );
             let request = request.unwrap();
-            let inputs = PreparedInputResourceFacts {
-                encoded_payload_bytes: ByteCount(1024 * 1024),
-                transport_closure_bytes: ByteCount(2 * 1024 * 1024),
-                decoded_resident_bytes_admission_budget: ByteCount(8 * 1024 * 1024),
-            };
             let bound = observation_history_series_reduction_payload_bytes_upper_bound(
                 &request,
                 &checkpoint,
-                &inputs,
             )
             .unwrap()
             .unwrap();

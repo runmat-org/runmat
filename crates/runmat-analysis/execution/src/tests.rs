@@ -336,17 +336,16 @@ fn portable_program_packages_every_manifest_and_chunk_under_one_access_scope() {
     .unwrap();
     let prepared =
         prepare_analysis_program(&host, revision(), std::slice::from_ref(&input)).unwrap();
-    assert_eq!(prepared.objects.len(), input.objects.len() + 1);
-    assert!(prepared.objects.iter().all(|object| {
-        object.reference.authorization_scope == host.artifact_access.authorization_scope
-            && object.reference.kind == ValueRefKind::DriverObject
+    assert_eq!(prepared.objects().len(), input.objects.len() + 1);
+    assert!(prepared.objects().all(|(reference, _)| {
+        reference.authorization_scope == host.artifact_access.authorization_scope
+            && reference.kind == ValueRefKind::DriverObject
     }));
     let locations = prepared
-        .objects
-        .iter()
+        .objects()
         .enumerate()
-        .map(|(index, object)| ProgramExecutionObjectLocation {
-            reference: object.reference.clone(),
+        .map(|(index, (reference, _))| ProgramExecutionObjectLocation {
+            reference: reference.clone(),
             artifact_id: format!("input-artifact-{index}"),
         })
         .collect();
