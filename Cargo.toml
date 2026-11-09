@@ -224,16 +224,17 @@ runmat-meshing-curve = { version = "=0.7.0", path = "crates/runmat-meshing/curve
 runmat-meshing-surface = { version = "=0.7.0", path = "crates/runmat-meshing/surface" }
 runmat-meshing-tetrahedron = { version = "=0.7.0", path = "crates/runmat-meshing/tetrahedron" }
 
-# Optimize the largest release archive producers as whole crates without
-# changing optimization level, target CPU, features, or unwind semantics.
+# Partition the largest release crates into eight codegen units so LLVM can
+# optimize them in parallel. Optimization level and other release settings
+# retain their existing values.
 [profile.release.package.runmat-runtime]
-codegen-units = 1
+codegen-units = 8
 
 [profile.release.package.runmat-analysis-fea]
-codegen-units = 1
+codegen-units = 8
 
 [profile.release.package.runmat-builtins]
-codegen-units = 1
+codegen-units = 8
 
 # Large test harnesses otherwise spend minutes importing between codegen units
 # even with Cargo's default `lto = false` (local ThinLTO). Keep numerical crate
