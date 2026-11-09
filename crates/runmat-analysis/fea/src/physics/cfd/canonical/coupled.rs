@@ -326,13 +326,17 @@ fn skew_fraction(a: &CsrRef<'_, f64>) -> f64 {
     }
 }
 
-/// Whether convection dominates the momentum block: a mean face Péclet number above 2, the
-/// classical limit of central differencing (skew fraction 1/2). Measured on the uniform-inlet
-/// square duct (11 520 cells, ISO VG 46): at face Péclet ≈ 1 the AMG-preconditioned step
-/// converges in 6 outer iterations; at ≈ 11 every inner AMG solve exhausts its iterations
-/// and the coupled FGMRES stagnates at relative residual 0.98, while ILU(0) converges in 10.
-fn convection_dominated(a: &CsrRef<'_, f64>) -> bool {
-    skew_fraction(a) > 0.5
+/// Skew fraction above which a momentum block counts as convection-dominated and takes ILU(0)
+/// factors instead of AMG. Measured on the uniform-inlet square duct (11 520 cells, ISO VG 46)
+/// from the second Picard step on: at 0.02 m/s (skew 0.08) and 0.06 m/s (skew 0.21) the AMG
+/// step converges, and ILU(0) needs the same FGMRES iterations at 0.06 m/s; at 0.1 m/s and
+/// above every inner AMG solve exhausts its iterations and the coupled FGMRES stagnates (at
+/// 0.2122 m/s, relative residual 0.98 after 1 000 iterations), while ILU(0) converges in 10
+/// Picard steps. The limit sits below the first failing case with margin.
+const CONVECTION_SKEW_LIMIT: f64 = 0.15;
+
+fn convection_dominated(skew: f64) -> bool {
+    skew > CONVECTION_SKEW_LIMIT
 }
 
 /// Block-diagonal preconditioner: each velocity component by its own factors.
@@ -602,7 +606,8 @@ pub(super) fn solve_with_time(
         let pressure_arrays = CsrArrays::of(&laplacian);
         let blocks =
             super::jacobian::component_operators(p, &frozen.matrix, &frozen.viscosity_gradients)?;
-        let convective = convection_dominated(&blocks[0].view());
+        let skew = skew_fraction(&blocks[0].view());
+        let convective = convection_dominated(skew);
         let planned = PreconditionerEnvelope::for_counts(n as u64, p.reservation.sparse_entries)
             .ok_or(Error::Resource("planned preconditioner envelope"))?;
         let mut setup_seconds = 0.0;
@@ -709,6 +714,8 @@ pub(super) fn solve_with_time(
             relative_residual = report.relative_residual,
             restart = p.policy.gmres_restart,
             cells = n,
+            skew,
+            convective,
             preconditioner_applications = inner[0],
             momentum_inner_iterations = inner[1],
             pressure_inner_iterations = inner[2],
