@@ -18,7 +18,7 @@ mod partition;
 mod publication;
 mod publish;
 pub use publication::{
-    ObservationHistoryPublication, ObservationPublicationCatalog,
+    ObservationHistoryPublication, ObservationPublicationCatalog, ObservationPublicationScope,
     ObservationPublicationCatalogIdentity, ObservationPublicationEntry,
     ObservationSamplePublication, SeriesReductionPublication,
     SeriesReductionPublicationContribution,
@@ -33,10 +33,13 @@ pub use sampled::{
     sampled_observation_partition_source_indices,
 };
 mod topology;
-pub use topology::resources::solid_observation_topology_resident_bytes;
+pub use topology::resources::{
+    solid_observation_topology_resident_bytes, solid_observation_topology_resident_bytes_for_mesh,
+};
 
 pub use source::{
-    ObservationFieldSelection, ObservationFieldSelectionIdentity, ObservationFieldSource,
+    thermal_source_validation_resident_bytes, ObservationFieldSelection,
+    ObservationFieldSelectionIdentity, ObservationFieldSource,
 };
 
 pub(crate) use acceleration::governed_extrema_device_resident_bytes;
@@ -61,7 +64,8 @@ pub use distributed::{
     structural_observation_partition_source_indices, ObservationPartitionCombination,
     ObservationPartitionContribution, ObservationPartitionContributionIdentity,
     ObservationPartitionEvidence, ObservationPartitionEvidenceIdentity,
-    ObservationPartitionPayload, SolidObservationSourceSelection,
+    ObservationPartitionPayload, ObservationPartitionPayloadCapacity,
+    SolidObservationSourceSelection,
 };
 pub use evaluate::{
     authored_histories_sample, authored_observations_sample, evaluate_observation_event_sample,
@@ -99,6 +103,8 @@ pub(crate) use topology::ObservationTopology;
 mod acceleration_tests;
 #[cfg(test)]
 mod partition_tests;
+#[cfg(test)]
+mod partition_payload_tests;
 #[cfg(test)]
 mod tests;
 pub use acceleration::{

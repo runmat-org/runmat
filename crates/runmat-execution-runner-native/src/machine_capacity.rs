@@ -31,8 +31,8 @@ pub(crate) fn memory_bytes() -> io::Result<u64> {
 /// `pool_bytes` is the run's admitted capacity, read once when the run was configured
 /// (`NativeExecutionConfig::local_memory_capacity_bytes`). The coordinator keeps its mesh, model
 /// and prepared inputs resident while the worker solves, so the worker cannot also have them.
-/// A run reads this once, after meshing and before planning, and uses the same value for path
-/// selection, the output policy and the worker envelope.
+/// A run reads this once, after the family compile and before path selection, and uses the same
+/// value for path selection, the output policy and the worker envelope.
 pub(crate) fn worker_memory_bytes(pool_bytes: u64) -> io::Result<u64> {
     worker_budget(pool_bytes, process_footprint()?)
 }

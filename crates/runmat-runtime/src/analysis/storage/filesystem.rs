@@ -174,9 +174,9 @@ impl access::FilesystemAccess<'_> {
                 |digest, limit| self.read_bounded_artifact(&self.object_path(digest), limit),
             )
             .map(Some),
-            PersistedAnalysisArtifact::AcousticFrequency(_) => Err(AssessmentStoreError::Invalid(
-                "acoustic frequency assessment evidence is unsupported".into(),
-            )),
+            PersistedAnalysisArtifact::AcousticFrequency(run) => {
+                frequency_sample::assessment_evidence(&run, self.remaining_bytes()).map(Some)
+            }
         }
     }
 

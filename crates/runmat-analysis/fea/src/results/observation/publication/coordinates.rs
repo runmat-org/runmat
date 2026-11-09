@@ -28,17 +28,11 @@ pub(super) fn validate_history_coordinates(
                 visit(field)?;
             }
         }
-        ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } => {
+        ObservationFieldCatalogSource::EntryHistory { samples } => {
             for sample in samples {
-                let ObservationFieldCatalogSource::Structural {
-                    recovery_request,
-                    manifest,
-                } = sample.source()
-                else {
-                    return Err(invalid("frequency history contains a nonstructural sample"));
-                };
+                let (recovery_request, manifest) = sample.entry_recovery()?;
                 if recovery_request.producer != producer {
-                    return Err(invalid("frequency history producer differs"));
+                    return Err(invalid("entry history producer differs"));
                 }
                 for field in &manifest.fields {
                     visit(field)?;

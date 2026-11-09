@@ -68,3 +68,21 @@ fn original_topology_requested_allocations_fit_inventory_and_cap_rejects_before_
         println!("observation nodes={} elements={} requested_peak={peak} retained={live} admitted={budget}", projection.nodes.len(), projection.elements.len());
     }
 }
+
+#[test]
+fn the_mesh_topology_law_bounds_the_projection_law_before_any_projection_exists() {
+    for mesh in [
+        canonical_tetrahedron_solver_mesh(ElementOrder::Tet4),
+        canonical_tetrahedron_solver_mesh(ElementOrder::Tet10),
+        slab_mesh(2),
+        quadratic_slab_mesh(2),
+    ] {
+        let projection = AnalysisProjection::derive(&mesh).unwrap();
+        let from_mesh = solid_observation_topology_resident_bytes_for_mesh(&mesh).unwrap();
+        assert!(from_mesh >= solid_observation_topology_resident_bytes(&projection).unwrap());
+        let (_, _, peak) = crate::topology::measure_test_allocations(|| {
+            ObservationTopology::from_projection(&projection).unwrap()
+        });
+        assert!(peak as u64 <= from_mesh);
+    }
+}

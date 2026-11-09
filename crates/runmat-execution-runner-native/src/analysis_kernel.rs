@@ -69,9 +69,9 @@ use runmat_analysis_fea::planning::resource::{
     structural_random_response_interval_payload_bytes_upper_bound,
     structural_random_response_receipt_payload_bytes_upper_bound, validate_resource_usage_evidence,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, ObservationPartitionResourcePlanning,
-    PreparedPhaseResourceFacts, PreparedStructuralBucklingResourceFacts,
-    PreparedStructuralModalResourceFacts, ResourceUsageEvidence,
-    StructuralFrequencyRecoveryResourceInput,
+    ObservationPartitionSourceWorkspace, PreparedPhaseResourceFacts,
+    PreparedStructuralBucklingResourceFacts, PreparedStructuralModalResourceFacts,
+    ResourceUsageEvidence, StructuralFrequencyRecoveryResourceInput,
 };
 use runmat_analysis_fea::post::fields::{
     structural_observable_field_definitions, take_structural_observable_fields,

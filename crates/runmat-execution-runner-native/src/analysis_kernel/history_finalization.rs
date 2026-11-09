@@ -133,12 +133,18 @@ pub(super) fn execute(
             ObservationHistorySourceContext::Structural { source, mesh }
         }
         (
-            ObservationFieldCatalogSource::StructuralFrequencyHistory { .. },
+            ObservationFieldCatalogSource::EntryHistory { .. },
             None,
             Some(source @ StructuralObservationSource::Frequency(_)),
             mesh,
         ) => ObservationHistorySourceContext::Structural { source, mesh },
-        (ObservationFieldCatalogSource::VolumeMeshRecovery { .. }, None, None, Some(mesh)) => {
+        (
+            ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
+            | ObservationFieldCatalogSource::EntryHistory { .. },
+            None,
+            None,
+            Some(mesh),
+        ) => {
             ObservationHistorySourceContext::VolumeMesh { mesh }
         }
         _ => {
@@ -161,14 +167,11 @@ pub(super) fn execute(
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let facts = prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?;
     let history_bound =
-        observation_history_finalization_payload_bytes_upper_bound(&request, &checkpoint, &facts)
+        observation_history_finalization_payload_bytes_upper_bound(&request, &checkpoint)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let series_bound = observation_history_series_reduction_payload_bytes_upper_bound(
-        &request,
-        &checkpoint,
-        &facts,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let series_bound =
+        observation_history_series_reduction_payload_bytes_upper_bound(&request, &checkpoint)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let expected = build_observation_history_finalization_resource_plan(
         &request,
         &checkpoint,
