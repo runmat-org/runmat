@@ -143,6 +143,29 @@ impl FacetRecoveryWorking {
         })
     }
 
+    /// The canonical recovery state: topology, segments, Steiner nodes and passes.
+    pub(super) fn into_recovery(
+        self,
+        work: &FacetRecoveryWork<'_>,
+    ) -> Result<DelaunaySegmentRecovery, DelaunayFacetRecoveryError> {
+        let topology = match self.canonical {
+            Some(topology) => topology,
+            None => self
+                .topology
+                .freeze(
+                    work.options.segment_recovery.insertion.topology,
+                    work.cancellation,
+                )
+                .map_err(|failure| mutation_error(0, failure))?,
+        };
+        Ok(DelaunaySegmentRecovery {
+            topology,
+            segments: self.segments,
+            steiner_node_identities: self.steiner_node_identities,
+            recovery_passes: self.recovery_passes,
+        })
+    }
+
     pub(super) fn finish(
         self,
         work: &FacetRecoveryWork<'_>,
