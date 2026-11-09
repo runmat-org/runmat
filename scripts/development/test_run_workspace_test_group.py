@@ -1,11 +1,13 @@
 """Check scientific routing without invoking Cargo or numerical workloads."""
 
 import importlib.util
+import io
 from collections import Counter
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -56,6 +58,25 @@ class ScientificRoutingTests(unittest.TestCase):
             self.assertEqual({command[index + 1] for index, token in enumerate(command)
                               if token == "--package"}, set(members))
             self.assertLessEqual(command.count("--test"), 4)
+
+    def test_unicode_child_output_survives_redirected_legacy_streams(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            child = root / "unicode_child.py"
+            child.write_text('import sys\nsys.stdout.buffer.write("\\u03f5\\n".encode("utf-8"))\n', encoding="utf-8")
+            output_bytes, error_bytes = io.BytesIO(), io.BytesIO()
+            output = io.TextIOWrapper(output_bytes, encoding="cp1252", newline="\n")
+            errors = io.TextIOWrapper(error_bytes, encoding="cp1252", newline="\n")
+            with patch.object(runner.sys, "stdout", output), patch.object(runner.sys, "stderr", errors):
+                runner.configure_output_streams()
+                code = runner.run_batch([sys.executable, str(child)], root, root / "target", False)
+                print("\u03f5", file=runner.sys.stderr, flush=True)
+            output.flush()
+            errors.flush()
+            self.assertEqual(code, 0)
+            self.assertIn("\u03f5".encode("utf-8"), output_bytes.getvalue())
+            self.assertIn(b"Batch exit: 0", output_bytes.getvalue())
+            self.assertEqual(error_bytes.getvalue(), "\u03f5\n".encode("utf-8"))
 
     def test_cargo_batch_selection_and_reclamation(self):
         # Exercise Cargo's actual mixed-package root selection and JSON stream.

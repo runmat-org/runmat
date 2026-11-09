@@ -22,6 +22,13 @@ import tempfile
 NATIVE_TEST_STACK_BYTES = 64 * 1024 * 1024
 
 
+def configure_output_streams() -> None:
+    # Cargo and libtest emit UTF-8, including mathematical symbols. Windows CI
+    # redirects Python's streams, whose locale encoding can otherwise be cp1252.
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
 def test_environment() -> dict[str, str]:
     environment = os.environ.copy()
     environment["RUST_MIN_STACK"] = str(NATIVE_TEST_STACK_BYTES)
@@ -440,4 +447,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    configure_output_streams()
     sys.exit(main())

@@ -249,13 +249,13 @@ fn load_context(
         flush(&mut batch)?;
     }
     log::info!(
-        "context geometry {name}: {} triangles; peak resident {} MiB",
+        "context geometry {name}: {} triangles; peak resident {}",
         asset
             .surface_meshes
             .iter()
             .map(|mesh| mesh.triangles.len())
             .sum::<usize>(),
-        super::peak_resident_mib()
+        super::peak_resident_memory()
     );
     Ok(ContextGeometry {
         record: ContextRecord {

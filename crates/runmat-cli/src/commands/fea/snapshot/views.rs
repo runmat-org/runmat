@@ -3,9 +3,11 @@ use serde::Serialize;
 use std::path::Path;
 mod camera;
 mod legend;
+mod memory;
 mod presentation;
 mod profiles;
 pub(super) use legend::authored_bound_units;
+pub(super) use memory::peak_resident_memory;
 pub(super) use presentation::Presentation;
 
 /// What a view's legend is written in terms of: the unit each assessment states its bound in
@@ -378,9 +380,9 @@ pub(super) async fn capture(
         let scene_path = format!("{id}.scene.json");
         std::fs::write(output.join(&scene_path), bytes)?;
         log::info!(
-            "snapshot view {}/{view_count} '{id}' written; peak resident {} MiB",
+            "snapshot view {}/{view_count} '{id}' written; peak resident {}",
             position + 1,
-            peak_resident_mib()
+            peak_resident_memory()
         );
         let deformation_field = spec
             .deformation
@@ -466,27 +468,10 @@ pub(super) async fn capture(
         result.push(view);
     }
     log::info!(
-        "snapshot posters drawn; peak resident {} MiB",
-        peak_resident_mib()
+        "snapshot posters drawn; peak resident {}",
+        peak_resident_memory()
     );
     Ok(result)
-}
-
-/// This process's peak resident memory so far, for the capture's phase log.
-pub(super) fn peak_resident_mib() -> u64 {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
-    // SAFETY: getrusage writes one rusage for this process into the provided buffer.
-    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
-        return 0;
-    }
-    // SAFETY: getrusage returned success, so it initialized the buffer.
-    let maximum = u64::try_from(unsafe { usage.assume_init() }.ru_maxrss).unwrap_or(0);
-    // macOS reports bytes; Linux reports KiB.
-    if cfg!(target_os = "macos") {
-        maximum / (1024 * 1024)
-    } else {
-        maximum / 1024
-    }
 }
 
 #[cfg(test)]
