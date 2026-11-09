@@ -1366,6 +1366,55 @@ fn fsi_compliant_tube_example_runs_as_a_coupled_study() {
     passed_assessment(&payload, "pressurized");
 }
 
+/// `runmat check` applies the run's fluid–solid face rule to the CAD's shared faces: the
+/// compliant tube's bore with its declared interface checks clean, the bore with a fluid wall
+/// condition and no interface is a rigid wall, and the bore with neither is the same
+/// `fea.admission.fluid_solid_face` error the run reports.
+#[test]
+fn fsi_check_classifies_the_cad_faces_that_join_fluid_and_solid() {
+    let temp = TempDir::new().unwrap();
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("fsi-compliant-tube.fea")).unwrap();
+    assert_fea_checks(&temp, "docs/simulation/examples/fsi-compliant-tube.fea");
+    let start = source.find("    interface wetted {").unwrap();
+    let end = start + source[start..].find("\n    }\n").unwrap() + "\n    }\n".len();
+    let check = |name: &str, replacement: &str| -> Value {
+        fs::write(
+            examples.join(name),
+            format!("{}{replacement}{}", &source[..start], &source[end..]),
+        )
+        .unwrap();
+        let output = runmat_from_repository(
+            &temp,
+            &["check", &format!("docs/simulation/examples/{name}"), "--json"],
+        );
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+            panic!(
+                "{name}: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+    };
+    let undeclared = check("fsi-undeclared-bore.fea", "");
+    assert_eq!(undeclared["status"], "invalid", "{undeclared}");
+    let diagnostics = undeclared["diagnostics"].to_string();
+    assert!(
+        diagnostics.contains("fea.admission.fluid_solid_face") && diagnostics.contains("Bore"),
+        "{diagnostics}"
+    );
+    let rigid = check(
+        "fsi-rigid-bore.fea",
+        "    constraint bore_wall { fluid.no_slip_wall { target = geometry.tube.region.bore } }\n",
+    );
+    assert!(
+        !rigid["diagnostics"]
+            .to_string()
+            .contains("fea.admission.fluid_solid_face"),
+        "{rigid}"
+    );
+}
+
 // witness: FEA-COUPLING-CHAIN-001/thermal_to_prestress_to_modal @ thermoelastic/tet4/public_study;
 //   coverage: partial; boundary: The thermal-prestress example runs thermal steady, then
 //   thermomechanical preload, then prestressed modal from `runmat run`; no reference values.

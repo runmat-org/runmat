@@ -296,6 +296,7 @@ fn parameterized_geometry_inspection() -> GeometryInspection {
     GeometryInspection {
         preview_extent_m: None,
         unit_evidence: Default::default(),
+        shared_faces: Default::default(),
         content_digest: SourceDigest([8; 32]),
         topology_digest: SourceDigest([9; 32]),
         capabilities: vec![

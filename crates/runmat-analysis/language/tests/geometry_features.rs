@@ -157,6 +157,7 @@ geometry bracket {
                 unit: runmat_geometry_core::LengthUnit::Millimeter,
             }],
         },
+        shared_faces: Default::default(),
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![
@@ -203,6 +204,7 @@ model loaded_bracket { assign material.steel to geometry.bracket.region.body }
             vec!["body".to_string()],
         )]),
         preview_extent_m: None,
+        shared_faces: Default::default(),
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![
@@ -265,6 +267,7 @@ fn a_name_carried_by_two_entities_fails_an_exactly_one_region_at_check() {
             ],
         )]),
         preview_extent_m: None,
+        shared_faces: Default::default(),
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![
@@ -312,6 +315,7 @@ geometry channel {
 }
 "#;
     let inspection = GeometryInspection {
+        shared_faces: Default::default(),
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![

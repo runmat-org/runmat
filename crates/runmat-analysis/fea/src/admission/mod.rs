@@ -1,5 +1,6 @@
 mod electrical;
 mod fluid;
+mod fluid_solid;
 mod identity;
 mod magnetic;
 mod maxwell;
@@ -24,6 +25,10 @@ pub use fluid::{
     admit_canonical_fluid_steady, admit_canonical_fluid_structure_steady,
     admit_canonical_fluid_structure_transient, admit_canonical_fluid_transient,
     canonical_fluid_steady_realization, canonical_fluid_transient_realization,
+};
+pub use fluid_solid::{
+    classify_fluid_solid_face, is_authored_fluid_wall, is_fluid_wall, FluidSolidFaceRole,
+    FLUID_SOLID_FACE_CODE,
 };
 pub use identity::AnalysisRunIdentity;
 pub use magnetic::admit_canonical_magnetostatic;

@@ -123,6 +123,7 @@ fn inspect_uncached(
     })
     .transpose();
     let mut authored_names = std::collections::BTreeMap::<String, Vec<String>>::new();
+    let mut shared_faces = Vec::new();
     let (topology_digest, exact_topology) = match exact {
         Ok(Some(exact)) => {
             for (id, names) in &exact.entity_names {
@@ -143,6 +144,7 @@ fn inspect_uncached(
             for names in authored_names.values_mut() {
                 names.sort();
             }
+            shared_faces = shared_face_inspections(&exact);
             let closure = exact.build_closure().map_err(|error| {
                 diagnostic(
                     "fea.host.geometry_inspection_failed",
@@ -184,8 +186,40 @@ fn inspect_uncached(
         exchange,
         resolved_units: Some(units),
         authored_names,
+        shared_faces,
         unit_evidence,
     })
+}
+
+/// Every face two solids share, with the authored names of the face and of each side's solid.
+fn shared_face_inspections(
+    exact: &runmat_geometry_io::ImportedExactCad,
+) -> Vec<runmat_analysis_language::SharedFaceInspection> {
+    let names = |id: &runmat_geometry_core::PersistentEntityId| {
+        exact.entity_names.get(id).cloned().unwrap_or_default()
+    };
+    let solid_names = |region: &runmat_geometry_core::PersistentEntityId| {
+        exact
+            .topology
+            .regions
+            .iter()
+            .find(|r| &r.id == region)
+            .map(|r| names(&r.solid_id))
+            .unwrap_or_default()
+    };
+    exact
+        .topology
+        .interfaces
+        .iter()
+        .map(|interface| runmat_analysis_language::SharedFaceInspection {
+            face: interface.face_id.source_topology_id.clone(),
+            face_names: names(&interface.face_id),
+            solid_names: [
+                solid_names(&interface.side_a_region_id),
+                solid_names(&interface.side_b_region_id),
+            ],
+        })
+        .collect()
 }
 
 /// An imported geometry without authored `units` uses the single length unit its STEP or IGES

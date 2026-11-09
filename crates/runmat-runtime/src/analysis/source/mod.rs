@@ -1,5 +1,6 @@
 mod admission;
 mod compile;
+mod fluid_solid_faces;
 mod geometry_resolver;
 mod host;
 mod project_host;
