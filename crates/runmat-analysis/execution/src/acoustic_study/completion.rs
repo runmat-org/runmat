@@ -15,6 +15,8 @@ pub enum AcousticStudyResultPhase {
     Accuracy,
     State { ordinal: usize },
     Publication,
+    /// One checkpoint or finalization task of the study-level history phase, in order.
+    History { ordinal: usize },
 }
 
 /// Preserves the original scheduler association; this is not a new scheduler attestation.
@@ -107,7 +109,11 @@ impl CompletedAcousticStudy {
                 .checked_add(entry.closures.len())
                 .ok_or_else(|| invalid("acoustic entry attempt inventory overflow"))
         })?;
-        if entry_attempts.checked_add(1) != Some(self.resource_usage.evidence.attempts.len()) {
+        if entry_attempts
+            .checked_add(self.history_closures.len())
+            .and_then(|total| total.checked_add(1))
+            != Some(self.resource_usage.evidence.attempts.len())
+        {
             return Err(invalid("acoustic aggregate resource inventory omits or adds an actual entry/assembly attempt"));
         }
         self.compiled
@@ -169,6 +175,7 @@ pub fn import_acoustic_study_completion(
     source: &impl CacheImport,
     preparation: AcousticStudyPreparation,
     entries: Vec<AcousticStudyEntryClosure>,
+    histories: Vec<AcousticStudyResultClosure>,
     assembly: AcousticStudyAssemblyClosure,
     wave_wall_millis: u64,
 ) -> AnalysisBridgeResult<CompletedAcousticStudy> {
@@ -225,6 +232,31 @@ pub fn import_acoustic_study_completion(
         if closures.next().is_some() {
             return Err(invalid("acoustic entry completion contains an extra phase"));
         }
+    }
+    let mut histories = histories.into_iter();
+    let mut ordinal = 0;
+    loop {
+        let hosts = study
+            .prepare_history()?
+            .iter()
+            .map(|task| task.host.clone())
+            .collect::<Vec<_>>();
+        if hosts.is_empty() {
+            break;
+        }
+        let mut wave = Vec::with_capacity(hosts.len());
+        for host in &hosts {
+            let closure = histories
+                .next()
+                .ok_or_else(|| invalid("acoustic completion omits a history phase"))?;
+            closure.validate_for(AcousticStudyResultPhase::History { ordinal }, host)?;
+            wave.push((closure.response, closure.execution));
+            ordinal += 1;
+        }
+        study.complete_history(source, wave)?;
+    }
+    if histories.next().is_some() {
+        return Err(invalid("acoustic completion contains an extra history phase"));
     }
     if study.prepare_assembly()?.host.workload != assembly.workload {
         return Err(invalid(

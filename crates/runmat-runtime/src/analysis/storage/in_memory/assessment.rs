@@ -44,10 +44,12 @@ impl InMemoryAnalysisArtifactStore {
                 )
                 .map(Some)
             }
-            Some(PersistedAnalysisArtifact::AcousticFrequency(_)) => {
-                Err(AssessmentStoreError::Invalid(
-                    "acoustic frequency assessment evidence is unsupported".into(),
-                ))
+            Some(PersistedAnalysisArtifact::AcousticFrequency(persisted)) => {
+                crate::analysis::storage::assessment::check_encoded_size(
+                    persisted.as_ref(),
+                    maximum_bytes,
+                )?;
+                frequency_sample::assessment_evidence(persisted, maximum_resident_bytes).map(Some)
             }
         }
     }

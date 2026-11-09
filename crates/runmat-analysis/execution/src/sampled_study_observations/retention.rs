@@ -68,6 +68,9 @@ impl SampledStudyObservations {
             metadata(&mut bytes, &contribution.contribution, limits)?;
             add(&mut bytes, contribution.objects.retained_storage_bytes()?)?;
         }
+        for host in &self.reduction_hosts {
+            metadata(&mut bytes, &(&host.workload, &host.artifact_access), limits)?;
+        }
         for reduced in &self.reduced {
             metadata(&mut bytes, &reduced.result, limits)?;
             add(&mut bytes, reduced.objects.retained_storage_bytes()?)?;

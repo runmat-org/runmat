@@ -263,7 +263,7 @@ impl StatisticalStudyObservations {
         let reduced = self
             .state
             .import_reduction(source, response, self.output_policy()?)?;
-        self.state.reduced.push(reduced);
+        self.state.push_reduced(reduced)?;
         let count = self.state.reduction_count();
         self.phase = if self.state.reduced.len() == count {
             Phase::ReadyForAssembly
@@ -320,6 +320,7 @@ impl StatisticalStudyObservations {
             ObservationHistorySourceContext::VolumeMesh {
                 mesh: &self.source.mesh,
             },
+            runmat_analysis_fea::results::observation::ObservationPublicationScope::Complete,
         )?;
         self.state.completed = Some(artifact);
         self.state.catalog = Some(catalog);
