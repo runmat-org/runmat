@@ -436,7 +436,7 @@ pub fn odb(board: &Board, parts: &BTreeMap<String, String>) -> BTreeMap<String, 
             eda.push_str("SNT VIA\n");
         }
         if let Some(fids) = net_features.get(*name) {
-            if net_pins.get(*name).is_none() && net_vias.get(*name).is_none() {
+            if !net_pins.contains_key(*name) && !net_vias.contains_key(*name) {
                 eda.push_str("SNT TRC\n");
             }
             for (layer, feat) in fids {

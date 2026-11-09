@@ -433,7 +433,8 @@ fn expand<'a>(
 /// `<name>#1`, `<name>#2` between the first node and the element, which keeps its own name, so
 /// probes, initial conditions and `K` couplings still find it. A zero value adds nothing.
 fn with_parasitics(mut e: FlatElement) -> Vec<FlatElement> {
-    let (series, parallel): (&[(&str, char)], &[(&str, char)]) = match e.kind {
+    type ParasiticSpec = (&'static str, char);
+    let (series, parallel): (&[ParasiticSpec], &[ParasiticSpec]) = match e.kind {
         'c' => (
             &[("rser", 'r'), ("lser", 'l')],
             &[("rpar", 'r'), ("cpar", 'c')],

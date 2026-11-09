@@ -62,16 +62,25 @@ pub fn symbol_texts(s: &SchematicSymbol) -> Vec<[f64; 4]> {
     out
 }
 
+pub(super) struct PageLayout<'a> {
+    pub cells: &'a [Cell],
+    pub places: &'a [Place],
+    pub centre: bool,
+}
+
 pub(super) fn page(
     nl: &Netlist,
     path: &NamePath,
     sheet_name: &str,
     sheets: &[(NamePath, String)],
-    cells: &[Cell],
-    places: &[Place],
     infos: &[NetInfo],
-    centre: bool,
+    layout: PageLayout<'_>,
 ) -> SchematicSheet {
+    let PageLayout {
+        cells,
+        places,
+        centre,
+    } = layout;
     let mut page = SchematicSheet {
         path: path.to_string(),
         sheet: sheet_name.to_owned(),

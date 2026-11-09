@@ -187,7 +187,7 @@ mod tests {
             direction: Vec3::NEG_Z,
         };
         let hit =
-            pick(&index.instanced_sets(), &ray, f32::INFINITY).expect("hits the second square");
+            pick(index.instanced_sets(), &ray, f32::INFINITY).expect("hits the second square");
         assert_eq!(hit.region_id.as_deref(), Some("occ:1"));
         assert!(
             (hit.position[0] - 10.5).abs() < 1e-5 && (hit.distance - 5.0).abs() < 1e-5,
@@ -197,7 +197,7 @@ mod tests {
             origin: Vec3::new(5.0, 0.5, 5.0),
             direction: Vec3::NEG_Z,
         };
-        assert!(pick(&index.instanced_sets(), &miss, f32::INFINITY).is_none());
+        assert!(pick(index.instanced_sets(), &miss, f32::INFINITY).is_none());
     }
 
     /// A hidden placement, or a hidden owner node of the prototype, lets the click through.

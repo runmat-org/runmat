@@ -444,10 +444,17 @@ fn read_circuit(reader: &mut Reader<'_>, declaration: &ast::Declaration) -> Desi
                         }
                     }
                     words::PART => {
-                        if design.parts.contains_key(&name) {
-                            reader.diagnostics.push(diagnostic(span, format!("part `{name}` is declared twice")));
-                        } else if let Some(part) = reader.note(part_decl::read(name.clone(), value.value(), span)) {
-                            design.parts.insert(name, part);
+                        use std::collections::btree_map::Entry;
+                        match design.parts.entry(name) {
+                            Entry::Occupied(entry) => reader.diagnostics.push(diagnostic(
+                                span,
+                                format!("part `{}` is declared twice", entry.key()),
+                            )),
+                            Entry::Vacant(entry) => {
+                                if let Some(part) = reader.note(part_decl::read(entry.key().clone(), value.value(), span)) {
+                                    entry.insert(part);
+                                }
+                            }
                         }
                     }
                     other => reader.diagnostics.push(diagnostic(

@@ -91,7 +91,7 @@ impl TetMesh {
         if elements.is_empty() {
             return Err(FieldVolumeError::Empty);
         }
-        if elements.len() % per_element != 0 {
+        if !elements.len().is_multiple_of(per_element) {
             return Err(FieldVolumeError::ElementLength {
                 per_element,
                 actual: elements.len(),

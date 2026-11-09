@@ -350,8 +350,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
                             ));
                         }
                         let t = &mut sides[i].1.translation;
-                        for k in 0..3 {
-                            t[k] = (t[k] + pair.1.translation[k]) / 2.0;
+                        for (k, coordinate) in t.iter_mut().enumerate() {
+                            *coordinate = (*coordinate + pair.1.translation[k]) / 2.0;
                         }
                     }
                 }

@@ -258,7 +258,7 @@ fn component_field(
         }
         "part" => {
             let mpn = required("Part", value)?;
-            if project.own.parts.get(&mpn).is_none() && project.pool.part(&mpn).is_none() {
+            if !project.own.parts.contains_key(&mpn) && project.pool.part(&mpn).is_none() {
                 return Err(EditError::new(format!(
                     "no part `{mpn}` in the file or the library; search the library for it"
                 )));

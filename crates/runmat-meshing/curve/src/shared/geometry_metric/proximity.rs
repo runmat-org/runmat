@@ -554,7 +554,10 @@ fn closing_endpoint(
     maximum_grading_ratio: f64,
 ) -> Option<PersistentEntityId> {
     let slope = maximum_grading_ratio - 1.0;
-    if !(slope > 0.0) || separations.len() < 2 || !(size_m > 0.0) {
+    if slope.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+        || separations.len() < 2
+        || size_m.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+    {
         return None;
     }
     let closest = separations

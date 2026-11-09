@@ -443,7 +443,7 @@ impl<'a> Editor<'a> {
             Endpoint::Port(name) => {
                 let n = &nl.nets[net];
                 let local = instance.child(name.as_str()).to_string();
-                n.path.to_string() == local || n.aliases.iter().any(|a| *a == local)
+                n.path.to_string() == local || n.aliases.contains(&local)
             }
             _ => false,
         }

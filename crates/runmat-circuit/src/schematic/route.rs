@@ -224,7 +224,8 @@ pub(super) fn connect(
         r
     }
     // Per net: each stored wire's first pin and its straight runs of grid cells.
-    let mut hand_cells: BTreeMap<usize, Vec<(usize, Vec<Vec<usize>>)>> = BTreeMap::new();
+    type HandWireRuns = (usize, Vec<Vec<usize>>);
+    let mut hand_cells: BTreeMap<usize, Vec<HandWireRuns>> = BTreeMap::new();
     for h in hands {
         let (ta, tb) = (&terms[h.a], &terms[h.b]);
         let Some(n) = ta.net.filter(|n| tb.net == Some(*n)) else {
@@ -498,7 +499,9 @@ fn search(
         (bb[0] - x).max(0) + (x - bb[2]).max(0) + (bb[1] - y).max(0) + (y - bb[3]).max(0)
     };
     let opposite = |d: usize| d ^ 1;
-    let mut best: BTreeMap<(usize, usize), (Coord, usize, (usize, usize))> = BTreeMap::new();
+    type RouteState = (usize, usize);
+    type RouteCost = (Coord, usize, RouteState);
+    let mut best: BTreeMap<RouteState, RouteCost> = BTreeMap::new();
     let mut heap = BinaryHeap::new();
     let start = (from, out_dir);
     best.insert(start, (0, 0, start));

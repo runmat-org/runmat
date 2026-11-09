@@ -469,7 +469,7 @@ impl PlotRenderer {
                 sw.max(1),
                 sh.max(1)
             );
-                if let Some(ref vb_grid) = grid_vb_opt.as_ref().filter(|_| !stroke_pass) {
+                if let Some(vb_grid) = grid_vb_opt.as_ref().filter(|_| !stroke_pass) {
                     if let Some(ref pipeline) = self.wgpu_renderer.direct_line_pipeline {
                         log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_grid_start axes_index={} vertex_buffer_size={}",

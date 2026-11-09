@@ -34,7 +34,7 @@ pub(super) fn compare_classes(x: &Inputs, nets: &Nets, b: &mut Builder) {
                         None,
                         Some(format!("{} rules", params.len())),
                         root_cause(
-                            &root,
+                            root,
                             src.clone(),
                             format!("net class {name} is declared in the schematic"),
                         ),
@@ -65,7 +65,7 @@ pub(super) fn compare_classes(x: &Inputs, nets: &Nets, b: &mut Builder) {
                             from,
                             to,
                             root_cause(
-                                &root,
+                                root,
                                 src.clone(),
                                 format!(
                                     "net class {name} sets {} in the schematic",
@@ -99,7 +99,7 @@ pub(super) fn compare_classes(x: &Inputs, nets: &Nets, b: &mut Builder) {
                 Some(name.clone()),
                 None,
                 root_cause(
-                    &root,
+                    root,
                     None,
                     format!("net class {name} is no longer declared"),
                 ),
@@ -117,7 +117,7 @@ pub(super) fn compare_classes(x: &Inputs, nets: &Nets, b: &mut Builder) {
             if bn.class == n.class {
                 continue;
             }
-            let (sheet, sheet_path) = sheet_of(&n.path, &root);
+            let (sheet, sheet_path) = sheet_of(&n.path, root);
             let mut requires = Vec::new();
             if let Some(cls) = &n.class {
                 if !base.net_classes.contains_key(cls) {
@@ -200,7 +200,7 @@ pub(super) fn compare_pairs(x: &Inputs, nets: &Nets, b: &mut Builder) {
                 base.diff_pairs.get(name).map(|(p, n)| format!("{p} / {n}")),
                 Some(format!("{} / {}", pair.0, pair.1)),
                 root_cause(
-                    &root,
+                    root,
                     None,
                     format!("differential pair {name} is declared in the schematic"),
                 ),
@@ -227,7 +227,7 @@ pub(super) fn compare_pairs(x: &Inputs, nets: &Nets, b: &mut Builder) {
                 Some(format!("{} / {}", pair.0, pair.1)),
                 None,
                 root_cause(
-                    &root,
+                    root,
                     None,
                     format!("differential pair {name} is no longer declared"),
                 ),

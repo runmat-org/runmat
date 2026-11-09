@@ -74,7 +74,7 @@ impl<'a> Fields<'a> {
 /// Space- or comma-separated numbers (`4000 3000 4100 3000`) as pairs.
 pub fn pairs(s: &str) -> Vec<(f64, f64)> {
     let n: Vec<f64> = s
-        .split(|c: char| c == ' ' || c == ',')
+        .split([' ', ','])
         .filter(|t| !t.is_empty())
         .filter_map(|t| t.parse().ok())
         .collect();

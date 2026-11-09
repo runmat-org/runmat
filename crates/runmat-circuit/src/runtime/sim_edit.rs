@@ -348,7 +348,7 @@ fn analysis_raw(
                 need(v, "stop", "sweep's end").or_else(|_| need(v, "to", "sweep's end"))?,
                 need(v, "step", "sweep step")?,
             );
-            if !(step > 0.0) || to <= from {
+            if step.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) || to <= from {
                 return Err(EditError::new(
                     "a DC sweep goes up from `start` to `stop` in steps above zero",
                 ));

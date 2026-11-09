@@ -573,6 +573,19 @@ pub fn to_json(index: &CircuitIndex) -> String {
     json
 }
 
+/// An ERC item's schematic region: a pin (`U1.VCCINT (F7)`, `R1.2`) is that pin, as the
+/// schematic scene names it (`pin:U1.VCCINT`), so selecting a finding lights the pin and not
+/// every unit of a large part; a net name is its net.
+fn erc_region(item: &str) -> String {
+    let item = item.split(" (").next().unwrap_or(item);
+    match item.split_once('.') {
+        Some((component, pin)) if !component.is_empty() && !pin.is_empty() => {
+            format!("pin:{component}.{pin}")
+        }
+        _ => format!("net:{item}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,18 +598,5 @@ mod tests {
         assert_eq!(quantity_display(4.7e-6, Dim::INDUCTANCE), "4.7 \u{b5}H");
         assert_eq!(quantity_display(16.0, Dim::VOLTAGE), "16 V");
         assert!(natural("R2") < natural("R10"));
-    }
-}
-
-/// An ERC item's schematic region: a pin (`U1.VCCINT (F7)`, `R1.2`) is that pin, as the
-/// schematic scene names it (`pin:U1.VCCINT`), so selecting a finding lights the pin and not
-/// every unit of a large part; a net name is its net.
-fn erc_region(item: &str) -> String {
-    let item = item.split(" (").next().unwrap_or(item);
-    match item.split_once('.') {
-        Some((component, pin)) if !component.is_empty() && !pin.is_empty() => {
-            format!("pin:{component}.{pin}")
-        }
-        _ => format!("net:{item}"),
     }
 }

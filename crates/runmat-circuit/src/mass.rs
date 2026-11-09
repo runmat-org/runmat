@@ -129,8 +129,8 @@ pub fn combine(items: Vec<MassItem>) -> BoardMass {
     }
     let mut center = [0.0; 3];
     for i in &items {
-        for k in 0..3 {
-            center[k] += i.mass * i.center[k] / mass;
+        for (k, coordinate) in center.iter_mut().enumerate() {
+            *coordinate += i.mass * i.center[k] / mass;
         }
     }
     let mut inertia = [[0.0; 3]; 3];
@@ -194,7 +194,7 @@ pub fn board_mass(board: &Board, netlist: Option<&Netlist>, pool: Option<&Pool>)
             LayerKind::Copper => {
                 let (a, xy) = copper
                     .get(layer.name.as_str())
-                    .map(|r| area_centroid(r))
+                    .map(area_centroid)
                     .unwrap_or((0.0, c));
                 (format!("copper/{}", layer.name), a, xy, COPPER_DENSITY)
             }

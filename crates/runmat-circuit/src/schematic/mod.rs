@@ -731,7 +731,16 @@ fn page(
         stick::stick(&cells, &infos, &mut placed, &stored, title_rows);
         let places = placed.places;
         let mut drawn = draw::page(
-            nl, path, sheet_name, sheets, &cells, &places, &infos, !recorded,
+            nl,
+            path,
+            sheet_name,
+            sheets,
+            &infos,
+            draw::PageLayout {
+                cells: &cells,
+                places: &places,
+                centre: !recorded,
+            },
         );
         if k > 0 {
             drawn.page = 2;

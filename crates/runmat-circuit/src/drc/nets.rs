@@ -373,10 +373,9 @@ impl Drc {
             CopperIndex,
         )> = None;
         // Coupled runs by layer, width and gap (1 µm), for the differential impedance check.
-        let mut runs: BTreeMap<
-            (CopperIndex, crate::geom::Coord, i64),
-            Vec<(crate::layout::ItemId, crate::layout::ItemId, Point)>,
-        > = BTreeMap::new();
+        type CoupledRunKey = (CopperIndex, crate::geom::Coord, i64);
+        type CoupledRunWitness = (crate::layout::ItemId, crate::layout::ItemId, Point);
+        let mut runs: BTreeMap<CoupledRunKey, Vec<CoupledRunWitness>> = BTreeMap::new();
         for a in &tp {
             // A class's per-layer impedance gap applies on the track's own layer.
             let gap_rule = rules

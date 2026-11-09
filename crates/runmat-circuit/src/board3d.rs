@@ -478,12 +478,11 @@ fn chip(pads: &[crate::layout::PlacedPad], bw: f64, bl: f64) -> Option<Chip> {
 
 /// A component body's extent as the 3D view draws it: its outline on the board (mm) and the
 /// heights it spans (`z0 < z1`, mm, z = 0 at the board's bottom face). A chip part's end caps
-/// are inside the outline. `None` for a package with no body.
-pub fn body_extent(
-    f: &Footprint,
-    n: CopperIndex,
-    thickness: f64,
-) -> Option<(Vec<(f64, f64)>, f64, f64)> {
+/// are inside the outline.
+pub type BodyExtent = (Vec<(f64, f64)>, f64, f64);
+
+/// The component outline and lower/upper heights, in millimetres; `None` for a package with no body.
+pub fn body_extent(f: &Footprint, n: CopperIndex, thickness: f64) -> Option<BodyExtent> {
     let body = f.package.body.as_ref()?;
     let (bw, bl, h) = (to_mm(body.width), to_mm(body.length), to_mm(body.height));
     if h <= 0.0 {

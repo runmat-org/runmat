@@ -36,12 +36,14 @@ fn pin_of(expr: Expr, span: Span) -> Read<CatalogPin> {
             "pad" => pin.pads = vec![text_of(value, span)?],
             "pads" => pin.pads = words_of(Some(value), span)?,
             "type" => pin.kind = text_of(value, span)?,
-            other => return Err(diagnostic(
-                value.span(),
-                format!(
+            other => {
+                return Err(diagnostic(
+                    value.span(),
+                    format!(
                     "a part's pin has no `{other}`; it takes `name`, `pad` or `pads`, and `type`"
                 ),
-            )),
+                ))
+            }
         }
     }
     if pin.name.is_empty() {

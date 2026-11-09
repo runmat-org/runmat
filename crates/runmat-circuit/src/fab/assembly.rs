@@ -374,7 +374,7 @@ pub fn pick_place_in(
     let mut rows: Vec<(Footprint, String)> = Vec::new();
     let is_fitted = |f: &Footprint| fitted.map_or(f.fitted, |s| s.contains(&f.reference));
     for f in board.footprints.values().filter(|f| {
-        is_fitted(f) && (f.package.smd || include_tht) && side.map_or(true, |s| f.side == s)
+        is_fitted(f) && (f.package.smd || include_tht) && side.is_none_or(|s| f.side == s)
     }) {
         let p = f.at - origin;
         rows.push((

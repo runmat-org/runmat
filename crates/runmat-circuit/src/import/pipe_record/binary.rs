@@ -221,7 +221,9 @@ const BOARD_BINARY: &[(&str, &str)] = &[("ComponentBodies6", "3D bodies of compo
 
 /// A binary file's records: a schematic's `FileHeader` stream, or a board's text streams.
 /// Returns the records and what the binary primitives left out (by kind, count).
-pub fn file_records(bytes: &[u8]) -> Result<(Vec<Record>, Vec<(String, usize)>), String> {
+pub type FileRecords = (Vec<Record>, Vec<(String, usize)>);
+
+pub fn file_records(bytes: &[u8]) -> Result<FileRecords, String> {
     let c = Compound::read(bytes)?;
     // A board has a `FileHeader` stream too (its version text), so the board storages decide.
     if let Some(data) = c

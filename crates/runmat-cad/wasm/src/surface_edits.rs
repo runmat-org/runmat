@@ -130,9 +130,11 @@ pub fn surface_kind(
             let tool = some(values, "tool", "the trim plane")?.remove(0);
             let keep = match text(values, "keep", "positive") {
                 k @ ("positive" | "negative") => k,
-                other => return Err(model(format!(
+                other => {
+                    return Err(model(format!(
                     "keep the side above (positive) or below (negative) the plane, not `{other}`"
-                ))),
+                )))
+                }
             };
             (
                 "trim",

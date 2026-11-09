@@ -46,7 +46,7 @@ impl Obstacles {
     fn cell(&self, p: Pos2) -> Option<(usize, usize)> {
         let (cx, cy) = ((p.x - self.origin.x) / CELL, (p.y - self.origin.y) / CELL);
         (cx >= 0.0 && cy >= 0.0 && (cx as usize) < self.cols && (cy as usize) < self.rows)
-            .then(|| (cx as usize, cy as usize))
+            .then_some((cx as usize, cy as usize))
     }
 
     pub fn point(&mut self, p: Pos2) {

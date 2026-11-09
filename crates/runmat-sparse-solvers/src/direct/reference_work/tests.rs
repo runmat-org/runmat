@@ -214,63 +214,62 @@ fn excluded_sparse_pivot_kernels_keep_refined_execution_and_covered_batches() {
         }
     }
     let matrix = entries.build();
-    for (kind, exclusion) in [(
+    let (kind, exclusion) = (
         FactorKind::BunchKaufman,
         ExcludedDirectKernel::SparseBunchKaufman,
-    )] {
-        let ledger = Arc::new(UsageLedger::new(count(100_000), count(100_000)).unwrap());
-        let context = UsageContext::new(Arc::clone(&ledger));
-        context.run_sync(|| {
-            let solver = DirectSolver::<f64>::new(
+    );
+    let ledger = Arc::new(UsageLedger::new(count(100_000), count(100_000)).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    context.run_sync(|| {
+        let solver = DirectSolver::<f64>::new(
+            matrix.as_ref().into(),
+            DirectOptions {
+                ordering: Ordering::Identity,
+                ..DirectOptions::new(kind)
+            },
+            SolveControl::NONE,
+        )
+        .unwrap();
+        assert_eq!(
+            solver.symbolic().measurement_coverage().unwrap(),
+            DirectMeasurementCoverage::Excluded(exclusion)
+        );
+        let mut x = [0.0; 3];
+        let mut phases = Vec::new();
+        {
+            let future = solver.solve_refined_with_owner(
                 matrix.as_ref().into(),
-                DirectOptions {
-                    ordering: Ordering::Identity,
-                    ..DirectOptions::new(kind)
+                &[6.0; 3],
+                &mut x,
+                1,
+                |phase, operations| {
+                    phases.push((phase, operations));
+                    std::future::ready(Ok::<(), ()>(()))
                 },
-                SolveControl::NONE,
-            )
-            .unwrap();
-            assert_eq!(
-                solver.symbolic().measurement_coverage().unwrap(),
-                DirectMeasurementCoverage::Excluded(exclusion)
             );
-            let mut x = [0.0; 3];
-            let mut phases = Vec::new();
-            {
-                let future = solver.solve_refined_with_owner(
-                    matrix.as_ref().into(),
-                    &[6.0; 3],
-                    &mut x,
-                    1,
-                    |phase, operations| {
-                        phases.push((phase, operations));
-                        std::future::ready(Ok::<(), ()>(()))
-                    },
-                );
-                let mut future = std::pin::pin!(future);
-                let mut task = std::task::Context::from_waker(std::task::Waker::noop());
-                match std::future::Future::poll(future.as_mut(), &mut task) {
-                    std::task::Poll::Ready(Ok(report)) => report,
-                    std::task::Poll::Ready(Err(_)) => panic!("excluded direct solve failed"),
-                    std::task::Poll::Pending => panic!("ready direct owner suspended"),
-                };
-            }
-            assert!(x.iter().all(|value| (value - 1.0).abs() < 1e-12));
-            assert!(phases
-                .iter()
-                .any(|(phase, _)| *phase == DirectSolvePhase::Residual));
-            assert!(phases
-                .iter()
-                .any(|(phase, _)| *phase == DirectSolvePhase::Norm));
-            assert!(phases.iter().all(|(phase, _)| !matches!(
-                phase,
-                DirectSolvePhase::InitialSubstitution | DirectSolvePhase::RefinementSubstitution
-            )));
-        });
-        let usage = ledger.finish().unwrap();
-        assert_eq!(usage.factorization, OperationCount::ZERO);
-        assert!(usage.solve.operations() > 0);
-    }
+            let mut future = std::pin::pin!(future);
+            let mut task = std::task::Context::from_waker(std::task::Waker::noop());
+            match std::future::Future::poll(future.as_mut(), &mut task) {
+                std::task::Poll::Ready(Ok(report)) => report,
+                std::task::Poll::Ready(Err(_)) => panic!("excluded direct solve failed"),
+                std::task::Poll::Pending => panic!("ready direct owner suspended"),
+            };
+        }
+        assert!(x.iter().all(|value| (value - 1.0).abs() < 1e-12));
+        assert!(phases
+            .iter()
+            .any(|(phase, _)| *phase == DirectSolvePhase::Residual));
+        assert!(phases
+            .iter()
+            .any(|(phase, _)| *phase == DirectSolvePhase::Norm));
+        assert!(phases.iter().all(|(phase, _)| !matches!(
+            phase,
+            DirectSolvePhase::InitialSubstitution | DirectSolvePhase::RefinementSubstitution
+        )));
+    });
+    let usage = ledger.finish().unwrap();
+    assert_eq!(usage.factorization, OperationCount::ZERO);
+    assert!(usage.solve.operations() > 0);
 }
 
 #[test]
@@ -297,19 +296,25 @@ fn exercise_admitted_batches<T: super::super::FactorScalar>() {
         }
     }
     let matrix = entries.build();
-    for kind in [FactorKind::Cholesky, FactorKind::Ldlt] {
+    for kind in [FactorKind::Cholesky, FactorKind::Ldlt, FactorKind::Lu] {
         let (factor, solve) = match (kind, T::IS_COMPLEX) {
             (FactorKind::Cholesky, false) => (14, 18),
             (FactorKind::Ldlt, false) => (11, 15),
             (FactorKind::Cholesky, true) => (29, 60),
             (FactorKind::Ldlt, true) => (26, 54),
+            (FactorKind::Lu, false) => (16, 15),
+            (FactorKind::Lu, true) => (76, 66),
             _ => unreachable!(),
         };
         let total = 2 * (factor + solve);
-        for workspace in [
-            DirectWorkspacePolicy::CallerOwned,
-            DirectWorkspacePolicy::BackendManaged,
-        ] {
+        let workspaces: &[DirectWorkspacePolicy] = match kind {
+            FactorKind::Lu => &[DirectWorkspacePolicy::BackendManaged],
+            _ => &[
+                DirectWorkspacePolicy::CallerOwned,
+                DirectWorkspacePolicy::BackendManaged,
+            ],
+        };
+        for &workspace in workspaces {
             let ledger = Arc::new(UsageLedger::new(count(total), count(factor)).unwrap());
             let context = UsageContext::new(Arc::clone(&ledger));
             context.run_sync(|| {

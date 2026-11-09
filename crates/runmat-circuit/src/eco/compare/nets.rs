@@ -81,7 +81,7 @@ pub(super) fn compare_nets(x: &Inputs, b: &mut Builder) -> Nets {
     for (old, new) in &renamed {
         let nid = board.net(old).unwrap();
         let (_, n) = nl.net(new).unwrap();
-        let (sheet, sheet_path) = sheet_of(&n.path, &root);
+        let (sheet, sheet_path) = sheet_of(&n.path, root);
         let mut impact = copper_on_net(board, nid);
         impact.nets.push(new.clone());
         b.push(
@@ -116,7 +116,7 @@ pub(super) fn compare_nets(x: &Inputs, b: &mut Builder) -> Nets {
         if n.pins.is_empty() {
             continue;
         }
-        let (sheet, sheet_path) = sheet_of(&n.path, &root);
+        let (sheet, sheet_path) = sheet_of(&n.path, root);
         b.push(
             ChangeKind::AddNet,
             new,
@@ -156,7 +156,7 @@ pub(super) fn compare_nets(x: &Inputs, b: &mut Builder) -> Nets {
             Some(net_label(old)),
             None,
             root_cause(
-                &root,
+                root,
                 None,
                 format!("{} is no longer in the schematic", net_label(old)),
             ),

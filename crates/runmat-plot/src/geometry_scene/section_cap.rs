@@ -57,12 +57,12 @@ impl PlaneFrame {
         }
     }
 
-    fn to_plane(&self, p: Vec3) -> Vec2 {
+    fn to_plane(self, p: Vec3) -> Vec2 {
         let d = p - self.origin;
         Vec2::new(d.dot(self.u), d.dot(self.v))
     }
 
-    fn to_world(&self, p: Vec2) -> Vec3 {
+    fn to_world(self, p: Vec2) -> Vec3 {
         self.origin + self.u * p.x + self.v * p.y
     }
 }

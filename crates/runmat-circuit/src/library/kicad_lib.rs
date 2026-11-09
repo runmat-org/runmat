@@ -196,7 +196,7 @@ pub fn rebase(part: &CatalogPart, lib_dir: &str, base: &str) -> CatalogPart {
             .chain(path.split('/'))
             .collect();
         let common = target.iter().zip(&from).take_while(|(a, b)| a == b).count();
-        let mut out: Vec<&str> = std::iter::repeat("..").take(from.len() - common).collect();
+        let mut out: Vec<&str> = std::iter::repeat_n("..", from.len() - common).collect();
         out.extend(&target[common..]);
         out.join("/")
     };

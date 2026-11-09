@@ -45,7 +45,7 @@ pub(super) fn compare_channels(x: &Inputs, new_rooms: &BTreeMap<String, Rect>, b
         cis.first()
             .map(|ci| {
                 let c = &nl.components[*ci];
-                let (sheet, sheet_path) = sheet_of(&c.path, &root);
+                let (sheet, sheet_path) = sheet_of(&c.path, root);
                 Cause {
                     sheet,
                     sheet_path,
@@ -53,7 +53,7 @@ pub(super) fn compare_channels(x: &Inputs, new_rooms: &BTreeMap<String, Rect>, b
                     reason: why.clone(),
                 }
             })
-            .unwrap_or_else(|| root_cause(&root, None, why))
+            .unwrap_or_else(|| root_cause(root, None, why))
     };
     if !o.ignore_component_classes {
         let mut want: BTreeMap<String, Vec<usize>> = authored.clone();
@@ -110,7 +110,7 @@ pub(super) fn compare_channels(x: &Inputs, new_rooms: &BTreeMap<String, Rect>, b
                 Some(name.clone()),
                 None,
                 root_cause(
-                    &root,
+                    root,
                     None,
                     format!("component class {name} is gone from the schematic"),
                 ),
@@ -209,7 +209,7 @@ pub(super) fn compare_channels(x: &Inputs, new_rooms: &BTreeMap<String, Rect>, b
                 Some(format!("{} parts", r.members.len())),
                 None,
                 root_cause(
-                    &root,
+                    root,
                     None,
                     format!("channel {} is no longer in the schematic", r.name),
                 ),

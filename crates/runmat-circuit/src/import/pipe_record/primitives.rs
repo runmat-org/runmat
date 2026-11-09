@@ -57,7 +57,9 @@ pub fn layer_number(name: &str) -> Option<u8> {
 }
 
 /// The stream's records: each its kind byte and its blocks.
-fn split(data: &[u8], blocks: usize) -> Result<Vec<(u8, Vec<&[u8]>)>, String> {
+type PrimitiveRecord<'a> = (u8, Vec<&'a [u8]>);
+
+fn split(data: &[u8], blocks: usize) -> Result<Vec<PrimitiveRecord<'_>>, String> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < data.len() {

@@ -86,7 +86,7 @@ pub(super) fn compare_parts(x: &Inputs, nets: &Nets, b: &mut Builder) -> BTreeMa
                 }),
                 comp_cause(
                     c,
-                    &root,
+                    root,
                     format!("{} is in the schematic, not on the board", c.designator),
                 ),
                 Impact {
@@ -156,7 +156,7 @@ pub(super) fn compare_parts(x: &Inputs, nets: &Nets, b: &mut Builder) -> BTreeMa
             Some(f.package.name.clone()),
             None,
             root_cause(
-                &root,
+                root,
                 None,
                 format!("no schematic component links to {}", f.reference),
             ),
@@ -198,7 +198,7 @@ pub(super) fn compare_parts(x: &Inputs, nets: &Nets, b: &mut Builder) -> BTreeMa
                 Some(c.designator.clone()),
                 comp_cause(
                     c,
-                    &root,
+                    root,
                     if c.renamed_from.is_some() {
                         format!(
                             "renamed in the schematic; the board still calls it {}",
@@ -256,7 +256,7 @@ pub(super) fn compare_parts(x: &Inputs, nets: &Nets, b: &mut Builder) -> BTreeMa
                 c.designator.clone(),
                 Some(f.package.name.clone()),
                 Some(to.clone()),
-                comp_cause(c, &root, format!("the part of {} uses {to}", c.designator)),
+                comp_cause(c, root, format!("the part of {} uses {to}", c.designator)),
                 impact,
                 Op::SetFootprint {
                     reference: f.reference.clone(),
@@ -337,7 +337,7 @@ pub(super) fn compare_parts(x: &Inputs, nets: &Nets, b: &mut Builder) -> BTreeMa
                 Some(value.clone()).filter(|v| !v.is_empty()),
                 comp_cause(
                     c,
-                    &root,
+                    root,
                     format!(
                         "{} is {} in the schematic",
                         c.designator,
@@ -384,7 +384,7 @@ pub(super) fn compare_parts(x: &Inputs, nets: &Nets, b: &mut Builder) -> BTreeMa
                     to.clone(),
                     comp_cause(
                         c,
-                        &root,
+                        root,
                         match &to {
                             Some(v) => format!(
                                 "{} {} is {v} in the schematic",
@@ -418,7 +418,7 @@ pub(super) fn compare_parts(x: &Inputs, nets: &Nets, b: &mut Builder) -> BTreeMa
                 Some(fit(c.fitted())),
                 comp_cause(
                     c,
-                    &root,
+                    root,
                     format!(
                         "{} is {} in variant {}",
                         c.designator,
@@ -468,7 +468,7 @@ pub(super) fn compare_parts(x: &Inputs, nets: &Nets, b: &mut Builder) -> BTreeMa
                 to.as_deref().map(net_label),
                 comp_cause(
                     c,
-                    &root,
+                    root,
                     match &to {
                         Some(n) => {
                             format!(

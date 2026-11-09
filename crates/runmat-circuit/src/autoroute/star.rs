@@ -78,11 +78,11 @@ fn rewire(net: Vec<Airwire>, room_of: &dyn Fn(Point) -> Option<usize>) -> Vec<Ai
     }
     // Groups by root: whether they sit outside the rooms, and their anchors.
     let mut groups: BTreeMap<usize, (bool, Vec<usize>)> = BTreeMap::new();
-    for i in 0..anchors.len() {
+    for (i, anchor) in anchors.iter().enumerate() {
         let root = find(&mut parent, i);
         let g = groups
             .entry(root)
-            .or_insert((room_of(anchors[i].0).is_none(), Vec::new()));
+            .or_insert((room_of(anchor.0).is_none(), Vec::new()));
         g.1.push(i);
     }
     let net_id = net[0].net;

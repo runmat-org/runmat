@@ -245,8 +245,8 @@ fn pad(r: &Record, frame: &Frame, local: &Local, side: Side, report: &mut Report
     let slot = Some(r.len("SLOTSIZE")).filter(|s| *s > r.len("HOLESIZE"));
     if slot.is_some() {
         match r.num("SLOTROTATION").rem_euclid(180.0) {
-            a if a == 0.0 => {}
-            a if a == 90.0 => {
+            0.0 => {}
+            90.0 => {
                 (w, h, turn) = (h, w, 90.0);
             }
             _ => report

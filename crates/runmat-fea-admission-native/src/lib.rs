@@ -369,7 +369,9 @@ impl StoredSignIn {
         } else {
             tokio::time::timeout(timeout, auth::resolve_auth_token(&mut config, &server)).await
         };
-        token.map_err(|_| unreachable())?.map_err(auth_failure)
+        let token = token.map_err(|_| unreachable())?.map_err(auth_failure)?;
+        self.config = config;
+        Ok(token)
     }
 }
 

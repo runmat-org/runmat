@@ -60,7 +60,7 @@ pub(super) fn endpoint_of(e: &Editor, at: &Place, end: &End) -> Result<Endpoint,
                 }
             }
             written_name(e, &at.instance, *n)
-                .map(|name| Endpoint::Net(name))
+                .map(Endpoint::Net)
                 .ok_or_else(|| {
                     EditError::new(format!(
                         "{} isn't on this sheet",

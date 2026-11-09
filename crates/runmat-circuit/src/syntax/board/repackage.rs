@@ -133,9 +133,7 @@ pub(crate) fn read_packages(
     let mut users: Vec<(ItemId, Span)> = Vec::new();
     for s in statements.iter().filter(|s| s.group == Group::Footprint) {
         let Some(id) = s.item else { continue };
-        let Some(f) = board.footprints.get(&id) else {
-            return None;
-        };
+        let f = board.footprints.get(&id)?;
         if !changed.contains(f.package.name.as_str()) {
             continue;
         }

@@ -21,8 +21,10 @@ pub struct PackedMesh {
     pub normals16: Option<String>,
 }
 
+pub(crate) type DecodedMesh = (Vec<[f32; 3]>, Vec<[u32; 3]>, Vec<[f32; 3]>);
+
 impl PackedMesh {
-    pub(crate) fn decode(&self) -> Result<(Vec<[f32; 3]>, Vec<[u32; 3]>, Vec<[f32; 3]>), String> {
+    pub(crate) fn decode(&self) -> Result<DecodedMesh, String> {
         let positions = triples(&f32s(&self.positions)?)?;
         let indices = if self.index_bytes == Some(2) {
             u16s(&self.triangles)?

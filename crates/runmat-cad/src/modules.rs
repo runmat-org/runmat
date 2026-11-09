@@ -496,12 +496,9 @@ fn site(key: &str, obj: &[(String, Json)]) -> Option<(Site, String, String)> {
     None
 }
 
-fn walk(
-    json: &mut Json,
-    key: &str,
-    at: &str,
-    visit: &mut dyn FnMut(&mut Vec<(String, Json)>, Site, String, String, &str),
-) {
+type ModuleVisitor<'a> = dyn FnMut(&mut Vec<(String, Json)>, Site, String, String, &str) + 'a;
+
+fn walk(json: &mut Json, key: &str, at: &str, visit: &mut ModuleVisitor<'_>) {
     match json {
         Json::Object(obj) => {
             if let Some((s, k, n)) = site(key, obj) {
@@ -683,7 +680,7 @@ pub fn module_text(doc: &str, file: &str) -> Option<String> {
             } else {
                 segs[..i].join("/")
             };
-            if ancestors(here).iter().any(|a| *a == base) {
+            if ancestors(here).contains(&base) {
                 return Some(
                     segs[i..]
                         .iter()

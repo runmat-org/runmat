@@ -368,7 +368,7 @@ fn dense_modal(
         }
     }
     let residuals = true_residuals(k, m, &values, &vectors);
-    return Ok(EigenResult {
+    Ok(EigenResult {
         converged: values.len() == count,
         values,
         vectors,
@@ -379,7 +379,7 @@ fn dense_modal(
         factorization: None,
         factor_kind: None,
         sturm: None,
-    });
+    })
 }
 
 fn sturm_count(

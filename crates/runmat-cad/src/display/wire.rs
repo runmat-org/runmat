@@ -228,10 +228,10 @@ pub fn numbers(value: &serde_json::Value) -> Vec<f64> {
                 let Some(bytes) = sink.as_ref() else {
                     return Vec::new();
                 };
-                if !count
+                if count
                     .checked_mul(4)
                     .and_then(|n| n.checked_add(offset))
-                    .is_some_and(|e| e <= bytes.len())
+                    .is_none_or(|e| e > bytes.len())
                 {
                     return Vec::new();
                 }

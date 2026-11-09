@@ -12,6 +12,8 @@ struct MirrorImage {
     host: Option<NodeId>,
 }
 
+type PatternInstances = BTreeMap<String, (Vec<(InstanceKey, Transform)>, Option<NodeId>)>;
+
 impl<'a, 'b> Resolver<'a, 'b> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn compose_instances(
@@ -27,8 +29,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         let file = doc.path.clone();
         let mut plans = Vec::new();
         // Each active pattern's instances, for the mirrors that repeat it.
-        let mut laid: BTreeMap<String, (Vec<(InstanceKey, Transform)>, Option<NodeId>)> =
-            BTreeMap::new();
+        let mut laid = PatternInstances::new();
         for p in &doc.patterns {
             let site = Site::with_param(
                 Subject::Pattern {
@@ -209,7 +210,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         &mut self,
         doc: &AssemblyDocument,
         m: &OccurrenceMirror,
-        laid: &BTreeMap<String, (Vec<(InstanceKey, Transform)>, Option<NodeId>)>,
+        laid: &PatternInstances,
         site: &Site,
     ) -> Vec<MirrorImage> {
         let mut out: Vec<MirrorImage> = Vec::new();
