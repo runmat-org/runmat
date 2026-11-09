@@ -783,7 +783,7 @@ mod tests {
         let files: Files = [("/a.circuit".to_string(), "b\n".to_string())]
             .into_iter()
             .collect();
-        let message = propose(&input, &files).err().expect("refused").message;
+        let message = propose(&input, &files).expect_err("refused").message;
         assert!(
             message.contains("`replace` came with `command` \"x\""),
             "{message}"

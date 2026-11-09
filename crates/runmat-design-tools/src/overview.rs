@@ -191,11 +191,11 @@ impl Ran {
 /// The guides whose completion check reads this kind of file: those that write it, and those
 /// that open from it. A circuit with a board also gets the board's guides, since the board's
 /// state is part of the circuit's overview.
-fn fitting_guides<'a>(
+fn fitting_guides(
     kind: DesignKind,
     has_board: bool,
-    catalog: &'a GuideCatalog,
-) -> Vec<&'a guides::Guide> {
+    catalog: &GuideCatalog,
+) -> Vec<&guides::Guide> {
     let ext = |k: DesignKind| match k {
         DesignKind::Part => ".part",
         DesignKind::Assembly => ".assembly",

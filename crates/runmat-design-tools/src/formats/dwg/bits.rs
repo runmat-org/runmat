@@ -548,7 +548,7 @@ mod tests {
         w.b3(6);
         w.bl(-1);
         w.bl(77);
-        w.bll(0x1234_5678_9A);
+        w.bll(0x0012_3456_789A);
         w.bd(1.0);
         w.bd(-2.5);
         w.dd(10.5, 10.0);
@@ -580,7 +580,7 @@ mod tests {
         assert_eq!(r.b3().unwrap(), 6);
         assert_eq!(r.bl().unwrap(), -1);
         assert_eq!(r.bl().unwrap(), 77);
-        assert_eq!(r.bll().unwrap(), 0x1234_5678_9A);
+        assert_eq!(r.bll().unwrap(), 0x0012_3456_789A);
         assert_eq!(r.bd().unwrap(), 1.0);
         assert_eq!(r.bd().unwrap(), -2.5);
         assert_eq!(r.dd(10.0).unwrap(), 10.5);
