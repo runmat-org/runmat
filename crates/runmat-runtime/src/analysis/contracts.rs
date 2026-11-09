@@ -2423,8 +2423,9 @@ mod tests {
         assert!(workflow[3].starts_with("runmat run "));
 
         let procedures = analysis_procedure_ids();
-        assert_eq!(procedures.len(), 11);
+        assert_eq!(procedures.len(), AnalysisProcedure::ALL.len());
         assert!(procedures.contains(&"modal_response_spectrum".to_string()));
+        assert!(procedures.contains(&"line_parameters".to_string()));
         assert!(procedures.contains(&"random_response".to_string()));
 
         let operations = analysis_output_operation_ids();
