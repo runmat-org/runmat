@@ -50,7 +50,7 @@ fn rc_charge_curve_trapezoidal_and_gear() {
 
 #[test]
 fn series_rlc_resonance_and_q() {
-    let (r, l, c) = (10.0, 1e-3, 1e-6);
+    let (r, l, c): (f64, f64, f64) = (10.0, 1e-3, 1e-6);
     let deck = format!("rlc\nV1 in 0 AC 1\nL1 in a {l}\nC1 a b {c}\nR1 b 0 {r}\n");
     let res = run(
         &deck,
@@ -93,7 +93,7 @@ fn series_rlc_resonance_and_q() {
 
 #[test]
 fn underdamped_rlc_step_matches_analytic() {
-    let (r, l, c) = (20.0, 1e-3, 1e-6);
+    let (r, l, c): (f64, f64, f64) = (20.0, 1e-3, 1e-6);
     let deck =
         format!("rlc step\nV1 in 0 PULSE(0 1 0 1p 1p 1 2)\nR1 in a {r}\nL1 a b {l}\nC1 b 0 {c}\n");
     let w = run(&deck, &tran(1e-6, 1e-3));
