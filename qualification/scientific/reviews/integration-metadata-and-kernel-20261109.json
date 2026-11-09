@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Scientific source conservation across corpus metadata, disabled OCCT kernel repairs and stale test assertions",
+  "status": "Scientific source conservation across corpus metadata, OCCT kernel repairs, test assertions and ECAD via-contact analysis",
   "measured_source_revision": "878baa910e7806296fee33c672272f90af5d3d24",
   "measured_inputs": {
     "sha256": "1ad763993fe86d2f2d3dd9e089257a7eca9dd188dca98d76d059f2b7f775995d",
@@ -8,8 +8,8 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "085845bf6235b2c61104951f5b3da02ca2a39560663618c9e92c00f83eab0872",
-    "files": 25998,
+    "sha256": "d39623e887558c693b785e1bfec45e60d7703eb96452607acb01f98b5d4c4cc5",
+    "files": 25999,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "cohorts": ["authored-cli-physics", "driver-recovery-physics"],
@@ -49,6 +49,36 @@
       "before": ["100644", "blob", "5829fcd6c7db24b944432b3fa1b4bc6fc3b528a5"],
       "after": ["100644", "blob", "2f01cc3117a8530bccd85cc6243b4192f7fadb0c"],
       "reason": "Update the exact refusal message after the CAD selection sidecar was removed in 380fa871f66. Configuration edits remain denied. This separate integration-test target is selected by neither scientific command. The ordinary fea_workspace integration suite qualifies the assertion repair."
+    },
+    {
+      "path": "crates/runmat-circuit/src/high_speed/connections.rs",
+      "before": null,
+      "after": ["100644", "blob", "186b52032ab97e9b769f33ef5ba5f55a1471ce75"],
+      "reason": "Add the per-call spatial contact index for ECAD via-stub analysis. The recovery dependency graph excludes this crate. The authored CLI cohort dispatches FEA execution and cold publication, which do not call these ECAD functions. Focused scan-equivalence, high-speed, deep-stack and unchanged scale tests qualify the affected behavior."
+    },
+    {
+      "path": "crates/runmat-circuit/src/high_speed/delay.rs",
+      "before": ["100644", "blob", "c3bc008bd419e3efb14b3edfed264601fd729555"],
+      "after": ["100644", "blob", "e6731d88d7d382509d76dba0d4a7d263be89011d"],
+      "reason": "Share one contact index across ECAD via timing and stub calculations; retain track/via accumulation order and delay formulas. These functions are outside both selected FEA scientific workloads. Their affected circuit tests and strict all-target lint pass separately."
+    },
+    {
+      "path": "crates/runmat-circuit/src/high_speed/mod.rs",
+      "before": ["100644", "blob", "94f46e8696989ffdcb642ee88e223d66c9095a4f"],
+      "after": ["100644", "blob", "07b0aa330d06aa639757e6d05fb8a3d72ee54c93"],
+      "reason": "Declare the private ECAD contact module. It has no static initialization or registration affecting FEA execution."
+    },
+    {
+      "path": "crates/runmat-circuit/src/high_speed/stubs.rs",
+      "before": ["100644", "blob", "78c7e8e1c71e6426f98e44f1faebf71ba9b5ac72"],
+      "after": ["100644", "blob", "156e2bfd7041733e78c8fa25f0b350bc1faa2559"],
+      "reason": "Use the shared spatial lookup for batch ECAD via queries, preserving contact, layer, pour-outline and back-drill rules. No selected FEA scientific path calls this analysis. Independent circuit equivalence and scale checks cover the repair."
+    },
+    {
+      "path": "crates/runmat-circuit/tests/library.rs",
+      "before": ["100644", "blob", "86ac103b67be95d9903ce9da6a0a02b3b9662e63"],
+      "after": ["100644", "blob", "b475a7bd9b8c2cd9dc4349942814f2e399afc801"],
+      "reason": "Instantiate the child sheet selected by the catalog-placement fixture. All five library tests pass; production selection behavior is unchanged. Neither scientific command selects this circuit integration-test target."
     }
   ],
   "qualification_evidence": [
@@ -59,6 +89,10 @@
     {
       "path": "qualification/scientific/evidence/occt-kernel-feature-conservation-20261109.json",
       "sha256": "33a7bb44d21dcc1ebd4664d44e70127e6738ecbddf6dbd9f059cf3c6d3222f0f"
+    },
+    {
+      "path": "qualification/scientific/evidence/circuit-via-contacts-20261109.json",
+      "sha256": "4ee5472a7bff14a9d6017c8399aab4fb70145141b370529675fa378cc7aa269e"
     }
   ]
 }
