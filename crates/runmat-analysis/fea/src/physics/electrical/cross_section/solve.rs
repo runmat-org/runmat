@@ -97,7 +97,7 @@ pub(super) fn capacitance_matrices(
     let mut elements = Vec::with_capacity(mesh.triangles.len());
     for corners in &mesh.triangles {
         let (b, c, area) = shape(mesh, *corners);
-        if !(area > 0.0) {
+        if area.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return Err(CrossSectionError::Operator(
                 "a mesh triangle is inverted or degenerate".into(),
             ));

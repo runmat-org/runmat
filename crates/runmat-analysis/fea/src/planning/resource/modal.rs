@@ -244,15 +244,19 @@ pub fn build_structural_modal_resource_plan_from_compilation(
         )?
     };
     let workspace_bytes = modal_workspace_bytes(
-        full_dimension,
-        reduced_dimension,
-        maximum_subspace_dimension,
-        residual_vector_count,
-        reduced_tangent_nonzeros,
-        reduced_mass_nonzeros,
-        shifted_nonzeros,
-        admission.factor_resident_limit(),
-        energy_proof_bytes,
+        sizing::ModalWorkspaceDimensions {
+            full: full_dimension,
+            reduced: reduced_dimension,
+            subspace: maximum_subspace_dimension,
+            residual_vectors: residual_vector_count,
+        },
+        sizing::ModalOperatorStorage {
+            stiffness_nonzeros: reduced_tangent_nonzeros,
+            mass_nonzeros: reduced_mass_nonzeros,
+            shifted_nonzeros,
+            factor_bytes: admission.factor_resident_limit(),
+            energy_proof_bytes,
+        },
     )?;
 
     let modal_output_values = modal_output_value_count(

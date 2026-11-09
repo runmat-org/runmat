@@ -107,10 +107,10 @@ fn symmetric_eigen(a: &Matrix) -> (Vec<f64>, Matrix) {
                 let t = if theta == 0.0 { 1.0 } else { t };
                 let c = 1.0 / (t * t + 1.0).sqrt();
                 let s = t * c;
-                for k in 0..n {
-                    let (akp, akq) = (a[k][p], a[k][q]);
-                    a[k][p] = c * akp - s * akq;
-                    a[k][q] = s * akp + c * akq;
+                for row in &mut a {
+                    let (akp, akq) = (row[p], row[q]);
+                    row[p] = c * akp - s * akq;
+                    row[q] = s * akp + c * akq;
                 }
                 for k in 0..n {
                     let (apk, aqk) = (a[p][k], a[q][k]);
@@ -131,7 +131,10 @@ fn symmetric_eigen(a: &Matrix) -> (Vec<f64>, Matrix) {
 /// f(A) for a symmetric positive definite A.
 fn spd_function(a: &Matrix, f: impl Fn(f64) -> f64) -> Result<Matrix, CrossSectionError> {
     let (values, vectors) = symmetric_eigen(a);
-    if values.iter().any(|value| !(*value > 0.0)) {
+    if values
+        .iter()
+        .any(|value| value.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater))
+    {
         return Err(CrossSectionError::Operator(
             "a per-length matrix is not positive definite".into(),
         ));

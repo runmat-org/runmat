@@ -260,11 +260,11 @@ fn admit_initial_conditions(
             conditions
                 .iter()
                 .any(|condition| {
-                    !matches!(
+                    !(matches!(
                         condition.kind,
                         AuthoredInitialConditionKind::FluidVelocity(_)
                             | AuthoredInitialConditionKind::FluidPressure(_)
-                    ) && !(conjugate
+                    ) || conjugate
                         && matches!(condition.kind, AuthoredInitialConditionKind::Temperature(_)))
                 })
                 .then_some(FLUID_INITIAL_CONDITION)
