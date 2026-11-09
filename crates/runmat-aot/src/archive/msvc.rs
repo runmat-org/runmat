@@ -115,6 +115,11 @@ pub fn prepare_msvc_runtime_archive(
 }
 
 fn is_bundled_windows_targets_import_library(token: &str) -> bool {
+    // windows-targets 0.42 uses the unversioned name. Rust bundles its import
+    // members into the staticlib, just as it does for the later versioned names.
+    if token == "windows.lib" {
+        return true;
+    }
     let Some(version) = token
         .strip_prefix("windows.")
         .and_then(|token| token.strip_suffix(".lib"))
@@ -157,13 +162,14 @@ mod tests {
             &archive,
             vec![
                 "kernel32.lib".into(),
+                "windows.lib".into(),
                 "windows.0.52.0.lib".into(),
                 "windows.custom.lib".into(),
             ],
         )
         .unwrap();
         assert_eq!(prepared.duplicate_members_removed, 1);
-        assert_eq!(prepared.bundled_link_tokens_removed, 1);
+        assert_eq!(prepared.bundled_link_tokens_removed, 2);
         assert_eq!(
             prepared.native_link_tokens,
             vec!["kernel32.lib", "windows.custom.lib"]
