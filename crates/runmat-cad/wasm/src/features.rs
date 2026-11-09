@@ -140,7 +140,7 @@ fn profiles(values: &Values, field: &str, picks: &Picks) -> Result<Vec<Value>, E
     let mut out: Vec<P> = Vec::new();
     for pick in &all {
         if let Some((sketch, loops)) = region_pick(pick) {
-            picks.sketch(&sketch)?;
+            let sketch = picks.sketch(&format!("sketch:{sketch}"))?;
             let at = out.iter_mut().find(|p| matches!(p, P::Whole(s) | P::Regions(s, _) if *s == sketch));
             match at {
                 Some(P::Regions(_, ls)) => {
@@ -862,6 +862,11 @@ mod tests {
     /// Runs a command from the canvas and checks the change: one inserted statement that names
     /// the new feature, and a part that still regenerates with a body and no error.
     fn added(command: &str, values: Value) -> String {
+        inserted(command, values, 1)
+    }
+
+    /// As [`added`], for a command that inserts `count` statements (one feature per profile).
+    fn inserted(command: &str, values: Value, count: usize) -> String {
         let request = json!({ "command": command, "values": values });
         let out: Value = serde_json::from_str(&edit_json(
             "/p/plate.part",
@@ -874,11 +879,10 @@ mod tests {
         let file = &out["files"][0];
         assert_eq!(file["reprinted"], false, "{command}");
         let edits = file["edits"].as_array().unwrap();
-        assert_eq!(edits.len(), 1, "{command}: {edits:?}");
-        assert_eq!(
-            edits[0]["start"], edits[0]["end"],
-            "{command}: an insertion"
-        );
+        assert_eq!(edits.len(), count, "{command}: {edits:?}");
+        for edit in edits {
+            assert_eq!(edit["start"], edit["end"], "{command}: an insertion");
+        }
         let text = file["text"].as_str().unwrap().to_owned();
         let compiled: Value =
             serde_json::from_str(&compile_json("/p/plate.part", &text, &Files::new())).unwrap();
@@ -911,12 +915,13 @@ mod tests {
         let t = added("part.extrude", json!({ "profile": [END], "op": "add", "from": "sketch_plane", "end": "blind", "distance": 5 }));
         assert!(t.contains("feature extrude1 = extrude(profile = feature.body.face.end") && t.contains("distance = 5 mm"), "{t}");
         assert!((height(&t) - 15.0).abs() < 1e-6, "{t}");
+        // Remove cuts inward: 4 mm off the whole top face leaves the plate 6 mm thick.
         let t = added("part.extrude", json!({ "profile": [END], "op": "remove", "distance": 4 }));
-        assert!((height(&t) - 10.0).abs() < 1e-6, "{t}");
+        assert!((height(&t) - 6.0).abs() < 1e-6, "{}: {t}", height(&t));
         let t = added("part.extrude", json!({ "profile": [END], "op": "new", "distance": 5, "draft": false }));
         assert_eq!(compiled(&t)["display"]["data"]["bodies"].as_array().unwrap().len(), 2, "{t}");
         // Every profile picked is written: a face and a sketch make two extrudes.
-        let t = added("part.extrude", json!({ "profile": [END, "sketch:s1"], "op": "new", "distance": 5 }));
+        let t = inserted("part.extrude", json!({ "profile": [END, "sketch:s1"], "op": "new", "distance": 5 }), 2);
         assert!(t.contains("extrude1 = extrude(profile = feature.body.face.end") && t.contains("extrude2 = extrude(profile = sketch.s1"), "{t}");
     }
 
