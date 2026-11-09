@@ -37,6 +37,8 @@ const ARM_BOX_BEAM: &[u8] = include_bytes!("fixtures/boolean_step/arm_box_beam.s
 const ARM_ONLY: &[u8] = include_bytes!("fixtures/boolean_step/arm_only.step");
 const ARM_STUDY: &[u8] = include_bytes!("fixtures/boolean_step/arm_study.step");
 const ESC_THERMAL: &[u8] = include_bytes!("fixtures/boolean_step/esc_thermal.step");
+const HEATSINK: &[u8] =
+    include_bytes!("../../../docs/simulation/examples/geometry/electronics-heatsink.step");
 
 #[test]
 fn a_lofted_beam_alone_meshes() {
@@ -58,6 +60,14 @@ fn the_arm_and_its_motor_pod_mesh_with_a_shared_interface() {
     assert_meshes("arm_study.step", ARM_STUDY, true, 3.0e-3, 2);
 }
 
+/// The docs heat-sink example (KiCad library model): 0.25 mm chamfers along every fin edge
+/// and 2.4 um sliver faces at the fin roots. Facet recovery must recover the sliver needles.
+#[test]
+#[ignore = "over 30 min in release (about 330k surface triangles); run with --ignored when changing surface sizing or facet recovery"]
+fn the_docs_heat_sink_meshes() {
+    assert_meshes("electronics-heatsink.step", HEATSINK, false, 10.0e-3, 1);
+}
+
 #[test]
 #[ignore = "tetrahedralization facet recovery: constrained Delaunay Steiner insertion leaves a non-Delaunay neighbor on the y = 31.5 mm trim plane"]
 fn a_trimmed_and_cut_lofted_shell_with_its_board_meshes_with_a_shared_interface() {
@@ -70,7 +80,7 @@ fn assert_meshes(
     shared_interfaces: bool,
     target_size_m: f64,
     solids: usize,
-) {
+) -> usize {
     let result = mesh_step(source_name, source_bytes, shared_interfaces, target_size_m)
         .unwrap_or_else(|error| panic!("{source_name} must mesh: {error}"));
     let topology = &result.artifact.topology;
@@ -79,6 +89,12 @@ fn assert_meshes(
         !topology.volume_elements.is_empty(),
         "{source_name} volume elements"
     );
+    eprintln!(
+        "{source_name}: {} nodes, {} volume elements",
+        topology.nodes.len(),
+        topology.volume_elements.len()
+    );
+    topology.volume_elements.len()
 }
 
 fn mesh_step(
