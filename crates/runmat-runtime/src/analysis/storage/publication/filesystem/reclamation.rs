@@ -19,23 +19,31 @@ pub(in crate::analysis::storage) fn sweep(
     }
     let protected = protected_set;
     let mut reachable = inventory::Digests::new(store)?;
+    // Ordinary discovery permits retired or unsupported legacy records, and a supported run may
+    // carry a legacy observation attachment. Their unknown closure defers all deletion; never
+    // infer that their objects are orphans.
+    let legacy_attachment = std::cell::Cell::new(false);
     let mut visit = |record: PersistedAnalysisArtifact| {
         super::super::reclamation::visit_record_objects(&record, &mut |digest| {
             reachable.insert(digest)
         })?;
         if let PersistedAnalysisArtifact::Standard(run) = &record {
-            if let Some(attachment) = store.read_observation_attachment(&run.metadata)? {
-                let _attachment_reservation =
-                    store.reserve_resident(store.retained_estimate(&attachment)?)?;
-                for digest in super::super::reclamation::attachment_digests(&attachment) {
-                    reachable.insert(digest)?;
+            match store.read_stored_observation_attachment(&run.metadata)? {
+                Some(observations::StoredObservationAttachment::Current(attachment)) => {
+                    let _attachment_reservation =
+                        store.reserve_resident(store.retained_estimate(&attachment)?)?;
+                    for digest in super::super::reclamation::attachment_digests(&attachment) {
+                        reachable.insert(digest)?;
+                    }
                 }
+                Some(observations::StoredObservationAttachment::Legacy) => {
+                    legacy_attachment.set(true)
+                }
+                None => {}
             }
         }
         Ok(())
     };
-    // Ordinary discovery permits retired or unsupported legacy records. Their
-    // unknown closure defers all deletion; never infer that their objects are orphans.
     let mut unresolved_legacy = false;
     discovery::visit_supported_artifacts_admitted(
         store,
@@ -52,7 +60,7 @@ pub(in crate::analysis::storage) fn sweep(
     // Committed descriptors/reservations/digests remain strict even when legacy
     // collection is deferred. They define supported authority, not optional discovery.
     store.visit_publication_records(visit)?;
-    if unresolved_legacy {
+    if unresolved_legacy || legacy_attachment.get() {
         return Ok(SweepOutcome::DeferredLegacyInventory);
     }
     let directory = store.objects_directory();
