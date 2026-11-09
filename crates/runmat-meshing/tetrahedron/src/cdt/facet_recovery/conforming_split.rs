@@ -138,7 +138,7 @@ pub(super) fn try_split_recovered_segment_edge(
         work.reject("conflicting segment midpoint duplicates an existing node position");
         return Ok(None);
     }
-    if let Some(insertion) = insert_conformingly(
+    insert_conformingly(
         current,
         node,
         protected,
@@ -146,48 +146,7 @@ pub(super) fn try_split_recovered_segment_edge(
         &[],
         constraint_index,
         work,
-    )? {
-        return Ok(Some(insertion));
-    }
-    // The midpoint's constrained cavity can hold the whole star of another recovered segment
-    // edge: the midpoint lies inside every circumsphere around that edge, so no
-    // constrained-Delaunay complex holds both, the cavity drops the edge and the edge star
-    // leaves an illegal face beside it. Ruppert's rule splits the encroached segment first.
-    // The working split detects that edge and runs that cascade; it admits every edit exactly.
-    let declined = work
-        .last_rejection()
-        .unwrap_or("no reason recorded")
-        .to_owned();
-    work.clear_rejection();
-    let mut working = super::working::FacetRecoveryWorking::new(current);
-    let protected_edges =
-        crate::cdt::segment_recovery::recovered_segment_edge_keys(&current.segments)
-            .into_iter()
-            .collect::<Vec<_>>();
-    let Some(splits) = split_recovered_segment_edge_in_place(
-        &mut working,
-        edge,
-        protected,
-        &protected_edges,
-        constraint_index,
-        work,
-    )?
-    else {
-        let cascade = work
-            .last_rejection()
-            .unwrap_or("no reason recorded")
-            .to_owned();
-        work.reject(format!("{declined}; encroachment cascade: {cascade}"));
-        return Ok(None);
-    };
-    let recovery = working.into_recovery(work)?;
-    if !recovered_segments_exist(&recovery) {
-        work.reject(format!(
-            "{declined}; encroachment cascade removed a recovered segment edge"
-        ));
-        return Ok(None);
-    }
-    Ok(Some(ConformingInsertion { recovery, splits }))
+    )
 }
 
 /// Splits a recovered segment edge directly on the working topology: the split, Lawson flips in
