@@ -1,6 +1,6 @@
 //! Publication of a solved cross-section: its line parameters as observation results, on the
 //! canonical triangle mesh the potential solves ran on. No re-solve and no proxy values.
-use super::{AnalysisLineParametersRunOptions, AnalysisStudyCompletionIdentity};
+use crate::analysis::{AnalysisLineParametersRunOptions, AnalysisStudyCompletionIdentity};
 use crate::analysis::*;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use runmat_analysis_fea::{
@@ -106,24 +106,24 @@ pub fn prepare_line_parameters_study_publication(
                 error, &context, invalid,
             )
         })?;
-    let execution = super::AnalysisExecutionStep {
+    let execution = crate::analysis::AnalysisExecutionStep {
         step_id: step.step_id.clone(),
         backend: ComputeBackend::Cpu,
         accelerator_admission: Default::default(),
-        solver_options: super::AnalysisSolverOptions::LineParameters(options.clone()),
+        solver_options: crate::analysis::AnalysisSolverOptions::LineParameters(options.clone()),
     };
-    let prepared = super::structural_study::standalone_completion(
+    let prepared = crate::analysis::structural_study::standalone_completion(
         context.clone(),
         study,
         execution,
         persisted,
     )
     .map_err(invalid)?;
-    let completed_step = super::structural_study::CompletedStudyStep {
+    let completed_step = crate::analysis::structural_study::CompletedStudyStep {
         step_id: step.step_id.clone(),
         solver_result_identity,
-        run: super::structural_study::CompletedStudyStepRun::Standard(Box::new(run)),
-        resolved_solver_options: super::AnalysisSolverOptions::LineParameters(options.clone()),
+        run: crate::analysis::structural_study::CompletedStudyStepRun::Standard(Box::new(run)),
+        resolved_solver_options: crate::analysis::AnalysisSolverOptions::LineParameters(options.clone()),
     };
     let mut published =
         crate::analysis::structural_study::publication::complete_study_run_prepared(
@@ -141,7 +141,7 @@ pub fn prepare_line_parameters_study_publication(
     let workload_digest = Digest::sha256(
         serde_json::to_vec(&workload).map_err(|error| invalid(error.to_string()))?,
     );
-    let manifest = super::study_result_manifest::StudyResultManifest::new(
+    let manifest = crate::analysis::study_result_manifest::StudyResultManifest::new(
         study,
         workload_digest,
         &workload,
@@ -268,8 +268,8 @@ fn materialize(
         provenance,
     };
     Ok(OperationEnvelope::new(
-        super::execution_dispatch::AnalysisOperation::LineParameters.name(),
-        super::execution_dispatch::AnalysisOperation::LineParameters.version(),
+        crate::analysis::execution_dispatch::AnalysisOperation::LineParameters.name(),
+        crate::analysis::execution_dispatch::AnalysisOperation::LineParameters.version(),
         context,
         result,
     ))
@@ -281,8 +281,8 @@ fn publication_error(
     message: String,
 ) -> OperationErrorEnvelope {
     crate::operations::operation_error(
-        super::ANALYSIS_RUN_STUDY_OPERATION,
-        super::ANALYSIS_RUN_STUDY_OP_VERSION,
+        crate::analysis::ANALYSIS_RUN_STUDY_OPERATION,
+        crate::analysis::ANALYSIS_RUN_STUDY_OP_VERSION,
         context,
         crate::operations::OperationErrorSpec {
             error_code: "RM.FEA.RUN_STUDY.INVALID_LINE_PARAMETERS_RESULT",
