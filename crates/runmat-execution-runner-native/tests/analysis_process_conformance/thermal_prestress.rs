@@ -168,7 +168,7 @@ fn base(order: ElementOrder, scope: &str, revision: ProgramRevision) -> ThermalS
     .unwrap();
     let limits = NativeAnalysisHostLimits::default();
     ThermalStudyPreparation {
-        maximum_resident_bytes: u64::MAX,
+        maximum_resident_bytes: None,
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         field_source: None,
         scope: ThermalStudyScope::Standalone,

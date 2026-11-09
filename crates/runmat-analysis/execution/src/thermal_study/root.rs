@@ -42,7 +42,7 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
-    maximum_resident_bytes: u64,
+    maximum_resident_bytes: Option<u64>,
     #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
     local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     field_source: Option<FieldSourceWire>,

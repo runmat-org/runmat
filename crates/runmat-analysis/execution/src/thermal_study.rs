@@ -60,7 +60,7 @@ pub struct CompletedThermalStudy {
 
 pub struct ThermalStudyPreparation {
     /// Effective execution capacity, carried separately from the compiled study definition.
-    pub maximum_resident_bytes: u64,
+    pub maximum_resident_bytes: Option<u64>,
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub scope: ThermalStudyScope,
     pub field_source: Option<runmat_analysis_fea::execution::RetainedJouleHeatSource>,

@@ -140,7 +140,7 @@ pub(crate) async fn execute_with_pool(
     let executed = Box::pin(crate::analysis_thermal::execute_with_pool(
         pool,
         ThermalStudyPreparation {
-            maximum_resident_bytes: policy.resources.memory_bytes,
+            maximum_resident_bytes: Some(policy.resources.memory_bytes),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             field_source: None,
             scope: ThermalStudyScope::SelectedStep,

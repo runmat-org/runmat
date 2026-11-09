@@ -56,7 +56,7 @@ impl ThermalStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ThermalStudyReplayContext {
-    pub maximum_resident_bytes: u64,
+    pub maximum_resident_bytes: Option<u64>,
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub field_source: Option<runmat_analysis_fea::execution::RetainedJouleHeatSource>,
     pub scope: ThermalStudyScope,

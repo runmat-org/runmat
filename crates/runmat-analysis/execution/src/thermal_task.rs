@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 
 pub struct ThermalTaskPreparation {
     /// Placement budget; the authored model and numerical intent retain their original identity.
-    pub maximum_resident_bytes: u64,
+    pub maximum_resident_bytes: Option<u64>,
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
@@ -50,7 +50,7 @@ pub fn prepare_thermal_task(
         preparation.output_policy,
         preparation.field_source.as_ref(),
         preparation.local_execution,
-        preparation.maximum_resident_bytes,
+        preparation.maximum_resident_bytes.unwrap_or(u64::MAX),
     )?;
     let resource_plan = prepared.resource_plan;
     let mut inputs = prepared.inputs;

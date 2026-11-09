@@ -91,7 +91,7 @@ pub(super) async fn run() {
         let executed = execute_thermal_study_locally_with_source(
             config,
             ThermalStudyPreparation {
-                maximum_resident_bytes: u64::MAX,
+                maximum_resident_bytes: None,
                 local_execution:
                     runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 scope: ThermalStudyScope::SelectedStep,

@@ -89,7 +89,7 @@ fn thermal_observation_fanout_uses_published_sample_and_reads_only_selected_fiel
             };
             let limits = ObjectInventoryLimits::default();
             let task = prepare_thermal_task(ThermalTaskPreparation {
-                maximum_resident_bytes: u64::MAX,
+                maximum_resident_bytes: None,
                 local_execution:
                     runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 field_source: None,

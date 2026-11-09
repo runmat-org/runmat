@@ -220,7 +220,7 @@ pub(crate) fn plan_family_study(
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Thermal(Box::new(ThermalStudyPreparation {
-                    maximum_resident_bytes: worker_memory()?,
+                    maximum_resident_bytes: Some(worker_memory()?),
                     local_execution: context.local_execution,
                     field_source: None,
                     scope: ThermalStudyScope::Standalone,

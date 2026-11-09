@@ -80,7 +80,7 @@ pub(super) async fn run(
     config.worker_scratch_bytes = ceiling;
     config.worker_capabilities = super::super::capabilities();
     let preparation = ThermalStudyPreparation {
-        maximum_resident_bytes: u64::MAX,
+        maximum_resident_bytes: None,
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         scope: ThermalStudyScope::Standalone,
         field_source: None,

@@ -166,7 +166,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         let output_policy =
             AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap();
         let mut study = ThermalStudyCoordinator::new(ThermalStudyPreparation {
-            maximum_resident_bytes: u64::MAX,
+            maximum_resident_bytes: None,
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             field_source: None,
             scope,

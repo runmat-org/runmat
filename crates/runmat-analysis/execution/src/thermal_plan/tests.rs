@@ -5,7 +5,7 @@ use runmat_analysis_core::*;
 fn preparation() -> ThermalTaskPreparation {
     let p = crate::thermal_study::tests::preparation();
     ThermalTaskPreparation {
-        maximum_resident_bytes: u64::MAX,
+        maximum_resident_bytes: None,
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: p.product.compiled.definition_digest().unwrap(),
         frozen_project_digest: p.frozen_project_digest,
@@ -25,7 +25,7 @@ fn placement_budget_changes_resource_identity_without_rewriting_thermal_intent()
     for maximum in [64 * 1024 * 1024, 128 * 1024 * 1024] {
         let mut input = preparation();
         let original = input.workload.clone();
-        input.maximum_resident_bytes = maximum;
+        input.maximum_resident_bytes = Some(maximum);
         let mesh = input.mesh.clone();
         let task = prepare_thermal_task(input).unwrap();
         assert_eq!(
@@ -52,7 +52,7 @@ fn placement_budget_changes_resource_identity_without_rewriting_thermal_intent()
     }
     assert_ne!(plans[0], plans[1]);
     let mut refused = preparation();
-    refused.maximum_resident_bytes = 1;
+    refused.maximum_resident_bytes = Some(1);
     assert!(prepare_thermal_task(refused).is_err());
 }
 
