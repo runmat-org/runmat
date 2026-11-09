@@ -252,13 +252,15 @@ async fn execute_command(
         } => {
             boxed_command(|| {
                 fea::snapshot(
-                    file,
-                    study,
-                    step,
-                    case,
-                    views,
-                    out,
-                    presentation,
+                    fea::SnapshotRequest {
+                        file,
+                        study,
+                        step,
+                        case,
+                        views,
+                        out,
+                        presentation,
+                    },
                     cli,
                     config,
                 )

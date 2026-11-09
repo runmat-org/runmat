@@ -59,7 +59,7 @@ fn a_lofted_surface_thickens_into_a_solid() {
     // the 20 mm section; its outside passes the 10 mm section's radius.
     let width = b["max"][0].as_f64().unwrap() - b["min"][0].as_f64().unwrap();
     assert!(
-        height >= 0.02 - 1e-6 && height < 0.0215,
+        (0.02 - 1e-6..0.0215).contains(&height),
         "the solid spans the two sections: {b}"
     );
     assert!(

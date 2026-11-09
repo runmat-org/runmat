@@ -76,7 +76,14 @@ fn repository_fixture(temp: &TempDir) -> PathBuf {
 }
 
 fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
-    runmat_from_repository_through(temp, args, None).0
+    runmat_from_repository_through(temp, args, None).output
+}
+
+struct RepositoryRun {
+    output: Output,
+    requests: Vec<(String, &'static str)>,
+    receipts: Vec<Value>,
+    closed_for: Option<std::time::Duration>,
 }
 
 /// Run from the repository against the test Server, optionally closing the Server's port
@@ -85,12 +92,7 @@ fn runmat_from_repository_through(
     temp: &TempDir,
     args: &[&str],
     outage: Option<fea_admission::Outage>,
-) -> (
-    Output,
-    Vec<(String, &'static str)>,
-    Vec<Value>,
-    Option<std::time::Duration>,
-) {
+) -> RepositoryRun {
     let repository = repository_fixture(temp);
     let config = temp.path().join("runmat.toml");
     let artifact_root =
@@ -132,15 +134,20 @@ fn runmat_from_repository_through(
     };
     let output = command.output().expect("run repository FEA example");
     let Some(admission) = admission else {
-        return (output, Vec::new(), Vec::new(), None);
+        return RepositoryRun {
+            output,
+            requests: Vec::new(),
+            receipts: Vec::new(),
+            closed_for: None,
+        };
     };
     let journal = admission.journal();
-    (
+    RepositoryRun {
         output,
-        journal.requests.clone(),
-        journal.receipts.clone(),
-        journal.closed_for,
-    )
+        requests: journal.requests.clone(),
+        receipts: journal.receipts.clone(),
+        closed_for: journal.closed_for,
+    }
 }
 
 fn assert_fea_checks(temp: &TempDir, path: &str) {
@@ -803,7 +810,11 @@ fn acoustic_cavity_example_runs_its_certified_frequency_sweep() {
 fn a_server_restart_mid_run_keeps_the_lease_and_meters_the_same_operations() {
     let path = "docs/simulation/examples/acoustic-cavity-harmonic.fea";
     let steady_temp = TempDir::new().unwrap();
-    let (steady, _, steady_receipts, _) = runmat_from_repository_through(
+    let RepositoryRun {
+        output: steady,
+        receipts: steady_receipts,
+        ..
+    } = runmat_from_repository_through(
         &steady_temp,
         &["run", path, "--json"],
         Some(fea_admission::Outage {
@@ -817,7 +828,12 @@ fn a_server_restart_mid_run_keeps_the_lease_and_meters_the_same_operations() {
         String::from_utf8_lossy(&steady.stderr)
     );
     let temp = TempDir::new().unwrap();
-    let (output, requests, receipts, closed_for) = runmat_from_repository_through(
+    let RepositoryRun {
+        output,
+        requests,
+        receipts,
+        closed_for,
+    } = runmat_from_repository_through(
         &temp,
         &["run", path, "--json"],
         Some(fea_admission::Outage {

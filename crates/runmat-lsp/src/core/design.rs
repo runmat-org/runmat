@@ -380,10 +380,8 @@ impl DesignDocumentAnalysis {
 
     fn file_location(&self, written: &str) -> Option<Location> {
         let mut target = runmat_circuit::runtime::resolve_path(self.uri.path(), written);
-        if Dialect::for_path(&target).is_none() {
-            // `use circuit io from "./io"` and other extension-free paths name the kind's file.
-            return None;
-        }
+        // `use circuit io from "./io"` and other extension-free paths name the kind's file.
+        Dialect::for_path(&target)?;
         if !target.starts_with('/') {
             target = format!("/{target}");
         }

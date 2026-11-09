@@ -23,7 +23,7 @@ mod run;
 mod snapshot;
 pub(crate) mod source;
 
-pub use command::{plan, reassess, render_snapshot, snapshot, verify_snapshot};
+pub use command::{plan, reassess, render_snapshot, snapshot, verify_snapshot, SnapshotRequest};
 
 /// Largest saved study publication manifest that reassessment and snapshot rendering read. A
 /// manifest grows with the mesh: the 241,984-tetrahedron battery-module study writes 20.5 MB.

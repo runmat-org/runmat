@@ -102,15 +102,15 @@ struct Detail {
     cap_triangle_budget: usize,
 }
 
-enum Attempt {
-    Fits(Encoded),
-    /// The encoded scene is `required` bytes and the consumer accepts `maximum`; `cap` is the
-    /// section cap drawn (triangles, evaluation grid) for a section view.
-    TooLarge {
-        required: usize,
-        maximum: usize,
-        cap: Option<(usize, usize)>,
-    },
+/// Encoding within a payload budget. A limit miss can retry at lower detail;
+/// fatal encoding failures use the outer runtime result.
+type EncodingAttempt = std::result::Result<Encoded, ScenePayloadLimit>;
+
+struct ScenePayloadLimit {
+    required: usize,
+    maximum: usize,
+    /// The section cap drawn (triangles, evaluation grid) for a section view.
+    cap: Option<(usize, usize)>,
 }
 
 /// The next lighter drawing of a view whose scene is `required` bytes against a `maximum`
@@ -202,7 +202,7 @@ pub(super) async fn capture(
             })
             .transpose()
             .map_err(anyhow::Error::msg)?;
-        let encode = |detail: Detail| -> Result<Attempt> {
+        let encode = |detail: Detail| -> Result<EncodingAttempt> {
             let (mut scene, deformation_scale, surface, volume) = match spec.volume {
                 Some(volume) => {
                     let solver_mesh = mesh_path.as_deref().ok_or_else(|| {
@@ -299,18 +299,18 @@ pub(super) async fn capture(
                         maximum,
                     } = error.kind()
                     {
-                        return Ok(Attempt::TooLarge {
+                        return Ok(Err(ScenePayloadLimit {
                             required,
                             maximum,
                             cap: volume.as_ref().and_then(|volume| {
                                 volume.cap_triangles.zip(volume.cap_subdivisions)
                             }),
-                        });
+                        }));
                     }
                     return Err(anyhow::Error::new(error));
                 }
             };
-            Ok(Attempt::Fits(Encoded {
+            Ok(Ok(Encoded {
                 minimum: range.map(|range| range.0),
                 maximum: range.map(|range| range.1),
                 display_unit,
@@ -351,12 +351,12 @@ pub(super) async fn capture(
             };
             loop {
                 let (required, maximum, cap) = match encode(detail)? {
-                    Attempt::Fits(encoded) => break encoded,
-                    Attempt::TooLarge {
+                    Ok(encoded) => break encoded,
+                    Err(ScenePayloadLimit {
                         required,
                         maximum,
                         cap,
-                    } => (required, maximum, cap),
+                    }) => (required, maximum, cap),
                 };
                 detail = match lighter(detail, spec.volume.is_some(), required, maximum, cap) {
                     Some(lighter) => lighter,
