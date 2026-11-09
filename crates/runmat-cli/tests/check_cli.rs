@@ -243,28 +243,51 @@ fn canonical_fea_documentation_examples_check_cleanly() {
     }
 }
 
-// The trace-impedance example checks, and its line-parameter outputs lower to reductions of the
-// section. `runmat run` admits `electromagnetic line_parameters` once the cross-section solve
-// publishes (ledger row electromagnetic.line_parameters). When this run succeeds, replace this
-// test with the FEA-EM-LINE-001/public_study witness on Z0 and Zdiff.
+// witness: FEA-EM-LINE-001/public_study @ quasi_static_tem/tri3/public_study; coverage: partial;
+//   boundary: The page's trace-impedance example runs both studies through `runmat run`: the
+//   single-ended microstrip publishes Z0 within [49.7, 50.7] Ω and the edge-coupled pair Zdiff
+//   within [98.7, 100.7] Ω on the default graded mesh, inline stackup; the layout-file stackup
+//   is covered at check time only.
 #[test]
-fn trace_impedance_example_run_waits_for_the_line_parameters_procedure() {
+fn trace_impedance_example_publishes_the_microstrip_and_pair_impedances() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/simulation/examples/trace-impedance.fea";
-    let output = runmat_from_repository(&temp, &["run", path, "--study", "microstrip", "--json"]);
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        !output.status.success(),
-        "{path} now runs: add the Z0 and Zdiff witness and land the ledger rows\n{text}"
-    );
-    assert!(
-        text.contains("electromagnetic.line_parameters"),
-        "{path}: the run rejection does not name the pending procedure\n{text}"
-    );
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("trace-impedance.fea")).unwrap();
+    let anchor_single = "    output delay = analysis.line.delay.line\n";
+    let anchor_pair = "    output l = analysis.lines.inductance\n";
+    assert!(source.contains(anchor_single) && source.contains(anchor_pair));
+    let witness = source
+        .replace(
+            anchor_single,
+            &format!("{anchor_single}    assessment z0_band {{ value = output.z0; minimum = 49.7 V/A; maximum = 50.7 V/A; evidence = authored_samples }}\n"),
+        )
+        .replace(
+            anchor_pair,
+            &format!("{anchor_pair}    assessment zdiff_band {{ value = output.z_diff; minimum = 98.7 V/A; maximum = 100.7 V/A; evidence = authored_samples }}\n"),
+        );
+    fs::write(examples.join("trace-impedance.witness.fea"), witness).unwrap();
+    let path = "docs/simulation/examples/trace-impedance.witness.fea";
+    for (study, assessment, label) in [
+        ("microstrip", "z0_band", "Z0"),
+        ("differential_pair", "zdiff_band", "Zdiff"),
+    ] {
+        let output = runmat_from_repository(&temp, &["run", path, "--study", study, "--json"]);
+        assert!(
+            output.status.success(),
+            "{path} --study {study} failed:\nstdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let manifest_path = payload["result_manifest_artifact_path"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{study}: no manifest path in {payload}"));
+        let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+        assert_eq!(manifest["public_run"]["run_status"], "completed", "{study}");
+        assert_eq!(manifest["public_run"]["numerically_acceptable"], true, "{study}");
+        let value = passed_assessment(&payload, assessment);
+        eprintln!("trace-impedance {study}: {label} = {value} Ω");
+    }
 }
 
 #[test]

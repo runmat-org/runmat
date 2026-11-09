@@ -2740,6 +2740,10 @@ export type ObservationQuantity = "displacement"
   | "common_mode_impedance"
   | "odd_mode_impedance"
   | "even_mode_impedance"
+  | "odd_mode_effective_permittivity"
+  | "even_mode_effective_permittivity"
+  | "odd_mode_delay"
+  | "even_mode_delay"
   | "near_end_coupling"
   | "far_end_coupling";
 

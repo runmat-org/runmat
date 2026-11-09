@@ -209,3 +209,87 @@ pub(super) fn solver_mesh_artifact(
     artifact.seal_canonical_digest().map_err(invalid)?;
     Ok(artifact)
 }
+
+/// Evidence for a cross-section mesh artifact: one serialization stage of the graded mapped
+/// mesh, measured against the ceilings the run admitted. `elapsed_time_ms` is the meshing
+/// wall time; `platform` identifies the host that built it.
+pub fn cross_section_meshing_evidence(
+    artifact: &SolverMeshArtifact,
+    ceilings: runmat_meshing_core::MeshingExecutionCeilings,
+    platform: runmat_meshing_core::PlatformBuildIdentity,
+    elapsed_time_ms: u64,
+) -> Result<runmat_meshing_core::MeshingEvidence, CrossSectionError> {
+    use runmat_meshing_core::{
+        CacheAdmissionDecision, CanonicalMeshingContract, InvariantEvidence,
+        MeshingPartitionDescriptor, MeshingPartitionKind, MeshingResourceUsage,
+        MeshingStageEvidence, MeshingStageKind, MESHING_EVIDENCE_SCHEMA_VERSION,
+    };
+    let invalid = |error: runmat_meshing_core::MeshingContractError| {
+        CrossSectionError::Invalid(format!("cross-section meshing evidence: {error}"))
+    };
+    let nodes = artifact.topology.nodes.len() as u64;
+    let elements = artifact.generated_element_count();
+    let artifact_bytes = artifact.canonical_encode().map_err(invalid)?.len() as u64;
+    let peak_memory_bytes = nodes.saturating_mul(super::mesh::BYTES_PER_NODE);
+    let mut stage_digest = Sha256::new();
+    stage_digest.update(STAGE_DOMAIN);
+    stage_digest.update(artifact.canonical_digest.bytes());
+    let stage = MeshingStageEvidence {
+        reused_from: None,
+        stage: MeshingStageKind::Serialization,
+        partition: MeshingPartitionDescriptor {
+            kind: MeshingPartitionKind::WholeStage,
+            partition_index: 0,
+            partition_count: 1,
+            entity_range: None,
+        },
+        stage_result_digest: StableDigest::from_bytes(stage_digest.finalize().into()),
+        entity_counts: std::collections::BTreeMap::from([
+            ("serialized_nodes".to_string(), nodes),
+            ("serialized_triangles".to_string(), elements),
+        ]),
+        invariants: vec![InvariantEvidence {
+            invariant_id: "canonical_artifact_valid".to_string(),
+            passed: true,
+            measured: None,
+            required: None,
+            unit: None,
+        }],
+        achieved_error_distributions: std::collections::BTreeMap::new(),
+        completed_work: elements.max(1),
+        estimated_work: elements.max(1),
+        peak_memory_bytes,
+        peak_scratch_bytes: artifact_bytes,
+        search_work: elements.max(1),
+        maximum_recursion_depth: 1,
+        iterations: 1,
+        elapsed_time_ms,
+        cancellation_checkpoints: 1,
+    };
+    let evidence = runmat_meshing_core::MeshingEvidence {
+        schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
+        geometry: artifact.geometry.clone(),
+        resolved_request_digest: artifact.resolved_request.canonical_digest().map_err(invalid)?,
+        artifact_digest: artifact.canonical_digest,
+        algorithms: artifact.resolved_request.algorithms.clone(),
+        deterministic_seed: artifact.resolved_request.deterministic_seed,
+        platform,
+        stages: vec![stage],
+        sizing: Vec::new(),
+        resources: MeshingResourceUsage {
+            generated_nodes: nodes,
+            generated_elements: elements,
+            peak_memory_bytes,
+            peak_scratch_bytes: artifact_bytes,
+            wall_time_ms: elapsed_time_ms,
+            artifact_bytes,
+            search_work: elements.max(1),
+            maximum_recursion_depth: 1,
+            iterations: 1,
+        },
+        ceilings,
+        cache_admission: CacheAdmissionDecision::RejectedPolicy,
+    };
+    evidence.validate(artifact).map_err(invalid)?;
+    Ok(evidence)
+}

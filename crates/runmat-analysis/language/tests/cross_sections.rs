@@ -164,7 +164,7 @@ study lines {
     output z_diff = analysis.lines.differential_impedance
     output next = analysis.lines.near_end_coupling
     output c = analysis.lines.capacitance
-    assessment pair_target { value = output.z_diff; minimum = 90 V/A; maximum = 110 V/A }
+    assessment pair_target { value = output.z_diff; minimum = 90 V/A; maximum = 110 V/A; evidence = authored_samples }
 }
 "#;
 

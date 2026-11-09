@@ -140,6 +140,14 @@ pub enum ObservationQuantity {
     OddModeImpedance,
     /// Even-mode impedance of a pair, Ω.
     EvenModeImpedance,
+    /// Odd-mode (differential) effective relative permittivity of a pair.
+    OddModeEffectivePermittivity,
+    /// Even-mode (common) effective relative permittivity of a pair.
+    EvenModeEffectivePermittivity,
+    /// Odd-mode propagation delay per length of a pair, s/m.
+    OddModeDelay,
+    /// Even-mode propagation delay per length of a pair, s/m.
+    EvenModeDelay,
     /// Backward (near-end) coupling coefficient K_b of a pair.
     NearEndCoupling,
     /// Forward (far-end) coupling coefficient K_f of a pair.
@@ -179,6 +187,8 @@ impl ObservationQuantity {
             | Self::Balance
             | Self::ConstraintViolation
             | Self::LineEffectivePermittivity
+            | Self::OddModeEffectivePermittivity
+            | Self::EvenModeEffectivePermittivity
             | Self::NearEndCoupling
             | Self::FarEndCoupling => D::DIMENSIONLESS,
             Self::LineImpedance
@@ -188,7 +198,9 @@ impl ObservationQuantity {
             | Self::EvenModeImpedance => D::ELECTRIC_POTENTIAL
                 .divide(D::ELECTRIC_CURRENT)
                 .expect("static dimension"),
-            Self::LineDelay => D::TIME.divide(D::LENGTH).expect("static dimension"),
+            Self::LineDelay | Self::OddModeDelay | Self::EvenModeDelay => {
+                D::TIME.divide(D::LENGTH).expect("static dimension")
+            }
             Self::LineCapacitance | Self::LineVacuumCapacitance => D::ELECTRIC_CURRENT
                 .multiply(D::TIME)
                 .expect("static dimension")
@@ -422,6 +434,10 @@ impl ObservationQuantity {
             "common_mode_impedance" => Self::CommonModeImpedance,
             "odd_mode_impedance" => Self::OddModeImpedance,
             "even_mode_impedance" => Self::EvenModeImpedance,
+            "odd_mode_effective_permittivity" => Self::OddModeEffectivePermittivity,
+            "even_mode_effective_permittivity" => Self::EvenModeEffectivePermittivity,
+            "odd_mode_delay" => Self::OddModeDelay,
+            "even_mode_delay" => Self::EvenModeDelay,
             "near_end_coupling" => Self::NearEndCoupling,
             "far_end_coupling" => Self::FarEndCoupling,
             _ => return None,
@@ -438,6 +454,10 @@ impl ObservationQuantity {
             | Self::CommonModeImpedance
             | Self::OddModeImpedance
             | Self::EvenModeImpedance
+            | Self::OddModeEffectivePermittivity
+            | Self::EvenModeEffectivePermittivity
+            | Self::OddModeDelay
+            | Self::EvenModeDelay
             | Self::NearEndCoupling
             | Self::FarEndCoupling => LineParameterScope::Pair,
             Self::LineCapacitance | Self::LineVacuumCapacitance | Self::LineInductance => {

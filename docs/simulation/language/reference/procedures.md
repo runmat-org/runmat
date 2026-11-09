@@ -121,7 +121,7 @@ analysis response after analysis.modes {
 | `electromagnetic harmonic` | `frequencies` |
 | `electromagnetic transient` [not yet in the current release](pending:electromagnetic.transient) | `start_time`, `end_time`, `time_step` |
 | `electromagnetic nonlinear` [not yet in the current release](pending:electromagnetic.nonlinear) | `start_load_factor`, `end_load_factor` |
-| `electromagnetic line_parameters` [not yet in the current release](pending:electromagnetic.line_parameters) | none; the `cross_section` geometry carries the stackup and traces ([trace impedance](../../physics/trace-impedance.md)) |
+| `electromagnetic line_parameters` | none; the `cross_section` geometry carries the stackup and traces ([trace impedance](../../physics/trace-impedance.md)) |
 
 ## Acoustic procedures
 

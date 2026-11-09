@@ -223,6 +223,14 @@ fn line_parameter_values(
                 ObservationQuantity::CommonModeImpedance => pair.common_mode_impedance_ohm,
                 ObservationQuantity::OddModeImpedance => pair.odd_mode_impedance_ohm,
                 ObservationQuantity::EvenModeImpedance => pair.even_mode_impedance_ohm,
+                ObservationQuantity::OddModeEffectivePermittivity => {
+                    pair.odd_mode_effective_permittivity
+                }
+                ObservationQuantity::EvenModeEffectivePermittivity => {
+                    pair.even_mode_effective_permittivity
+                }
+                ObservationQuantity::OddModeDelay => pair.odd_mode_delay_s_per_m,
+                ObservationQuantity::EvenModeDelay => pair.even_mode_delay_s_per_m,
                 ObservationQuantity::NearEndCoupling => pair.near_end_coupling,
                 ObservationQuantity::FarEndCoupling => pair.far_end_coupling,
                 _ => unreachable!("pair scope"),
