@@ -4,7 +4,7 @@ use runmat_circuit::runtime::{self, CompileOptions, EditRequest, Files};
 use runmat_circuit::syntax::{parse_circuit, print_circuit};
 use serde_json::{json, Value};
 
-const CIRCUIT: &str = "runmat 0.7\nstd 1\n\ncircuit board {\n    root = main\n\n    sheet main {\n        component R1 = { part = \"R0402-10K\" }\n        net GND = { global = true }\n        connect = [net.GND, \"R1.2\"]\n    }\n\n    sheet empty {\n    }\n}\n";
+const CIRCUIT: &str = "runmat 0.7\nstd 1\n\ncircuit board {\n    root = main\n\n    sheet main {\n        instance empty = { sheet = empty }\n        component R1 = { part = \"R0402-10K\" }\n        net GND = { global = true }\n        connect = [net.GND, \"R1.2\"]\n    }\n\n    sheet empty {\n    }\n}\n";
 
 fn buck() -> Value {
     json!({
