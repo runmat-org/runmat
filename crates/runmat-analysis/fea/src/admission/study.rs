@@ -128,6 +128,9 @@ pub enum AdmittedFamily {
     AcousticResponse,
     Electrical,
     Fluid,
+    /// Per-length line parameters of a cross-section: solved in place on the section's
+    /// triangle mesh, with no exact geometry or volume mesh.
+    LineParameters,
     Nonlinear,
     Magnetic,
     Maxwell,
@@ -543,6 +546,18 @@ pub fn select_family(
         && sequence.branches.is_empty()
     {
         return Ok(AdmittedFamily::Acoustic);
+    }
+    if step.family == PhysicsFamily::Electromagnetic
+        && step.procedure == AnalysisProcedure::LineParameters
+        && step.solution_space == SolutionSpace::Direct
+        && step.restart == RestartPolicy::Fresh
+        && step.state_inputs.is_empty()
+        && step.activations.is_empty()
+        && sequence.dependencies.is_empty()
+        && sequence.transitions.is_empty()
+        && sequence.branches.is_empty()
+    {
+        return Ok(AdmittedFamily::LineParameters);
     }
     if is_electrothermal(sequence) {
         return Ok(AdmittedFamily::Thermal);

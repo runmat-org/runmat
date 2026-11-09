@@ -719,7 +719,8 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
         }
         AnalysisSolverOptions::ElectricalStatic(_)
         | AnalysisSolverOptions::Magnetostatic(_)
-        | AnalysisSolverOptions::MaxwellHarmonic(_) => {
+        | AnalysisSolverOptions::MaxwellHarmonic(_)
+        | AnalysisSolverOptions::LineParameters(_) => {
             panic!(
                 "typed electromagnetic completions have no synthetic scalar-harness primary field"
             )
@@ -2881,7 +2882,8 @@ fn run_fixture_cpu(
         ),
         AnalysisSolverOptions::ElectricalStatic(_)
         | AnalysisSolverOptions::Magnetostatic(_)
-        | AnalysisSolverOptions::MaxwellHarmonic(_) => panic!(
+        | AnalysisSolverOptions::MaxwellHarmonic(_)
+        | AnalysisSolverOptions::LineParameters(_) => panic!(
             "electromagnetic fixtures must execute through the governed typed study runner, not the legacy single-run fixture harness"
         ),
     })
@@ -2972,7 +2974,8 @@ fn run_fixture_gpu(
         ),
         AnalysisSolverOptions::ElectricalStatic(_)
         | AnalysisSolverOptions::Magnetostatic(_)
-        | AnalysisSolverOptions::MaxwellHarmonic(_) => panic!(
+        | AnalysisSolverOptions::MaxwellHarmonic(_)
+        | AnalysisSolverOptions::LineParameters(_) => panic!(
             "electromagnetic fixtures must execute through the governed typed study runner, not the legacy single-run fixture harness"
         ),
     }

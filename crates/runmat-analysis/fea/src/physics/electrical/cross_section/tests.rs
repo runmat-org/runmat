@@ -474,3 +474,34 @@ fn calibrate_mesh_defaults() {
         }
     }
 }
+
+/// The published mesh is exactly the mesh the potential solves ran on, as one canonical
+/// surface artifact whose geometry identity is the section digest.
+#[test]
+fn solved_section_publishes_its_mesh_as_one_canonical_artifact() {
+    use runmat_meshing_core::{CanonicalMeshingContract, MeshDimension, StableDigest};
+    let section = example_section(&[("p", -0.2 * MM, 0.23 * MM), ("n", 0.2 * MM, 0.23 * MM)]);
+    let tolerance = runmat_meshing_core::GeometryTolerancePolicy {
+        source_tolerance_m: runmat_types::physical::Length::new(0.0),
+        absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
+        model_relative_term: 1.0e-9,
+        requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+        maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
+    };
+    let request = runmat_meshing_core::resolve_meshing_request(
+        tolerance,
+        runmat_meshing_core::MeshingRequestSettings::default(),
+    )
+    .unwrap();
+    let digest = StableDigest::from_bytes([7; 32]);
+    let solved = solve_cross_section_with_mesh(&section, digest, request).unwrap();
+    let reference = solve_cross_section(&section).unwrap();
+    assert_eq!(solved.parameters, reference);
+    let mesh = &solved.mesh;
+    mesh.validate_canonical().unwrap();
+    assert_eq!(mesh.resolved_request.dimension, MeshDimension::Surface);
+    assert_eq!(mesh.topology.nodes.len(), reference.mesh.nodes);
+    assert_eq!(mesh.topology.boundary_faces.len(), reference.mesh.elements);
+    assert_eq!(mesh.geometry, cross_section_geometry(digest));
+    assert!(mesh.topology.nodes.iter().all(|node| node.coordinates_m.canonical_value()[2] == 0.0));
+}
