@@ -230,7 +230,7 @@ impl ThermalWorkload {
         &'a self,
         mesh: &'a SolverMeshArtifact,
     ) -> Result<super::PreparedThermalSolve<'a>, FeaRunError> {
-        let (step, options) = self.admitted_controls()?;
+        let (step, options) = self.admitted_controls(u64::MAX)?;
         crate::pipeline::thermal::prepare_selected(&self.model, self.backend, options, mesh, step)
     }
     /// Admit numerical fields and original selectors; published-field tasks admit observation execution.
@@ -247,38 +247,30 @@ impl ThermalWorkload {
         mesh: &'a SolverMeshArtifact,
         maximum_resident_bytes: u64,
     ) -> Result<super::PreparedThermalPrimarySolve<'a>, FeaRunError> {
-        let maximum = self
-            .validated_step_with_dependency_graph_budget(maximum_resident_bytes)
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?
-            .accuracy
-            .resources
-            .resident_byte_budget()
-            .min(maximum_resident_bytes);
-        crate::planning::resource::ThermalPreassemblyResourceFacts::require_input_fits(
-            &self.model,
-            &self.initial_fields,
-            maximum,
-        )?;
-        let (step, options) = self.admitted_controls()?;
+        let (step, options) = self.admitted_controls(maximum_resident_bytes)?;
         crate::pipeline::thermal::prepare_selected_primary(
             &self.model,
             self.backend,
             options,
             mesh,
             step,
-            maximum,
+            maximum_resident_bytes,
         )
     }
     fn admitted_controls(
         &self,
+        maximum_resident_bytes: u64,
     ) -> Result<(&ProcedureStep, crate::ThermalSolveOptions), FeaRunError> {
         let step = self
-            .validated_step()
+            .validated_step_with_dependency_graph_budget(maximum_resident_bytes)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
         crate::planning::resource::ThermalPreassemblyResourceFacts::require_input_fits(
             &self.model,
             &self.initial_fields,
-            step.accuracy.resources.resident_byte_budget(),
+            step.accuracy
+                .resources
+                .resident_byte_budget()
+                .min(maximum_resident_bytes),
         )?;
         Ok((
             step,
