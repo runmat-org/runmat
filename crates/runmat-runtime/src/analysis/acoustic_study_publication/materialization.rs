@@ -34,6 +34,9 @@ pub(in crate::analysis) struct AcousticFrequencyCompletionResults {
     pub result: runmat_analysis_fea::execution::AcousticFrequencyResult,
     pub publication: runmat_analysis_fea::execution::FrequencySamplePublicationManifest,
     pub entries: Vec<AcousticStudyEntryCompletion>,
+    pub history_catalog:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    pub series_reductions: Vec<runmat_analysis_fea::results::observation::SeriesReductionResult>,
     pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
 }
 
@@ -78,6 +81,8 @@ impl AcousticFrequencyCompletionResults {
             workload: self.workload.clone(),
             publication: self.publication.clone(),
             entries,
+            history_catalog: self.history_catalog.clone(),
+            series_reductions: self.series_reductions.clone(),
             resource_usage: self.resource_usage.clone(),
         })
     }
@@ -147,6 +152,8 @@ pub(super) fn admit(
             result: completed.result.clone(),
             publication: completed.publication.clone(),
             entries: completed.entries.clone(),
+            history_catalog: completed.history_catalog.clone(),
+            series_reductions: completed.series_reductions.clone(),
             resource_usage: completed.resource_usage.clone(),
         }),
         persistence: AcousticFrequencyPersistence {

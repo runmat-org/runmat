@@ -16,6 +16,12 @@ pub struct AcousticStudyCompletion {
     pub workload: AcousticFrequencyWorkload,
     pub result: AcousticFrequencyResult,
     pub entries: Vec<AcousticStudyEntryCompletion>,
+    /// Histories over the sweep's frequencies, finalized after the last entry; the entry
+    /// catalogs publish only the outputs their frequency schedules.
+    pub history_catalog:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    /// The series reductions of `history_catalog`'s histories, in authored order.
+    pub series_reductions: Vec<runmat_analysis_fea::results::observation::SeriesReductionResult>,
     pub publication: FrequencySamplePublicationManifest,
     pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
     pub publication_catalog: PublishedObjectCatalog,
@@ -34,7 +40,7 @@ pub struct AcousticStudyEntryCompletion {
     pub host_workload_digest: Digest,
     pub result: AcousticHarmonicSolverResult,
     pub numerical_receipt: AcousticNumericalReceiptArtifact,
-    /// Authored outputs evaluated at this frequency, with their publication catalog.
+    /// The authored outputs this frequency schedules, with their publication catalog.
     pub observation_catalog:
         Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
     pub observation_results: Vec<runmat_analysis_fea::results::observation::ObservationResult>,

@@ -18,7 +18,7 @@ mod partition;
 mod publication;
 mod publish;
 pub use publication::{
-    ObservationHistoryPublication, ObservationPublicationCatalog,
+    ObservationHistoryPublication, ObservationPublicationCatalog, ObservationPublicationScope,
     ObservationPublicationCatalogIdentity, ObservationPublicationEntry,
     ObservationSamplePublication, SeriesReductionPublication,
     SeriesReductionPublicationContribution,

@@ -101,6 +101,79 @@ pub(super) fn validate(
         validate_options(options, completed.workload.solver.relative_tolerance)?;
         validate_entry(completed, mesh, step)?;
     }
+    validate_histories(completed, mesh, step)
+}
+
+/// The histories over the sweep's frequencies: one catalog over every entry's field catalog,
+/// with each authored history and its series reduction.
+fn validate_histories(
+    completed: &AcousticStudyCompletion,
+    mesh: &SolverMeshArtifact,
+    step: &runmat_analysis_core::ProcedureStep,
+) -> Result<(), String> {
+    use runmat_analysis_fea::results::observation::{
+        ObservationFieldCatalogSource, ObservationPublicationEntry, ObservationPublicationScope,
+    };
+    let declared = step
+        .observations
+        .iter()
+        .any(|request| matches!(request, runmat_analysis_core::ObservationRequest::History(_)));
+    let catalog = match &completed.history_catalog {
+        None if !declared && completed.series_reductions.is_empty() => return Ok(()),
+        Some(catalog) if declared => catalog,
+        _ => return Err("acoustic history catalog differs from the authored step".into()),
+    };
+    if catalog.scope() != ObservationPublicationScope::EntryHistories {
+        return Err("acoustic history catalog has another publication scope".into());
+    }
+    catalog
+        .validate_for(
+            step,
+            runmat_analysis_fea::execution::ObservationHistorySourceContext::VolumeMesh { mesh },
+        )
+        .map_err(|e| e.to_string())?;
+    let ObservationFieldCatalogSource::EntryHistory { samples } = catalog.source().source() else {
+        return Err("acoustic history catalog is not an entry history".into());
+    };
+    if samples.len() != completed.entries.len()
+        || samples
+            .iter()
+            .zip(&completed.entries)
+            .any(|(sample, entry)| {
+                entry
+                    .observation_catalog
+                    .as_ref()
+                    .is_some_and(|catalog| catalog.source() != sample)
+            })
+    {
+        return Err("acoustic history catalog differs from the entries' field catalogs".into());
+    }
+    // Catalog entries are in canonical identifier order; reductions are in authored order.
+    let mut matched = 0;
+    for entry in catalog.entries() {
+        let ObservationPublicationEntry::History(history) = entry else {
+            return Err("acoustic history catalog publishes an entry sample".into());
+        };
+        if let Some(series) = &history.series {
+            let mut candidates = completed
+                .series_reductions
+                .iter()
+                .filter(|reduction| reduction.observation_id == history.history.observation_id);
+            let reduction = candidates
+                .next()
+                .ok_or("acoustic history omits its series reduction")?;
+            if candidates.next().is_some() {
+                return Err("acoustic history has more than one series reduction".into());
+            }
+            series
+                .validate_published_result(reduction, &history.history, &history.request)
+                .map_err(|e| e.to_string())?;
+            matched += 1;
+        }
+    }
+    if matched != completed.series_reductions.len() {
+        return Err("acoustic publication has an undeclared series reduction".into());
+    }
     Ok(())
 }
 
@@ -155,20 +228,35 @@ fn validate_entry(
             catalog
                 .validate_authored_step(step)
                 .map_err(|e| e.to_string())?;
+            if catalog.scope()
+                != runmat_analysis_fea::results::observation::ObservationPublicationScope::Entry
+            {
+                return Err("acoustic entry catalog has another publication scope".into());
+            }
             let sample = runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
                 completed.workload.frequency.canonical_value(),
             );
-            if completed.observation_results.len() != step.observations.len()
+            // The outputs this frequency schedules, in authored order.
+            let plan = catalog.plan();
+            let mut scheduled = Vec::new();
+            for observation in &plan.observations {
+                if runmat_analysis_fea::results::observation::resolved_observation_accepts_sample(
+                    plan,
+                    observation,
+                    sample,
+                    None,
+                )
+                .map_err(|e| e.to_string())?
+                {
+                    scheduled.push(&observation.spec.observation_id);
+                }
+            }
+            if completed.observation_results.len() != scheduled.len()
                 || completed
                     .observation_results
                     .iter()
-                    .zip(&step.observations)
-                    .any(|(result, request)| {
-                        request
-                            .spec()
-                            .is_none_or(|spec| spec.observation_id != result.observation_id)
-                            || result.sample != sample
-                    })
+                    .zip(scheduled)
+                    .any(|(result, id)| &result.observation_id != id || result.sample != sample)
             {
                 return Err(
                     "acoustic outputs differ from the authored observations at this frequency"

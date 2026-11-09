@@ -562,3 +562,59 @@ mod tests {
             .is_none());
     }
 }
+
+/// Scalar evidence of an acoustic sweep: the scalar outputs each frequency publishes and the
+/// series reductions of the histories over the frequencies. A history sample evaluated at one
+/// entry never stands in for its history. The record was admitted whole, so the copy is
+/// bounded by the caller's admitted workspace.
+pub(super) fn assessment_evidence(
+    artifact: &PersistedAcousticFrequencyArtifact,
+    maximum_resident_bytes: u64,
+) -> Result<super::AssessmentRunEvidence, super::AssessmentStoreError> {
+    use super::AssessmentStoreError as Error;
+    use runmat_analysis_fea::results::assessment::{
+        scalar_observation_evidence, scalar_series_evidence,
+    };
+    validate_artifact(artifact, &artifact.step.run_id).map_err(Error::Invalid)?;
+    let AnalysisStudyStepNumericalResultData::AcousticFrequency(result) =
+        &artifact.step.numerical_result
+    else {
+        return Err(Error::Invalid(
+            "acoustic frequency evidence has another result kind".into(),
+        ));
+    };
+    let histories = result
+        .history_catalog
+        .iter()
+        .flat_map(|catalog| catalog.entries())
+        .filter_map(|entry| match entry {
+            runmat_analysis_fea::results::observation::ObservationPublicationEntry::History(
+                history,
+            ) => Some(&history.history.observation_id),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let scalars = result
+        .entries
+        .iter()
+        .flat_map(|entry| &entry.observations)
+        .filter(|observation| !histories.contains(&observation.observation_id))
+        .filter_map(scalar_observation_evidence)
+        .chain(result.series_reductions.iter().filter_map(scalar_series_evidence))
+        .collect::<Vec<_>>();
+    let resident = scalars
+        .len()
+        .checked_mul(std::mem::size_of::<
+            runmat_analysis_fea::results::assessment::ScalarObservationEvidence,
+        >())
+        .and_then(|bytes| u64::try_from(bytes).ok())
+        .ok_or(Error::ResourceLimit)?;
+    if resident > maximum_resident_bytes {
+        return Err(Error::ResourceLimit);
+    }
+    Ok(super::AssessmentRunEvidence {
+        identity: artifact.step.identity.clone(),
+        numerically_acceptable: artifact.step.numerically_acceptable,
+        observation_scalars: scalars,
+    })
+}

@@ -85,6 +85,7 @@ impl<S: CacheImport + Send + Sync> AcousticStudySource for RetainedAcousticSourc
             self,
             self.completed.preparation().map_err(|e| e.to_string())?,
             self.completed.entry_closures(),
+            self.completed.history_closures.clone(),
             self.completed.assembly_closure.clone(),
             self.completed.wave_wall_millis,
         )
@@ -206,25 +207,17 @@ fn completion(
                     result: entry.result.result.clone(),
                     numerical_receipt: entry.result.numerical_receipt.clone(),
                     observation_catalog: entry.observation_catalog.clone(),
+                    // The outputs this frequency schedules, in authored order.
                     observation_results: match &entry.observations {
-                        Some(observations) => entry
-                            .workload
-                            .model
-                            .sequence
-                            .steps
+                        Some(observations) => observations
+                            .manifest
+                            .results
                             .iter()
-                            .find(|step| step.step_id == entry.workload.step_id)
-                            .ok_or("acoustic entry omits its selected authored step")?
-                            .observations
-                            .iter()
-                            .map(|request| {
-                                let spec = request.spec().ok_or(
-                                    "acoustic publication has a non-field observation without a result spec",
-                                )?;
+                            .map(|result| {
                                 runmat_analysis_execution::import_observation_result(
                                     source,
                                     observations,
-                                    &spec.observation_id,
+                                    &result.observation_id,
                                     preparation.output_policy.inventory_limits(),
                                 )
                                 .map_err(|error| error.to_string())
@@ -244,6 +237,16 @@ fn completion(
                 })
             })
             .collect::<Result<Vec<_>, String>>()?,
+        history_catalog: completed
+            .histories
+            .as_ref()
+            .map(|histories| histories.catalog.clone()),
+        series_reductions: completed
+            .histories
+            .iter()
+            .flat_map(|histories| &histories.histories)
+            .filter_map(|history| history.series_reduction.clone())
+            .collect(),
         resource_usage: completed.resource_usage.evidence.clone(),
         publication: completed.assembly.publication.clone(),
         publication_catalog,

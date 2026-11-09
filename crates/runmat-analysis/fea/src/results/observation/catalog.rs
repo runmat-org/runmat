@@ -12,7 +12,7 @@ use crate::execution::{
 };
 use crate::results::field::RecoveredFieldArtifactManifest;
 
-mod frequency;
+mod entry_history;
 mod sampled;
 mod selection;
 mod volume_mesh;
@@ -35,9 +35,11 @@ pub enum ObservationFieldCatalogSource {
         recovery_request: Box<FieldRecoveryRequest>,
         manifest: Box<RecoveredFieldArtifactManifest>,
     },
-    /// Complete, ordered source authority for a frequency history. Children are
-    /// individual structural recoveries; nested history catalogs are inadmissible.
-    StructuralFrequencyHistory {
+    /// Complete, ordered source authority for a history that spans the entries of a sampled
+    /// study (one frequency of a sweep, for example). Children are the entries' individual
+    /// single-sample catalogs of one kind (structural or volume-mesh recoveries), in increasing
+    /// sample order; nested history catalogs are inadmissible.
+    EntryHistory {
         samples: Vec<ObservationFieldCatalog>,
     },
     Thermal {
@@ -227,8 +229,8 @@ impl ObservationFieldCatalog {
                     ));
                 }
             }
-            ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } => {
-                frequency::validate_samples(samples)?;
+            ObservationFieldCatalogSource::EntryHistory { samples } => {
+                entry_history::validate_samples(samples)?;
             }
         }
         if self.schema_version != 1 || self.identity != self.derive_identity()? {
@@ -248,7 +250,7 @@ impl ObservationFieldCatalog {
                 manifest,
             } => selection.validate_structural(recovery_request, manifest),
             ObservationFieldCatalogSource::Thermal { .. }
-            | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
+            | ObservationFieldCatalogSource::EntryHistory { .. }
             | ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected structural catalog"))
@@ -268,7 +270,7 @@ impl ObservationFieldCatalog {
                 selection.validate_thermal(workload, manifest, mesh)
             }
             ObservationFieldCatalogSource::Structural { .. }
-            | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
+            | ObservationFieldCatalogSource::EntryHistory { .. }
             | ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected thermal catalog"))
