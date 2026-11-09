@@ -551,7 +551,12 @@ fn line_parameter_outputs_publish_one_observation_result_each() {
         AnalysisProcedure::LineParameters,
         SolutionSpace::Direct,
         IndependentDomain::Static,
-        Vec::new(),
+        vec![runmat_analysis_core::StateOutput {
+            state_id: runmat_analysis_core::StateId("primary".into()),
+            kind: runmat_analysis_core::StateKind::ElectromagneticStatic,
+            completeness: runmat_analysis_core::StateCompleteness::Complete,
+            persistence: runmat_analysis_core::StatePersistence::UntilDependentsComplete,
+        }],
     );
     let mut sequence = AnalysisSequence::from_steps("lines", vec![step]);
     let output = |id: &str, quantity, conductor: Option<&str>| AuthoredOutput {
