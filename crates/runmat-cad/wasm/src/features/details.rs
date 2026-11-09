@@ -5,8 +5,8 @@
 //! - **Rib**: an open sketch chain, thickened in its plane by `thickness` and extended `depth`
 //!   along the sketch normal into the body (`reverse` flips the side).
 //! - **Thread**: a cylindrical face takes the size's pitch and thread depth from the ISO metric
-//!   or unified inch tables. Cosmetic threads are attributes for drawings and PMI; modelled
-//!   threads cut or add the helix.
+//!   or unified inch tables. The thread is cosmetic: an attribute for drawings and
+//!   PMI. (Modelled helical threads wait on a kernel helical cut; the form doesn't offer one.)
 //! - **Emboss**: a sketch on a face raises (emboss) or sinks (deboss) by the depth.
 //! - **Axis**: along a linear edge, where two planes meet, through two points, the axis of a
 //!   cylindrical face, or through a point normal to a plane or face.
@@ -145,7 +145,8 @@ fn thread_feature(values: &Values, picks: &Picks) -> Result<Value, EditFailure> 
             "class": data.class,
         },
         "length": length,
-        "modelled": text(values, "form", "cosmetic") == "modeled",
+        // Cosmetic: the kernel has no helical thread cut yet, so the canvas makes none.
+        "modelled": false,
     }))
 }
 
@@ -224,8 +225,10 @@ mod tests {
     fn rib_thread_and_emboss_from_the_canvas() {
         let t = added("part.rib", json!({ "profile": ["feature:web"], "thickness": 2, "depth": 5 }));
         assert!(t.contains("feature rib1 = rib(") && t.contains("thickness = 2 mm"), "{t}");
-        let t = added("part.thread", json!({ "face": [BORE], "standard": "iso", "designation": "M6", "form": "cosmetic", "length": 8 }));
+        let t = added("part.thread", json!({ "face": [BORE], "standard": "iso", "designation": "M6", "length": 8 }));
         assert!(t.contains("feature thread1 = thread(") && t.contains("M6x1"), "{t}");
+        // Cosmetic: a regenerating thread with no helical cut.
+        assert!(!t.contains("modelled"), "{t}");
         let t = added("part.emboss", json!({ "profile": ["feature:logo"], "face": [TOP], "depth": 0.5, "mode": "deboss" }));
         assert!(t.contains("feature emboss1 = emboss(") && t.contains("-0.5 mm"), "{t}");
     }

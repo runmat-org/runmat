@@ -252,8 +252,10 @@ mod tests {
         assert!(t.contains("feature helix1 = curve.helix(") && t.contains("pitch = 2 mm") && t.contains("left_hand,") && t.contains("taper = 0.5 mm"), "{t}");
         assert_eq!(refs.len(), 1, "{refs:?}");
         assert_eq!(refs[0]["kind"], "curve");
-        // 3 turns at 48 samples a turn: 145 points.
-        assert_eq!(refs[0]["lines"][0].as_array().unwrap().len(), 145 * 3);
+        // A 40 mm radius coil keeps its chords within 1e-4 of its size: over 100 segments a
+        // turn, so 3 turns draw as a smooth curve.
+        let points = refs[0]["lines"][0].as_array().unwrap().len() / 3;
+        assert!(points > 3 * 100, "{points} points");
         let (t, refs) = added("part.curve-helix", json!({ "type": "spiral", "plane": [TOP], "start_radius": 2, "pitch": 1, "revolutions": 2 }));
         assert!(t.contains("feature spiral1 = curve.spiral(") && t.contains("start_radius = 2 mm"), "{t}");
         assert_eq!(refs[0]["id"], "spiral1");

@@ -443,14 +443,15 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             qty("t1", "End t", "ratio", Some(std::f64::consts::TAU)),
         ]),
         cmd("part.thread", "Thread", "thread", P)
-            .desc("Add a cosmetic or modeled thread on a cylindrical face.")
+            // Cosmetic only: a modelled (helical) thread needs a helical cut the kernel doesn't
+            // make yet, so the form doesn't offer one.
+            .desc("Add a cosmetic thread on a cylindrical face, for drawings and inspection.")
             .kw(&["tap", "screw"])
             .inputs(vec![
                 pick("face", "Cylindrical face", &[K::Face]),
                 choice("standard", "Standard", &[("iso", "ISO metric"), ("unified", "Unified inch")]),
                 text("designation", "Size", Some("M6x1")),
                 length("length", "Length", 10.0).optional(),
-                radio("form", "Form", &[("cosmetic", "Cosmetic"), ("modeled", "Modeled")]),
                 flag("left_hand", "Left hand", false),
             ])
             .when(bodies_exist())

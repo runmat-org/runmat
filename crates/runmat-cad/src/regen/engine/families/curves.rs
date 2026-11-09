@@ -2,6 +2,30 @@
 
 use super::*;
 
+/// The largest chord deviation a helix or spiral may show, as a fraction of its size (the larger
+/// of its widest diameter and its height). Relative, so a curve reads equally smooth at any scale.
+const CHORD_TOLERANCE: f64 = 1e-4;
+
+/// At least this many segments a turn, so a short or tight coil keeps its round look.
+const MIN_SEGMENTS_PER_TURN: f64 = 48.0;
+
+/// At most this many points in one coil, so a long one stays a bounded display and pattern path.
+const MAX_COIL_POINTS: usize = 100_000;
+
+/// Segments for `turns` turns of a coil whose radius reaches `max_radius` and whose size is
+/// `size`: each segment's chord stays within `CHORD_TOLERANCE * size` of the arc at the widest
+/// turn (sagitta `r (1 - cos(θ / 2))`).
+fn coil_segments(turns: f64, max_radius: f64, size: f64) -> usize {
+    let tol = CHORD_TOLERANCE * size;
+    let per_turn = if max_radius > tol {
+        let step = 2.0 * (1.0 - tol / max_radius).acos();
+        (std::f64::consts::TAU / step).max(MIN_SEGMENTS_PER_TURN)
+    } else {
+        MIN_SEGMENTS_PER_TURN
+    };
+    ((turns.abs() * per_turn).ceil() as usize).clamp(2, MAX_COIL_POINTS - 1)
+}
+
 impl<'a, 'b> Run<'a, 'b> {
     /// A point and unit tangent at parameter `t ∈ [0, 1]` along a curve or edge.
     pub(super) fn curve_at(
@@ -192,7 +216,8 @@ impl<'a, 'b> Run<'a, 'b> {
                 let u = normalize(radial);
                 let v = cross(ad, u);
                 let sign = if *left_hand { -1.0 } else { 1.0 };
-                let n = ((turns * 48.0).ceil() as usize).max(2);
+                let r_max = r0.max(r0 + taper * turns).abs();
+                let n = coil_segments(turns, r_max, (2.0 * r_max).max((pitch * turns).abs()));
                 let points = (0..=n)
                     .map(|k| {
                         let t = turns * k as f64 / n as f64;
@@ -219,7 +244,8 @@ impl<'a, 'b> Run<'a, 'b> {
                 let r0 = self.value(id, "start_radius", start_radius, Dimension::LENGTH)?;
                 let pitch = self.value(id, "pitch", pitch, Dimension::LENGTH)?;
                 let turns = self.value(id, "turns", turns, Dimension::DIMENSIONLESS)?;
-                let n = ((turns * 48.0).ceil() as usize).max(2);
+                let r_max = r0.abs().max((r0 + pitch * turns).abs());
+                let n = coil_segments(turns, r_max, 2.0 * r_max);
                 let points = (0..=n)
                     .map(|k| {
                         let t = turns * k as f64 / n as f64;
@@ -381,4 +407,28 @@ impl<'a, 'b> Run<'a, 'b> {
     }
 
     // ------------------------------------------------------------------ direct edits
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The widest chord's sagitta for `n` segments over `turns` turns at radius `r`.
+    fn sagitta(turns: f64, r: f64, n: usize) -> f64 {
+        r * (1.0 - (std::f64::consts::PI * turns / n as f64).cos())
+    }
+
+    #[test]
+    fn coils_keep_their_chords_within_a_tolerance_relative_to_their_size() {
+        // A 40 mm radius helix of 3 turns of 4 mm: each chord within 1e-4 of its 80 mm size.
+        let n = coil_segments(3.0, 0.04, 0.08);
+        assert!(sagitta(3.0, 0.04, n) <= 1e-4 * 0.08 * 1.0001, "{n}");
+        assert!(n / 3 > 100, "{n} segments for 3 turns");
+        // The same coil a thousand times smaller tessellates the same way.
+        assert_eq!(coil_segments(3.0, 0.04e-3, 0.08e-3), n);
+        // A tall thin coil (2 mm radius, 200 mm high) keeps the 48-a-turn floor.
+        assert_eq!(coil_segments(10.0, 0.002, 0.2), 480);
+        // A huge turn count stays bounded.
+        assert_eq!(coil_segments(1e6, 0.04, 0.08), MAX_COIL_POINTS - 1);
+    }
 }

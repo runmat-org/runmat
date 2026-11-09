@@ -82,3 +82,14 @@ fn section_second_plane_starts_off_the_first_plane() {
     assert_eq!(default_of("plane").as_deref(), Some("front"));
     assert_eq!(default_of("second_plane").as_deref(), Some("top"));
 }
+
+/// The thread form offers only what the engine builds: cosmetic threads. A modelled (helical)
+/// thread waits on a kernel helical cut, so no field offers one.
+#[test]
+fn thread_offers_no_modelled_form() {
+    let c = design_catalog();
+    let thread = c.command("part.thread").expect("part.thread");
+    assert!(thread.inputs.iter().all(|f| f.id != "form"), "{:?}", thread.inputs.iter().map(|f| &f.id).collect::<Vec<_>>());
+    let json = c.to_json();
+    assert!(!json.contains("\"modeled\""), "no command offers a modeled choice");
+}
