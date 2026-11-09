@@ -94,7 +94,8 @@ pub use request::{
 };
 pub use runmat_geometry_core::{GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind};
 pub use settings::{
-    production_algorithm_versions, resolve_meshing_request, MeshingRequestSettings,
+    production_algorithm_versions, resolve_meshing_request, CrossSectionMeshSettings,
+    MeshingRequestSettings,
 };
 pub use size_controls::{
     size_control_evidence, validate_size_controls, AppliedSizeControl, MeshSizeControl,

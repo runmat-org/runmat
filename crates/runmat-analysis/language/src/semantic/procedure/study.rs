@@ -51,10 +51,29 @@ pub(super) fn lower(
         );
     }
 
-    let (model_key, model_expression) = model_binding(context.bound, declaration, diagnostics)?;
-    // A model that failed to lower has already reported its own located diagnostics; repeating
-    // that failure at every dependent study would only add cascade errors.
-    let model = context.models.get(&model_key)?;
+    // A study on a cross-section takes no model: the section carries its dielectrics.
+    let section = matches!(
+        geometry_definition.source,
+        runmat_geometry_core::GeometryDefinitionSource::CrossSection(_)
+    );
+    let empty;
+    let bound_model = if section && values::assignment(&declaration.statements, "model").is_none()
+    {
+        None
+    } else {
+        let (model_key, model_expression) =
+            model_binding(context.bound, declaration, diagnostics)?;
+        // A model that failed to lower has already reported its own located diagnostics;
+        // repeating that failure at every dependent study would only add cascade errors.
+        Some((context.models.get(&model_key)?, model_expression))
+    };
+    let model = match bound_model {
+        Some((model, _)) => model,
+        None => {
+            empty = AuthoredModel::empty(declaration.module.as_str(), &declaration.key.name);
+            &empty
+        }
+    };
     let inputs = super::super::input::lower_definitions(context.bound, declaration, diagnostics);
     let geometry_arguments = geometry_arguments(
         context.bound,
@@ -63,20 +82,22 @@ pub(super) fn lower(
         geometry_definition,
         diagnostics,
     );
-    let arguments = model_arguments(
-        context.bound,
-        declaration,
-        model_expression,
-        model,
-        diagnostics,
-    );
-    let model_closure = model_closure(context.models, model)?;
-    require_sections_for_structural_domains(
-        declaration,
-        model_expression.span,
-        &model_closure,
-        diagnostics,
-    );
+    let arguments = bound_model.map(|(model, expression)| {
+        model_arguments(context.bound, declaration, expression, model, diagnostics)
+    });
+    let model_closure = match bound_model {
+        Some((model, expression)) => {
+            let closure = model_closure(context.models, model)?;
+            require_sections_for_structural_domains(
+                declaration,
+                expression.span,
+                &closure,
+                diagnostics,
+            );
+            closure
+        }
+        None => vec![model],
+    };
     let mut sequence = lower::lower_study(declaration, &model_closure, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
     reject_formulation_setting(declaration, diagnostics);
@@ -107,13 +128,13 @@ pub(super) fn lower(
             module_path: mesh_definition.module_path.clone(),
             mesh_id: mesh_definition.mesh_id.clone(),
         },
-        model: AuthoredModelInstance {
+        model: arguments.map(|arguments| AuthoredModelInstance {
             model: AuthoredModelRef {
                 module_path: model.module_path.clone(),
                 model_id: model.model_id.clone(),
             },
             arguments,
-        },
+        }),
         inputs,
         outputs,
         assessments,

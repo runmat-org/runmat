@@ -1022,7 +1022,7 @@ export interface AuthoredStudy {
   study_id: string;
   geometry: AuthoredGeometryInstance;
   mesh: AuthoredMeshRef;
-  model: AuthoredModelInstance;
+  model?: AuthoredModelInstance;
   inputs: AuthoredInputDefinition[];
   outputs: AuthoredOutput[];
   assessments?: AuthoredAssessment[];
@@ -1283,6 +1283,63 @@ export type CoupledPhysicsFamily = "thermomechanical"
 export interface CrossPowerSpectralDensity {
   values: ComplexSpectralDensity[];
 }
+
+export interface CrossSectionDefinition {
+  layers: CrossSectionLayer[];
+  stackup?: CrossSectionStackupSource;
+  traces: CrossSectionTrace[];
+  enclosure?: CrossSectionEnclosure;
+}
+
+export interface CrossSectionEnclosure {
+  half_width_m: number;
+  air_m: number;
+}
+
+export interface CrossSectionLayer {
+  name: string;
+  thickness_m: number;
+  role: CrossSectionLayerRole;
+}
+
+export type CrossSectionLayerRole = {
+  permittivity: number;
+kind: "dielectric" }
+  | {
+  permittivity: number;
+kind: "solder_mask" }
+  | {
+  fill_permittivity?: number;
+kind: "signal" }
+  | { kind: "plane" };
+
+export interface CrossSectionMeshSettings {
+  edge_size_m?: number;
+  growth?: number;
+  max_size_m?: number;
+}
+
+export interface CrossSectionStackupSource {
+  logical_path: string;
+  stackup_name?: string;
+  content_digest: GeometryDigest;
+}
+
+export interface CrossSectionTrace {
+  name: string;
+  role: CrossSectionTraceRole;
+  layer: string;
+  center_m: number;
+  width_m: number;
+  etch_angle_rad: number;
+  base?: CrossSectionTraceBase;
+}
+
+export type CrossSectionTraceBase = "top"
+  | "bottom";
+
+export type CrossSectionTraceRole = "signal"
+  | "ground";
 
 export interface Curvature {
   per_meter: number;
@@ -1911,7 +1968,8 @@ export interface GeometryDefinitionRef {
 export type GeometryDefinitionSource = ImportedGeometryDefinition & { kind: "imported" }
   | GeometryFeatureGraph & { kind: "constructed" }
   | DerivedGeometryDefinition & { kind: "derived" }
-  | GeneratedGeometryDefinition & { kind: "generated" };
+  | GeneratedGeometryDefinition & { kind: "generated" }
+  | CrossSectionDefinition & { kind: "cross_section" };
 
 export type GeometryDigest = [WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8];
 
@@ -2457,6 +2515,7 @@ export interface MeshingRequestSettings {
   cancellation: CancellationPolicy;
   cells_across_gap?: WireU32;
   size_controls?: MeshSizeControl[];
+  cross_section?: CrossSectionMeshSettings;
 }
 
 export interface MeshingSizeLimits {

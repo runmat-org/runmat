@@ -161,6 +161,11 @@ pub fn prepare_geometry_materialization_request(
         }
         GeometryDefinitionSource::Constructed(_) | GeometryDefinitionSource::Derived(_) => {}
         GeometryDefinitionSource::Generated(_) => {}
+        GeometryDefinitionSource::CrossSection(_) => {
+            return Err(AnalysisBridgeError::Invalid(
+                "a cross-section is meshed and solved by the transmission-line solver; no geometry kernel materializes it".into(),
+            ))
+        }
     }
     if source
         .roots

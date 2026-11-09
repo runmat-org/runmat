@@ -385,6 +385,66 @@ fn site_example_sections_meet_their_targets() {
     assert!((parameters.differential_impedance_ohm - 100.0).abs() < 5.0);
 }
 
+/// A checked `cross_section` definition maps field for field onto the solver section.
+#[test]
+fn authored_definition_maps_onto_the_solver_section() {
+    use runmat_geometry_core::{
+        CrossSectionDefinition, CrossSectionLayer, CrossSectionLayerRole, CrossSectionTrace,
+        CrossSectionTraceRole,
+    };
+    let layer = |name: &str, thickness_m: f64, role| CrossSectionLayer {
+        name: name.into(),
+        thickness_m,
+        role,
+    };
+    let definition = CrossSectionDefinition {
+        layers: vec![
+            layer(
+                "F.Mask",
+                20.0 * UM,
+                CrossSectionLayerRole::SolderMask { permittivity: 3.8 },
+            ),
+            layer(
+                "F.Cu",
+                35.0 * UM,
+                CrossSectionLayerRole::Signal {
+                    fill_permittivity: None,
+                },
+            ),
+            layer(
+                "dielectric 1",
+                0.2 * MM,
+                CrossSectionLayerRole::Dielectric { permittivity: 4.1 },
+            ),
+            layer("In1.Cu", 35.0 * UM, CrossSectionLayerRole::Plane),
+        ],
+        stackup: None,
+        traces: vec![CrossSectionTrace {
+            name: "line".into(),
+            role: CrossSectionTraceRole::Signal,
+            layer: "F.Cu".into(),
+            center_m: 0.0,
+            width_m: 0.36 * MM,
+            etch_angle_rad: 60f64.to_radians(),
+            base: None,
+        }],
+        enclosure: None,
+    };
+    definition.validate().unwrap();
+    assert_eq!(
+        CrossSection::from_authored(&definition, None),
+        example_section(&[("line", 0.0, 0.36 * MM)])
+    );
+    let controls = runmat_meshing_core::CrossSectionMeshSettings {
+        edge_size_m: Some(1.0 * UM),
+        growth: Some(1.2),
+        max_size_m: None,
+    };
+    let section = CrossSection::from_authored(&definition, Some(&controls));
+    assert_eq!(section.mesh.edge_size_m, Some(1.0 * UM));
+    assert_eq!(section.mesh.growth, 1.2);
+}
+
 #[test]
 #[ignore = "calibration sweep for the default mesh controls; prints a table"]
 fn calibrate_mesh_defaults() {
