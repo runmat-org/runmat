@@ -477,14 +477,17 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     // Golden counts for the authored independent-definition STEP fixture,
     // qualified by two byte-identical standalone meshes with seed zero.
     // Face gaps are sized to at least one element layer across (thin-layer sizing): over a
-    // whole face when all its edges face the gap, otherwise from the edges that do.
+    // whole face when all its edges face the gap, otherwise from the edges that do. Gaps are
+    // located where they are measured and narrow faces size only along their length, so the
+    // 1 x 2 x 3 m boxes mesh closer to the 1.5 m target than the (584, 2330, 776) of 9bb447a159;
+    // peak displacement is within 6.1 % of a 0.2 m reference mesh (4.5 % before).
     assert_eq!(
         (
             mesh.topology.nodes.len(),
             mesh.topology.volume_elements.len(),
             mesh.topology.boundary_faces.len()
         ),
-        (584, 2330, 776)
+        (238, 582, 464)
     );
 
     let model: AnalysisModel =
