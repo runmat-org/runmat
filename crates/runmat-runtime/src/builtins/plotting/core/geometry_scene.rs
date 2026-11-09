@@ -112,13 +112,67 @@ pub const GEOMETRY_SCENE_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 
 /// Why a geometry scene could not be encoded for its consumer.
 #[cfg(feature = "plot-core")]
-#[derive(Debug, thiserror::Error)]
-pub enum GeometrySceneEncodeError {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeometrySceneEncodeErrorKind {
     /// The encoded payload is larger than the consumer accepts.
-    #[error("figure scene payload is {required} bytes; its consumer accepts at most {maximum}")]
-    PayloadTooLarge { required: usize, maximum: usize },
-    #[error("{0}")]
-    Encode(crate::RuntimeError),
+    PayloadTooLarge {
+        required: usize,
+        maximum: usize,
+    },
+    Encode,
+}
+
+/// Retains the original encoding cause inline, without an additional diagnostic allocation.
+#[cfg(feature = "plot-core")]
+#[derive(Debug)]
+pub struct GeometrySceneEncodeError {
+    kind: GeometrySceneEncodeErrorKind,
+    cause: Option<crate::RuntimeError>,
+}
+
+#[cfg(feature = "plot-core")]
+impl GeometrySceneEncodeError {
+    pub fn kind(&self) -> GeometrySceneEncodeErrorKind {
+        self.kind
+    }
+
+    fn encode(cause: crate::RuntimeError) -> Self {
+        Self {
+            kind: GeometrySceneEncodeErrorKind::Encode,
+            cause: Some(cause),
+        }
+    }
+
+    fn payload_too_large(required: usize, maximum: usize) -> Self {
+        Self {
+            kind: GeometrySceneEncodeErrorKind::PayloadTooLarge { required, maximum },
+            cause: None,
+        }
+    }
+}
+
+#[cfg(feature = "plot-core")]
+impl std::fmt::Display for GeometrySceneEncodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            GeometrySceneEncodeErrorKind::PayloadTooLarge { required, maximum } => {
+                write!(f, "figure scene payload is {required} bytes; its consumer accepts at most {maximum}")
+            }
+            GeometrySceneEncodeErrorKind::Encode => match &self.cause {
+                Some(cause) => std::fmt::Display::fmt(cause, f),
+                None => f.write_str("geometry figure scene encoding failed"),
+            },
+        }
+    }
+}
+
+#[cfg(feature = "plot-core")]
+impl std::error::Error for GeometrySceneEncodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cause
+            .as_ref()
+            .map(|cause| cause as &(dyn std::error::Error + 'static))
+    }
 }
 
 /// Encodes a geometry figure scene for a consumer that accepts at most `maximum_bytes` (a
@@ -134,12 +188,12 @@ pub fn encode_geometry_figure_scene_within(
         ..geometry_scene_limits()
     };
     let bytes = crate::replay::export_figure_scene_payload_with_limits(scene, limits)
-        .map_err(GeometrySceneEncodeError::Encode)?;
+        .map_err(GeometrySceneEncodeError::encode)?;
     if bytes.len() > maximum_bytes {
-        return Err(GeometrySceneEncodeError::PayloadTooLarge {
-            required: bytes.len(),
-            maximum: maximum_bytes,
-        });
+        return Err(GeometrySceneEncodeError::payload_too_large(
+            bytes.len(),
+            maximum_bytes,
+        ));
     }
     Ok(bytes)
 }
@@ -344,6 +398,38 @@ fn merge_warnings(current: &mut Vec<String>, incoming: Vec<String>) {
 
 #[cfg(all(test, feature = "plot-core"))]
 mod limit_tests {
+    use super::{GeometrySceneEncodeError, GeometrySceneEncodeErrorKind};
+    use std::error::Error;
+
+    #[test]
+    fn scene_encoding_failures_retain_typed_causes_and_exact_payload_limits() {
+        let cause = crate::build_runtime_error("encoding failed")
+            .with_identifier("RunMat:Replay:Encoding")
+            .build();
+        let error = GeometrySceneEncodeError::encode(cause);
+        assert_eq!(error.kind(), GeometrySceneEncodeErrorKind::Encode);
+        assert_eq!(error.to_string(), "encoding failed");
+        let original = error
+            .source()
+            .unwrap()
+            .downcast_ref::<crate::RuntimeError>()
+            .unwrap();
+        assert_eq!(original.identifier(), Some("RunMat:Replay:Encoding"));
+
+        let error = GeometrySceneEncodeError::payload_too_large(129, 128);
+        assert_eq!(
+            error.kind(),
+            GeometrySceneEncodeErrorKind::PayloadTooLarge {
+                required: 129,
+                maximum: 128
+            }
+        );
+        assert!(error.source().is_none());
+        assert_eq!(
+            error.to_string(),
+            "figure scene payload is 129 bytes; its consumer accepts at most 128"
+        );
+    }
     #[test]
     fn geometry_scenes_import_past_the_replay_default() {
         let limits = super::geometry_scene_limits();

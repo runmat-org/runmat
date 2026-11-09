@@ -294,7 +294,7 @@ pub use self::geometry_scene::{
     append_geometry_scene_chunks, clone_geometry_scene, close_geometry_scene,
     encode_geometry_figure_scene, encode_geometry_figure_scene_within, export_geometry_scene,
     import_geometry_scene, import_geometry_scene_payload, present_geometry_scene_on_surface,
-    replace_geometry_scene, GeometrySceneEncodeError,
+    replace_geometry_scene, GeometrySceneEncodeError, GeometrySceneEncodeErrorKind,
 };
 #[cfg(feature = "plot-core")]
 pub use self::import_registry::register_imported_geometry_scene;

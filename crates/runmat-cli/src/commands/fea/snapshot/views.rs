@@ -291,16 +291,22 @@ pub(super) async fn capture(
                 presentation.max_scene_bytes,
             ) {
                 Ok(bytes) => bytes,
-                Err(plotting::GeometrySceneEncodeError::PayloadTooLarge { required, maximum }) => {
-                    return Ok(Attempt::TooLarge {
+                Err(error) => {
+                    if let plotting::GeometrySceneEncodeErrorKind::PayloadTooLarge {
                         required,
                         maximum,
-                        cap: volume
-                            .as_ref()
-                            .and_then(|volume| volume.cap_triangles.zip(volume.cap_subdivisions)),
-                    })
+                    } = error.kind()
+                    {
+                        return Ok(Attempt::TooLarge {
+                            required,
+                            maximum,
+                            cap: volume.as_ref().and_then(|volume| {
+                                volume.cap_triangles.zip(volume.cap_subdivisions)
+                            }),
+                        });
+                    }
+                    return Err(anyhow::Error::new(error));
                 }
-                Err(error) => return Err(anyhow::Error::msg(error.to_string())),
             };
             Ok(Attempt::Fits(Encoded {
                 minimum: range.map(|range| range.0),

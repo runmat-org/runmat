@@ -114,7 +114,9 @@ fn centroid(corners: &[usize], nodes: &[[f64; 3]]) -> Option<[f64; 3]> {
 
 /// Solver node coordinates and each volume element's node indices, in solver order, from the
 /// run's canonical solver mesh artifact.
-pub fn solver_mesh_entities(path: &str) -> Result<(Vec<[f64; 3]>, Vec<Vec<usize>>), String> {
+pub type SolverMeshEntities = (Vec<[f64; 3]>, Vec<Vec<usize>>);
+
+pub fn solver_mesh_entities(path: &str) -> Result<SolverMeshEntities, String> {
     let mesh =
         super::super::solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path))
             .map_err(|error| error.to_string())?;

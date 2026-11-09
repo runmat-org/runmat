@@ -373,7 +373,7 @@ mod tests {
         assert_eq!(refs[0]["kind"], "curve");
         let (t, refs) = added(
             "part.curve-equation",
-            json!({ "x": "cos(t) * 10 mm", "y": "sin(t) * 10 mm", "z": "t * 2 mm", "t0": 0, "t1": 6.283 }),
+            json!({ "x": "cos(t) * 10 mm", "y": "sin(t) * 10 mm", "z": "t * 2 mm", "t0": 0, "t1": std::f64::consts::TAU }),
         );
         assert!(
             t.contains("feature equation1 = curve.equation(") && t.contains("cos(input.t)"),
