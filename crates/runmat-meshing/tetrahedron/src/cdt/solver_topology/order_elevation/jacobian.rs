@@ -87,14 +87,16 @@ pub(super) fn validate_elements(
     Ok(())
 }
 
+type CertifiedElement = (
+    usize,
+    [[f64; 3]; 10],
+    Result<(), DelaunaySolverTopologyError>,
+);
+
 /// The shared Tet10 element rule (Jacobian margin and stiffness-quadrature convergence) for
 /// every element whose Jacobian was certified, on all admitted cores, in input order.
 fn shared_rule_results(
-    certified: &[(
-        usize,
-        [[f64; 3]; 10],
-        Result<(), DelaunaySolverTopologyError>,
-    )],
+    certified: &[CertifiedElement],
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<Result<(), DelaunaySolverTopologyError>>, DelaunaySolverTopologyError> {
     if cancellation.is_cancelled() {
@@ -419,8 +421,10 @@ fn certify_jacobian(
         maximum_search_work,
         maximum_recursion_depth,
         cancellation,
-        &storage,
-        &mut element_work,
+        ValidationWork {
+            storage,
+            counter: &mut element_work,
+        },
         cancellation_check_interval,
         &mut deepest,
     );
@@ -482,11 +486,14 @@ fn certify_element_within(
     maximum_search_work: u64,
     maximum_recursion_depth: u32,
     cancellation: &dyn MeshingCancellationSignal,
-    storage: &Storage<'_>,
-    work: &mut u64,
+    work: ValidationWork<'_, '_>,
     cancellation_check_interval: u64,
     deepest: &mut u32,
 ) -> Result<(), DelaunaySolverTopologyError> {
+    let ValidationWork {
+        storage,
+        counter: work,
+    } = work;
     if cancellation_check_interval == 0 {
         return Err(error::failure(
             DelaunaySolverTopologyErrorKind::InvalidOptions,

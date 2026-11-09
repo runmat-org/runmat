@@ -167,8 +167,10 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
         10_000,
         0,
         &NeverCancelled,
-        &Storage(None),
-        &mut work,
+        ValidationWork {
+            storage: Storage(None),
+            counter: &mut work,
+        },
         1,
         &mut 0,
     )

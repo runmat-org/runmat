@@ -221,16 +221,14 @@ fn rebuild_when_asked() {
                 .net
                 .map(|n| b.net_name(n).to_owned())
                 .unwrap_or_default();
-            if !net.is_empty() {
-                if f.reference != "U1" || pad.name.starts_with("3") {
-                    eprintln!(
-                        "pad {}.{} {:.3} {:.3} {net}",
-                        f.reference,
-                        pad.name,
-                        runmat_circuit::geom::to_mm((r.min.x + r.max.x) / 2),
-                        runmat_circuit::geom::to_mm((r.min.y + r.max.y) / 2)
-                    );
-                }
+            if !net.is_empty() && (f.reference != "U1" || pad.name.starts_with("3")) {
+                eprintln!(
+                    "pad {}.{} {:.3} {:.3} {net}",
+                    f.reference,
+                    pad.name,
+                    runmat_circuit::geom::to_mm((r.min.x + r.max.x) / 2),
+                    runmat_circuit::geom::to_mm((r.min.y + r.max.y) / 2)
+                );
             }
         }
     }

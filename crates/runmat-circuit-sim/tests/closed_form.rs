@@ -61,7 +61,7 @@ fn series_rlc_resonance_and_q() {
             fstop: 3e4,
         },
     );
-    let f0 = 1.0 / (2.0 * std::f64::consts::PI * (l * c as f64).sqrt());
+    let f0 = 1.0 / (2.0 * std::f64::consts::PI * (l * c).sqrt());
     let q = (l / c).sqrt() / r;
     let fp = evaluate(
         &Measure::PeakFrequency {
@@ -99,7 +99,7 @@ fn underdamped_rlc_step_matches_analytic() {
     let w = run(&deck, &tran(1e-6, 1e-3));
     let w = w.real().unwrap();
     let alpha = r / (2.0 * l);
-    let w0 = 1.0 / (l * c as f64).sqrt();
+    let w0 = 1.0 / (l * c).sqrt();
     let wd = (w0 * w0 - alpha * alpha).sqrt();
     for t in [50e-6, 150e-6, 300e-6, 600e-6] {
         let want = 1.0 - (-alpha * t).exp() * ((wd * t).cos() + alpha / wd * (wd * t).sin());

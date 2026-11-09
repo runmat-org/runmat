@@ -467,8 +467,7 @@ pub fn place(
             let hit = nearest_free(
                 &ctx.occ,
                 &v.id,
-                g.w(),
-                g.h(),
+                [g.w(), g.h()],
                 [preferred[0] + c[0], preferred[1] + c[1]],
                 step,
                 0.0,
@@ -482,8 +481,7 @@ pub fn place(
                 let hit = nearest_free(
                     &ctx.occ,
                     &v.id,
-                    tight.w(),
-                    tight.h(),
+                    [tight.w(), tight.h()],
                     [preferred[0] + c[0], preferred[1] + c[1]],
                     step,
                     0.0,

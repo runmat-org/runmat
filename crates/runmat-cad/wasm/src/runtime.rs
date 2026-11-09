@@ -506,8 +506,7 @@ pub fn resolve_assembly_in(
                         // laminate.
                         let part = crate::board::board_part(&file, files);
                         summary.part_number = part.part_number;
-                        summary.material =
-                            part.material.map(|m| runmat_cad::ids::MaterialRef::new(m));
+                        summary.material = part.material.map(runmat_cad::ids::MaterialRef::new);
                         source.add_part(summary, configured);
                         displays.insert(key.clone(), display);
                         if let Some(d) = crate::board::board_digest(&file, files) {

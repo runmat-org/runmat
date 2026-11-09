@@ -683,9 +683,15 @@ fn solve(
         // The free spot nearest the anchor for the label alone; its leader may cross what is there.
         let probe = label([0.0, 0.0], true);
         let g = v.geom_box();
-        let elbow = match nearest_free(&ctx.occ, id, probe.w(), probe.h(), anchor, 2.0, 1.0, &|b| {
-            !b.hits(&g)
-        }) {
+        let elbow = match nearest_free(
+            &ctx.occ,
+            id,
+            [probe.w(), probe.h()],
+            anchor,
+            2.0,
+            1.0,
+            &|b| !b.hits(&g),
+        ) {
             Some(b) => [b.x0 - probe.x0, b.y0 - probe.y0],
             None => [g.x1 + 6.0, anchor[1]],
         };
@@ -707,8 +713,7 @@ fn free_note(ctx: &mut Ctx<'_>, v: &ViewPlan, id: &str, t: &str) {
     let b = nearest_free(
         &ctx.occ,
         id,
-        probe.w(),
-        probe.h(),
+        [probe.w(), probe.h()],
         preferred,
         2.0,
         1.0,

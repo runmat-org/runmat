@@ -28,6 +28,8 @@ struct FaceScope {
     constant: MetricTensor3,
 }
 
+type NodeMetricKey = (StableDigest, [u64; 3], Option<PersistentEntityId>);
+
 pub(in crate::cdt) struct NodeSizeField {
     field: ResolvedMetricField,
     uniform: Option<MetricTensor3>,
@@ -38,7 +40,7 @@ pub(in crate::cdt) struct NodeSizeField {
     all_local: Vec<LocalMetricSource>,
     surfaces: RefCell<Option<Vec<SurfaceMetricSource>>>,
     regions: RefCell<BTreeMap<PersistentEntityId, MetricTensor3>>,
-    cache: RefCell<HashMap<(StableDigest, [u64; 3], Option<PersistentEntityId>), MetricTensor3>>,
+    cache: RefCell<HashMap<NodeMetricKey, MetricTensor3>>,
 }
 
 impl NodeSizeField {

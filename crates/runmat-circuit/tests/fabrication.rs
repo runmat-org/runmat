@@ -246,7 +246,7 @@ fn odb_tree_is_consistent() {
         .filter(|n| *n != "PCB")
         .map(|n| n.to_lowercase())
         .collect();
-    assert!(names.len() >= 4 + 6 + 2 + 1, "{names:?}");
+    assert!(names.len() > 4 + 6 + 2, "{names:?}");
     for n in &names {
         let f = format!("flight_controller/steps/pcb/layers/{n}/features");
         let t = odb.get(f.as_str()).unwrap_or_else(|| panic!("no {f}"));

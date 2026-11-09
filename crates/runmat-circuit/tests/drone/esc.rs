@@ -315,7 +315,8 @@ pub fn build(dir: &Path, stage: Stage) -> Build {
     // stepping west to a via between the shunt filters and the bulk capacitor; they cross to the
     // MCU on In2 and In3 and come up through vias under its pins.
     // (net, bus x, where it leaves the bus, inner layer, inner path, via under the pin)
-    let inputs: [(&str, f64, f64, &str, &[[f64; 2]], [f64; 2]); 5] = [
+    type InputRoute<'a> = (&'a str, f64, f64, &'a str, &'a [[f64; 2]], [f64; 2]);
+    let inputs: [InputRoute<'_>; 5] = [
         (
             "INHA",
             -9.15,

@@ -494,7 +494,7 @@ pub fn place(ctx: &mut Ctx<'_>) {
                 {
                     stepped
                 } else {
-                    match nearest_free(&ctx.occ, &id, w, h, b.center(), 2.5, 1.0, &clear) {
+                    match nearest_free(&ctx.occ, &id, [w, h], b.center(), 2.5, 1.0, &clear) {
                         Some(n) => [n.x0, n.y1],
                         None => {
                             ctx.finding(

@@ -362,8 +362,7 @@ pub fn place(occ: &Occupancy, req: &Request<'_>) -> Option<Spot> {
 pub fn nearest_free(
     occ: &Occupancy,
     owner: &str,
-    w: f64,
-    h: f64,
+    [w, h]: Xy,
     preferred: Xy,
     step: f64,
     margin: f64,

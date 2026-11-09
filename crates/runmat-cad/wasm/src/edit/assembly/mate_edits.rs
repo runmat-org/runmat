@@ -377,11 +377,11 @@ pub(super) fn smart(
                 .filter(|c| c.world.kind == FrameKind::Plane && c.id.contains("/face:"))
                 .min_by(|a, b| {
                     let (fa, fb) = (dot(a.world.z, to.z), dot(b.world.z, to.z));
-                    (fa - fb)
-                        .abs()
-                        .gt(&1e-6)
-                        .then(|| fa.total_cmp(&fb))
-                        .unwrap_or_else(|| near(a).total_cmp(&near(b)))
+                    if (fa - fb).abs().gt(&1e-6) {
+                        fa.total_cmp(&fb)
+                    } else {
+                        near(a).total_cmp(&near(b))
+                    }
                 });
             ("coincident", best)
         }
@@ -395,11 +395,11 @@ pub(super) fn smart(
                         (a.world.radius.unwrap_or(0.0) - radius).abs(),
                         (b.world.radius.unwrap_or(0.0) - radius).abs(),
                     );
-                    (ra - rb)
-                        .abs()
-                        .gt(&1e-7)
-                        .then(|| ra.total_cmp(&rb))
-                        .unwrap_or_else(|| near(a).total_cmp(&near(b)))
+                    if (ra - rb).abs().gt(&1e-7) {
+                        ra.total_cmp(&rb)
+                    } else {
+                        near(a).total_cmp(&near(b))
+                    }
                 });
             ("concentric", best)
         }

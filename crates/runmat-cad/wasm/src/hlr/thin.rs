@@ -60,7 +60,8 @@ fn runs_out(runs: Vec<Vec<f64>>) -> Vec<Value> {
 /// Picks with the same reference joined and thinned, in the order each reference first appears.
 fn thin_picks(picks: Vec<Value>, tol: f64, grid: f64) -> Vec<Value> {
     let mut order: Vec<String> = Vec::new();
-    let mut by: BTreeMap<String, (Map<String, Value>, Vec<Vec<f64>>)> = BTreeMap::new();
+    type PickRuns = (Map<String, Value>, Vec<Vec<f64>>);
+    let mut by: BTreeMap<String, PickRuns> = BTreeMap::new();
     let mut other = Vec::new();
     for p in picks {
         let Value::Object(mut o) = p else {

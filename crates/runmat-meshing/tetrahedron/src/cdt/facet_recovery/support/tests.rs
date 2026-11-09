@@ -166,8 +166,10 @@ fn facet_support_is_the_exact_delaunay_triangulation_of_the_boundary_polygon() {
         &view,
         &boundary,
         source,
-        projection,
-        sign,
+        delaunay::FacetProjection {
+            axes: projection,
+            sign,
+        },
         &memberships,
         1,
         &mut work,

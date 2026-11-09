@@ -12,18 +12,26 @@ use runmat_meshing_core::quality::predicate::{
     insphere3d_constructed, orient3d_constructed, Point3Construction,
 };
 
+pub(super) struct FacetProjection {
+    pub(super) axes: [usize; 2],
+    pub(super) sign: PredicateSign,
+}
+
 /// Returns `None` when a cocircular tie or a degenerate chord leaves the triangulation
 /// undetermined; the caller then keeps its topology-guided ear clipping.
 pub(super) fn triangulate_delaunay(
     recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     boundary: &[StableDigest],
     source: [StableDigest; 3],
-    axes: [usize; 2],
-    polygon_sign: PredicateSign,
+    projection: FacetProjection,
     source_edge_membership: &BTreeMap<StableDigest, BTreeSet<usize>>,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Option<Vec<DelaunayRecoveredFacetTriangle>>, DelaunayFacetRecoveryError> {
+    let FacetProjection {
+        axes,
+        sign: polygon_sign,
+    } = projection;
     let count = boundary.len();
     if count < 4 {
         return Ok(None);
@@ -45,10 +53,10 @@ pub(super) fn triangulate_delaunay(
     // between them; only adjacent boundary nodes may share a source edge.
     let chord_admissible = |first: usize, last: usize| {
         last == first + 1
-            || !source_edge_membership
+            || source_edge_membership
                 .get(&boundary[first])
                 .zip(source_edge_membership.get(&boundary[last]))
-                .is_some_and(|(first, last)| first.intersection(last).next().is_some())
+                .is_none_or(|(first, last)| first.intersection(last).next().is_none())
     };
     let mut triangles = Vec::with_capacity(count - 2);
     // The closing boundary edge (count - 1, 0) is the base of the whole polygon.

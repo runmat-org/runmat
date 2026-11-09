@@ -462,6 +462,8 @@ fn inside_trim(
     Ok(location != TrimDomainLocation::Outside)
 }
 
+type SurfaceCoordinatePoint = ([f64; 2], [f64; 3]);
+
 /// The trimmed surface point closest to the point at `fraction` along the chord between two
 /// surface coordinates, with its coordinate; `None` when that point lies outside the trim.
 fn closest_trimmed_chord_point(
@@ -471,7 +473,7 @@ fn closest_trimmed_chord_point(
     fraction: f64,
     evaluation: PreparedEvaluation<'_, '_>,
     options: DelaunaySolverTopologyOptions,
-) -> Result<Option<([f64; 2], [f64; 3])>, DelaunaySolverTopologyError> {
+) -> Result<Option<SurfaceCoordinatePoint>, DelaunaySolverTopologyError> {
     let face = evaluation.sources.face(surface_use.source_face_id)?;
     let local = |uv| {
         evaluation.control.checkpoint().map_err(error::geometry)?;

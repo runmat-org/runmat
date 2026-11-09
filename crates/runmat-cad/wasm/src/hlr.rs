@@ -485,7 +485,8 @@ fn silhouettes(model: &Model, depth: P3) -> Vec<Edge> {
     }
     let mut out = Vec::new();
     for faces in by_body {
-        let mut by_edge: BTreeMap<EdgeKey, Vec<(usize, f64, P3, P3, P3)>> = BTreeMap::new();
+        type FacingEdge = (usize, f64, P3, P3, P3);
+        let mut by_edge: BTreeMap<EdgeKey, Vec<FacingEdge>> = BTreeMap::new();
         for &fi in &faces {
             for t in &model.faces[fi].tris {
                 let n = cross(sub(t[1], t[0]), sub(t[2], t[0]));

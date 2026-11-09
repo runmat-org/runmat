@@ -44,7 +44,8 @@ fn feature_edges(positions: &[f64], triangles: &[u32]) -> Vec<[[f64; 3]; 2]> {
         (l > 1e-12).then(|| n.map(|x| x / l))
     };
     type Key = [i64; 3];
-    let mut uses: BTreeMap<(Key, Key), (Vec<[f64; 3]>, [f64; 3], [f64; 3])> = BTreeMap::new();
+    type EdgeUses = (Vec<[f64; 3]>, [f64; 3], [f64; 3]);
+    let mut uses: BTreeMap<(Key, Key), EdgeUses> = BTreeMap::new();
     for t in triangles.chunks_exact(3) {
         if t.iter().any(|&i| 3 * i as usize + 2 >= positions.len()) {
             continue;

@@ -43,7 +43,7 @@ fn json<T: Serialize>(value: &T) -> String {
 
 thread_local! {
     /// The text of every file the module has received, by path.
-    static HELD: RefCell<Files> = RefCell::new(Files::new());
+    static HELD: RefCell<Files> = const { RefCell::new(Files::new()) };
 }
 
 /// The files of a call: each path's text as sent, or the text last sent for it when `null`.

@@ -53,8 +53,8 @@ pub fn view_edit(
     selection: &[String],
 ) -> Option<Result<(SourceChange, String), EditFailure>> {
     let word = |key: &str| values.get(key).and_then(Value::as_str).unwrap_or("");
-    let set: Box<dyn Fn(&mut runmat_cad::drawing::View) -> Result<(), EditFailure>> = match command
-    {
+    type ViewEdit = dyn Fn(&mut runmat_cad::drawing::View) -> Result<(), EditFailure>;
+    let set: Box<ViewEdit> = match command {
         "drawing.view-scale" => {
             let s = match scale(word("scale")) {
                 Ok(s) => s,

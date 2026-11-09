@@ -196,8 +196,10 @@ fn triangulate_boundary(
         recovery,
         &boundary,
         source,
-        projection,
-        polygon_sign,
+        delaunay::FacetProjection {
+            axes: projection,
+            sign: polygon_sign,
+        },
         source_edge_membership,
         constraint_index,
         work,
