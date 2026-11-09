@@ -81,7 +81,7 @@ legacy sidecars does not remove canonical builtin references from the artifact.
 
 ```sh
 cargo run --locked -p runmat-builtins --bin export_builtin_documentation -- \
-  --transition --output target/docs/builtin-documentation.json
+  --output target/docs/builtin-documentation.json
 node scripts/docs/build.mjs \
   --native-executable target/release/runmat \
   --graphics-runtime target/docs/graphics-runtime \
