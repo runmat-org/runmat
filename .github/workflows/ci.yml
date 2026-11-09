@@ -68,7 +68,7 @@ jobs:
     if: inputs.release_validation || github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     strategy:
       fail-fast: false
-      max-parallel: 14
+      max-parallel: 15
       matrix:
         include:
           - runner: warp-ubuntu-latest-x64-16x

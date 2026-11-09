@@ -65,14 +65,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "e957f24453e8fe06321ff6a18fef59b2ec6a0aea7ded1c9f206f724db3e8212d",
+      "sha256": "14486aa3de9dc5297bc4eebc35ab4455bd2db434d4be765eb7b0491bbdca17b7",
       "files": 24831,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The reviewed 124-path inverse reconstructs the measured scientific inventory. Console-consumer observation ordering, CI fixtures and metadata preserve successful numerical work, process-retirement production and resource charges. The logspace and atan2 changes are confined to cfg(test) GPU witnesses, preserving scientific implementation and assertions. Original scientific totals and artifact identities remain. Windows logspace preflight passed; revised atan2 execution remains pending separately.",
+    "reason": "The reviewed 127-path inverse reconstructs the measured scientific inventory. Console-consumer ordering, CI fixtures, metadata and CRLF diagnostic rendering preserve numerical work, process retirement, publication and resource charges. Logspace and atan2 changes are confined to cfg(test) GPU witnesses; both pass the Windows precision preflight in run 42534293840. The actual Windows CLI diagnostic cohort passes 19 cases with its repaired CRLF assertion and unchanged source guard. Original scientific totals and artifact identities remain. Consolidated platform and distribution qualification is separate.",
     "review": {
       "path": "qualification/scientific/reviews/dev-ci-repairs.json",
-      "sha256": "dc9f4ca5dfecaedd49a2236573c27121acd56901ef65ce5caa80488dc6d9dac3"
+      "sha256": "86f71540cc05071afb715e8359b0483f7c975e4eb91938a10d4a88b17e9344ea"
     }
   }
 }

@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "status": "Reviewed conservation of Linux authored-physics and driver-recovery measurements across bounded CI, metadata and console-observation repairs",
+  "status": "Reviewed conservation of Linux authored-physics and driver-recovery measurements across bounded CI, metadata, console-observation and CRLF diagnostic repairs",
   "measured_inputs": {
     "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
     "files": 24826,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "e957f24453e8fe06321ff6a18fef59b2ec6a0aea7ded1c9f206f724db3e8212d",
+    "sha256": "14486aa3de9dc5297bc4eebc35ab4455bd2db434d4be765eb7b0491bbdca17b7",
     "files": 24831,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -17,6 +17,24 @@
     "driver-recovery-physics"
   ],
   "changed_inputs": [
+    {
+      "path": "crates/runmat-cli/src/commands/check.rs",
+      "before": ["100644", "blob", "3d1f89cc61366906c035831376d93fefb3f60821"],
+      "after": ["100644", "blob", "f6f50ab7c458728353b654349a7b78e09a839408"],
+      "reason": "Removes a trailing CR from the displayed source excerpt while retaining source bytes, byte offsets and Unicode columns. The existing coordinate test covers LF and CRLF. This changes diagnostic rendering, with no change to solving, successful result publication or resource charges. The actual Windows check_cli cohort passes all 19 cases, including the exact FEA source/caret assertion."
+    },
+    {
+      "path": "crates/runmat-cli/src/diagnostics.rs",
+      "before": ["100644", "blob", "4da1303067945ab1026eb026d84b4bfcdb721d53"],
+      "after": ["100644", "blob", "ba1b370c81e0fb0a642bc7e26bb6f0a1d619b116"],
+      "reason": "Applies the same CRLF line-terminator handling to runtime error excerpts and excludes the removed terminator from caret widths. Existing error-rendering assertions cover LF and CRLF. Error construction, typed causes, exit classification and all successful numerical execution are unchanged. The extracted production helpers pass direct Rust LF/CRLF checks, and the Windows CLI cohort passes."
+    },
+    {
+      "path": "crates/runmat-cli/tests/check_cli.rs",
+      "before": ["100644", "blob", "d71edec5b769a244b5121ba6e68442a3ea9ca762"],
+      "after": ["100644", "blob", "ef56b9fd90af35e3343fa22d5d9028fd7d6ee460"],
+      "reason": "The existing located-diagnostic fixture explicitly writes CRLF on every platform. Its exact expected diagnostic, source line, location and caret remain. All 19 actual Windows CLI cases pass; the two measured scientific harnesses and their fixtures are unchanged."
+    },
     {
       "path": "crates/runmat-runtime/src/builtins/math/trigonometry/atan2/tests.rs",
       "before": [
@@ -29,7 +47,7 @@
         "blob",
         "38c43c012d6afce17988abd8575ddea6b1597431"
       ],
-      "reason": "Only the cfg(test) atan2 GPU witness changes. Windows run 42483299272/job 128740898953 reports GPU 0.7854096293449402 versus CPU 0.7853981633974483, exceeding the old absolute 1e-5 bound. The F32 shader delegates nonzero inputs to WGSL atan2, whose specified accuracy is 4096 ULP for the normal finite fixture inputs. The revised comparison uses that bound plus one reference-rounding ULP; F64 remains 1e-12, zero outputs are exact, and signed-zero bits and shape checks remain. Failures include index, precision and tolerance. The test module is excluded from both measured scientific harnesses; runtime/shader implementation, scientific thresholds and original artifact identities are unchanged. Revised GPU-witness execution is pending."
+      "reason": "Only the cfg(test) atan2 GPU witness changes. Windows run 42483299272/job 128740898953 reports GPU 0.7854096293449402 versus CPU 0.7853981633974483, exceeding the old absolute 1e-5 bound. The F32 shader delegates nonzero inputs to WGSL atan2, whose specified accuracy is 4096 ULP for the normal finite fixture inputs. The revised comparison uses that bound plus one reference-rounding ULP; F64 remains 1e-12, zero outputs are exact, and signed-zero bits and shape checks remain. Failures include index, precision and tolerance. The test module is excluded from both measured scientific harnesses; runtime/shader implementation, scientific thresholds and original artifact identities are unchanged. The Windows GPU precision preflight in run 42534293840 passes this witness."
     },
     {
       "path": "crates/runmat-runtime/src/builtins/array/creation/logspace.rs",
@@ -43,7 +61,7 @@
         "blob",
         "525b508e02db439ec5d696537fdc78acd34e2532"
       ],
-      "reason": "Only the cfg(test) logspace GPU witness changes. Windows CI 42476109333/job 128718437217 reaches the numerical assertion after verified DXC staging. The fixed F32 absolute threshold is replaced by a 40-output-ULP bound for its exact quarter-step exponents in [1,2], derived from the WGSL pow/exp2/log2 accuracy contract; conservative propagated bounds including one reference ULP are 21.17, 31.78 and 33.29 ULP for its three interior values. Endpoints are checked exactly, the F64 bound remains 1e-12, and failures print both values and selected precision. GPU execution of the revised witness remains pending. Runtime and shader implementations are unchanged; this unit-test module is excluded when Runtime is linked into either measured scientific harness. Scientific fixtures, numerical thresholds, counts and original artifact identities remain unchanged."
+      "reason": "Only the cfg(test) logspace GPU witness changes. Windows CI 42476109333/job 128718437217 reaches the numerical assertion after verified DXC staging. The fixed F32 absolute threshold is replaced by a 40-output-ULP bound for its exact quarter-step exponents in [1,2], derived from the WGSL pow/exp2/log2 accuracy contract; conservative propagated bounds including one reference ULP are 21.17, 31.78 and 33.29 ULP for its three interior values. Endpoints are checked exactly, the F64 bound remains 1e-12, and failures print both values and selected precision. The Windows GPU precision preflight in run 42534293840 passes this witness. Runtime and shader implementations are unchanged; this unit-test module is excluded when Runtime is linked into either measured scientific harness. Scientific fixtures, numerical thresholds, counts and original artifact identities remain unchanged."
     },
     {
       "path": "crates/runmat-analysis/fea/src/algebra/coercivity.rs",
@@ -1766,8 +1784,12 @@
     {
       "path": "qualification/scientific/evidence/dev-console-observation-order.json",
       "sha256": "f1c0ac5e4997f11e6bc16e86ddd921837eff58eec790d86e722d3fd1f0d35883"
+    },
+    {
+      "path": "qualification/scientific/evidence/cli-crlf-diagnostics.json",
+      "sha256": "9f456b1324cea026695b6bcecf8972e37b2281a57a284272c0e3ccf5af625254"
     }
   ],
   "cache_identity": "Package test inputs can change conservative compiled cache namespaces. This review does not claim byte-identical compiled artifacts or relabel earlier cache implementations.",
-  "implementation_commit": "2a49ca1c467256029c5a64ec165bc66ec2b35810"
+  "implementation_commit": "c096ba97bd1db22f1138e018a679abf99888ef16"
 }
