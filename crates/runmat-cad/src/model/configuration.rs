@@ -256,7 +256,26 @@ impl Configuration {
                 });
                 continue;
             };
-            match patched_kind(feature, patch) {
+            // `suppressed` is the feature's own flag, not a field of its definition: a
+            // configuration that sets it brings back (or leaves out) a feature the part
+            // suppresses (or keeps) by default.
+            let mut patch = patch.clone();
+            if let Some(flag) = patch.remove("suppressed") {
+                match patch_bool(&flag) {
+                    Some(b) => feature.suppressed = b,
+                    None => problems.push(FeatureOverrideProblem {
+                        feature: id.clone(),
+                        message: format!(
+                            "configuration `{}` sets `{id}.suppressed`, which is `true` or `false`",
+                            self.name
+                        ),
+                    }),
+                }
+                if patch.is_empty() {
+                    continue;
+                }
+            }
+            match patched_kind(feature, &patch) {
                 Ok(kind) => feature.kind = kind,
                 Err(e) => problems.push(FeatureOverrideProblem {
                     feature: id.clone(),
@@ -268,6 +287,20 @@ impl Configuration {
             }
         }
         (out, problems)
+    }
+}
+
+/// A patch value read as a flag: `true`/`false` as written in the source (a bool, or the word).
+fn patch_bool(v: &Value) -> Option<bool> {
+    match v {
+        Value::Bool(b) => Some(*b),
+        Value::String(s) => s.parse().ok(),
+        Value::Object(m) => m.values().find_map(|x| match x {
+            Value::Bool(b) => Some(*b),
+            Value::String(s) => s.parse().ok(),
+            _ => None,
+        }),
+        _ => None,
     }
 }
 
@@ -356,6 +389,21 @@ mod tests {
         let back: Configuration =
             serde_json::from_value(serde_json::to_value(&c).unwrap()).unwrap();
         assert_eq!(back, c);
+    }
+
+    #[test]
+    fn a_configuration_brings_back_a_feature_the_part_suppresses() {
+        let parsed = crate::syntax::parse_part(
+            "p.part",
+            "runmat 0.7\nstd 1\n\npart p {\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = 5 mm)\n    }\n    feature a = extrude(profile = sketch.s, distance = 2 mm)\n    feature b = extrude(profile = sketch.s, distance = 4 mm, suppressed = true)\n    output p = { body = feature.a.body }\n    configuration upper = { suppress = [feature.a], features = { b = { suppressed = false } } }\n}\n",
+        );
+        let doc = parsed.document.unwrap_or_else(|| panic!("the part parses ({} diagnostics)", parsed.diagnostics.len()));
+        let c = doc.configuration(&ConfigurationName::new("upper")).unwrap();
+        let (features, problems) = c.apply_features(&doc.features);
+        assert!(problems.is_empty(), "{problems:?}");
+        let b = features.iter().find(|f| f.id == FeatureId::new("b")).unwrap();
+        assert!(!b.suppressed, "the configuration unsuppresses b");
+        assert_eq!(b.kind, doc.features.iter().find(|f| f.id == FeatureId::new("b")).unwrap().kind);
     }
 
     #[test]
