@@ -69,6 +69,20 @@ pub(crate) fn modal_lobpcg_options(
     }
 }
 
+/// Whether the full space holds only translational solid DOFs, three per node in node-major
+/// order, and the constraint reduction keeps each node's three DOFs together.
+fn keeps_whole_translational_nodes(summary: &AssemblySummary, free_dofs: &[usize]) -> bool {
+    summary.dof_count > 0
+        && summary.structural_rotational_dof_count == 0
+        && summary.structural_translational_dof_count == summary.dof_count
+        && summary.dof_count == 3 * summary.structural_node_count
+        && !free_dofs.is_empty()
+        && free_dofs.len() % 3 == 0
+        && free_dofs.chunks_exact(3).all(|triple| {
+            triple[0] % 3 == 0 && triple[1] == triple[0] + 1 && triple[2] == triple[0] + 2
+        })
+}
+
 pub(crate) const MODAL_MASS_ORTHOGONALIZATION_PASSES: usize = 2;
 type ModalCandidate = (f64, Vec<f64>, f64);
 
@@ -276,11 +290,23 @@ pub(crate) fn solve_modal_system_reusing(
     // The LOBPCG preconditioner, built once for every search of this solve.
     let mut multigrid = None;
     if path == SubspaceSolvePath::PreconditionedLobpcg {
+        // A translational solid space is node-major with three DOFs per node. When the
+        // constraint reduction keeps whole nodes, multigrid aggregates the nodal 3×3 blocks, as
+        // the static solve does and as the plan's multigrid estimate assumes.
+        let block_size = if keeps_whole_translational_nodes(summary, prepared_modal.free_dofs()) {
+            3
+        } else {
+            1
+        };
         match crate::solve::shared_sparse::with_plan(LocalExecutionPlan::serial(), || {
             runmat_sparse_solvers::precond::Amg::new(
                 crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().stiffness())
                     .view(),
-                runmat_sparse_solvers::precond::AmgOptions::default(),
+                runmat_sparse_solvers::precond::AmgOptions {
+                    block_size,
+                    strength_threshold: if block_size > 1 { 0.02 } else { 0.0 },
+                    ..Default::default()
+                },
                 crate::solve::shared_sparse::control(),
             )
         }) {
