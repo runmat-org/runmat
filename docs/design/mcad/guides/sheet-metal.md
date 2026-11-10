@@ -87,7 +87,7 @@ Other operations add hems, jogs, miter flanges, sketched and lofted bends, tabs 
 
 `convert_to_sheet_metal` turns a thin solid, such as a shelled box, into sheet metal:
 
-```
+```part
 feature sheet = sheet_metal.convert_to_sheet_metal(
     fixed_face = feature.body.face.start,
     bend_edges = [],
