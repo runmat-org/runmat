@@ -38,12 +38,32 @@
       "ordinary_skip": ["remote::driver_replacement_tests::"]
     },
     {
+      "id": "circuit-large-board-performance",
+      "expected_passed": 1,
+      "group": "geometry-analysis",
+      "required": true,
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat-circuit", "--test", "runtime_scale", "--", "--test-threads=1"],
+      "ordinary_skip": ["small_edits_on_a_large_board_stay_within_budget"],
+      "description": "Full 50k-plus primitive board edit, fresh-compile equivalence, delta and timing qualification. Preserve the 500 ms release budget; ordinary CI runs bounded functional regressions and verifies this receipt."
+    },
+    {
       "id": "extended-transient-rod",
       "group": "geometry-analysis",
       "required": false,
       "exception": "RM-1297",
       "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat-analysis-fea", "--lib", "pipeline::transient::rod_qualification::", "--", "--test-threads=1"],
       "ordinary_skip": ["pipeline::transient::rod_qualification::"]
+    },
+    {
+      "id": "coupled-full-model-witnesses",
+      "group": "tooling-distributed",
+      "required": false,
+      "exception": "Owner-approved manual scientific runs, 2026-11-09: full-model FSI wall-time and CHT wall-time/memory ceilings remain beta limitations.",
+      "expected_passed": 2,
+      "selected_filter": "example_runs_as_a_coupled_study",
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat", "--test", "check_cli", "example_runs_as_a_coupled_study", "--", "--test-threads=1"],
+      "ordinary_skip": ["fsi_compliant_tube_example_runs_as_a_coupled_study", "cht_plate_channel_example_runs_as_a_coupled_study"],
+      "description": "Full public coupled FSI and CHT model solves, publication and authored assessments. Preserve assertions and report actual manual outcomes; ordinary CI retains bounded coupling regressions."
     },
     {
       "id": "meshing-release",

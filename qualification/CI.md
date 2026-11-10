@@ -37,6 +37,21 @@ pass/failure/skip totals and original logs. Renew affected receipts when their
 relevant inputs change. `scripts/qualification/scientific.py verify` checks the
 committed receipt dispositions on every dev candidate.
 
+The full circuit large-board benchmark runs offline on the recorded reference
+host in release mode under
+`circuit-large-board-performance`. It checks a board with at least 50,000
+primitives, edit deltas, fresh-compile equivalence and the 500 ms edit budget.
+Ordinary geometry CI excludes this timing case and checks its required receipt;
+the smaller circuit functional tests remain in the ordinary suite. Use
+`python3 scripts/qualification/scientific.py command --cohort circuit-large-board-performance`
+to obtain the exact command.
+
+The two full-model FSI/CHT CLI witnesses use the manual
+`coupled-full-model-witnesses` cohort. Its owner-approved exception records the
+known wall-time and memory-ceiling failures. Keep their solve, publication and
+assessment assertions intact, and report actual outcomes when running them.
+Smaller coupling regressions remain in ordinary CI.
+
 GitHub also provides explicit manual workflows:
 
 - `offline-qualification.yml`: scientific conformance, full GPU and performance qualification, selected by exact source ref.

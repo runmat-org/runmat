@@ -4,6 +4,18 @@
 *.brep text eol=lf
 *.step text eol=lf
 
+# Design printers and source-identity fixtures use LF on every target. Git's
+# Windows checkout conversion must not change these authored source bytes.
+*.part text eol=lf
+*.assembly text eol=lf
+*.drawing text eol=lf
+*.circuit text eol=lf
+*.circuit.layout text eol=lf
+*.circuit.lock text eol=lf
+*.fea text eol=lf
+# FEA syntax snapshots also include source blocks from Markdown documentation.
+*.md text eol=lf
+
 # Canonical package fixtures are compared byte-for-byte with serializer output.
 # Keep their wire-format line endings stable on Windows checkouts as well.
 crates/runmat-package/tests/fixtures/*.lock text eol=lf

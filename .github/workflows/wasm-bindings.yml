@@ -292,13 +292,18 @@ jobs:
                 const validPublished = publishedVersions.filter((version) => parse(version));
                 const latestPublished = validPublished.sort(compareVersions).at(-1) || currentVersion;
                 const latest = parse(latestPublished);
+                const current = parse(currentVersion);
 
-                if (!latest) {
-                  throw new Error("Could not determine latest published package version");
+                if (!latest || !current) {
+                  throw new Error("Could not determine package version");
                 }
 
                 let nextVersion;
-                if (latest.prerelease[0] === "dev" && /^\d+$/.test(latest.prerelease[1] || "")) {
+                const currentBase = `${current.major}.${current.minor}.${current.patch}`;
+                const latestBase = `${latest.major}.${latest.minor}.${latest.patch}`;
+                if (validPublished.length === 0 || compareVersions(currentBase, latestBase) > 0) {
+                  nextVersion = `${currentBase}-dev.0`;
+                } else if (latest.prerelease[0] === "dev" && /^\d+$/.test(latest.prerelease[1] || "")) {
                   nextVersion = `${latest.major}.${latest.minor}.${latest.patch}-dev.${Number(latest.prerelease[1]) + 1}`;
                 } else {
                   nextVersion = `${latest.major}.${latest.minor}.${latest.patch + 1}-dev.0`;

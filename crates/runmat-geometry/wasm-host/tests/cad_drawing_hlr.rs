@@ -33,11 +33,16 @@ drawing lug_views {
 /// A vertical visible line at `u` spanning `v` 0 to 3.4 mm.
 fn has_side(lines: &[Vec<f64>], u: f64) -> bool {
     lines.iter().any(|l| {
-        let us: Vec<f64> = l.chunks_exact(2).map(|p| p[0]).collect();
-        let vs: Vec<f64> = l.chunks_exact(2).map(|p| p[1]).collect();
-        let lo = vs.iter().cloned().fold(f64::INFINITY, f64::min);
-        let hi = vs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        us.iter().all(|x| (x - u).abs() < 1e-3) && lo < 1e-3 && (hi - 3.4).abs() < 1e-3
+        // A visible wire can contain several connected edges. Inspect consecutive
+        // points so a closed outline and separate edge polylines have the same test.
+        l.windows(4).step_by(2).any(|edge| {
+            let lo = edge[1].min(edge[3]);
+            let hi = edge[1].max(edge[3]);
+            (edge[0] - u).abs() < 1e-3
+                && (edge[2] - u).abs() < 1e-3
+                && lo.abs() < 1e-3
+                && (hi - 3.4).abs() < 1e-3
+        })
     })
 }
 
@@ -108,7 +113,11 @@ fn the_standard_drawing_measures_the_bracket_on_occt() {
         assert!(
             hidden
                 .iter()
-                .any(|l| l.chunks(2).all(|p| (p[0] - x).abs() < 1e-3)),
+                .any(|line| line.windows(4).step_by(2).any(|edge| {
+                    (edge[0] - x).abs() < 1e-3
+                        && (edge[2] - x).abs() < 1e-3
+                        && (edge[3] - edge[1]).abs() > 1e-3
+                })),
             "no hidden line at x = {x}: {hidden:?}"
         );
     }

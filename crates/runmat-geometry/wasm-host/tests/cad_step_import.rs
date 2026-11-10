@@ -2,6 +2,7 @@
 //! exported as exact AP242, then imported into another part from the request's files (the
 //! browser host has no project folder, so the STEP text travels with the request).
 
+use base64::Engine as _;
 use runmat_cad::regen::kernel::{ExchangeDocument, ExchangeFormat, ExchangePart};
 use runmat_cad_wasm::runtime::regenerate_part;
 use serde_json::Value;
@@ -229,5 +230,23 @@ fn the_export_call_writes_a_part_and_an_assembly_that_import_back() {
         &files,
         serde_json::json!({ "format": "stl" }),
     );
-    assert_eq!(stl["ok"], false);
+    assert_eq!(stl["ok"], true, "{stl}");
+    assert_eq!(stl["name"], "plate.stl");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(stl["base64"].as_str().expect("binary STL payload"))
+        .expect("valid base64");
+    assert!(bytes.len() >= 84, "STL header and triangle count");
+    let count = u32::from_le_bytes(bytes[80..84].try_into().unwrap()) as usize;
+    assert!(count > 0, "STL contains the plate surface");
+    assert_eq!(bytes.len(), 84 + count * 50, "complete STL triangles");
+    let unsupported = export(
+        "/p/plate.part",
+        PLATE,
+        &files,
+        serde_json::json!({ "format": "unsupported_format" }),
+    );
+    assert_eq!(unsupported["ok"], false, "{unsupported}");
+    assert!(unsupported["message"]
+        .as_str()
+        .is_some_and(|m| !m.is_empty()));
 }
