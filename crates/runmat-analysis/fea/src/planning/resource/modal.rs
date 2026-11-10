@@ -40,8 +40,8 @@ use observations::resolve_modal_observations;
 pub(super) use sizing::structural_modal_accelerator_minimum_bytes;
 
 use sizing::{
-    modal_output_value_count, modal_phase_value_count, modal_result_payload_bytes,
-    modal_workspace_bytes, prepared_output_covers_transport,
+    modal_eigensolver_working_values, modal_output_value_count, modal_phase_value_count,
+    modal_result_payload_bytes, modal_workspace_bytes, prepared_output_covers_transport,
 };
 pub use sizing::{
     structural_modal_receipt_payload_bytes_upper_bound,
@@ -247,6 +247,11 @@ pub fn build_structural_modal_resource_plan_from_compilation(
         full_dimension,
         reduced_dimension,
         maximum_subspace_dimension,
+        modal_eigensolver_working_values(
+            reduced_dimension,
+            maximum_subspace_dimension,
+            workload.convergence(),
+        )?,
         residual_vector_count,
         reduced_tangent_nonzeros,
         reduced_mass_nonzeros,

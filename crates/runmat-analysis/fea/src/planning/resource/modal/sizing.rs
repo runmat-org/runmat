@@ -9,14 +9,32 @@ use crate::planning::resource::{
 };
 
 const ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
-/// Block size of the shared shift-invert Lanczos (`EigenOptions::default().block_size`).
-const LANCZOS_BLOCK_SIZE: u64 = 6;
 const MODAL_RECEIPT_PAYLOAD_BYTES_UPPER_BOUND: u64 = 16 * 1024;
+
+/// `f64` values the shift-invert eigensolver holds for one search of `subspace_dimension`
+/// vectors, from the options the solver itself uses.
+pub(super) fn modal_eigensolver_working_values(
+    reduced_dimension: u64,
+    subspace_dimension: u64,
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+) -> Result<u64, ResourcePlanningError> {
+    let reduced = usize::try_from(reduced_dimension)
+        .map_err(|_| ResourcePlanningError::Overflow("modal reduced dimension"))?;
+    let subspace = usize::try_from(subspace_dimension)
+        .map_err(|_| ResourcePlanningError::Overflow("modal subspace dimension"))?;
+    let options = crate::solve::modal::modal_eigen_options(subspace, convergence);
+    runmat_sparse_solvers::eigen::modal_working_value_count(&options, reduced)
+        .and_then(|values| u64::try_from(values).ok())
+        .ok_or(ResourcePlanningError::Overflow(
+            "modal eigensolver working set",
+        ))
+}
 
 pub(super) fn modal_workspace_bytes(
     full_dimension: u64,
     reduced_dimension: u64,
     subspace_dimension: u64,
+    eigensolver_values: u64,
     residual_vector_count: u64,
     reduced_stiffness_nonzeros: u64,
     reduced_mass_nonzeros: u64,
@@ -47,32 +65,13 @@ pub(super) fn modal_workspace_bytes(
         checked_bytes(reduced_entries, 16, "reduced operator entries")?,
         "reduced operators",
     )?;
-    // Shift-invert block Lanczos (shared sparse layer): basis of
-    // max(2s + 2p, s + 8p) vectors with block p, plus restart, block and Ritz-vector copies.
-    let block = LANCZOS_BLOCK_SIZE;
-    let basis = checked_add(
-        checked_mul(subspace_dimension, 2, "Lanczos basis")?,
-        2 * block,
-        "Lanczos basis",
-    )?
-    .max(checked_add(subspace_dimension, 8 * block, "Lanczos basis")?);
+    // The expanded full-length candidates of the current search, plus the shared eigensolver's
+    // working set (Lanczos basis, restart copy, blocks, Ritz vectors and projected matrices, or
+    // the dense fallback's matrices on a small pencil).
     let vector_values = checked_add(
         checked_mul(full_dimension, subspace_dimension, "expanded modal vectors")?,
-        checked_mul(
-            reduced_dimension,
-            checked_add(
-                checked_mul(basis, 2, "Lanczos basis and restart copy")?,
-                checked_add(subspace_dimension, 6 * block, "Ritz vectors and blocks")?,
-                "reduced Lanczos vectors",
-            )?,
-            "reduced Lanczos vectors",
-        )?,
+        eigensolver_values,
         "modal vector values",
-    )?;
-    let dense_values = checked_mul(
-        checked_mul(basis, basis, "dense projected matrices")?,
-        4,
-        "dense projected matrices",
     )?;
     let residual_workspace_values = if residual_vector_count == 0 {
         0
@@ -85,7 +84,7 @@ pub(super) fn modal_workspace_bytes(
     };
     let vector_and_dense = checked_bytes(
         checked_add(
-            checked_add(vector_values, dense_values, "modal numerical workspace")?,
+            vector_values,
             residual_workspace_values,
             "modal and residual-vector workspace",
         )?,
@@ -292,4 +291,50 @@ pub(in crate::planning::resource) fn structural_modal_accelerator_minimum_bytes(
         .try_fold(0_u64, |total, value| {
             checked_add(total, value, "modal accelerator")
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::modal_governance::ModalConvergencePolicy;
+
+    // G26: the drone arm modal study requests 4 modes on 1,135,827 DOFs (378,609 Tet10 nodes).
+    // Its inventories follow the 13-vector working subspace, not the 256-vector search ceiling.
+    #[test]
+    fn arm_modal_inventories_follow_the_requested_working_subspace() {
+        let (full, nodes) = (1_135_827_u64, 378_609_u64);
+        let convergence = ModalConvergencePolicy::production();
+        let subspace = convergence
+            .admitted_subspace_dimension(1_135_827, 4)
+            .unwrap() as u64;
+        assert_eq!(subspace, 13);
+        let output = modal_output_value_count(full, subspace, 0).unwrap();
+        assert_eq!(output, full * 13 + 2 * 13 * 13 + 64 * 13 + 32);
+        assert_eq!(output, 14_766_953);
+        let ceiling = modal_output_value_count(full, 256, 0).unwrap();
+        assert_eq!(ceiling, 290_919_200);
+        let phase = modal_phase_value_count(output, full, subspace, nodes, 0).unwrap();
+        let phase_at_ceiling = modal_phase_value_count(ceiling, full, 256, nodes, 0).unwrap();
+        assert!(
+            phase * 19 < phase_at_ceiling,
+            "{phase} vs {phase_at_ceiling}"
+        );
+
+        // The eigensolver's working set comes from the solver's own options: a 61-vector
+        // Lanczos basis (max(2·13 + 2·6, 13 + 8·6)) and its restart copy, four blocks of 6,
+        // two copies of the 13 Ritz vectors, and four 61 × 61 projected matrices.
+        let working = modal_eigensolver_working_values(full, subspace, convergence).unwrap();
+        assert_eq!(working, full * (2 * 61 + 4 * 6 + 2 * 13) + 4 * 61 * 61);
+        let at_ceiling = modal_eigensolver_working_values(full, 256, convergence).unwrap();
+        assert!(working * 9 < at_ceiling, "{working} vs {at_ceiling}");
+    }
+
+    #[test]
+    fn small_pencils_reserve_the_dense_fallback() {
+        let convergence = ModalConvergencePolicy::production();
+        let n = 300_u64;
+        let working = modal_eigensolver_working_values(n, 13, convergence).unwrap();
+        // The densified pencil, its copy and transpose, and the dense eigenvectors.
+        assert!(working >= 5 * n * n, "{working}");
+    }
 }

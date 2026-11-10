@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 pub struct ModalConvergencePolicy {
     relative_residual_tolerance: f64,
     maximum_subspace_iterations: usize,
-    /// Hard capacity for Ritz vectors, including boundary probes.
-    /// Reaching this bound never establishes a complete clustered eigenspace.
+    /// Search ceiling for Ritz vectors, including boundary probes. A request admits the smaller
+    /// of this ceiling and the subspace it works with (see `admitted_subspace_dimension`).
+    /// Reaching the admitted bound never establishes a complete clustered eigenspace.
     maximum_subspace_dimension: usize,
 }
 
@@ -49,8 +50,14 @@ impl ModalConvergencePolicy {
         self.maximum_subspace_dimension
     }
 
-    /// Shared planning/execution bound. A partial spectrum needs at least one
-    /// additional vector to prove separation from the retained boundary.
+    /// Shared planning/execution bound: the largest subspace the solver searches for this
+    /// request, and the size the resource plan reserves.
+    ///
+    /// The working subspace is the requested modes, plus room for a cluster that shares the
+    /// last requested eigenvalue (`MODAL_BOUNDARY_CLUSTER_ALLOWANCE`), plus the boundary probes
+    /// that prove separation (`MODAL_BOUNDARY_PROBE_WIDTH`). It is capped by the search ceiling
+    /// and the reduced dimension. A partial spectrum needs at least one additional vector to
+    /// prove separation from the retained boundary.
     pub(crate) fn admitted_subspace_dimension(
         self,
         reduced_dimension: usize,
@@ -58,7 +65,13 @@ impl ModalConvergencePolicy {
     ) -> Result<usize, FeaRunError> {
         self.validate()?;
         let requested = requested_modes.min(reduced_dimension);
-        let capacity = self.maximum_subspace_dimension.min(reduced_dimension);
+        let working = requested
+            .saturating_add(crate::solve::modal::MODAL_BOUNDARY_CLUSTER_ALLOWANCE)
+            .saturating_add(crate::solve::modal::MODAL_BOUNDARY_PROBE_WIDTH);
+        let capacity = self
+            .maximum_subspace_dimension
+            .min(working)
+            .min(reduced_dimension);
         if requested == 0
             || capacity < requested
             || (requested < reduced_dimension && capacity == requested)
@@ -107,6 +120,35 @@ impl Default for ModalConvergencePolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admitted_subspace_is_sized_by_the_request_not_the_search_ceiling() {
+        use crate::solve::modal::{
+            MODAL_BOUNDARY_CLUSTER_ALLOWANCE, MODAL_BOUNDARY_PROBE_WIDTH, MODAL_LANCZOS_BLOCK_SIZE,
+        };
+        let production = ModalConvergencePolicy::production();
+        assert_eq!(
+            MODAL_BOUNDARY_CLUSTER_ALLOWANCE,
+            MODAL_LANCZOS_BLOCK_SIZE - 1
+        );
+        // The drone-arm modal study: 4 requested modes on 1,135,827 unconstrained DOFs.
+        let working = 4 + MODAL_BOUNDARY_CLUSTER_ALLOWANCE + MODAL_BOUNDARY_PROBE_WIDTH;
+        assert_eq!(working, 13);
+        assert_eq!(
+            production
+                .admitted_subspace_dimension(1_135_827, 4)
+                .unwrap(),
+            working
+        );
+        // The search ceiling still caps a large request, and the reduced dimension a small model.
+        assert_eq!(
+            production
+                .admitted_subspace_dimension(1_000_000, 300)
+                .unwrap(),
+            production.maximum_subspace_dimension()
+        );
+        assert_eq!(production.admitted_subspace_dimension(10, 4).unwrap(), 10);
+    }
 
     #[test]
     fn modal_capacity_requires_a_real_boundary_probe_and_explicit_cold_controls() {

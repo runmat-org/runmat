@@ -262,6 +262,14 @@ fn execute_modal_core(
     check_cancelled("fea.run_modal")?;
 
     let mut diagnostics = modal.diagnostics.clone();
+    if let Some(admitted) = modal.boundary_unresolved_at_capacity {
+        return Err(FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::ModalSubspaceCapacity {
+                requested_mode_count: options.truncation.requested_mode_count() as u64,
+                admitted_subspace_dimension: admitted as u64,
+            },
+        ));
+    }
     if !modal.converged {
         return Err(FeaRunError::Assembly(format!(
             "modal eigensolver did not qualify its requested subspace: {:?}",

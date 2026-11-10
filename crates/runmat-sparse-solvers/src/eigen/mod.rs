@@ -25,6 +25,10 @@ use crate::ordering::Ordering;
 use crate::par;
 use lanczos::{thick_restart_block_lanczos, LanczosConfig};
 
+/// Default Lanczos block width. A block of `p` vectors resolves an eigenvalue of multiplicity up
+/// to `p` without relying on rounding to seed the missing directions.
+pub const DEFAULT_BLOCK_SIZE: usize = 6;
+
 /// Options shared by the Lanczos drivers.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EigenOptions {
@@ -48,7 +52,7 @@ impl Default for EigenOptions {
         Self {
             count: 10,
             shift: None,
-            block_size: 6,
+            block_size: DEFAULT_BLOCK_SIZE,
             max_basis: None,
             tolerance: 1e-10,
             max_restarts: 200,
@@ -98,6 +102,52 @@ fn basis_size(options: &EigenOptions, n: usize) -> usize {
         .max_basis
         .unwrap_or_else(|| (2 * options.count + 2 * p).max(options.count + 8 * p));
     wanted.min(n)
+}
+
+impl EigenOptions {
+    /// Lanczos basis capacity the drivers use for these options on an `n`-dimensional pencil.
+    pub fn basis_capacity(&self, n: usize) -> usize {
+        basis_size(self, n)
+    }
+}
+
+/// Whether [`modal`] (or [`modal_with_factor`]) takes the dense fallback for these options on an
+/// `n`-dimensional pencil. This is the union of both entry points' dense criteria.
+fn modal_takes_dense_path(options: &EigenOptions, n: usize) -> bool {
+    let count = options.count.min(n);
+    let p = options.block_size.max(1);
+    n <= 400 || n <= 3 * basis_size(options, n).max(count + 2 * p) || n < count + 4 * p
+}
+
+/// Upper bound on the `f64` working values that [`modal`] and [`modal_with_factor`] hold at once
+/// for `options` on an `n`-dimensional pencil, apart from the sparse factorization.
+///
+/// - Dense fallback: the densified pencil, its copy and transpose, the dense eigenvectors, the
+///   dense eigensolver scratch, and the returned vectors.
+/// - Lanczos: the basis and its restart copy, the start/residual/operator/metric blocks, the
+///   Ritz vectors and their reordered copy, and the projected matrices (tridiagonal block,
+///   projection, Ritz coefficients and their selection).
+///
+/// Returns `None` on arithmetic overflow.
+pub fn modal_working_value_count(options: &EigenOptions, n: usize) -> Option<usize> {
+    let count = options.count.min(n);
+    let p = options.block_size.max(1);
+    let returned = n.checked_mul(count)?;
+    if modal_takes_dense_path(options, n) {
+        let square = n.checked_mul(n)?;
+        return square
+            .checked_mul(5)?
+            .checked_add(crate::dense::symmetric_eigen_scratch_values(n))?
+            .checked_add(returned)?
+            .checked_add(n);
+    }
+    let basis = basis_size(options, n);
+    let columns = basis
+        .checked_mul(2)?
+        .checked_add(p.checked_mul(4)?)?
+        .checked_add(count.checked_mul(2)?)?;
+    n.checked_mul(columns)?
+        .checked_add(basis.checked_mul(basis)?.checked_mul(4)?)
 }
 
 /// Dense fallback for small problems: `A x = λ B x` with `B` SPD after an optional shift

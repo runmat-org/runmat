@@ -55,6 +55,16 @@ pub enum ResourcePlanningError {
         multigrid_resident_bytes: u64,
         maximum: u64,
     },
+    /// The modes that share the eigenvalue of the last requested mode need more vectors than
+    /// the modal subspace the plan admitted for the request. The solver stops at the admitted
+    /// size and publishes no result. Requesting more modes admits a larger subspace.
+    #[error(
+        "the eigenvalue cluster at requested mode {requested_mode_count} needs more than the admitted modal subspace of {admitted_subspace_dimension} vectors; request more modes to admit a larger subspace"
+    )]
+    ModalSubspaceCapacity {
+        requested_mode_count: u64,
+        admitted_subspace_dimension: u64,
+    },
     #[error("worker inventory is insufficient: {0}")]
     Inventory(&'static str),
     #[error("worker lacks required capability `{0:?}`")]

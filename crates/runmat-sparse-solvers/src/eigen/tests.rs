@@ -158,3 +158,29 @@ fn largest_algebraic_eigenvalues_without_shift_invert() {
         assert!((v - x).abs() <= 1e-7 * x, "{v} vs {x}");
     }
 }
+
+#[test]
+fn modal_working_set_follows_the_requested_count() {
+    let options = |count| EigenOptions {
+        count,
+        ..Default::default()
+    };
+    let n = 1_000_000;
+    let p = DEFAULT_BLOCK_SIZE;
+    // Lanczos: basis max(2s + 2p, s + 8p) and its restart copy, four blocks, two copies of
+    // the Ritz vectors, four projected matrices of the basis size.
+    let basis = options(13).basis_capacity(n);
+    assert_eq!(basis, (2 * 13 + 2 * p).max(13 + 8 * p));
+    assert_eq!(
+        modal_working_value_count(&options(13), n),
+        Some(n * (2 * basis + 4 * p + 2 * 13) + 4 * basis * basis)
+    );
+    assert!(
+        modal_working_value_count(&options(13), n).unwrap() * 9
+            < modal_working_value_count(&options(256), n).unwrap()
+    );
+    // Dense fallback on a small pencil: at least the densified pencil and its copies.
+    let small = 300;
+    assert!(modal_working_value_count(&options(13), small).unwrap() >= 5 * small * small);
+    assert_eq!(modal_working_value_count(&options(13), usize::MAX), None);
+}

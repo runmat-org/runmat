@@ -20,6 +20,29 @@ pub use preparation::solve_modal_system;
 use truncation::resolve_truncation_boundary;
 
 pub(crate) const MODAL_BOUNDARY_PROBE_WIDTH: usize = 4;
+/// Block width of the modal shift-invert Lanczos.
+pub(crate) const MODAL_LANCZOS_BLOCK_SIZE: usize = runmat_sparse_solvers::eigen::DEFAULT_BLOCK_SIZE;
+/// Modes past the last requested one that the admitted subspace keeps room for when they share
+/// its eigenvalue. A Lanczos block of `p` vectors resolves an eigenvalue of multiplicity up to
+/// `p`, so a resolved cluster at the truncation boundary adds at most `p − 1` modes.
+pub(crate) const MODAL_BOUNDARY_CLUSTER_ALLOWANCE: usize = MODAL_LANCZOS_BLOCK_SIZE - 1;
+
+/// Eigensolver options for one modal search of `subspace_dimension` vectors. The resource
+/// planner sizes the search's working set from these same options.
+pub(crate) fn modal_eigen_options(
+    subspace_dimension: usize,
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+) -> runmat_sparse_solvers::eigen::EigenOptions {
+    runmat_sparse_solvers::eigen::EigenOptions {
+        count: subspace_dimension,
+        shift: Some(0.0),
+        block_size: MODAL_LANCZOS_BLOCK_SIZE,
+        tolerance: (0.1 * convergence.relative_residual_tolerance()).min(1.0e-10),
+        max_restarts: convergence.maximum_subspace_iterations().max(1),
+        sturm_check: true,
+        ..Default::default()
+    }
+}
 pub(crate) const MODAL_MASS_ORTHOGONALIZATION_PASSES: usize = 2;
 type ModalCandidate = (f64, Vec<f64>, f64);
 
@@ -40,6 +63,10 @@ pub struct ModalSolveResult {
     pub available_mode_count: usize,
     pub boundary_probe_count: usize,
     pub boundary_probe_frequency_hz: Option<f64>,
+    /// The admitted subspace dimension when the search reached it with the truncation boundary
+    /// still unresolved: the boundary cluster needs more vectors than the plan reserved.
+    #[serde(default)]
+    pub boundary_unresolved_at_capacity: Option<usize>,
 }
 
 pub(crate) fn solve_modal_system_reusing(
@@ -73,6 +100,7 @@ pub(crate) fn solve_modal_system_reusing(
             available_mode_count: summary.dof_count,
             boundary_probe_count: 0,
             boundary_probe_frequency_hz: None,
+            boundary_unresolved_at_capacity: None,
         };
     }
 
@@ -122,6 +150,7 @@ pub(crate) fn solve_modal_system_reusing(
                 available_mode_count: summary.dof_count,
                 boundary_probe_count: 0,
                 boundary_probe_frequency_hz: None,
+                boundary_unresolved_at_capacity: None,
             };
         }
     };
@@ -148,6 +177,7 @@ pub(crate) fn solve_modal_system_reusing(
                 available_mode_count: summary.dof_count,
                 boundary_probe_count: 0,
                 boundary_probe_frequency_hz: None,
+                boundary_unresolved_at_capacity: None,
             };
         }
     };
@@ -176,6 +206,7 @@ pub(crate) fn solve_modal_system_reusing(
                 available_mode_count: reduced_operator.dof_count(),
                 boundary_probe_count: 0,
                 boundary_probe_frequency_hz: None,
+                boundary_unresolved_at_capacity: None,
             }
         }
     };
@@ -207,6 +238,7 @@ pub(crate) fn solve_modal_system_reusing(
     let mut modes: Vec<ModalCandidate> = Vec::with_capacity(target_mode_count.saturating_add(4));
     let mut boundary_probe_count = 0usize;
     let mut complete_boundary_eigenspace = false;
+    let mut capacity_reached = false;
     let mut boundary_probe_frequency_hz = None;
     let mut subspace_dimension = target_mode_count
         .saturating_add(MODAL_BOUNDARY_PROBE_WIDTH)
@@ -217,14 +249,7 @@ pub(crate) fn solve_modal_system_reusing(
     let mut sturm = None;
     let tolerance = convergence.relative_residual_tolerance();
     while subspace_dimension > 0 && !crate::is_fea_cancelled() {
-        let options = runmat_sparse_solvers::eigen::EigenOptions {
-            count: subspace_dimension,
-            shift: Some(0.0),
-            tolerance: (0.1 * tolerance).min(1.0e-10),
-            max_restarts: convergence.maximum_subspace_iterations().max(1),
-            sturm_check: true,
-            ..Default::default()
-        };
+        let options = modal_eigen_options(subspace_dimension, convergence);
         let solved = crate::solve::shared_sparse::with_plan(LocalExecutionPlan::serial(), || {
             let (k, m) = (stiffness.view(), mass.view());
             match factor.as_deref() {
@@ -291,6 +316,7 @@ pub(crate) fn solve_modal_system_reusing(
             break;
         }
         if exhausted || subspace_dimension == maximum_subspace_dimension {
+            capacity_reached = !exhausted;
             modes = candidates;
             break;
         }
@@ -415,5 +441,6 @@ pub(crate) fn solve_modal_system_reusing(
         available_mode_count: unconstrained.len(),
         boundary_probe_count,
         boundary_probe_frequency_hz,
+        boundary_unresolved_at_capacity: capacity_reached.then_some(maximum_subspace_dimension),
     }
 }

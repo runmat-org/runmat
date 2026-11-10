@@ -25,6 +25,7 @@ pub(super) fn failure(
         available_mode_count: available_modes,
         boundary_probe_count: 0,
         boundary_probe_frequency_hz: None,
+        boundary_unresolved_at_capacity: None,
     }
 }
 
@@ -84,6 +85,9 @@ mod tests {
         assert!(!partial.converged);
         assert!(partial.mode_shapes.len() <= 4);
         assert!(partial.boundary_probe_frequency_hz.is_none());
+        // The five-fold cluster at the boundary needs more than the four admitted vectors: the
+        // solver stops at the admitted size and names it for the typed capacity error.
+        assert_eq!(partial.boundary_unresolved_at_capacity, Some(4));
         let complete = super::super::solve_modal_system(
             &summary,
             2,
@@ -94,5 +98,6 @@ mod tests {
         assert!(complete.converged, "{:?}", complete.diagnostics);
         assert_eq!(complete.mode_shapes.len(), 5);
         assert!(complete.boundary_probe_frequency_hz.is_some());
+        assert_eq!(complete.boundary_unresolved_at_capacity, None);
     }
 }
