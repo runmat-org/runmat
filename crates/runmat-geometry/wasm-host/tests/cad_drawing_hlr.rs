@@ -76,15 +76,8 @@ fn a_lugs_rounded_end_keeps_its_outline_in_the_side_view() {
 /// thickness measure the part (80 and 10 mm) and show the cut's walls and the hole dashed.
 #[test]
 fn the_standard_drawing_measures_the_bracket_on_occt() {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures");
-    let (Ok(part), Ok(drawing)) = (
-        std::fs::read_to_string(dir.join("bracket.part")),
-        std::fs::read_to_string(dir.join("standard.drawing")),
-    ) else {
-        eprintln!("the Desktop checkout isn't beside runmat-cad; skipped");
-        return;
-    };
+    let part = include_str!("fixtures/drawings/bracket.part");
+    let drawing = include_str!("fixtures/drawings/standard.drawing");
     let files = serde_json::json!({ "/p/bracket.part": part }).to_string();
     let request = serde_json::json!({ "fn": "compile", "args": ["/p/standard.drawing", drawing, files, "{}"] });
     let v: serde_json::Value =

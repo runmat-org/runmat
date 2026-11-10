@@ -1111,7 +1111,7 @@ fn edge_link_flip(
             let boundary_protection =
                 [stable([x, y, p]), stable([x, y, d])].map(|face| protected_faces.contains(&face));
             let facet = match boundary_protection {
-                [true, true] if facet_flips => Some(Box::new(facet_record())),
+                [true, true] if facet_flips => Some(facet_record()),
                 [false, false] => None,
                 _ => continue,
             };
@@ -1211,7 +1211,7 @@ fn edge_link_flip(
         } else if facet_flips
             && protected_shared == BTreeSet::from([stable([x, y, p]), stable([x, y, d])])
         {
-            Some(Box::new(facet_record()))
+            Some(facet_record())
         } else {
             continue;
         };

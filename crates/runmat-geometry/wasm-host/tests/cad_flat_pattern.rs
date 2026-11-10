@@ -211,14 +211,8 @@ fn a_drawings_flat_pattern_view_carries_the_developed_sheet_and_its_bend_table()
 #[test]
 fn the_sheet_metal_showcase_compiles_and_draws_its_flat_pattern() {
     runmat_geometry_wasm_host::cad::install_occt();
-    const FIXTURES: &str = "../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures";
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
-    let (Ok(part), Ok(drawing)) = (
-        std::fs::read_to_string(root.join("vent_cover.part")),
-        std::fs::read_to_string(root.join("vent_cover_flat.drawing")),
-    ) else {
-        panic!("the Desktop fixtures are missing at {}", root.display());
-    };
+    let part = include_str!("fixtures/drawings/vent_cover.part").to_owned();
+    let drawing = include_str!("fixtures/drawings/vent_cover_flat.drawing").to_owned();
     let files: runmat_cad_wasm::runtime::Files = [
         ("/p/vent_cover.part".to_string(), part.clone()),
         ("/p/vent_cover_flat.drawing".to_string(), drawing.clone()),

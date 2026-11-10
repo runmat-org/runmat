@@ -1,0 +1,16 @@
+runmat 0.7
+std 1
+
+drawing vent_cover_flat {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [
+            { label = "Title", source = { source = literal, text = "Vent cover, flat pattern" } },
+            { label = "Scale", source = { source = scale } },
+            { label = "Sheet", source = { source = sheet_number } }
+        ]
+    }
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+    view flat = flat_pattern(feature = flat, sheet = "1", model = { part = vent_cover }, at = [200, 170], display = visible_lines)
+    table bends = bend(view = flat, sheet = "1", at = [20, 120])
+}
