@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "cohort": "authored-cli-physics",
-  "policy_sha256": "e703044e0eead41dd417ea3c7718bfd9346fa8583b659663b71258d1dac085a1",
+  "policy_sha256": "7655c83b375ab5ac409efede7be38438c27e5e02ba5e93156586e44f096ddac1",
   "measured": {
-    "source_revision": "c816a5927360e6355120f4de1c3690a4d914fb99",
+    "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
     "target": "linux-x86_64",
     "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "command": [
@@ -20,8 +20,8 @@
       "--",
       "--test-threads=1"
     ],
-    "log_sha256": "7f794c3f2af01a1d36d1ed5b7629b29a4f52b1517195f6371205091ace87a694",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/settings-linux-r1055-scientific.authored.log",
+    "log_sha256": "beb97127c5881756646739fa57a74af099540ca3728267a89600da8bac7be693",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.authored-cli-physics.log",
     "passed": 12,
     "failed": 0,
     "ignored": 0,
@@ -43,36 +43,19 @@
     ],
     "selected_filter": null,
     "inputs": {
-      "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
-      "files": 24826,
+      "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
+      "files": 26022,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "artifacts": [
       {
-        "sha256": "a1733e75dd02788d8128bb09cd44d3cd33edfa51933de09a8b3dc132c4dd0071",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/settings-linux-r1055-scientific-artifacts/authored-harness"
+        "sha256": "0ae7f0686a7016ce60e76c97ffac84ffbd18e476f1c54c29ac330c61a80c4767",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.artifacts/authored-cli-physics-harness"
       },
       {
-        "sha256": "ba61610dd032814f55a1f3105aa1af7aaeeeb6ea45a3816e74a3876b8e247eff",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/settings-linux-r1055-scientific-artifacts/runmat"
+        "sha256": "e293c56daf42640ed3b9a6f27cc898cd794109a809f2a93c1ea78195c93e932d",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.artifacts/runmat"
       }
     ]
-  },
-  "conservation": {
-    "measured_inputs": {
-      "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
-      "files": 24826,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "accepted_inputs": {
-      "sha256": "14486aa3de9dc5297bc4eebc35ab4455bd2db434d4be765eb7b0491bbdca17b7",
-      "files": 24831,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "reason": "The reviewed 127-path inverse reconstructs the measured scientific inventory. Console-consumer ordering, CI fixtures, metadata and CRLF diagnostic rendering preserve numerical work, process retirement, publication and resource charges. Logspace and atan2 changes are confined to cfg(test) GPU witnesses; both pass the Windows precision preflight in run 42534293840. The actual Windows CLI diagnostic cohort passes 19 cases with its repaired CRLF assertion and unchanged source guard. Original scientific totals and artifact identities remain. Consolidated platform and distribution qualification is separate.",
-    "review": {
-      "path": "qualification/scientific/reviews/dev-ci-repairs.json",
-      "sha256": "86f71540cc05071afb715e8359b0483f7c975e4eb91938a10d4a88b17e9344ea"
-    }
   }
 }
