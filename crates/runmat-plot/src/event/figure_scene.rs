@@ -56,6 +56,9 @@ impl FigureScene {
     pub const SCHEMA_VERSION: u32 = 7;
 
     pub fn capture(figure: &Figure) -> Self {
+        if let Some(scene) = figure.geometry_source() {
+            return Self::from_geometry_scene(scene);
+        }
         let snapshot = FigureSnapshot::capture(figure);
         let plots = figure
             .plots()
@@ -89,8 +92,15 @@ impl FigureScene {
         figure: &Figure,
         policy: SceneExportPolicy,
     ) -> Result<Self, SceneExportFailure> {
-        let snapshot = FigureSnapshot::capture(figure);
         let mut budget = SceneExportBudget::new(policy);
+        if let Some(scene) = figure.geometry_source() {
+            let scene = Self::from_geometry_scene(scene);
+            for plot in &scene.plots {
+                budget.reserve_plot(plot)?;
+            }
+            return Ok(scene);
+        }
+        let snapshot = FigureSnapshot::capture(figure);
         let mut plots = Vec::new();
 
         for (idx, plot) in figure.plots().enumerate() {
@@ -160,7 +170,37 @@ impl FigureScene {
         }
     }
 
+    /// Whether this scene was written from a geometry scene ([`Self::from_geometry_scene`]):
+    /// it carries a legend and color bar, outline lines, unit context or a hidden triad.
+    pub fn is_geometry_export(&self) -> bool {
+        self.geometry_overlay.is_some()
+            || self.geometry_physical_context.is_some()
+            || !self.geometry_lines.is_empty()
+            || !self.geometry_orientation_triad
+    }
+
+    /// Restore a figure. A scene written from a geometry scene keeps that geometry scene
+    /// ([`Figure::geometry_source`]), so the figure draws its legend, color bar and outlines
+    /// as the live result did.
     pub fn into_figure(self) -> Result<Figure, String> {
+        static NEXT_IMPORT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let geometry_source = if self.is_geometry_export() {
+            let import = NEXT_IMPORT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Some(
+                self.clone()
+                    .into_geometry_scene(format!("figure-scene-import:{import}"), 1)?,
+            )
+        } else {
+            None
+        };
+        let figure = self.into_plain_figure()?;
+        Ok(match geometry_source {
+            Some(scene) => figure.with_geometry_source(scene),
+            None => figure,
+        })
+    }
+
+    fn into_plain_figure(self) -> Result<Figure, String> {
         self.validate_schema_version()?;
 
         let mut figure = Figure::new();

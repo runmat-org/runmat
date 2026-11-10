@@ -22,6 +22,8 @@ mod colormap;
 mod color_range;
 #[path = "figure/y_direction.rs"]
 mod y_direction;
+#[path = "figure/geometry_source.rs"]
+mod geometry_source;
 pub use y_direction::YDirection;
 #[path = "figure/dimensionality.rs"]
 mod dimensionality;
@@ -108,6 +110,10 @@ pub struct Figure {
     /// Per-axes metadata used for subplot-correct annotations and legend state.
     pub axes_metadata: Vec<AxesMetadata>,
     pub sg_title_style: TextStyle,
+
+    /// The geometry scene (a field result or model) this figure was imported from; see
+    /// `figure/geometry_source.rs`.
+    geometry_source: Option<std::sync::Arc<crate::geometry_scene::GeometryScene>>,
 }
 
 #[derive(Debug, Clone)]
@@ -572,6 +578,7 @@ impl Figure {
             active_axes_index: 0,
             axes_metadata: vec![Self::default_axes_metadata()],
             sg_title_style: TextStyle::default(),
+            geometry_source: None,
         }
     }
 
@@ -1667,6 +1674,7 @@ impl Figure {
         let idx = self.normalize_axes_index(axes_index);
         self.plots.push(element);
         self.plot_axes_indices.push(idx);
+        self.geometry_source = None;
         self.dirty = true;
         self.plots.len() - 1
     }
@@ -1828,6 +1836,7 @@ impl Figure {
         }
         self.plots.remove(index);
         self.plot_axes_indices.remove(index);
+        self.geometry_source = None;
         self.dirty = true;
         Ok(())
     }
@@ -1836,6 +1845,7 @@ impl Figure {
     pub fn clear(&mut self) {
         self.plots.clear();
         self.plot_axes_indices.clear();
+        self.geometry_source = None;
         self.dirty = true;
     }
 
@@ -1847,6 +1857,7 @@ impl Figure {
             if ax == axes_index {
                 self.plots.remove(i);
                 self.plot_axes_indices.remove(i);
+                self.geometry_source = None;
             } else {
                 i += 1;
             }

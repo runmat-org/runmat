@@ -9,6 +9,12 @@ impl PlotRenderer {
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
         figure: Figure,
     ) {
+        // A figure imported from a saved field result or model draws as that geometry scene,
+        // with its legend, color bar and outlines.
+        if let Some(scene) = figure.geometry_source() {
+            self.set_geometry_scene(scene.clone());
+            return;
+        }
         self.last_geometry_scene_key = None;
         self.last_geometry_scene = None;
         self.geometry_overlay = None;
