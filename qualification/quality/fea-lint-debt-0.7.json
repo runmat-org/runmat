@@ -2,8 +2,8 @@
   "schema_version": 1,
   "issue": "RM-1287",
   "toolchain": "1.90.0",
-  "distinct_sites": 183,
-  "baseline_sha256": "ac2dc0c17431559fc93c0f3b4f0c14307a47190394c761dd4f7ae7cf45de3186",
+  "distinct_sites": 179,
+  "baseline_sha256": "152dc4f633b477b298d30de7361b9961fd68fd1dc1bf3b00ff682f97019c82d3",
   "diagnostics": [
     [
       "[\"clippy::clone_on_copy\",\"using `clone` on type `ExcitationSamplePoint<'_>` which implements the `Copy` trait\",[[\"crates/runmat-analysis/fea/src/physics/electrical/mod.rs\",\"return terminals::solve(model, step_id, sample.clone(), |fixed| {\"]]]",
@@ -342,23 +342,7 @@
       2
     ],
     [
-      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(k_norm > 0.0) || !k_norm.is_finite() {\"]]]",
-      2
-    ],
-    [
-      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(length > 1.0e-6 * original) {\"]]]",
-      2
-    ],
-    [
       "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(pivot > 0.0) || !pivot.is_finite() {\"]]]",
-      2
-    ],
-    [
-      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(residual <= RIGID_MODE_RESIDUAL_RATIO) {\"]]]",
-      2
-    ],
-    [
-      "[\"clippy::neg_cmp_op_on_partial_ord\",\"the use of negated comparison operators on partially ordered types produces code that is hard to read and refactor, please consider using the `partial_cmp` method instead, to make it clear that the two values could be incomparable\",[[\"crates/runmat-analysis/fea/src/algebra/elastic_rigidity.rs\",\"if !(scale > 0.0) || !scale.is_finite() {\"]]]",
       2
     ],
     [

@@ -1,116 +1,40 @@
 # Reviewed FEA architecture and style debt
 
+CI compares current FEA findings with two reviewed inventories under
+[RM-1287](https://linear.app/dystr/issue/RM-1287). Compiler errors, numerical
+failures and findings outside the recorded scope fail their respective gates.
+Every other first-party crate retains strict all-target Clippy.
+
 ## Architecture inventory
 
-`fea-architecture-debt-0.7.json` records 107 approved diagnostic identities under
-RM-1287. The November 9 integration review found 108 diagnostics against the
-previous 89-entry inventory: 58 matched exactly, 50 were added or changed, and
-31 were removed or replaced. Lowering the stale `contracts.rs` size ceiling
-from 2,828 to its current 2,623 lines removed one diagnostic.
-
-The exception covers module concentration, module-size debt and existing
-suppression sites in the listed FEA domains. The checker requires the exact
-diagnostic multiset, an ancestor review commit, its Git input identity and the
-pinned compiler. The language surface ledger runs independently. Numerical
-failures, compiler errors and findings outside the declared domains fail their
-gates.
+`fea-architecture-debt-0.7.json` records 111 findings covering module
+concentration, module size and existing suppression sites in the listed FEA
+domains. The checker requires the exact diagnostic multiset, an ancestor review
+commit, its Git input identity and the pinned compiler. The language-surface
+ledger runs independently and covers 136 current members.
 
 ## Clippy inventory
 
-CI runs a fresh FEA Clippy census and compares its diagnostic source anchors and
-emission counts with `fea-lint-debt-0.7.json`. The ledger comes from the approved
-R1053 JSONL identified below. Line-number shifts preserve an identity; changing
-the lint, diagnostic message, primary source text or emission count requires
-review. Compiler errors and findings outside the FEA crate fail the gate.
-Every other first-party crate retains strict all-target Clippy.
+`fea-lint-debt-0.7.json` records 179 diagnostic source sites, grouped into 166
+identities, with 265 emissions across the library and library-test targets.
+An identity includes the lint, diagnostic message and all primary source-text
+anchors. CI compares both identities and emission counts; line-number shifts
+alone preserve an identity. A changed finding requires review.
 
-The earlier source pins below describe the original review. Current CI checks
-the emitted diagnostics directly, so unrelated documentation changes do not
-require renewing a whole-workspace exception.
+The consolidated Rust 1.90.0 census at
+`3d1c1b3b5ec5c57ccda7ecde19747004f8b93b56` removed four previously recorded
+partial-order findings in `algebra/elastic_rigidity.rs`. Every retained identity
+and emission count matches the prior inventory. No new exception was added.
+The retained JSONL SHA-256 is
+`152dc4f633b477b298d30de7361b9961fd68fd1dc1bf3b00ff682f97019c82d3`.
 
-The approved release exception covers 183 existing Clippy findings in
-`runmat-analysis-fea`, across 109 files. The all-target/all-feature census emits
-273 diagnostics: 90 library findings recur in the library-test target, which
-adds 93 findings. Repeated emissions count once.
+CI retains the separate FEA lint log and checks it against the ledger. The
+expected Clippy failure under `-D warnings` is accepted only when that exact
+comparison passes. Numerical test selection and assertions remain unchanged.
 
-| Family | Distinct findings |
-| --- | ---: |
-| Argument count, type complexity and enum size | 23 |
-| Partial-order expression readability | 20 |
-| Iterator, borrow, clone and expression simplification | 129 |
-| Slice-argument convention | 2 |
-| Documentation layout | 5 |
-| Test-module layout | 3 |
-| Floating-literal spelling | 1 |
+## Closure
 
-## Source and toolchain
-
-- Code anchor: `0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf`.
-- FEA Git tree: `55c7f312626e67dd08e22ba9583531661139baa7`.
-- Compiler-input Git inventory: `e0741de497f040a32725421ae6a5ea700136ecc7`.
-- Rust/Clippy: 1.90.0.
-
-CI computes the inventory with
-`git ls-tree -r HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml .cargo crates scripts docs bindings verification | git hash-object --stdin`.
-These inputs include shared dependency types and generated products.
-
-## Measured evidence
-
-The R1053 diagnostic census exits 101 under `-D warnings`. Its JSONL SHA-256 is
-`ac2dc0c17431559fc93c0f3b4f0c14307a47190394c761dd4f7ae7cf45de3186`.
-Comparison with the approved R1033 census conserves all 183 diagnostic identities.
-Of 109 lint-bearing files, 105 have identical bytes. The four changed files
-retain all 19 existing primary-source-line anchors. There are zero new findings.
-The comparison receipt SHA-256 is
-`8dd578ba21bdfcff06ea77f067e1056a4ff68738676fa76bac9570f6b8944289`.
-
-R1054 removes a test-only clone of a Copy value in the separate Execution crate.
-Its strict Execution Clippy check passes with no warnings. R1055 adopts R1054's
-exact source bytes at `c816a5927360e6355120f4de1c3690a4d914fb99`. Its FEA source
-and dependency inputs are unchanged from the R1053 census.
-
-The final anchor also includes three Windows-only filesystem files and the
-approved changelog and two guide corrections. The filesystem module is gated
-by `cfg(windows)`; the Linux/macOS FEA lint inputs are unchanged. The Windows
-private-filesystem tests pass 3/0, and the repaired Windows products retain
-their separate qualification requirement. The broader CI pin includes these
-source and documentation changes.
-
-The R1057 inventory adds only the CLI remote-upload suite correction to the
-previous compiler inputs. It replaces a duplicated spelling with an existing
-constant; FEA source, its dependencies, features and lint-bearing files are
-unchanged. The corrected CLI builds on ARM macOS, Intel macOS and Linux.
-Intel and Linux each pass their31-case product cohort; Intel also passes eight
-assessment commands. The real Server/registered-node witness passes successful
-and failed jobs with encrypted terminal output. Server's corresponding repair
-and21 passing domain tests are private-product evidence, outside this public
-Clippy exception. The approved183 findings and strict policy for every other
-first-party crate are unchanged; Windows retains its separate qualification.
-
-The current inventory also includes the release-workflow validator and its
-Python regression. The release gate verifies all required scientific receipts
-under the existing approved dispositions. All34 meshing-tooling unit tests
-and five catalog/workflow validators pass. These two Python files change no
-Rust source, dependency, feature or lint-bearing file; the183 FEA identities
-and their original measured evidence are conserved.
-
-R1059 changes three AOT linker files to reserve the Windows standalone execution
-stack and bind that reserve into selected-plan identity. FEA does not depend on
-the AOT orchestration crate. Its tree, dependencies, features and lint-bearing
-files retain the measured identities above. The Windows product receipt records
-its independent build, execution and physical-hardware results.
-
-## CI policy and closure
-
-CI enforces strict Clippy for every other first-party crate. The FEA Clippy
-exception requires the exact reviewed diagnostic source anchors and emission
-counts. A changed diagnostic fails the gate. The historical input identities
-above preserve the original measurement; they do not waive new findings.
-A separate FEA lint step retains its full diagnostics and expected failure as an artifact.
-Cargo checks and numerical test selection retain their existing behavior.
-
-[RM-1287](https://linear.app/dystr/issue/RM-1287), under RM-1280, owns this debt.
-Closure requires repairing the findings with semantic review, retaining
-affected numerical evidence, and removing the exception when strict FEA Clippy
-passes. Partial-order edits must preserve the intended NaN behavior.
-RM-1297 separately covers extended transient-rod qualification.
+RM-1287 owns repairs to these findings and removal of the exceptions. Each
+repair needs semantic review and applicable numerical evidence. Partial-order
+edits must preserve NaN behavior. RM-1297 separately covers extended
+transient-rod qualification.
