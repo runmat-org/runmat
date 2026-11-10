@@ -24,13 +24,7 @@ pub struct SurfaceMetricSource {
 impl ResolvedMetricField {
     /// Every entity-local source carried by the request, in canonical entity order.
     pub fn all_local_sources(&self) -> Result<Vec<LocalMetricSource>, MetricContractError> {
-        let entities = self
-            .request
-            .entity_supports
-            .iter()
-            .map(|support| support.entity_id.clone())
-            .collect();
-        self.local_sources(&entities)
+        Ok(self.entity_local.clone())
     }
 
     /// The constant sizing of a face scope, graded from the face's triangles. `None` when the
@@ -415,6 +409,7 @@ mod tests {
                 metric: isotropic(0.1),
             }],
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             cells_across_gap: None,
         };
         let field = ResolvedMetricField::new(&request).unwrap();

@@ -150,6 +150,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         .transpose()?;
     let mut solid_projection = None;
     let mut sampled_topology = None;
+    let mut source_workspace = ObservationPartitionSourceWorkspace::InputEnvelope;
     let (model, backend) = if let Some(workload_objects) = magnetic_workload.or(maxwell_workload) {
         let (model, sampling) = sampled::admit_source(
             workload_objects,
@@ -225,6 +226,22 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         let mesh = mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
             "thermal observation requires its exact mesh",
         ))?;
+        let runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::Thermal {
+            manifest,
+        } = catalog.source()
+        else {
+            return Err(AnalysisBridgeError::Identity(
+                "thermal observation requires a thermal catalog",
+            ));
+        };
+        // Admission read the same source law before validation allocates.
+        source_workspace = ObservationPartitionSourceWorkspace::thermal(
+            &workload,
+            manifest,
+            &source_request.plan,
+            mesh,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         catalog.validate_thermal_selection(&source_request.selection, &workload, mesh)?;
         catalog.validate_thermal_plan(&source_request.plan, &workload, mesh)?;
         let expected_partitions = ObservationPartitionPlan::derive(
@@ -334,7 +351,10 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
             inputs: input_facts.clone(),
             output: projected_output_resource_facts(
                 observation_partition_payload_bytes_upper_bound(
-                    &input_facts,
+                    &source_request,
+                    &request,
+                    &partition_plan,
+                    partition,
                     &fields,
                     accelerator.is_some(),
                 )
@@ -342,6 +362,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
             )?,
             output_set: projected_output_set_resource_facts(),
             accelerator,
+            source_workspace,
         })
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if resource_plan.input.phase

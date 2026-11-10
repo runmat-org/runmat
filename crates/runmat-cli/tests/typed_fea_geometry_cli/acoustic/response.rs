@@ -75,7 +75,7 @@ impl AnalysisRunResultView {
 //   within 0.5 percent are not asserted.
 // witness: FEA-ACOUSTIC-MODAL-001/modal_publication @ acoustic_modal/tet10/public_study; coverage:
 //   partial;
-//   boundary: The modal run publishes modal.frequency_hz and five acoustic.pressure mode fields and
+//   check: rigid-cavity-modes; boundary: The modal run publishes modal.frequency_hz and five acoustic.pressure mode fields and
 //   is numerically acceptable; residuals and normalization are not asserted; a cabin-sized model is
 //   not run.
 #[test]

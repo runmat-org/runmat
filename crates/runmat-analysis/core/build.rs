@@ -33,6 +33,7 @@ fn procedure(label: &str) -> &'static str {
         "random_response" => "RandomResponse",
         "nonlinear" => "Nonlinear",
         "adaptive" => "Adaptive",
+        "line_parameters" => "LineParameters",
         other => panic!("ledger: unknown procedure {other:?}"),
     }
 }

@@ -55,6 +55,16 @@ impl<'a> PublicationCoverage<'a> {
             _ => Ok(false),
         }
     }
+    /// Discharge a declaration this catalog's scope does not own: another catalog of the
+    /// same study publishes it. A waived declaration cannot be discharged again here.
+    pub(super) fn waive(&mut self, id: &str) -> AnalysisExecutionResult<()> {
+        let (_, seen) = self
+            .0
+            .get_mut(id)
+            .ok_or_else(|| invalid("waived observation is undeclared"))?;
+        *seen = true;
+        Ok(())
+    }
     pub(super) fn complete(&self) -> bool {
         self.0.entries().all(|entry| entry.1 .1)
     }

@@ -28,6 +28,9 @@ pub struct ResolvedCurveMetricField {
 
 #[derive(Debug, Clone, PartialEq)]
 struct EdgeMetricRecord {
+    /// Contributions that apply uniformly along the edge, graded over edge adjacency. Every
+    /// entity-local source of the request is graded by distance from its exact support at each
+    /// query point (`ResolvedMetricField::evaluate_at`), as on faces and in the volume.
     resolved: ResolvedMetricEvaluation,
     faces: Vec<usize>,
 }
@@ -67,26 +70,34 @@ impl ResolvedCurveMetricField {
                     error.reason,
                 ),
             })?;
+        // An edge-local source (curvature, feature, proximity, contact) with an exact support is
+        // graded by distance from that support, as on faces. Grading it over edge adjacency would
+        // impose its size on the whole of each neighbor and, hop by hop, on edges far from the
+        // feature: a gap at one end of a long edge would refine the corners at its other end.
+        let adjacency = TopologyMetricIncidence::edge_adjacency(topology);
         let mut by_edge = BTreeMap::new();
         for edge in &topology.edges {
             let incident = incidence.incident_edge_entities(edge);
-            let resolved = resolver.resolve(&incident).map_err(|error| {
+            let intersection_error = |error: runmat_meshing_size::metric::MetricContractError| {
                 SharedCurveError::invalid_request(
                     "resolved curve metric intersection",
                     error.to_string(),
                 )
                 .for_edge(&edge.id)
-            })?;
+            };
+            let resolved = resolver
+                .resolve_constant(&incident)
+                .map_err(intersection_error)?;
             by_edge.insert(edge.id.clone(), resolved);
         }
-        grade_metric_evaluations(
-            request.maximum_grading_ratio,
-            &TopologyMetricIncidence::edge_adjacency(topology),
-            &mut by_edge,
-        )
-        .map_err(|error| {
-            SharedCurveError::invalid_request("resolved curve metric grading", error.to_string())
-        })?;
+        grade_metric_evaluations(request.maximum_grading_ratio, &adjacency, &mut by_edge).map_err(
+            |error| {
+                SharedCurveError::invalid_request(
+                    "resolved curve metric grading",
+                    error.to_string(),
+                )
+            },
+        )?;
         let mut records = BTreeMap::new();
         for edge in &topology.edges {
             if let Some(control) = control {
@@ -229,14 +240,20 @@ impl CurveMetricField for ResolvedCurveMetricField {
                 .for_edge(query.edge_id)
             }
         };
-        let mut density = resolved
-            .metric
+        let edge_metric = self
+            .resolver
+            .evaluate_at(resolved.metric, &[], query.point_m)
+            .map_err(failure(
+                "graded edge metric",
+                format!("uniform {:?} at {:?}", resolved.metric, query.point_m),
+            ))?;
+        let mut density = edge_metric
             .directional_density(query.unit_tangent)
-            .map_err(failure("edge metric", format!("{:?}", resolved.metric)))?;
+            .map_err(failure("edge metric", format!("{edge_metric:?}")))?;
         for face in &record.faces {
             let face_metric = self
                 .resolver
-                .evaluate_graded(
+                .evaluate_at(
                     self.face_metrics[*face].metric,
                     &self.face_local[*face],
                     query.point_m,
@@ -257,14 +274,13 @@ impl CurveMetricField for ResolvedCurveMetricField {
                     ))?,
             );
         }
-        let metric = resolved
-            .metric
+        let metric = edge_metric
             .with_directional_density(query.unit_tangent, density)
             .map_err(failure(
                 "tightened edge metric",
                 format!(
-                    "base {:?}, tangent {:?}, density {density:e}",
-                    resolved.metric, query.unit_tangent
+                    "base {edge_metric:?}, tangent {:?}, density {density:e}",
+                    query.unit_tangent
                 ),
             ))?;
         Ok(CurveMetricEvaluation {

@@ -38,6 +38,11 @@ pub use acoustic_response::{
 #[path = "electrical_study_publication.rs"]
 mod electrical;
 pub use electrical::{prepare_electrical_study_publication, publish_electrical_study_result};
+#[path = "line_parameters_study_publication.rs"]
+mod line_parameters;
+pub use line_parameters::{
+    prepare_line_parameters_study_publication, LineParametersStudyCompletion,
+};
 #[path = "magnetic_study_publication.rs"]
 mod magnetic;
 pub use magnetic::{prepare_magnetic_study_publication, publish_magnetic_study_result};

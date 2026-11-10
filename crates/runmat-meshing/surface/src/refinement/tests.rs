@@ -866,6 +866,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
 
     let coarse_request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -1471,6 +1472,7 @@ fn quality() -> SurfaceQualityTargets {
 fn metric_request() -> MetricFieldRequest {
     MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,

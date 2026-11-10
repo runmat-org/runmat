@@ -1,18 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use runmat_analysis_core::{ObservationId, ObservationRequest, ProcedureStep};
 use runmat_analysis_execution::{
-    import_observation_assembly, import_observation_history_checkpoint_task,
-    import_observation_partition_contribution, import_reduced_observation,
-    prepare_analysis_objects, prepare_observation_assembly, prepare_observation_fanout,
-    prepare_observation_history_checkpoint_task, prepare_observation_reduction,
-    ImportedObservationHistoryCheckpointTask, ImportedObservations, ImportedRecoveredFields,
-    ImportedReducedObservation, ObservationAssemblyPreparation,
-    ObservationHistoryCheckpointPreparation, ObservationPreparation,
-    ObservationReductionPreparation, ObservationWorkloadSource, PreparedAnalysisObjects,
-    PreparedStructuralFrequencyFieldRecovery,
+    import_observation_assembly, import_observation_partition_contribution,
+    import_reduced_observation, prepare_observation_assembly, prepare_observation_fanout,
+    prepare_observation_reduction, ImportedObservationHistoryCheckpointTask, ImportedObservations,
+    ImportedRecoveredFields, ImportedReducedObservation, ObservationAssemblyPreparation,
+    ObservationPreparation, ObservationReductionPreparation, ObservationWorkloadSource,
+    PreparedAnalysisObjects, PreparedStructuralFrequencyFieldRecovery,
 };
-use runmat_analysis_fea::execution::{AnalysisNumericalObjectKind, SequenceIdentity};
+use runmat_analysis_fea::execution::SequenceIdentity;
 use runmat_analysis_fea::results::field::RecoveredFieldSample;
 use runmat_analysis_fea::results::observation::{
     ObservationFieldCatalog, ObservationLimits, ObservationPartitionPlanIdentity,
@@ -416,16 +413,12 @@ async fn execute_histories(
     reduced: &[ReducedRecord],
     resource_attempts: &mut Vec<runmat_analysis_execution::PlannedResourceUsageAttempt>,
 ) -> NativeExecutionResult<Vec<CompletedStructuralFrequencyHistory>> {
-    let history_ids = execution
+    if !execution
         .step
         .observations
         .iter()
-        .filter_map(|request| match request {
-            ObservationRequest::History(spec) => Some(spec.observation_id.clone()),
-            _ => None,
-        })
-        .collect::<BTreeSet<_>>();
-    if history_ids.is_empty() {
+        .any(|request| matches!(request, ObservationRequest::History(_)))
+    {
         return Ok(Vec::new());
     }
     // Every history in this step has the same authoritative workload and mesh.
@@ -435,56 +428,74 @@ async fn execute_histories(
     )
     .map_err(super::analysis_task_pool::protocol)?;
     let mesh = <runmat_meshing_core::SolverMeshArtifact as runmat_meshing_core::CanonicalMeshingContract>::canonical_decode(&execution.mesh.payload()).map_err(super::analysis_task_pool::protocol)?;
-    let mut checkpoints = BTreeMap::<
-        ObservationId,
-        (
-            ImportedObservationHistoryCheckpointTask,
-            AnalysisTaskDependency,
-        ),
-    >::new();
-    let mut terminal_hosts = BTreeMap::new();
-    for (sample_index, (_, _, fanout)) in fanouts.iter().enumerate() {
-        let mut origins = Vec::new();
-        let mut tasks = Vec::new();
-        for record in reduced {
-            if record.sample_index != sample_index
-                || !history_ids.contains(&record.result.result.observation_id)
-            {
-                continue;
-            }
-            let observation_id = record.result.result.observation_id.clone();
-            let previous = checkpoints
-                .get(&observation_id)
-                .map(|(checkpoint, _)| checkpoint.objects.clone());
-            let mut dependencies = vec![record.dependency];
-            if let Some((_, dependency)) = checkpoints.get(&observation_id) {
-                dependencies.push(*dependency);
-            }
-            let task = prepare_observation_history_checkpoint_task(
-                ObservationHistoryCheckpointPreparation {
-                    source_host: record.source_host.clone(),
-                    plan: fanout.source_request.plan.clone(),
-                    observation_id: observation_id.clone(),
-                    sample: record.result.clone(),
-                    previous,
-                    program_revision: execution.program_revision.clone(),
-                    chunk_bytes: execution.chunk_bytes,
-                    inventory_limits: execution.inventory_limits,
-                },
-            )
+    let producer = execution
+        .recoveries
+        .first()
+        .ok_or_else(|| NativeExecutionError::Protocol("frequency study has no entries".into()))?
+        .host
+        .workload
+        .step;
+    // The shared sampled-study history phase: one checkpoint wave per frequency, then one
+    // finalization wave against the entry-history catalog of every frequency.
+    let context = runmat_analysis_execution::EntryHistoryContext {
+        producer,
+        step: &execution.step,
+        source: runmat_analysis_execution::ObservationHistoryFinalizationSource::Structural {
+            workload: ObservationWorkloadSource::Frequency(execution.workload.clone()),
+            mesh: Some(execution.mesh.clone()),
+        },
+        history_context: runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
+            source: runmat_analysis_fea::execution::StructuralObservationSource::Frequency(
+                &workload,
+            ),
+            mesh: Some(&mesh),
+        },
+        program_revision: &execution.program_revision,
+        chunk_bytes: execution.chunk_bytes,
+        inventory_limits: execution.inventory_limits,
+    };
+    let samples = fanouts
+        .iter()
+        .enumerate()
+        .map(|(sample_index, (_, _, fanout))| {
+            Ok(runmat_analysis_execution::EntryHistorySample {
+                catalog: ObservationFieldCatalog::from_canonical_bytes(
+                    &fanout.source_catalog.payload(),
+                )?,
+                plan: Some(fanout.source_request.plan.clone()),
+                reduced: reduced
+                    .iter()
+                    .filter(|record| record.sample_index == sample_index)
+                    .map(|record| (record.result.clone(), record.source_host.clone()))
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>, runmat_analysis_fea::execution::AnalysisExecutionError>>()
+        .map_err(super::analysis_task_pool::protocol)?;
+    let Some(mut phase) = runmat_analysis_execution::EntryHistoryPhase::new(&context, samples)
+        .map_err(super::analysis_task_pool::protocol)?
+    else {
+        return Ok(Vec::new());
+    };
+    let mut dependencies = reduced
+        .iter()
+        .map(|record| record.dependency)
+        .collect::<Vec<_>>();
+    loop {
+        let tasks = phase
+            .prepare(&context)
             .map_err(super::analysis_task_pool::protocol)?;
-            origins.push((observation_id, dependencies));
-            tasks.push(task);
+        if tasks.is_empty() {
+            break;
         }
         let executed = execute_analysis_task_batch(
             pool,
             tasks
                 .iter()
-                .zip(&origins)
-                .map(|(task, (_, dependencies))| PreparedAnalysisTask {
-                    host: &task.host,
-                    program: &task.program,
-                    resource_plan: Some(&task.resource_plan),
+                .map(|task| PreparedAnalysisTask {
+                    host: task.host,
+                    program: task.program,
+                    resource_plan: Some(task.resource_plan),
                     prepared_closure: None,
                     fallback_resources: policy.resources.clone(),
                     dependencies: dependencies.clone(),
@@ -493,124 +504,42 @@ async fn execute_histories(
             batch_policy(policy),
         )
         .await?;
-        for ((task, (observation_id, _)), executed) in tasks.iter().zip(&origins).zip(executed) {
-            resource_attempts.push(resource_attempt(&task.resource_plan, &executed)?);
-            let dependency = AnalysisTaskDependency {
+        if executed.len() != tasks.len() {
+            return Err(NativeExecutionError::Protocol(
+                "frequency history wave response inventory differs from submitted tasks".into(),
+            ));
+        }
+        let mut responses = Vec::with_capacity(executed.len());
+        let mut next = Vec::with_capacity(executed.len());
+        for (task, executed) in tasks.iter().zip(executed) {
+            resource_attempts.push(resource_attempt(task.resource_plan, &executed)?);
+            next.push(AnalysisTaskDependency {
                 identity: executed.identity,
                 task_id: executed.task_id,
-            };
-            let imported = import_observation_history_checkpoint_task(
-                pool,
-                executed.response,
-                task,
-                execution.inventory_limits,
-            )
-            .map_err(super::analysis_task_pool::protocol)?;
-            terminal_hosts.insert(observation_id.clone(), (task.host.clone(), sample_index));
-            checkpoints.insert(observation_id.clone(), (imported, dependency));
+            });
+            responses.push(executed.response);
         }
+        drop(tasks);
+        phase
+            .complete(pool, responses, &context)
+            .map_err(super::analysis_task_pool::protocol)?;
+        dependencies = next;
     }
-    let mut histories = Vec::new();
-    let samples = fanouts
-        .iter()
-        .map(|(_, _, fanout)| {
-            ObservationFieldCatalog::from_canonical_bytes(&fanout.source_catalog.payload())
-        })
-        .collect::<Result<Vec<_>, _>>()
+    let completed = phase
+        .into_completed()
         .map_err(super::analysis_task_pool::protocol)?;
-    let catalog = ObservationFieldCatalog::structural_frequency_history(samples)
-        .map_err(super::analysis_task_pool::protocol)?;
-    let catalog_objects = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ObservationFieldCatalog,
-        catalog.identity(),
-        &catalog
-            .canonical_bytes()
-            .map_err(super::analysis_task_pool::protocol)?,
-        execution.chunk_bytes,
-        runmat_execution_artifact::ObjectNamespace::InputValue,
-        execution.inventory_limits,
-    )
-    .map_err(super::analysis_task_pool::protocol)?;
-    for request in &execution.step.observations {
-        let ObservationRequest::History(spec) = request else {
-            continue;
-        };
-        let (checkpoint, dependency) =
-            checkpoints.remove(&spec.observation_id).ok_or_else(|| {
-                NativeExecutionError::Protocol(format!(
-                    "frequency history `{}` produced no scheduled samples",
-                    spec.observation_id.0
-                ))
-            })?;
-        let (source_host, sample_index) =
-            terminal_hosts.remove(&spec.observation_id).ok_or_else(|| {
-                NativeExecutionError::Protocol(
-                    "frequency terminal checkpoint host is missing".into(),
-                )
-            })?;
-        let request = runmat_analysis_fea::execution::ObservationHistoryFinalizationRequest::new(
-            fanouts[sample_index].2.source_request.plan.clone(),
-            source_host.workload.step,
-            spec.observation_id.clone(),
-            &checkpoint.checkpoint,
-            &catalog,
-            runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
-                source: runmat_analysis_fea::execution::StructuralObservationSource::Frequency(
-                    &workload,
-                ),
-                mesh: Some(&mesh),
-            },
-        )
-        .map_err(super::analysis_task_pool::protocol)?;
-        let task = runmat_analysis_execution::prepare_observation_history_finalization_task(
-            runmat_analysis_execution::ObservationHistoryFinalizationPreparation {
-                source_host,
-                request,
-                checkpoint: checkpoint.objects.clone(),
-                catalog: catalog_objects.clone(),
-                source:
-                    runmat_analysis_execution::ObservationHistoryFinalizationSource::Structural {
-                        workload: ObservationWorkloadSource::Frequency(execution.workload.clone()),
-                        mesh: Some(execution.mesh.clone()),
-                    },
-                program_revision: execution.program_revision.clone(),
-                chunk_bytes: execution.chunk_bytes,
-                inventory_limits: execution.inventory_limits,
-            },
-        )
-        .map_err(super::analysis_task_pool::protocol)?;
-        let mut executed = execute_analysis_task_batch(
-            pool,
-            vec![PreparedAnalysisTask {
-                host: &task.host,
-                program: &task.program,
-                resource_plan: Some(&task.resource_plan),
-                prepared_closure: None,
-                fallback_resources: policy.resources.clone(),
-                dependencies: vec![dependency],
-            }],
-            batch_policy(policy),
-        )
-        .await?;
-        let executed = executed.pop().ok_or_else(|| {
-            NativeExecutionError::Protocol("frequency history finalization returned no task".into())
-        })?;
-        resource_attempts.push(resource_attempt(&task.resource_plan, &executed)?);
-        let result = runmat_analysis_execution::import_observation_history_finalization_task(
-            pool,
-            executed.response,
-            &task,
-            execution.inventory_limits,
-        )
-        .map_err(super::analysis_task_pool::protocol)?;
-        histories.push(CompletedStructuralFrequencyHistory {
-            observation_id: spec.observation_id.clone(),
+    let histories = completed
+        .histories
+        .into_iter()
+        .zip(completed.checkpoints)
+        .map(|(result, checkpoint)| CompletedStructuralFrequencyHistory {
+            observation_id: result.history.manifest.observation_id.clone(),
             checkpoint,
             finalization: Some(CompletedStructuralFrequencyHistoryFinalization {
-                catalog: catalog_objects.clone(),
+                catalog: completed.source_objects.clone(),
                 result,
             }),
-        });
-    }
+        })
+        .collect();
     Ok(histories)
 }

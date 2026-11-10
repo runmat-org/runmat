@@ -41,6 +41,9 @@ pub(super) struct View {
     pub display_unit: Option<String>,
     pub scene: String,
     pub poster: String,
+    /// The light-theme poster beside `poster`, when one is drawn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poster_light: Option<String>,
     pub deformation_scale: f64,
     pub minimum: Option<f64>,
     pub maximum: Option<f64>,
@@ -69,6 +72,9 @@ pub(super) struct View {
     pub context: Vec<presentation::ContextRecord>,
 }
 
+/// A cropped context part keeps this share of the frame clear at each edge.
+const CROP_EDGE_MARGIN: f32 = 0.02;
+
 /// A view whose scene is already written: what its poster pass still needs.
 #[derive(Serialize)]
 pub(super) struct VolumeView {
@@ -80,6 +86,9 @@ pub(super) struct VolumeView {
 }
 
 struct Encoded {
+    /// The scene draws a scalar legend; `legend_note` when it has a note line.
+    legend: bool,
+    legend_note: bool,
     minimum: Option<f64>,
     maximum: Option<f64>,
     display_unit: Option<String>,
@@ -143,6 +152,8 @@ fn lighter(
 
 struct Written {
     view: View,
+    legend: bool,
+    legend_note: bool,
     /// The whole scene, context geometry included.
     bounds: runmat_plot::core::BoundingBox,
     /// The result alone.
@@ -251,6 +262,11 @@ pub(super) async fn capture(
                             detail.surface,
                         )
                         .map_err(anyhow::Error::msg)?;
+                    let mut scene = scene;
+                    // A result view shows its field with feature edges, not the whole mesh.
+                    if spec.field.is_some() {
+                        runmat_runtime::analysis::field_scene::use_result_view_edges(&mut scene);
+                    }
                     (scene, deformation_scale, Some(surface), None)
                 }
             };
@@ -259,6 +275,7 @@ pub(super) async fn capture(
             let mut scalar_scale = 1.0;
             let mut range = None;
             let mut display_unit = None;
+            let (mut has_legend, mut legend_note) = (false, false);
             if let Some(legend) = scene
                 .overlay
                 .as_mut()
@@ -285,6 +302,8 @@ pub(super) async fn capture(
                             .unwrap_or_default(),
                     )?;
                 }
+                has_legend = true;
+                legend_note = legend.note.is_some();
             }
             let bytes = match plotting::encode_geometry_figure_scene_within(
                 &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
@@ -303,6 +322,8 @@ pub(super) async fn capture(
                 Err(error) => return Err(anyhow::Error::msg(error.to_string())),
             };
             Ok(Attempt::Fits(Encoded {
+                legend: has_legend,
+                legend_note,
                 minimum: range.map(|range| range.0),
                 maximum: range.map(|range| range.1),
                 display_unit,
@@ -324,6 +345,8 @@ pub(super) async fn capture(
         // what that leaves out; values, legend and extrema stay those of the full solution.
         use runmat_runtime::analysis::SurfaceDetail;
         let Encoded {
+            legend,
+            legend_note,
             minimum,
             maximum,
             display_unit,
@@ -382,10 +405,17 @@ pub(super) async fn capture(
             .filter(|_| deformation_scale != 0.0)
             .map(|deformation| deformation.field_id);
         written.push(Written {
+            legend,
+            legend_note,
             bounds,
             result_bounds,
             view: View {
                 poster: format!("{id}.png"),
+                poster_light: presentation
+                    .themes
+                    .iter()
+                    .find(|theme| !theme.suffix.is_empty())
+                    .map(|theme| format!("{id}{}.png", theme.suffix)),
                 id,
                 run_id: spec.run_id,
                 label: spec.label,
@@ -425,7 +455,26 @@ pub(super) async fn capture(
         });
     }
     drop(mesh);
-    let camera = camera::shared_camera(
+    // The posters keep the result clear of the legend when there is room; one camera serves
+    // every view, so it plans for the largest legend any view draws.
+    let legend = written
+        .iter()
+        .filter(|view| view.legend)
+        .map(|view| presentation.legend_footprint(view.legend_note))
+        .reduce(|a, b| {
+            if b.height_share > a.height_share {
+                b
+            } else {
+                a
+            }
+        })
+        .map(|footprint| (footprint.width_share, footprint.height_share));
+    let layout = camera::Layout {
+        legend,
+        width_share: presentation.frame_width,
+        ..camera::Layout::default()
+    };
+    let mut camera = camera::shared_camera(
         written.iter().map(|view| match presentation.frame {
             presentation::Frame::All => view.bounds,
             presentation::Frame::Result => view.result_bounds,
@@ -436,7 +485,32 @@ pub(super) async fn capture(
             .view_angle
             .map(|(azimuth, elevation)| camera::view_direction(azimuth, elevation)),
         presentation.aspect_ratio(),
+        &layout,
     );
+    // A cropped context keeps the parts that lie wholly inside the frame, clear of its edges;
+    // they are added to every saved scene, so the live view shows the same context.
+    let cropped = if presentation.crop_context {
+        let kept = presentation
+            .cropped_context(|bounds| camera::inside_frame(&camera, *bounds, CROP_EDGE_MARGIN))?;
+        let parts = presentation.context_parts().count();
+        if let Some(bounds) =
+            kept.iter()
+                .map(|chunk| chunk.bounds)
+                .reduce(|a, b| runmat_plot::core::BoundingBox {
+                    min: a.min.min(b.min),
+                    max: a.max.max(b.max),
+                })
+        {
+            camera::widen_saved_clip_planes(&mut camera, bounds);
+        }
+        log::info!(
+            "snapshot context cropped to the frame: {} merged chunks from {parts} parts",
+            kept.len()
+        );
+        Some(kept)
+    } else {
+        None
+    };
     let mut result = Vec::with_capacity(written.len());
     for Written { mut view, .. } in written {
         // Render the persisted representation: the poster and live view must share
@@ -445,17 +519,44 @@ pub(super) async fn capture(
         let handle = plotting::import_geometry_scene_payload(&bytes)?
             .ok_or_else(|| anyhow::anyhow!("snapshot scene did not contain geometry"))?;
         drop(bytes);
-        let poster = plotting::render_geometry_scene_snapshot_with_camera_state_scaled(
-            handle,
-            presentation.poster_width,
-            presentation.poster_height,
-            camera.clone(),
-            presentation.pixels_per_point(),
-            Some(presentation.theme_config()),
-        )
-        .await;
+        if let Some(context) = &cropped {
+            plotting::append_geometry_scene_chunks(handle, context.clone(), None)?;
+            let scene = plotting::clone_geometry_scene(handle)
+                .ok_or_else(|| anyhow::anyhow!("snapshot scene closed while cropping"))?;
+            let bytes = plotting::encode_geometry_figure_scene_within(
+                &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
+                presentation.max_scene_bytes,
+            )
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "snapshot view '{}' with its cropped context: {error}; raise \
+                     --max-scene-bytes",
+                    view.id
+                )
+            })?;
+            std::fs::write(output.join(&view.scene), bytes)?;
+        }
+        for theme in &presentation.themes {
+            let poster = plotting::render_geometry_scene_snapshot_with_camera_state_scaled(
+                handle,
+                presentation.poster_width,
+                presentation.poster_height,
+                camera.clone(),
+                presentation.pixels_per_point(),
+                Some(Presentation::theme_config(theme.variant)),
+            )
+            .await;
+            let poster = match poster {
+                Ok(poster) => poster,
+                Err(error) => {
+                    plotting::close_geometry_scene(handle);
+                    return Err(error.into());
+                }
+            };
+            let path = format!("{}{}.png", view.id, theme.suffix);
+            std::fs::write(output.join(path), poster)?;
+        }
         plotting::close_geometry_scene(handle);
-        std::fs::write(output.join(&view.poster), poster?)?;
         view.initial_camera = Some(camera.clone());
         result.push(view);
     }

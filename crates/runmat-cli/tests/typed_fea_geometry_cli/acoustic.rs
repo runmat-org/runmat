@@ -215,6 +215,7 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             &cold,
             completed.preparation().unwrap(),
             omitted,
+            completed.history_closures.clone(),
             completed.assembly_closure.clone(),
             completed.wave_wall_millis,
         )
@@ -226,6 +227,7 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
                 &cold,
                 completed.preparation().unwrap(),
                 reversed,
+                completed.history_closures.clone(),
                 completed.assembly_closure.clone(),
                 completed.wave_wall_millis,
             )
@@ -247,6 +249,7 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             &cold,
             completed.preparation().unwrap(),
             missing_state,
+            completed.history_closures.clone(),
             completed.assembly_closure.clone(),
             completed.wave_wall_millis,
         )

@@ -68,6 +68,7 @@ pub enum Formulation {
     ParticleTracing,
     CompressibleLaminarFlow,
     PipeNetwork,
+    QuasiStaticTem,
 }
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +82,7 @@ pub enum MeshOrder {
     Tet4,
     Tet10,
     CanonicalTetrahedra,
+    Tri3,
 }
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,6 +212,7 @@ impl Formulation {
         Formulation::ParticleTracing,
         Formulation::CompressibleLaminarFlow,
         Formulation::PipeNetwork,
+        Formulation::QuasiStaticTem,
     ];
 }
 wire_names!(Formulation);
@@ -223,6 +226,7 @@ impl MeshOrder {
         MeshOrder::Tet4,
         MeshOrder::Tet10,
         MeshOrder::CanonicalTetrahedra,
+        MeshOrder::Tri3,
     ];
 }
 wire_names!(MeshOrder);

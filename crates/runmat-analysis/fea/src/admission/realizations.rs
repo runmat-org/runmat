@@ -121,6 +121,9 @@ fn electromagnetic_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormul
         realizations.extend(super::magnetic::registered_realizations());
         return realizations;
     }
+    if procedure == AnalysisProcedure::LineParameters {
+        return vec![super::electrical::line_parameters_realization()];
+    }
     if procedure != AnalysisProcedure::HarmonicResponse {
         return Vec::new();
     }

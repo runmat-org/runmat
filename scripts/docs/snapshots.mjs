@@ -33,8 +33,11 @@ export function collectSnapshot(root, output, example, packagePath) {
   const views = snapshot.views.map(view => {
     const path = ".snapshot/" + safePath(view.scene); const scene = files.find(file => file.path === path);
     const poster = ".snapshot/" + safePath(view.poster);
-    if (!scene || !files.some(file => file.path === poster)) throw new Error("Snapshot view has missing assets");
-    return { ...view, scene: { url: "/docs-assets/" + projectPath + "/files/" + path, sha256: scene.sha256, bytes: scene.bytes }, poster: "/docs-assets/" + projectPath + "/files/" + poster };
+    // The light-theme poster beside the dark one, when the capture drew one.
+    const posterLight = view.poster_light === undefined ? null : ".snapshot/" + safePath(view.poster_light);
+    if (!scene || !files.some(file => file.path === poster) || (posterLight && !files.some(file => file.path === posterLight))) throw new Error("Snapshot view has missing assets");
+    const url = file => "/docs-assets/" + projectPath + "/files/" + file;
+    return { ...view, scene: { url: url(path), sha256: scene.sha256, bytes: scene.bytes }, poster: url(poster), ...(posterLight ? { poster_light: url(posterLight) } : {}) };
   });
   return { run_id: snapshot.run_id, views, project: { manifest_path: projectPath + "/project.json", sha256: hash(bytes) }, publication: snapshot.publication };
 }

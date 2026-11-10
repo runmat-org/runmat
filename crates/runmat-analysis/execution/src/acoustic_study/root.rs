@@ -5,6 +5,7 @@
 //! qualification or a replacement for scheduler attestation of response/accounting pairs.
 use std::collections::BTreeMap;
 
+use crate::study_closure::completion_codec_limits;
 use runmat_analysis_fea::{
     execution::{
         AcousticFrequencyWorkload, AnalysisNumericalObjectKind, AnalysisObjectManifest,
@@ -15,7 +16,7 @@ use runmat_analysis_fea::{
         CompiledAnalysisStudy,
     },
 };
-use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::{
     value::{ValuePayload, ValueRef, ValueRefKind},
     Digest, ProgramRevision,
@@ -27,7 +28,9 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
-use super::completion::{AcousticStudyAssemblyClosure, AcousticStudyEntryClosure};
+use super::completion::{
+    AcousticStudyAssemblyClosure, AcousticStudyEntryClosure, AcousticStudyResultClosure,
+};
 use super::{import_acoustic_study_completion, AcousticStudyPreparation, CompletedAcousticStudy};
 use crate::{
     import_analysis_objects, prepare_analysis_objects, AnalysisBridgeError, AnalysisBridgeResult,
@@ -35,9 +38,8 @@ use crate::{
 };
 
 const PREFIX: &[u8] = b"runmat-acoustic-study-completion\0";
-// Full original task history replaces the previous winning-attempt payload.
-const COMPLETION_SCHEMA_VERSION: u16 = 3;
-const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
+// Full original task history, with the study-level history phase after the entries.
+const COMPLETION_SCHEMA_VERSION: u16 = 4;
 
 #[cfg(test)]
 mod tests;
@@ -127,6 +129,7 @@ struct CompletionWire {
     schema_version: u16,
     preparation: PreparationWire,
     entries: Vec<AcousticStudyEntryClosure>,
+    histories: Vec<AcousticStudyResultClosure>,
     assembly: AcousticStudyAssemblyClosure,
     wave_wall_millis: u64,
     descendants: PublishedObjectCatalog,
@@ -152,11 +155,17 @@ pub fn prepare_acoustic_study_root(
         schema_version: COMPLETION_SCHEMA_VERSION,
         preparation: PreparationWire::new(preparation)?,
         entries: completed.entry_closures(),
+        histories: completed.history_closures.clone(),
         assembly: completed.assembly_closure.clone(),
         wave_wall_millis: completed.wave_wall_millis,
         descendants,
     };
-    let bytes = encode_contract(PREFIX, "acoustic-study-completion", &wire, LIMITS)?;
+    let bytes = encode_contract(
+        PREFIX,
+        "acoustic-study-completion",
+        &wire,
+        completion_codec_limits(policy.inventory_limits()),
+    )?;
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::AcousticStudyCompletion,
         Digest::sha256(&bytes),
@@ -223,8 +232,12 @@ pub fn import_acoustic_study_root(
     if manifest.logical_identity != Digest::sha256(&payload) {
         return Err(invalid("acoustic completion payload identity differs"));
     }
-    let wire: CompletionWire =
-        decode_contract(PREFIX, "acoustic-study-completion", &payload, LIMITS)?;
+    let wire: CompletionWire = decode_contract(
+        PREFIX,
+        "acoustic-study-completion",
+        &payload,
+        completion_codec_limits(limits),
+    )?;
     if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported acoustic completion schema"));
     }
@@ -250,6 +263,7 @@ pub fn import_acoustic_study_root(
         source,
         preparation,
         wire.entries,
+        wire.histories,
         wire.assembly,
         wire.wave_wall_millis,
     )?;
@@ -271,6 +285,12 @@ fn descendant_catalog(
         .entries
         .iter()
         .flat_map(|entry| entry.closures.iter().map(|closure| &closure.response))
+        .chain(
+            completed
+                .history_closures
+                .iter()
+                .map(|closure| &closure.response),
+        )
         .chain(std::iter::once(&completed.assembly_closure.response));
     for response in responses {
         let ProgramExecutionResponse::ExternalizedSuccess {

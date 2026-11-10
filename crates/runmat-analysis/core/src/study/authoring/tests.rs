@@ -108,7 +108,7 @@ fn study() -> AuthoredStudy {
             module_path: "project/main.fea".into(),
             mesh_id: "part".into(),
         },
-        model: AuthoredModelInstance {
+        model: Some(AuthoredModelInstance {
             model: AuthoredModelRef {
                 module_path: "project/model.fea".into(),
                 model_id: "bracket".into(),
@@ -120,7 +120,7 @@ fn study() -> AuthoredStudy {
                     value_type: AuthoredInputType::Quantity(PhysicalDimension::FORCE.into()),
                 }),
             }],
-        },
+        }),
         inputs: vec![AuthoredInputDefinition {
             input_id: "service_load".into(),
             value_type: AuthoredInputType::Quantity(PhysicalDimension::FORCE.into()),

@@ -105,6 +105,7 @@ fn every_planned_formulation_and_stage_has_standing_obligations() {
         Formulation::ParticleTracing,
         Formulation::CompressibleLaminarFlow,
         Formulation::PipeNetwork,
+        Formulation::QuasiStaticTem,
     ] {
         assert!(
             requirements().any(

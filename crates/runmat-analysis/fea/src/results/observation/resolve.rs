@@ -183,15 +183,16 @@ pub(super) fn resolve_observation_plan_for_topology(
     })
 }
 
-fn resolve_request<'a>(
+/// The mesh-free part of resolving one authored request: sampling, the family that produces
+/// the quantity, the supported spec shape, and the one declared field it binds to with a
+/// matching numeric representation. Static admission (`runmat check` and run preparation) and
+/// plan resolution both call this, so they accept the same observations. Diagnostics and
+/// monitors bind to their owning pipeline and return `None`.
+pub(crate) fn bind_request_field<'r, 'a>(
     step: &ProcedureStep,
-    request: &ObservationRequest,
-    topology: &ObservationTopology,
-    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
-    connector_plan: Option<&CanonicalStructuralConnectorPlan>,
+    request: &'r ObservationRequest,
     fields: impl Iterator<Item = &'a RecoveredFieldDefinition> + Clone,
-    limits: ObservationLimits,
-) -> Result<ResolvedObservation, ObservationError> {
+) -> Result<Option<(&'r ObservationSpec, &'a RecoveredFieldDefinition)>, ObservationError> {
     runmat_analysis_core::validate_observation_sampling(step, request)
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
     let spec = match request {
@@ -199,11 +200,7 @@ fn resolve_request<'a>(
         | ObservationRequest::History(spec)
         | ObservationRequest::Probe(spec)
         | ObservationRequest::Reduction(spec) => spec,
-        ObservationRequest::Diagnostic(_) | ObservationRequest::Monitor(_) => {
-            return Err(ObservationError::Unsupported(
-                "diagnostics and monitors are evaluated by their owning pipeline",
-            ));
-        }
+        ObservationRequest::Diagnostic(_) | ObservationRequest::Monitor(_) => return Ok(None),
     };
     if !runmat_analysis_core::procedure_produces_observation_quantity(step, spec.quantity) {
         return Err(ObservationError::Invalid(
@@ -213,6 +210,23 @@ fn resolve_request<'a>(
     validate_supported_spec(request, spec)?;
     let source_field = bind_field(spec, fields)?;
     validate_numeric_representation(spec, source_field)?;
+    Ok(Some((spec, source_field)))
+}
+
+fn resolve_request<'a>(
+    step: &ProcedureStep,
+    request: &ObservationRequest,
+    topology: &ObservationTopology,
+    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    connector_plan: Option<&CanonicalStructuralConnectorPlan>,
+    fields: impl Iterator<Item = &'a RecoveredFieldDefinition> + Clone,
+    limits: ObservationLimits,
+) -> Result<ResolvedObservation, ObservationError> {
+    let Some((spec, source_field)) = bind_request_field(step, request, fields)? else {
+        return Err(ObservationError::Unsupported(
+            "diagnostics and monitors are evaluated by their owning pipeline",
+        ));
+    };
     let target = resolve_target(
         request,
         spec,

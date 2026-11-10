@@ -9,6 +9,8 @@ use super::{
 
 mod affine;
 mod connectivity;
+mod counters;
+mod validity;
 mod geometry;
 mod jacobian;
 mod optimization;
@@ -64,19 +66,23 @@ pub(super) fn elevate(
         .filter(|node| !node.exact_parameters.is_empty())
         .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<std::collections::BTreeMap<_, _>>();
+    let counters = counters::ElevationCounters::default();
+    let started = std::time::Instant::now();
+    let mut validity = validity::ElementValidity::certify(
+        &topology,
+        validity::CertificationLimits {
+            maximum_search_work: jacobian::ELEMENT_SEARCH_WORK,
+            maximum_recursion_depth: input.request.limits.maximum_recursion_depth,
+            cancellation_check_interval: options.cancellation_check_interval,
+        },
+        evaluation.control,
+        cancellation,
+        &mut jacobian_work,
+        &counters,
+    )?;
     let mut invalid_elements = with_folded_faces(
         &topology,
-        jacobian::invalid_element_indices(
-            &topology,
-            jacobian::ELEMENT_SEARCH_WORK,
-            input.request.limits.maximum_recursion_depth,
-            options.cancellation_check_interval,
-            cancellation,
-            jacobian::ValidationWork {
-                counter: &mut jacobian_work,
-                storage: super::storage::Storage(Some(evaluation.control)),
-            },
-        )?,
+        validity.indices(super::storage::Storage(Some(evaluation.control)))?,
     )?;
     if invalid_elements.is_empty()
         && affine::retains_affine_edge_nodes(&topology, &midpoint_by_edge, evaluation.control)?
@@ -99,9 +105,12 @@ pub(super) fn elevate(
         evaluation.control,
         cancellation,
     )?;
+    let mut repair_state = optimization::RepairState::new(evaluation.control);
     let initial_invalid_element_count = invalid_elements.len();
+    counters.report("initial", invalid_elements.len(), started);
     let mut moved_node_count = 0_u64;
     for sweep in 0..options.maximum_curved_optimization_sweeps {
+        counters::ElevationCounters::add(&counters.sweeps, 1);
         let improve_valid_nodes = sweep == 0 && invalid_elements.is_empty();
         let moved = optimization::optimize(
             input,
@@ -113,11 +122,13 @@ pub(super) fn elevate(
                 cancellation,
                 jacobian_work: &mut jacobian_work,
                 candidate_work: &mut candidate_work,
+                counters: &counters,
             },
             optimization::OptimizationTargets {
                 improve_valid_nodes,
                 invalid_elements: &invalid_elements,
                 indexes: &optimization_topology,
+                repair: &mut repair_state,
             },
         )
         .map_err(|failure| phase_error("curved-node optimization", failure))?;
@@ -127,20 +138,16 @@ pub(super) fn elevate(
                 "curved-node movement counter overflowed",
             )
         })?;
-        invalid_elements = with_folded_faces(
+        invalid_elements = current_invalid(
+            &mut validity,
             &topology,
-            jacobian::invalid_element_indices(
-                &topology,
-                jacobian::ELEMENT_SEARCH_WORK,
-                input.request.limits.maximum_recursion_depth,
-                options.cancellation_check_interval,
-                cancellation,
-                jacobian::ValidationWork {
-                    counter: &mut jacobian_work,
-                    storage: super::storage::Storage(Some(evaluation.control)),
-                },
-            )?,
+            &optimization_topology,
+            evaluation.control,
+            cancellation,
+            &mut jacobian_work,
+            &counters,
         )?;
+        counters.report("sweep", invalid_elements.len(), started);
         if invalid_elements.is_empty() {
             return Ok((
                 topology,
@@ -167,8 +174,11 @@ pub(super) fn elevate(
                     cancellation,
                     jacobian_work: &mut jacobian_work,
                     candidate_work: &mut candidate_work,
+                    counters: &counters,
                 },
             )?;
+            counters::ElevationCounters::add(&counters.corner_star_repairs, 1);
+            counters::ElevationCounters::add(&counters.corner_star_moves, patch_moved);
             moved_node_count = moved_node_count.checked_add(patch_moved).ok_or_else(|| {
                 error::failure(
                     DelaunaySolverTopologyErrorKind::ResourceLimit,
@@ -176,20 +186,16 @@ pub(super) fn elevate(
                 )
             })?;
             if patch_moved > 0 {
-                invalid_elements = with_folded_faces(
+                invalid_elements = current_invalid(
+                    &mut validity,
                     &topology,
-                    jacobian::invalid_element_indices(
-                        &topology,
-                        jacobian::ELEMENT_SEARCH_WORK,
-                        input.request.limits.maximum_recursion_depth,
-                        options.cancellation_check_interval,
-                        cancellation,
-                        jacobian::ValidationWork {
-                            counter: &mut jacobian_work,
-                            storage: super::storage::Storage(Some(evaluation.control)),
-                        },
-                    )?,
+                    &optimization_topology,
+                    evaluation.control,
+                    cancellation,
+                    &mut jacobian_work,
+                    &counters,
                 )?;
+                counters.report("corner", invalid_elements.len(), started);
                 if invalid_elements.is_empty() {
                     return Ok((
                         topology,
@@ -210,8 +216,11 @@ pub(super) fn elevate(
                     cancellation,
                     jacobian_work: &mut jacobian_work,
                     candidate_work: &mut candidate_work,
+                    counters: &counters,
                 },
             )?;
+            counters::ElevationCounters::add(&counters.corner_relocations, 1);
+            counters::ElevationCounters::add(&counters.corner_relocation_moves, relocated);
             moved_node_count = moved_node_count.checked_add(relocated).ok_or_else(|| {
                 error::failure(
                     DelaunaySolverTopologyErrorKind::ResourceLimit,
@@ -219,20 +228,16 @@ pub(super) fn elevate(
                 )
             })?;
             if relocated > 0 {
-                invalid_elements = with_folded_faces(
+                invalid_elements = current_invalid(
+                    &mut validity,
                     &topology,
-                    jacobian::invalid_element_indices(
-                        &topology,
-                        jacobian::ELEMENT_SEARCH_WORK,
-                        input.request.limits.maximum_recursion_depth,
-                        options.cancellation_check_interval,
-                        cancellation,
-                        jacobian::ValidationWork {
-                            counter: &mut jacobian_work,
-                            storage: super::storage::Storage(Some(evaluation.control)),
-                        },
-                    )?,
+                    &optimization_topology,
+                    evaluation.control,
+                    cancellation,
+                    &mut jacobian_work,
+                    &counters,
                 )?;
+                counters.report("corner", invalid_elements.len(), started);
                 if invalid_elements.is_empty() {
                     return Ok((
                         topology,
@@ -300,21 +305,17 @@ pub(super) fn elevate(
             ));
         }
         straightened += changed;
-        invalid_elements = with_folded_faces(
+        invalid_elements = current_invalid(
+            &mut validity,
             &topology,
-            jacobian::invalid_element_indices(
-                &topology,
-                jacobian::ELEMENT_SEARCH_WORK,
-                input.request.limits.maximum_recursion_depth,
-                options.cancellation_check_interval,
-                cancellation,
-                jacobian::ValidationWork {
-                    counter: &mut jacobian_work,
-                    storage: super::storage::Storage(Some(evaluation.control)),
-                },
-            )?,
+            &optimization_topology,
+            evaluation.control,
+            cancellation,
+            &mut jacobian_work,
+            &counters,
         )?;
     }
+    counters.report("straightened", 0, started);
     tracing::info!(
         event_code = "meshing.tet10.straightened_edges",
         initially_invalid = initial_invalid_element_count,
@@ -525,6 +526,31 @@ fn describe_element(
     format!(
         "element {element}: {} of 4 corners on exact geometry, smallest altitude {altitude:e} m, largest boundary-edge sagitta {sagitta:e} m{worst}",
         corners.iter().filter(|corner| corner.1).count(),
+    )
+}
+
+/// The invalid-element inventory after nodes moved: elements that reference a moved node are
+/// certified again, folded boundary faces are merged in.
+fn current_invalid<'storage>(
+    validity: &mut validity::ElementValidity<'_>,
+    topology: &SolverMeshTopology,
+    indexes: &optimization::OptimizationTopology<'_>,
+    control: &'storage dyn runmat_geometry_core::GeometryEvaluationControl,
+    cancellation: &dyn MeshingCancellationSignal,
+    jacobian_work: &mut u64,
+    counters: &counters::ElevationCounters,
+) -> Result<super::storage::ReservedBuffer<'storage, usize>, DelaunaySolverTopologyError> {
+    validity.refresh(
+        topology,
+        |id| indexes.incident_elements(id),
+        control,
+        cancellation,
+        jacobian_work,
+        counters,
+    )?;
+    with_folded_faces(
+        topology,
+        validity.indices(super::storage::Storage(Some(control)))?,
     )
 }
 

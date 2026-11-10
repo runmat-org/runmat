@@ -14,6 +14,7 @@ common failure modes.
 | Stress, deformation, modes, vibration, or buckling | [Structural analysis](./structural) | Available | Available |
 | Steady or transient temperature | [Heat transfer](./thermal) | Available | Not yet connected end to end |
 | Electric or magnetic fields | [Electromagnetics](./electromagnetic) | Available | Not yet connected end to end |
+| Board trace impedance, delay and coupling | [Trace impedance](./trace-impedance) | Available | Available |
 | Pressure modes or sound propagation | [Acoustics](./acoustic) | Available | Not yet connected end to end |
 | Incompressible flow | [Fluid flow](./fluid) | Available | Not yet connected end to end |
 | Temperature-dependent deformation | [Thermomechanical analysis](./thermomechanical) | Available | Not yet connected end to end |

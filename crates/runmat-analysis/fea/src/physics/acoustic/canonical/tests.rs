@@ -373,7 +373,7 @@ impl C {
 }
 
 // witness: FEA-ACOUSTIC-BOUNDARY-002/region_damping @ acoustic_harmonic/tet4/numerical_kernel;
-//   coverage: partial; boundary: a lossy duct (loss factor 2ζ) converges at second order to the
+//   coverage: partial; check: damped-duct; boundary: a lossy duct (loss factor 2ζ) converges at second order to the
 //   complex-wavenumber standing wave and dissipates its input power; resonance width not asserted.
 #[test]
 fn damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_its_input() {
@@ -712,7 +712,7 @@ fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
 mod periodic;
 
 // witness: FEA-ACOUSTIC-BOUNDARY-002/complex_frequency_dependent_impedance @
-//   acoustic_harmonic/tet4/numerical_kernel; coverage: partial; boundary: a tabulated complex
+//   acoustic_harmonic/tet4/numerical_kernel; coverage: partial; check: impedance-termination; boundary: a tabulated complex
 //   termination converges to the two-wave duct solution; Delany-Bazley is checked in core only.
 #[test]
 fn complex_impedance_termination_converges_to_the_two_wave_duct_solution() {

@@ -153,10 +153,24 @@ impl access::FilesystemAccess<'_> {
             .read_observation_attachment(&run)?
             .map(|attachment| attachment.publication))
     }
+    /// The run's attachment at the current schema; a legacy attachment is a miss.
     pub(in crate::analysis::storage) fn read_observation_attachment(
         &self,
         run: &AnalysisRunResult,
     ) -> Result<Option<ObservationAttachment>, AnalysisPublicationError> {
+        Ok(match self.read_stored_observation_attachment(run)? {
+            Some(StoredObservationAttachment::Current(attachment)) => Some(attachment),
+            Some(StoredObservationAttachment::Legacy) | None => None,
+        })
+    }
+
+    /// The run's stored attachment. One that does not decode at the current schema and names
+    /// another schema version is [`StoredObservationAttachment::Legacy`]; one that names the
+    /// current version and still does not decode is an error.
+    pub(in crate::analysis::storage) fn read_stored_observation_attachment(
+        &self,
+        run: &AnalysisRunResult,
+    ) -> Result<Option<StoredObservationAttachment>, AnalysisPublicationError> {
         let path = self.observation_path(&run.run_id)?;
         let parent = path.parent().ok_or("observation parent absent")?;
         if !self.owned_directory_exists(parent, "observation attachments")? {
@@ -170,10 +184,25 @@ impl access::FilesystemAccess<'_> {
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.to_string().into()),
         };
-        let attachment: ObservationAttachment = self.decode_metadata(&bytes)?;
+        let attachment: ObservationAttachment = match self.decode_metadata(&bytes) {
+            Ok(attachment) => attachment,
+            Err(error) => {
+                return match self.decode_metadata::<ObservationAttachmentVersion>(&bytes) {
+                    Ok(version)
+                        if version.schema_version != OBSERVATION_ATTACHMENT_SCHEMA_VERSION =>
+                    {
+                        Ok(Some(StoredObservationAttachment::Legacy))
+                    }
+                    _ => Err(error),
+                }
+            }
+        };
+        if attachment.schema_version != OBSERVATION_ATTACHMENT_SCHEMA_VERSION {
+            return Ok(Some(StoredObservationAttachment::Legacy));
+        }
         self.validate_bound_observation(&run.run_id, &attachment)?;
         attachment.validate(run, self.observation_run_digest(&run.run_id)?)?;
-        Ok(Some(attachment))
+        Ok(Some(StoredObservationAttachment::Current(attachment)))
     }
     fn observation_path(&self, run_id: &str) -> Result<PathBuf, AnalysisPublicationError> {
         validate_run_id_token(run_id)?;

@@ -74,6 +74,18 @@ pub enum AuthoredOutputExpression {
         source: Box<AuthoredOutputExpression>,
         target: AuthoredRegionSource,
     },
+    /// A per-length line parameter of an `electromagnetic line_parameters` step:
+    /// `analysis.<step>.<name>.<conductor>` for a per-line value, `analysis.<step>.<name>` for a
+    /// pair or matrix value.
+    LineParameter {
+        step_id: String,
+        quantity: ObservationQuantity,
+        /// The signal conductor a per-line value reads; `None` for a pair or matrix value.
+        conductor: Option<String>,
+        /// Number of signal conductors of the section: the extent of the matrices.
+        #[serde(with = "runmat_types::wire_integer")]
+        signal_conductors: usize,
+    },
     Interpolation {
         source: Box<AuthoredOutputExpression>,
         positions: Vec<Position>,

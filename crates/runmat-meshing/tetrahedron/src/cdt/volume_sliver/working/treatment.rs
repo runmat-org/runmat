@@ -3,6 +3,7 @@
 //! boundary until that owner's full dependency closure has local authority.
 use super::*;
 use crate::cdt::volume_refinement::context::RefinementContext;
+use super::rejected::{CompleteSearchKey, Ranking, RejectedCompleteRelocations, SearchRecording};
 use crate::cdt::volume_sliver::{insertion, reconnection, relocation, work::OptimizationWork};
 use std::collections::BTreeMap;
 
@@ -49,8 +50,16 @@ pub(in crate::cdt::volume_sliver) fn run<'ctx>(
         context.fixed_node_identities,
         cancellation,
     )?;
-    let treatment = run_in_state(state, context, prepared, options, cancellation, mode)
-        .map_err(|failure| failure.error)?;
+    let treatment = run_in_state(
+        state,
+        context,
+        prepared,
+        options,
+        cancellation,
+        mode,
+        &mut RejectedCompleteRelocations::default(),
+    )
+    .map_err(|failure| failure.error)?;
     finish(treatment.state, treatment.mutations, options, cancellation)
 }
 
@@ -90,6 +99,7 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
     options: DelaunayVolumeSliverOptions,
     cancellation: &dyn MeshingCancellationSignal,
     mode: QualityConvergenceMode,
+    rejected: &mut RejectedCompleteRelocations,
 ) -> Result<WorkingTreatment<'ctx>, WorkingFailure<'ctx>> {
     let mut mutations = Vec::new();
     for pass in 0..options.maximum_passes {
@@ -228,7 +238,46 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
                         .expect("quality corner"),
                 )
         });
-        if has_complete_source {
+        let complete_key = has_complete_source
+            .then(|| CompleteSearchKey::new(source.node_identities, objective));
+        // The current coupled comparison floor: the worst violation of the whole state.
+        let ranking = {
+            let worst = |objective, ratio: fn(&crate::cdt::DelaunayTetrahedronQuality) -> f64| {
+                state
+                    .quality()
+                    .worst(objective)
+                    .map(ratio)
+                    .filter(|ratio| *ratio > 1.0)
+                    .map(crate::cdt::volume_quality::violation_priority_key)
+            };
+            Ranking {
+                coupled: matches!(
+                    policy.refinement,
+                    admission::CandidateRefinementPolicy::AllowForCoupledConvergence
+                ),
+                objective,
+                floor: worst(QualityObjective::Shape, |cell| {
+                    cell.optimization_violation_ratio
+                })
+                .max(worst(QualityObjective::Refinement, |cell| {
+                    cell.refinement_violation_ratio
+                }))
+                .unwrap_or(0),
+            }
+        };
+        if let Some(key) = complete_key
+            .as_ref()
+            .filter(|key| rejected.still_rejected(state.topology(), key, ranking))
+        {
+            tracing::info!(
+                pass,
+                source = ?key,
+                "volume optimization skipped a complete relocation search whose neighborhood is unchanged since it was rejected"
+            );
+            *relocation_rejections
+                .entry("complete_search_unchanged_since_rejected")
+                .or_default() += 1;
+        } else if let Some(key) = complete_key {
             let started = runmat_time::Instant::now();
             tracing::info!(
                 pass,
@@ -236,7 +285,8 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
             );
             let (topology, quality) = state.finish(options, cancellation)?;
             let spectrum = admission::candidate_spectrum(&quality, policy.refinement, objective);
-            let search = relocation::relocation_candidates(
+            let mut recording = SearchRecording::default();
+            let search = relocation::relocation_candidates_recording_changes(
                 context.with_state(&topology, &quality),
                 &source,
                 &spectrum,
@@ -248,6 +298,7 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
                 } else {
                     relocation::RelocationSearchScope::TopologyChanging
                 },
+                &mut recording,
             )?;
             tracing::info!(
                 pass,
@@ -283,6 +334,7 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
                 context.fixed_node_identities,
                 cancellation,
             )?;
+            rejected.record(state.topology(), key, recording);
         }
         let insertion = match local_insertion {
             Some(search) => search,

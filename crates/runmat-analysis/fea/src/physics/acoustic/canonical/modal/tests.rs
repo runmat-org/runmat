@@ -57,7 +57,7 @@ fn reference(released_x: bool, count: usize) -> Vec<f64> {
 
 // witness: FEA-ACOUSTIC-MODAL-001/rigid_box_modes @ acoustic_modal/tet10/numerical_kernel;
 //   coverage: partial;
-//   boundary: Eight modes of a rigid quadratic-mesh cavity on 2, 3 and 4 cells match the
+//   check: rigid-cavity-modes; boundary: Eight modes of a rigid quadratic-mesh cavity on 2, 3 and 4 cells match the
 //   rectangular-cavity reference including degenerate triplets, with a zero-frequency uniform mode,
 //   residuals at most 1e-8, mass orthogonality below 1e-8, h^4 frequency convergence and 4e-3 error
 //   at four cells; the first ten modes within 0.5 percent on a cube are not asserted.
@@ -102,7 +102,7 @@ fn rigid_cube_modes_match_rectangular_cavity_including_degenerate_triplets() {
 
 // witness: FEA-ACOUSTIC-MODAL-001/impedance_walls_and_damping_in_modes @
 //   acoustic_modal/tet10/numerical_kernel; coverage: partial;
-//   boundary: Pressure-release ends remove the rigid mode and five modes match the open-open duct
+//   check: open-open-duct-modes; boundary: Pressure-release ends remove the rigid mode and five modes match the open-open duct
 //   within 4e-3 with exactly zero modal pressure on released nodes; impedance walls and damping are
 //   not covered.
 #[test]
@@ -138,7 +138,7 @@ fn pressure_release_ends_remove_the_rigid_mode_and_match_open_open_duct() {
 
 // witness: FEA-ACOUSTIC-MODAL-001/rigid_box_modes @ acoustic_modal/tet4/numerical_kernel; coverage:
 //   partial;
-//   boundary: On a linear mesh the first nonzero cavity mode converges with an error ratio above 3
+//   check: rigid-cavity-modes; boundary: On a linear mesh the first nonzero cavity mode converges with an error ratio above 3
 //   from 2 to 4 cells (second order); only the first nonzero mode is compared.
 #[test]
 fn linear_cube_converges_at_second_order() {

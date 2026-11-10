@@ -100,10 +100,11 @@ pub(crate) struct FamilyStudyContext<'a> {
     pub artifact_access: &'a ArtifactAccess,
     pub program_revision: &'a ProgramRevision,
     pub local_execution: LocalExecutionPlan,
-    /// The memory one analysis worker of this run may use, read once per run by the placement
-    /// (locally: the run's pool less what the coordinating process holds). Path selection, the
-    /// output policy and the worker envelope all use this value.
-    pub worker_memory_bytes: u64,
+    /// Reads the memory one analysis worker of this run may use (locally: the run's pool less
+    /// what the coordinating process holds). Planning calls it once, after the family compile,
+    /// so the read sees the coordinator's compiled study. Path selection, the output policy and
+    /// the worker envelope all use that one value.
+    pub worker_memory: &'a dyn Fn() -> Result<u64, String>,
 }
 
 /// Coordinator preparation for one family, ready for any analysis task pool.
@@ -123,6 +124,8 @@ pub(crate) struct PlannedFamilyStudy {
     /// Authored step envelope; local placement sizes its worker processes from it.
     pub maximum_resident_bytes: u64,
     pub maximum_wall_millis: u64,
+    /// The run's worker memory, as read once during planning.
+    pub worker_memory_bytes: u64,
 }
 
 impl PlannedFamilyStudy {
@@ -168,7 +171,36 @@ pub(crate) fn plan_family_study(
             kind.label()
         ));
     }
-    let output_policy = admitted_output_policy(context.study, context.worker_memory_bytes)?;
+    // One read per run, at the first use after the compile.
+    let read = std::cell::Cell::new(None::<u64>);
+    let worker_memory = || -> Result<u64, String> {
+        if let Some(bytes) = read.get() {
+            return Ok(bytes);
+        }
+        let bytes = (context.worker_memory)()?;
+        read.set(Some(bytes));
+        Ok(bytes)
+    };
+    let output_policy = || admitted_output_policy(context.study, worker_memory()?);
+    // Every family plans within the run's admitted budget: each step's resident ceiling becomes
+    // min(authored, the run's worker memory). A plan then selects a solve path that fits the
+    // worker (the proving factor or an iterative path) or fails here, before any solve, naming
+    // the memory it needs and the memory admitted. The worker envelope uses the same value, so
+    // no planned task can ask the pool for more than it holds.
+    let admit = |steps: &mut [runmat_analysis_core::ProcedureStep]| -> Result<(), String> {
+        let machine = worker_memory()?;
+        for step in steps {
+            let budget = step.accuracy.resources.resident_byte_budget().min(machine);
+            step.accuracy.resources.set_resident_byte_budget(budget);
+        }
+        Ok(())
+    };
+    // Families whose product builder compiles the study itself plan from an admitted copy.
+    let admitted_study = || -> Result<RealizedStudy, String> {
+        let mut study = context.study.clone();
+        admit(&mut study.sequence.steps)?;
+        Ok(study)
+    };
     let capabilities = BTreeSet::from([AnalysisCapabilityRequirement::ProcessIsolation]);
     let mesh = context.mesh.clone();
     let access = context.artifact_access.clone();
@@ -198,14 +230,9 @@ pub(crate) fn plan_family_study(
                 compiled = electrothermal_heat_study(&compiled, context.mesh, policy)?;
             }
             // The thermal plan selects its solve path (the proving factor, or the conduction
-            // multigrid when the factor does not fit) within the step's resident ceiling. Run it
-            // under the run's admitted budget, min(authored, the run's worker memory), so the
+            // multigrid when the factor does not fit) within the admitted step ceiling, so the
             // plan, the worker's re-derivation and the worker envelope agree.
-            let machine = context.worker_memory_bytes;
-            for step in &mut compiled.model.sequence.steps {
-                let budget = step.accuracy.resources.resident_byte_budget().min(machine);
-                step.accuracy.resources.set_resident_byte_budget(budget);
-            }
+            admit(&mut compiled.model.sequence.steps)?;
             let product = plan_thermal_study_product_with_fields(
                 compiled,
                 context.mesh,
@@ -224,16 +251,17 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
             )
         }
         StudyRootPlanning::Acoustic(policy) => {
-            let product =
-                plan_acoustic_study_product(compile(apply_inputs)?, context.mesh, *policy)
-                    .map_err(|error| error.to_string())?;
+            let mut compiled = compile(apply_inputs)?;
+            admit(&mut compiled.model.sequence.steps)?;
+            let product = plan_acoustic_study_product(compiled, context.mesh, *policy)
+                .map_err(|error| error.to_string())?;
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Acoustic(Box::new(AcousticStudyPreparation {
@@ -244,16 +272,17 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
             )
         }
         StudyRootPlanning::AcousticResponse(policy) => {
-            let product =
-                plan_acoustic_response_study_product(compile(apply_inputs)?, context.mesh, *policy)
-                    .map_err(|error| error.to_string())?;
+            let mut compiled = compile(apply_inputs)?;
+            admit(&mut compiled.model.sequence.steps)?;
+            let product = plan_acoustic_response_study_product(compiled, context.mesh, *policy)
+                .map_err(|error| error.to_string())?;
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::AcousticResponse(Box::new(
@@ -265,7 +294,7 @@ pub(crate) fn plan_family_study(
                         frozen_project_digest: frozen,
                         artifact_access: access,
                         program_revision: revision,
-                        output_policy,
+                        output_policy: output_policy()?,
                         required_capabilities: capabilities,
                     },
                 )),
@@ -274,7 +303,8 @@ pub(crate) fn plan_family_study(
         }
         StudyRootPlanning::Electrical(policy) => {
             let policy = policy.clone();
-            let compiled = compile(&mut |_| Ok(()))?;
+            let mut compiled = compile(&mut |_| Ok(()))?;
+            admit(&mut compiled.model.sequence.steps)?;
             let product = if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
                 // The conduction side of an electrothermal analysis, at the temperatures its
                 // heat case published; the coupled loop is solved once, by the heat case.
@@ -287,7 +317,7 @@ pub(crate) fn plan_family_study(
                 plan_electrical_study_product(conduction, context.mesh, policy.clone())
             } else {
                 build_electrical_study_product(ElectricalStudyProductInput {
-                    study: context.study,
+                    study: &admitted_study()?,
                     geometry: context.document,
                     regions: context.regions,
                     materials: context.materials,
@@ -300,14 +330,14 @@ pub(crate) fn plan_family_study(
             (
                 FamilyStudyPreparation::Electrical(Box::new(ElectricalStudyPreparation {
                     local_execution: context.local_execution,
-                    machine_memory_bytes: context.worker_memory_bytes,
+                    machine_memory_bytes: worker_memory()?,
                     policy,
                     product,
                     mesh,
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
@@ -315,7 +345,7 @@ pub(crate) fn plan_family_study(
         }
         StudyRootPlanning::Magnetic(policy) => {
             let product = build_magnetic_study_product(MagneticStudyProductInput {
-                study: context.study,
+                study: &admitted_study()?,
                 geometry: context.document,
                 regions: context.regions,
                 materials: context.materials,
@@ -333,7 +363,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
@@ -341,7 +371,7 @@ pub(crate) fn plan_family_study(
         }
         StudyRootPlanning::Maxwell(policy) => {
             let product = build_maxwell_study_product(MaxwellStudyProductInput {
-                study: context.study,
+                study: &admitted_study()?,
                 geometry: context.document,
                 regions: context.regions,
                 materials: context.materials,
@@ -359,15 +389,17 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 })),
                 step,
             )
         }
         StudyRootPlanning::Fluid(policy) => {
+            let mut compiled = compile(&mut |_| Ok(()))?;
+            admit(&mut compiled.model.sequence.steps)?;
             let planned = PlannedFluidStudyPreparation::plan(
-                compile(&mut |_| Ok(()))?,
+                compiled,
                 FluidStudyPreparationParts {
                     local_execution: context.local_execution,
                     policy: *policy,
@@ -375,7 +407,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                     required_capabilities: capabilities,
                 },
             )
@@ -387,7 +419,7 @@ pub(crate) fn plan_family_study(
         }
         StudyRootPlanning::NonlinearSolid(policy) => {
             let product = build_nonlinear_solid_study_product(NonlinearSolidStudyProductInput {
-                study: context.study,
+                study: &admitted_study()?,
                 geometry: context.document,
                 regions: context.regions,
                 materials: context.materials,
@@ -406,7 +438,7 @@ pub(crate) fn plan_family_study(
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
-                    output_policy,
+                    output_policy: output_policy()?,
                 })),
                 step,
             )
@@ -416,6 +448,7 @@ pub(crate) fn plan_family_study(
         preparation,
         maximum_resident_bytes: step.0,
         maximum_wall_millis: step.1,
+        worker_memory_bytes: worker_memory()?,
     })
 }
 

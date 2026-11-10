@@ -113,6 +113,7 @@ fn fixture() -> ObservationPublicationCatalog {
     let mut catalog = ObservationPublicationCatalog {
         schema_version: 2,
         identity: ObservationPublicationCatalogIdentity(Digest::sha256([])),
+        scope: ObservationPublicationScope::Complete,
         producer,
         plan,
         source,

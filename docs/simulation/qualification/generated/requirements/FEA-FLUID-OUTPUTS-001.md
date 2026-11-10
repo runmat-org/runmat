@@ -47,7 +47,7 @@ Evidence kind: PhysicalBalance. Criterion: `pressure_drop` between named faces a
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | incompressible_laminar_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::fluid::tests::pressure_drop::pressure_drop_of_plane_poiseuille_flow_is_twelve_mu_u_l_over_h_squared` (crates/runmat-analysis/fea/src/execution/fluid/tests/pressure_drop.rs:180) - the face-pressure mean difference between the inlet and outlet of plane Poiseuille flow approaches (−dp/dx)·L = 12 µ Ū L / h² under refinement; developing and t... |
-| incompressible_laminar_steady | tet4 | public_study | PARTIAL | `runmat[test:check_cli]::plane_poiseuille_example_publishes_the_analytic_pressure_drop` (crates/runmat-cli/tests/check_cli.rs:1176) - pressure_drop on the public plane Poiseuille example (L/h = 30, Re = 1) lies within 5% of the fully developed 12 mu U L / h^2 = 36 Pa; the uniform inlet's entra... |
+| incompressible_laminar_steady | tet4 | public_study | PARTIAL | `runmat[test:check_cli]::plane_poiseuille_example_publishes_the_analytic_pressure_drop` (crates/runmat-cli/tests/check_cli.rs:1182) - pressure_drop on the public plane Poiseuille example (L/h = 30, Re = 1) lies within 5% of the fully developed 12 mu U L / h^2 = 36 Pa; the uniform inlet's entra... |
 | incompressible_laminar_steady | tet10 | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | tet10 | public_study | OPEN |  |
 | incompressible_laminar_transient | tet4 | numerical_kernel | OPEN |  |

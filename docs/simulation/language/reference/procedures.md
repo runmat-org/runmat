@@ -22,7 +22,27 @@ analysis response after analysis.modes {
 }
 ```
 
-Which procedures each family runs is generated from the solver's procedure registry in the [family and procedure matrix](../../validation/status.md#families-and-procedures). `runmat check` applies the same registry, so a combination the family does not run is reported at its line before anything is meshed.
+## Families and procedures
+
+The table below is generated from the capability ledger, the same source as the compiler's table of family and procedure pairs. `runmat check` applies that table, so a combination the family does not run is reported at its line before anything is meshed.
+
+<!-- ledger:families-and-procedures -->
+
+| Family | Runs in this release | Planned |
+| --- | --- | --- |
+| Structural mechanics | static, modal, prestressed modal, buckling, transient, harmonic, prestressed harmonic, nonlinear, transient (modal superposition), harmonic (modal superposition), prestressed harmonic (modal superposition), response spectrum (modal superposition), random response (modal superposition) | none |
+| Heat transfer | static, transient | none |
+| Electromagnetics | static, harmonic, line parameters | transient, nonlinear |
+| Acoustics | harmonic, modal, transient | static, nonlinear |
+| Fluid flow | static, transient | harmonic, nonlinear |
+| Thermomechanical | static, nonlinear | transient, harmonic |
+| Electrothermal | static, transient | harmonic, nonlinear |
+| Conjugate heat transfer | static, transient | harmonic, nonlinear |
+| Fluid–structure interaction | static, transient | harmonic, nonlinear |
+
+Modal superposition reuses a retained modal basis; every other entry solves the full system directly.
+
+<!-- /ledger:families-and-procedures -->
 
 ## What each procedure solves
 
@@ -101,6 +121,7 @@ analysis response after analysis.modes {
 | `electromagnetic harmonic` | `frequencies` |
 | `electromagnetic transient` [not yet in the current release](pending:electromagnetic.transient) | `start_time`, `end_time`, `time_step` |
 | `electromagnetic nonlinear` [not yet in the current release](pending:electromagnetic.nonlinear) | `start_load_factor`, `end_load_factor` |
+| `electromagnetic line_parameters` | none; the `cross_section` geometry carries the stackup and traces ([trace impedance](../../physics/trace-impedance.md)) |
 
 ## Acoustic procedures
 

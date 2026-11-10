@@ -9,6 +9,13 @@ pub struct AcousticFrequencyResultsData {
     pub workload: runmat_analysis_fea::execution::AcousticFrequencyWorkload,
     pub publication: runmat_analysis_fea::execution::FrequencySamplePublicationManifest,
     pub entries: Vec<AcousticFrequencyEntryEvidence>,
+    /// The catalog of the histories over the sweep's frequencies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_catalog:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    /// The series reductions of those histories (a peak over frequency, for example).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub series_reductions: Vec<runmat_analysis_fea::results::observation::SeriesReductionResult>,
     pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
 }
 

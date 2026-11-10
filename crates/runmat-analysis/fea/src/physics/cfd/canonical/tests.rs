@@ -152,7 +152,7 @@ fn unknown_pressure_trace_reconstructs_affine_inlet_gradient_without_fake_neuman
 
 // witness: FEA-FLUID-ACCURACY-001/steady_references @
 //   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
-//   boundary: Independent affine Couette velocity, wall shear and original balance; not
+//   check: couette; boundary: Independent affine Couette velocity, wall shear and original balance; not
 //   cavity/backward-facing step.
 #[test]
 fn affine_couette_uses_original_geometry_and_balanced_physical_fields() {
@@ -297,7 +297,7 @@ fn affine_nonzero_convection_reproduces_independent_velocity_and_pressure() {
 
 // witness: FEA-FLUID-ACCURACY-001/spatial @
 //   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
-//   boundary: Controlled-tail non-affine Fourier duct: velocity, flow and wall shear refinement;
+//   check: rectangular-duct; boundary: Controlled-tail non-affine Fourier duct: velocity, flow and wall shear refinement;
 //   not pressure/cavity/backward-facing-step envelope.
 #[test]
 fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
@@ -554,7 +554,7 @@ fn pressure_l2(f: &fixture::Fixture, r: &CanonicalFluidResult) -> f64 {
 mod time_block;
 
 // witness: FEA-FLUID-OUTPUTS-001/wall_shear_stress_fields @ incompressible_laminar_steady/tet4/numerical_kernel;
-//   coverage: partial; boundary: Couette vorticity and wall shear stress equal the linear profile's;
+//   coverage: partial; check: couette; boundary: Couette vorticity and wall shear stress equal the linear profile's;
 //   time-averaged WSS and the oscillatory shear index are not covered.
 #[test]
 fn couette_vorticity_and_wall_shear_match_the_linear_profile() {

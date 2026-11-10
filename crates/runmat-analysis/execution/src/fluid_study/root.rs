@@ -3,7 +3,7 @@
 //! The trusted root digest is supplied by the caller, not learned from the publication.
 //! Encoding and import are bounded, but gather metadata and mesh; this is not a peak-memory
 //! qualification or a replacement for scheduler attestation of response/accounting pairs.
-use crate::study_closure::{check_inventory, read, unique};
+use crate::study_closure::{check_inventory, completion_codec_limits, read, unique};
 use std::collections::BTreeMap;
 
 use runmat_analysis_fea::{
@@ -13,7 +13,7 @@ use runmat_analysis_fea::{
     },
     study::{plan_fluid_study_product, CompiledAnalysisStudy, FluidStudyPlanningPolicy},
 };
-use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::{
     value::{ValuePayload, ValueRef, ValueRefKind},
     Digest, ProgramRevision,
@@ -39,7 +39,6 @@ const PREFIX: &[u8] = b"runmat-fluid-study-completion\0";
 const COMPLETION_SCHEMA_VERSION: u16 = 2;
 /// The completion carries the solver mesh and workload of any admitted mesh, so collections are
 /// bounded by the encoded-byte ceiling rather than a fixed item count.
-const LIMITS: CanonicalLimits = CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -151,7 +150,12 @@ pub fn prepare_fluid_study_root_for(
         closures: completed.result_closures().to_vec(),
         descendants,
     };
-    let bytes = encode_contract(PREFIX, "fluid-study-completion", &wire, LIMITS)?;
+    let bytes = encode_contract(
+        PREFIX,
+        "fluid-study-completion",
+        &wire,
+        completion_codec_limits(policy.inventory_limits()),
+    )?;
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::FluidStudyCompletion,
         Digest::sha256(&bytes),
@@ -215,7 +219,12 @@ pub fn import_fluid_study_root(
     if manifest.logical_identity != Digest::sha256(&payload) {
         return Err(invalid("fluid completion payload identity differs"));
     }
-    let wire: CompletionWire = decode_contract(PREFIX, "fluid-study-completion", &payload, LIMITS)?;
+    let wire: CompletionWire = decode_contract(
+        PREFIX,
+        "fluid-study-completion",
+        &payload,
+        completion_codec_limits(limits),
+    )?;
     if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported fluid completion schema"));
     }

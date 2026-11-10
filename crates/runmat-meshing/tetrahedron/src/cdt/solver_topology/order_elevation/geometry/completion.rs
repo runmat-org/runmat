@@ -43,15 +43,21 @@ pub(super) fn complete_boundary_surface_parameters(
         let slot = node_slot(&topology.nodes, node_id)?;
         let node = &mut topology.nodes[slot];
         let parameter = curve_parameter(node, id)?;
+        let edge = evaluation.sources.edge(id)?;
+        // The curve point, not the node, is what the pcurve images must reproduce: a node the
+        // volume stage inserted on a boundary segment lies on the chord, off the curve.
+        let curve = evaluate_curve_point(id, parameter, evaluation)?;
+        require_node_near_curve(
+            input,
+            edge,
+            parameter,
+            node.coordinates_m.canonical_value(),
+            curve,
+        )?;
         // Pcurve images lie on the trim boundary by construction; only agreement is checked.
         for uv in pcurve_uvs(id, parameter, &usage, evaluation)? {
             let point = evaluate_surface_point(&usage, uv, evaluation)?;
-            require_matching_curve_points(
-                input,
-                evaluation.sources.edge(id)?,
-                node.coordinates_m.canonical_value(),
-                point,
-            )?;
+            require_matching_curve_points(input, edge, curve, point)?;
             insert_surface_parameter(node, &usage, uv, retained)?;
         }
     }

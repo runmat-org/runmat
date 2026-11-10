@@ -135,6 +135,7 @@ fn sliver_topology() -> DelaunayVolumeTopology {
 pub(super) fn metric_request() -> MetricFieldRequest {
     MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
         maximum_grading_ratio: 1.5,
@@ -270,6 +271,7 @@ fn anisotropic_metric_reports_a_sliver_without_scheduling_size_refinement() {
     };
     let request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3 {
             xx: 2.0,
@@ -355,6 +357,7 @@ fn constrained_boundary_radius_edge_is_reported_but_shape_drives_admission() {
         &topology,
         &MetricFieldRequest {
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
             maximum_grading_ratio: 1.5,

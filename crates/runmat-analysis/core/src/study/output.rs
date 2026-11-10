@@ -72,7 +72,7 @@ pub struct ObservationSpec {
 }
 
 mod quantity;
-pub use quantity::ObservationQuantity;
+pub use quantity::{LineParameterScope, ObservationQuantity};
 
 impl ObservationSpec {
     /// Physical meaning of the projected result, distinct from its recovered source quantity.
@@ -125,6 +125,8 @@ impl ObservationSpec {
             Some(SpatialReduction::Resultant | SpatialReduction::Moment { .. }) => {
                 ObservationValueShape::Vector3
             }
+            // A line parameter keeps its own shape: a scalar or the n x n conductor matrix.
+            Some(SpatialReduction::LineParameter) => self.value_shape.clone(),
             _ => projected,
         }
     }
@@ -183,7 +185,8 @@ impl ObservationSpec {
             | SpatialReduction::EuclideanNorm
             | SpatialReduction::Minimum
             | SpatialReduction::Maximum
-            | SpatialReduction::MeanDifference => Some(source),
+            | SpatialReduction::MeanDifference
+            | SpatialReduction::LineParameter => Some(source),
             // A level in dB of a power ratio.
             SpatialReduction::TransmissionLoss => Some(PhysicalDimension::DIMENSIONLESS.into()),
         }?;
@@ -271,6 +274,10 @@ pub enum ObservationTarget {
     },
     Connector {
         connector_id: String,
+    },
+    /// One signal conductor (trace) of a cross-section, by its authored name.
+    Conductor {
+        conductor_id: String,
     },
     Constraint {
         constraint_id: String,
@@ -456,6 +463,10 @@ pub enum SpatialReduction {
     /// 10·log10(∫ first / ∫ second) of a power-density field over the two face regions of a
     /// `RegionPair` target, in dB: transmission loss from the incident to the transmitted port.
     TransmissionLoss,
+    /// A per-length line parameter of a cross-section, reduced from the section's potential
+    /// solves (capacitance as the energy integral over the section, and what follows from it).
+    /// It reads a `Conductor` target for a per-line value and the whole section otherwise.
+    LineParameter,
 }
 
 impl SpatialReduction {

@@ -285,7 +285,15 @@ pub fn electrical_native_field_definitions(
             "electrical native inventory differs from canonical shape",
         ));
     }
-    let ids = match equation {
+    electrical_field_ids(equation)
+        .into_iter()
+        .zip(&request.plan.requirements)
+        .map(|(id, requirement)| native_electrical_field_definition(id, requirement))
+        .collect()
+}
+
+fn electrical_field_ids(equation: StaticElectricalEquation) -> [&'static str; 4] {
+    match equation {
         StaticElectricalEquation::SteadyConduction => [
             "electrical.potential",
             "electrical.electric_field",
@@ -298,9 +306,19 @@ pub fn electrical_native_field_definitions(
             "electrical.electric_displacement",
             "electrical.electric_energy_density",
         ],
-    };
-    ids.into_iter()
-        .zip(&request.plan.requirements)
+    }
+}
+
+/// The native fields an electrical solve of `equation` declares, without a mesh: the same
+/// definitions [`electrical_native_field_definitions`] reports for any recovery request.
+/// Static admission binds authored observations against this inventory.
+pub fn electrical_native_field_definition_inventory(
+    equation: StaticElectricalEquation,
+) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
+    let plan = native_electrical_field_plan(equation, 1, 1)?;
+    electrical_field_ids(equation)
+        .into_iter()
+        .zip(&plan.requirements)
         .map(|(id, requirement)| native_electrical_field_definition(id, requirement))
         .collect()
 }

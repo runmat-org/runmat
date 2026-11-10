@@ -133,7 +133,33 @@ pub(crate) mod bridge {
         /// Join touching solids so their coincident faces become shared interfaces.
         share_interfaces: bool,
         maximum_healing_displacement: f64,
+        /// Largest curve/pcurve gap, in metres, that exact import admits by raising the edge's
+        /// tolerance after rebuilding its pcurves: the request's geometric tolerance (requested
+        /// deviation). Larger gaps stay defects. Unused by display-only imports.
+        admissible_edge_gap_m: f64,
         cancel_token_id: u64,
+    }
+
+    /// One edge whose measured curve/pcurve gap exceeded its written tolerance: where it lies
+    /// (curve start, parameter midpoint, end; kernel units), the gap before and after rebuilding
+    /// its pcurves, and the tolerance import admitted (kernel units).
+    #[derive(Debug, Clone)]
+    struct OcctEdgeToleranceAdmissionPayload {
+        start_x: f64,
+        start_y: f64,
+        start_z: f64,
+        middle_x: f64,
+        middle_y: f64,
+        middle_z: f64,
+        end_x: f64,
+        end_y: f64,
+        end_z: f64,
+        written_tolerance: f64,
+        gap_before: f64,
+        gap_after: f64,
+        admitted_tolerance: f64,
+        repaired: bool,
+        within_bound: bool,
     }
 
     #[derive(Debug, Clone)]
@@ -221,6 +247,7 @@ pub(crate) mod bridge {
         short_edges_simplified: bool,
         sliver_faces_simplified: bool,
         healing_relations: Vec<OcctHealingRelationPayload>,
+        edge_tolerance_admissions: Vec<OcctEdgeToleranceAdmissionPayload>,
         maximum_healing_displacement: f64,
         displacement_original_x: f64,
         displacement_original_y: f64,

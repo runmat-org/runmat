@@ -5,6 +5,7 @@
 //! qualification or a replacement for scheduler attestation of response/accounting pairs.
 use std::collections::BTreeMap;
 
+use crate::study_closure::completion_codec_limits;
 use runmat_analysis_fea::{
     execution::{
         AcousticResponseWorkload, AnalysisNumericalObjectKind, AnalysisObjectManifest,
@@ -15,7 +16,7 @@ use runmat_analysis_fea::{
         AcousticResponseStudyProduct, CompiledAnalysisStudy,
     },
 };
-use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::{
     value::{ValuePayload, ValueRef, ValueRefKind},
     Digest, ProgramRevision,
@@ -39,7 +40,6 @@ use crate::{
 const PREFIX: &[u8] = b"runmat-acoustic-response-study-completion\0";
 // Full original task history replaces the previous winning-attempt payload.
 const COMPLETION_SCHEMA_VERSION: u16 = 3;
-const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -148,7 +148,12 @@ pub fn prepare_acoustic_response_study_root(
         closures: completed.result_closures().to_vec(),
         descendants,
     };
-    let bytes = encode_contract(PREFIX, "acoustic-response-study-completion", &wire, LIMITS)?;
+    let bytes = encode_contract(
+        PREFIX,
+        "acoustic-response-study-completion",
+        &wire,
+        completion_codec_limits(policy.inventory_limits()),
+    )?;
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::AcousticResponseStudyCompletion,
         Digest::sha256(&bytes),
@@ -220,7 +225,7 @@ pub fn import_acoustic_response_study_root(
         PREFIX,
         "acoustic-response-study-completion",
         &payload,
-        LIMITS,
+        completion_codec_limits(limits),
     )?;
     if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported acoustic response completion schema"));

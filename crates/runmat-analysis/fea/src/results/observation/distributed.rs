@@ -1,5 +1,7 @@
 mod combination;
+mod payload_bound;
 pub(crate) use combination::combine_observation_partitions;
+pub use payload_bound::ObservationPartitionPayloadCapacity;
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{AnalysisField, AnalysisModel, ObservationId, SpatialReduction};
@@ -172,6 +174,30 @@ impl ObservationPartitionEvidence {
         evidence.identity = evidence.derive_identity()?;
         evidence.validate()?;
         Ok(evidence)
+    }
+
+    /// Evidence of an observation evaluated directly from one solver result, as one partition
+    /// and one contribution: no recovered field is partitioned or combined.
+    pub(super) fn direct(
+        partition_plan: ObservationPartitionPlanIdentity,
+        source_field: RecoveredFieldIdentity,
+        contribution: Digest,
+        sample: RecoveredFieldSample,
+    ) -> Result<Self, ObservationError> {
+        Self::new(ObservationPartitionEvidenceInput {
+            partition_plan,
+            source_field,
+            sample,
+            event_attribution: None,
+            source_partitions: vec![RecoveredFieldPartitionIdentity::derived(
+                source_field.digest(),
+            )],
+            contributions: vec![ObservationPartitionContributionIdentity(contribution)],
+            accelerations: Vec::new(),
+            combination: ObservationPartitionCombination::CanonicalCompensatedReduction {
+                collective_count: 0,
+            },
+        })
     }
 
     pub fn validate(&self) -> Result<(), ObservationError> {

@@ -117,7 +117,8 @@ export type AnalysisProcedure = "static"
   | "modal_response_spectrum"
   | "random_response"
   | "nonlinear"
-  | "adaptive";
+  | "adaptive"
+  | "line_parameters";
 
 export interface AnalysisSequence {
   sequence_id: string;
@@ -831,6 +832,12 @@ kind: "port_reduction" }
   target: AuthoredRegionSource;
 kind: "spatial_selection" }
   | {
+  step_id: string;
+  quantity: ObservationQuantity;
+  conductor: string | null;
+  signal_conductors: WireU64;
+kind: "line_parameter" }
+  | {
   source: AuthoredOutputExpression;
   positions: Position[];
 kind: "interpolation" }
@@ -1021,7 +1028,7 @@ export interface AuthoredStudy {
   study_id: string;
   geometry: AuthoredGeometryInstance;
   mesh: AuthoredMeshRef;
-  model: AuthoredModelInstance;
+  model?: AuthoredModelInstance;
   inputs: AuthoredInputDefinition[];
   outputs: AuthoredOutput[];
   assessments?: AuthoredAssessment[];
@@ -1282,6 +1289,63 @@ export type CoupledPhysicsFamily = "thermomechanical"
 export interface CrossPowerSpectralDensity {
   values: ComplexSpectralDensity[];
 }
+
+export interface CrossSectionDefinition {
+  layers: CrossSectionLayer[];
+  stackup?: CrossSectionStackupSource;
+  traces: CrossSectionTrace[];
+  enclosure?: CrossSectionEnclosure;
+}
+
+export interface CrossSectionEnclosure {
+  half_width_m: number;
+  air_m: number;
+}
+
+export interface CrossSectionLayer {
+  name: string;
+  thickness_m: number;
+  role: CrossSectionLayerRole;
+}
+
+export type CrossSectionLayerRole = {
+  permittivity: number;
+kind: "dielectric" }
+  | {
+  permittivity: number;
+kind: "solder_mask" }
+  | {
+  fill_permittivity?: number;
+kind: "signal" }
+  | { kind: "plane" };
+
+export interface CrossSectionMeshSettings {
+  edge_size_m?: number;
+  growth?: number;
+  max_size_m?: number;
+}
+
+export interface CrossSectionStackupSource {
+  logical_path: string;
+  stackup_name?: string;
+  content_digest: GeometryDigest;
+}
+
+export interface CrossSectionTrace {
+  name: string;
+  role: CrossSectionTraceRole;
+  layer: string;
+  center_m: number;
+  width_m: number;
+  etch_angle_rad: number;
+  base?: CrossSectionTraceBase;
+}
+
+export type CrossSectionTraceBase = "top"
+  | "bottom";
+
+export type CrossSectionTraceRole = "signal"
+  | "ground";
 
 export interface Curvature {
   per_meter: number;
@@ -1910,7 +1974,8 @@ export interface GeometryDefinitionRef {
 export type GeometryDefinitionSource = ImportedGeometryDefinition & { kind: "imported" }
   | GeometryFeatureGraph & { kind: "constructed" }
   | DerivedGeometryDefinition & { kind: "derived" }
-  | GeneratedGeometryDefinition & { kind: "generated" };
+  | GeneratedGeometryDefinition & { kind: "generated" }
+  | CrossSectionDefinition & { kind: "cross_section" };
 
 export type GeometryDigest = [WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8];
 
@@ -2456,6 +2521,7 @@ export interface MeshingRequestSettings {
   cancellation: CancellationPolicy;
   cells_across_gap?: WireU32;
   size_controls?: MeshSizeControl[];
+  cross_section?: CrossSectionMeshSettings;
 }
 
 export interface MeshingSizeLimits {
@@ -2663,7 +2729,23 @@ export type ObservationQuantity = "displacement"
   | "temperature_jump"
   | "iteration_count"
   | "time"
-  | "frequency";
+  | "frequency"
+  | "line_impedance"
+  | "line_effective_permittivity"
+  | "line_delay"
+  | "line_capacitance"
+  | "line_vacuum_capacitance"
+  | "line_inductance"
+  | "differential_impedance"
+  | "common_mode_impedance"
+  | "odd_mode_impedance"
+  | "even_mode_impedance"
+  | "odd_mode_effective_permittivity"
+  | "even_mode_effective_permittivity"
+  | "odd_mode_delay"
+  | "even_mode_delay"
+  | "near_end_coupling"
+  | "far_end_coupling";
 
 export type ObservationRequest = { field: ObservationSpec }
   | { history: ObservationSpec }
@@ -2711,6 +2793,9 @@ export type ObservationTarget = { spatial: ExcitationTarget }
 } }
   | { connector: {
   connector_id: string;
+} }
+  | { conductor: {
+  conductor_id: string;
 } }
   | { constraint: {
   constraint_id: string;
@@ -3437,7 +3522,8 @@ export type SpatialReduction = "none"
 } }
   | "normal_flux"
   | "mean_difference"
-  | "transmission_loss";
+  | "transmission_loss"
+  | "line_parameter";
 
 export interface SpecificAcousticImpedance {
   pascal_seconds_per_meter: number;

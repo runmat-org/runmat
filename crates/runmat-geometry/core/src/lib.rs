@@ -30,6 +30,8 @@ pub use model::{
     CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadCurveEvaluator, CadEvaluatorSet,
     CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator, CadLabelRef,
     CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType, CadParameterSelector,
+    CrossSectionDefinition, CrossSectionEnclosure, CrossSectionLayer, CrossSectionLayerRole,
+    CrossSectionStackupSource, CrossSectionTrace, CrossSectionTraceBase, CrossSectionTraceRole,
     CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind, CurveDerivatives,
     CurveEvaluatorId, CurveProjection, DecodedExactGeometryComponents, DerivedGeometryDefinition,
     DisplayTessellationRef, EncodedExactGeometryClosure, EncodedFacetedSolidClosure, EntityIdRange,

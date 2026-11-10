@@ -17,7 +17,7 @@ use crate::{
 };
 
 // witness: FEA-THERMAL-DOMAIN-001/assembly @ thermal_steady/tet4/numerical_kernel;
-//   boundary: Aligned Tet4 two-material series resistance, temperature and flux plus property-order
+//   check: series-slab; boundary: Aligned Tet4 two-material series resistance, temperature and flux plus property-order
 //   invariance; no arbitrary nonuniform interface claim.
 #[test]
 fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant() {

@@ -98,6 +98,17 @@ fn main() {
         source.push_str("] },\n");
     }
     source.push_str("];\n");
+    // Reference checks: the ids a `; check:` witness field may name.
+    let checks: Vec<String> = ledger["checks"]
+        .as_array()
+        .expect("ledger checks")
+        .iter()
+        .map(|check| text(&check["id"]))
+        .collect();
+    source.push_str(&format!(
+        "pub(crate) const CHECKS: &[&str] = &[{}];\n",
+        checks.join(", ")
+    ));
     fs::write(out.join("requirements.rs"), source).unwrap();
 
     // The scope inventory, in the tab-separated form `scope` parses.

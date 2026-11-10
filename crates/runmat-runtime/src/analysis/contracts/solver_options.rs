@@ -34,6 +34,7 @@ impl AnalysisSolverOptions {
             Self::StructuralTransient(options) => options.solver_mesh_artifact_path = None,
             Self::IncompressibleFlow(_) => {}
             Self::StructuralNonlinear(options) => options.solver_mesh_artifact_path = None,
+            Self::LineParameters(_) => {}
         }
     }
 
@@ -132,6 +133,9 @@ impl AnalysisSolverOptions {
             )),
             (Electromagnetic, HarmonicResponse, SolutionSpace::Direct) => Ok(
                 Self::MaxwellHarmonic(super::super::AnalysisMaxwellRunOptions::default()),
+            ),
+            (Electromagnetic, AnalysisProcedure::LineParameters, SolutionSpace::Direct) => Ok(
+                Self::LineParameters(AnalysisLineParametersRunOptions::default()),
             ),
             (family, procedure, solution_space) => Err(format!(
                 "procedure step `{}` selects unsupported execution combination {family:?}/{procedure:?}/{solution_space:?}",

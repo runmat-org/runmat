@@ -23,6 +23,24 @@ pub enum ObservationHistoryLookup {
     Sample(Box<ObservationHistorySample>),
 }
 
+/// Schema of a persisted observation attachment. Version 2: sampled-history publications name
+/// each sample's scope. A stored attachment of another version is legacy: readers treat it as
+/// absent (a cache miss) and object reclamation defers rather than infer its closure.
+pub(super) const OBSERVATION_ATTACHMENT_SCHEMA_VERSION: u16 = 2;
+
+/// The version field alone, read when a stored attachment does not decode at this schema.
+#[derive(Deserialize)]
+pub(super) struct ObservationAttachmentVersion {
+    pub schema_version: u16,
+}
+
+/// A stored attachment as read from the filesystem store.
+pub(super) enum StoredObservationAttachment {
+    Current(ObservationAttachment),
+    /// Written at another schema version; its closure is unknown to this reader.
+    Legacy,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ObservationAttachment {
@@ -53,7 +71,7 @@ impl ObservationAttachment {
             return Err("observation catalog has a foreign producer".into());
         }
         Ok(Self {
-            schema_version: 1,
+            schema_version: OBSERVATION_ATTACHMENT_SCHEMA_VERSION,
             run_id: run.run_id.clone(),
             run_digest,
             publication,
@@ -66,7 +84,7 @@ impl ObservationAttachment {
         run: &AnalysisRunResult,
         run_digest: Digest,
     ) -> Result<(), String> {
-        if self.schema_version != 1 {
+        if self.schema_version != OBSERVATION_ATTACHMENT_SCHEMA_VERSION {
             return Err("observation attachment schema is unsupported".into());
         }
         if self.run_id != run.run_id {

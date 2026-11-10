@@ -8,7 +8,7 @@ Evidence kind: PhysicalBalance. Criterion: Conservatively transfer temperature a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| conjugate_heat_transfer | canonical_mixed_topology | public_study | FAIL | `runmat[test:check_cli]::cht_plate_channel_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1217) - The CHT plate-channel example runs two-way from `runmat run` to a completed, numerically acceptable run; interface closure is the runtime gate, not asserted her... |
+| conjugate_heat_transfer | canonical_mixed_topology | public_study | FAIL | `runmat[test:check_cli]::cht_plate_channel_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1223) - The CHT plate-channel example runs two-way from `runmat run` to a completed, numerically acceptable run; interface closure is the runtime gate, not asserted her... |
 
 ## iteration
 

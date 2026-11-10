@@ -42,7 +42,7 @@ Evidence kind: PhysicalBalance. Criterion: Two-way conjugate heat transfer with 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | conjugate_heat_transfer | tet4 | numerical_kernel | OPEN |  |
-| conjugate_heat_transfer | tet4 | public_study | FAIL | `runmat[test:check_cli]::cht_plate_channel_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1217) - One public two-way CHT example on a linear mesh converges. |
+| conjugate_heat_transfer | tet4 | public_study | FAIL | `runmat[test:check_cli]::cht_plate_channel_example_runs_as_a_coupled_study` (crates/runmat-cli/tests/check_cli.rs:1223) - One public two-way CHT example on a linear mesh converges. |
 | conjugate_heat_transfer | tet10 | numerical_kernel | OPEN |  |
 | conjugate_heat_transfer | tet10 | public_study | OPEN |  |
 

@@ -239,7 +239,7 @@ pub(super) fn import_frequency_artifacts<Source: CacheImport>(
                 let decoded_catalog = runmat_analysis_fea::results::observation::ObservationFieldCatalog::from_canonical_bytes(&catalog.payload()).map_err(protocol)?;
                 // Authenticate the aggregate against fields already admitted from the
                 // original physical result, rather than trusting a matching schedule.
-                let runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } = decoded_catalog.source() else {
+                let runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::EntryHistory { samples } = decoded_catalog.source() else {
                     return Err(protocol("frequency history requires its complete source catalog"));
                 };
                 if samples.len() != entries.len() || samples.iter().zip(&entries).any(|(sample, entry)| {

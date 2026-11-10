@@ -9,7 +9,8 @@ use runmat_analysis_fea::planning::resource::{
     build_observation_partition_resource_plan, build_observation_reduction_resource_plan,
     execute_scoped_chunks, observation_partition_payload_bytes_upper_bound,
     observation_reduction_payload_bytes_upper_bound, FeaResourcePlan, LocalExecutionPlan,
-    ObservationPartitionResourcePlanning, ScopedLocalExecutionError,
+    ObservationPartitionResourcePlanning, ObservationPartitionSourceWorkspace,
+    ScopedLocalExecutionError,
 };
 use runmat_analysis_fea::results::field::{RecoveredFieldPartitionSet, RecoveredFieldSample};
 use runmat_analysis_fea::results::observation::{
@@ -318,6 +319,7 @@ pub fn prepare_observation_fanout(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
+    let source_workspace = observation_partition_source_workspace(&preparation, &admitted)?;
     let prepared = fan_out(
         local_execution,
         &imported,
@@ -326,10 +328,13 @@ pub fn prepare_observation_fanout(
                 &preparation,
                 &admitted,
                 &source_request_objects,
-                plan.as_ref().clone(),
-                plan.partitions[*ordinal].clone(),
-                source_fields.clone(),
-                event_attribution,
+                PartitionWork {
+                    partition_plan: plan.as_ref().clone(),
+                    partition: plan.partitions[*ordinal].clone(),
+                    source_fields: source_fields.clone(),
+                    event_attribution,
+                    source_workspace,
+                },
             )
         },
     )?;
@@ -646,15 +651,55 @@ pub fn import_reduced_observation(
     })
 }
 
-fn prepare_partition_workload(
+/// Worker storage of the partition's source, read by the same law the worker re-derives.
+fn observation_partition_source_workspace(
     preparation: &ObservationPreparation,
     admitted: &AdmittedObservation,
-    source_request_objects: &PreparedAnalysisObjects,
+) -> AnalysisBridgeResult<ObservationPartitionSourceWorkspace> {
+    match (
+        &admitted.workload,
+        &preparation.source,
+        admitted.mesh.as_ref(),
+    ) {
+        (
+            super::observation_source::AdmittedObservationWorkload::Thermal(workload),
+            crate::ObservationPublishedSource::Thermal { manifest, .. },
+            Some(mesh),
+        ) => ObservationPartitionSourceWorkspace::thermal(
+            workload,
+            manifest,
+            &admitted.request.plan,
+            mesh,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string())),
+        (super::observation_source::AdmittedObservationWorkload::Thermal(_), _, _) => Err(
+            AnalysisBridgeError::Identity("thermal observation requires its manifest and mesh"),
+        ),
+        _ => Ok(ObservationPartitionSourceWorkspace::InputEnvelope),
+    }
+}
+
+struct PartitionWork {
     partition_plan: ObservationPartitionPlan,
     partition: ObservationPartition,
     source_fields: RecoveredFieldPartitionSet,
     event_attribution: Option<ObservationEventAttribution>,
+    source_workspace: ObservationPartitionSourceWorkspace,
+}
+
+fn prepare_partition_workload(
+    preparation: &ObservationPreparation,
+    admitted: &AdmittedObservation,
+    source_request_objects: &PreparedAnalysisObjects,
+    work: PartitionWork,
 ) -> AnalysisBridgeResult<PreparedObservationPartition> {
+    let PartitionWork {
+        partition_plan,
+        partition,
+        source_fields,
+        event_attribution,
+        source_workspace,
+    } = work;
     let execution_target = observation_execution_target(
         &preparation.source_host,
         admitted,
@@ -723,7 +768,10 @@ fn prepare_partition_workload(
     };
     let input_facts = prepared_input_resource_facts(&inputs)?;
     let output_payload_upper_bound = observation_partition_payload_bytes_upper_bound(
-        &input_facts,
+        &admitted.request,
+        &request,
+        &partition_plan,
+        &partition,
         &source_fields,
         accelerator.is_some(),
     )
@@ -739,6 +787,7 @@ fn prepare_partition_workload(
             output: projected_output_resource_facts(output_payload_upper_bound)?,
             output_set: crate::projected_output_set_resource_facts(),
             accelerator,
+            source_workspace,
         })
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan_objects = prepare_analysis_objects(

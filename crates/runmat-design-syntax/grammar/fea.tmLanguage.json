@@ -56,15 +56,15 @@
     },
     {
       "name": "keyword.control.fea",
-      "match": "(?<![\\w])(?:field|state|after)(?![\\w])"
+      "match": "(?<![\\w])(?:random_excitation|response_spectrum|orientation|constraint|excitation|transition|assessment|connector|construct|execution|generated|interface|load_case|analysis|function|geometry|material|feature|include|initial|section|assign|derive|expect|import|output|region|result|retain|select|signal|cases|input|layup|model|study|sweep|table|field|state|after|axis|case|from|load|mesh|over|let|on|to)(?![\\w])"
     },
     {
       "name": "storage.type.fea",
-      "match": "(?<![\\w])(?:fluid_structure_interaction|conjugate_heat_transfer|modal_response_spectrum|prestressed_harmonic|prestressed_modal|response_spectrum|thermomechanical|electromagnetic|random_response|modal_transient|electrothermal|modal_harmonic|structural|tetrahedra|nonlinear|transient|triangles|acoustic|adaptive|buckling|harmonic|thermal|preload|static|steady|fluid|modal|lines)(?![\\w])"
+      "match": "(?<![\\w])(?:fluid_structure_interaction|conjugate_heat_transfer|modal_response_spectrum|prestressed_harmonic|prestressed_modal|response_spectrum|thermomechanical|electromagnetic|line_parameters|random_response|modal_transient|electrothermal|modal_harmonic|structural|tetrahedra|nonlinear|transient|triangles|acoustic|adaptive|buckling|harmonic|thermal|preload|static|steady|fluid|modal|lines)(?![\\w])"
     },
     {
       "name": "constant.language.fea",
-      "match": "(?<![\\w])(?:thermal_energy_storage_rate_density|acoustic_particle_velocity|until_dependents_complete|electric_edge_circulation|magnetic_edge_circulation|magnetic_vector_potential|electric_current_density|magnetic_field_intensity|acoustic_port_intensity|electric_energy_density|boundary_introduced_by|shell_transverse_shear|electric_displacement|magnetic_flux_density|constraint_violation|shell_bending_moment|shell_membrane_force|sound_pressure_level|temperature_gradient|beam_bending_moment|beam_bending_stress|beam_torsion_moment|beam_torsion_stress|joule_power_density|modal_participation|acoustic_intensity|electric_potential|integration_point|acoustic_pressure|transmission_loss|wall_shear_stress|explicit_samples|beam_axial_force|beam_shear_force|contact_pressure|electric_current|volume_flow_rate|von_mises_stress|reference_point|electric_charge|modal_frequency|reaction_moment|shell_von_mises|latest_samples|electric_field|fluid_pressure|fluid_velocity|mass_flow_rate|reaction_force|persistent_id|applied_loads|error_bounded|strain_energy|acceleration|displacement|exactly_one|one_or_more|contact_gap|temperature|complex128|constraint|eigenvalue|quadratic|prestress|canonical|connector|interface|heat_flux|heat_rate|vorticity|readable|writable|lossless|residual|rotation|velocity|element|balance|linear|result|select|real64|global|strain|stress|basis|name|none|cell|edge|face|mode|node|tag|id)(?![\\w])"
+      "match": "(?<![\\w])(?:thermal_energy_storage_rate_density|acoustic_particle_velocity|until_dependents_complete|electric_edge_circulation|magnetic_edge_circulation|magnetic_vector_potential|electric_current_density|magnetic_field_intensity|acoustic_port_intensity|electric_energy_density|boundary_introduced_by|shell_transverse_shear|electric_displacement|magnetic_flux_density|constraint_violation|shell_bending_moment|shell_membrane_force|sound_pressure_level|temperature_gradient|beam_bending_moment|beam_bending_stress|beam_torsion_moment|beam_torsion_stress|joule_power_density|modal_participation|acoustic_intensity|electric_potential|integration_point|acoustic_pressure|transmission_loss|wall_shear_stress|authored_samples|explicit_samples|beam_axial_force|beam_shear_force|contact_pressure|electric_current|volume_flow_rate|von_mises_stress|certified_bound|reference_point|electric_charge|modal_frequency|reaction_moment|shell_von_mises|latest_samples|electric_field|fluid_pressure|fluid_velocity|mass_flow_rate|reaction_force|persistent_id|applied_loads|error_bounded|strain_energy|acceleration|displacement|exactly_one|one_or_more|contact_gap|temperature|complex128|constraint|eigenvalue|quadratic|prestress|canonical|connector|interface|heat_flux|heat_rate|vorticity|readable|writable|lossless|residual|rotation|velocity|element|balance|linear|result|select|real64|global|strain|stress|basis|name|none|cell|edge|face|mode|node|tag|id)(?![\\w])"
     },
     {
       "name": "support.type.property-name.fea",
@@ -169,8 +169,55 @@
         "scope": "keyword.control.fea",
         "words": [
           "after",
+          "analysis",
+          "assessment",
+          "assign",
+          "axis",
+          "case",
+          "cases",
+          "connector",
+          "constraint",
+          "construct",
+          "derive",
+          "excitation",
+          "execution",
+          "expect",
+          "feature",
           "field",
-          "state"
+          "from",
+          "function",
+          "generated",
+          "geometry",
+          "import",
+          "include",
+          "initial",
+          "input",
+          "interface",
+          "layup",
+          "let",
+          "load",
+          "load_case",
+          "material",
+          "mesh",
+          "model",
+          "on",
+          "orientation",
+          "output",
+          "over",
+          "random_excitation",
+          "region",
+          "response_spectrum",
+          "result",
+          "retain",
+          "section",
+          "select",
+          "signal",
+          "state",
+          "study",
+          "sweep",
+          "table",
+          "to",
+          "transition"
         ]
       },
       {
@@ -185,6 +232,7 @@
           "fluid",
           "fluid_structure_interaction",
           "harmonic",
+          "line_parameters",
           "lines",
           "modal",
           "modal_harmonic",
@@ -215,6 +263,7 @@
           "acoustic_port_intensity",
           "acoustic_pressure",
           "applied_loads",
+          "authored_samples",
           "balance",
           "basis",
           "beam_axial_force",
@@ -226,6 +275,7 @@
           "boundary_introduced_by",
           "canonical",
           "cell",
+          "certified_bound",
           "complex128",
           "connector",
           "constraint",

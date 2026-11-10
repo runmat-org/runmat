@@ -118,6 +118,36 @@ pub const ELECTROMAGNETIC_INITIAL_CONDITION: StaticRule = StaticRule {
     pending: None,
     message: "electromagnetic static and harmonic analyses take no initial conditions",
 };
+pub const CONJUGATE_HEAT_INITIAL_TEMPERATURE: StaticRule = StaticRule {
+    code: "fea.admission.initial_condition",
+    pending: None,
+    message: "transient conjugate heat transfer needs an authored initial temperature: declare a uniform whole-model `thermal.temperature` initial condition in the model",
+};
+pub const CONJUGATE_HEAT_INITIAL_UNIFORM: StaticRule = StaticRule {
+    code: "fea.admission.initial_condition",
+    pending: None,
+    message: "transient conjugate heat transfer starts from one uniform whole-model initial temperature above 0 K",
+};
+pub const CONJUGATE_HEAT_INITIAL_KIND: StaticRule = StaticRule {
+    code: "fea.admission.initial_condition",
+    pending: None,
+    message: "transient conjugate heat transfer takes only an initial temperature; the flow starts from its steady solution",
+};
+pub const CONJUGATE_HEAT_STEADY_INITIAL: StaticRule = StaticRule {
+    code: "fea.admission.initial_condition",
+    pending: None,
+    message: "steady conjugate heat transfer takes no initial conditions",
+};
+pub const FLUID_STRUCTURE_INITIAL_CONDITION: StaticRule = StaticRule {
+    code: "fea.admission.initial_condition",
+    pending: None,
+    message: "fluid–structure interaction starts from its steady flow at rest and takes no initial conditions",
+};
+pub const FLUID_STRUCTURE_INTERFACE: StaticRule = StaticRule {
+    code: "fea.admission.interface",
+    pending: None,
+    message: "fluid–structure interaction needs a declared fluid–structure interface on the wetted face (`fluid_structure.no_slip`), and admits no other interface kind",
+};
 pub const MATERIAL_MASS_DENSITY_CODE: &str = "fea.admission.material_mass_density";
 pub const OBSERVATION_CODE: &str = "fea.admission.observation";
 pub const ACCELERATOR_REQUIRED_CODE: &str = "fea.admission.accelerator_required";
@@ -128,6 +158,9 @@ pub enum AdmittedFamily {
     AcousticResponse,
     Electrical,
     Fluid,
+    /// Per-length line parameters of a cross-section: solved in place on the section's
+    /// triangle mesh, with no exact geometry or volume mesh.
+    LineParameters,
     Nonlinear,
     Magnetic,
     Maxwell,
@@ -136,8 +169,8 @@ pub enum AdmittedFamily {
 }
 
 /// Every static rule for one realized study, in order: family x procedure and procedure graph,
-/// then the selected family's constraint, initial-condition and observation admission, then
-/// strict accelerator placement. Returns the family the run prepares, or every issue found.
+/// then the selected family's material, constraint, initial-condition, interface and
+/// observation admission (each observation binds a field the family declares). Returns the family the run prepares, or every issue found.
 pub fn admit_study(
     realized: &RealizedStudy,
     materials: &BTreeMap<AuthoredMaterialRef, MaterialModel>,
@@ -148,6 +181,7 @@ pub fn admit_study(
     admit_materials(realized, materials, &mut issues);
     admit_constraints(realized, family, &mut issues);
     admit_initial_conditions(realized, family, &mut issues);
+    admit_interfaces(realized, family, &mut issues);
     admit_observations(realized, family, &mut issues);
     if issues.is_empty() {
         Ok(family)
@@ -248,27 +282,38 @@ fn admit_initial_conditions(
     issues: &mut Vec<AdmissionIssue>,
 ) {
     let conditions = &realized.model.initial_conditions;
+    if family == AdmittedFamily::Fluid {
+        if let Some(step) = realized.sequence.steps.iter().find(|step| {
+            step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+        }) {
+            if let Some(rule) = conjugate_heat_initial_rule(conditions, step) {
+                issues.push(rule.issue());
+            }
+            return;
+        }
+        if realized.sequence.steps.iter().any(|step| {
+            step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
+        }) {
+            if !conditions.is_empty() {
+                issues.push(FLUID_STRUCTURE_INITIAL_CONDITION.issue());
+            }
+            return;
+        }
+    }
     if conditions.is_empty() {
         return;
     }
     let rule = match family {
-        AdmittedFamily::Fluid => {
-            // Conjugate heat transfer also starts its solid and fluid temperatures here.
-            let conjugate = realized.sequence.steps.iter().any(|step| {
-                step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
-            });
-            conditions
-                .iter()
-                .any(|condition| {
-                    !matches!(
-                        condition.kind,
-                        AuthoredInitialConditionKind::FluidVelocity(_)
-                            | AuthoredInitialConditionKind::FluidPressure(_)
-                    ) && !(conjugate
-                        && matches!(condition.kind, AuthoredInitialConditionKind::Temperature(_)))
-                })
-                .then_some(FLUID_INITIAL_CONDITION)
-        }
+        AdmittedFamily::Fluid => conditions
+            .iter()
+            .any(|condition| {
+                !matches!(
+                    condition.kind,
+                    AuthoredInitialConditionKind::FluidVelocity(_)
+                        | AuthoredInitialConditionKind::FluidPressure(_)
+                )
+            })
+            .then_some(FLUID_INITIAL_CONDITION),
         AdmittedFamily::AcousticResponse
             if realized
                 .sequence
@@ -286,6 +331,87 @@ fn admit_initial_conditions(
     if let Some(rule) = rule {
         issues.push(rule.issue());
     }
+}
+
+/// Conjugate heat transfer starts its solid and fluid temperatures from one authored uniform
+/// whole-model temperature when transient, and from nothing when steady. The flow it carries
+/// is solved steady first, so it takes no initial state. Run preparation enforces the same
+/// messages on the compiled model (`FluidSteadyWorkload::initial_temperature`).
+fn conjugate_heat_initial_rule(
+    conditions: &[runmat_analysis_core::AuthoredInitialCondition],
+    step: &runmat_analysis_core::ProcedureStep,
+) -> Option<StaticRule> {
+    use runmat_analysis_core::{AuthoredInitialConditionTarget, InitialValue, StepObjectRef};
+    if step.procedure != AnalysisProcedure::TransientResponse {
+        return (!conditions.is_empty()).then_some(CONJUGATE_HEAT_STEADY_INITIAL);
+    }
+    let mut temperatures = 0;
+    for condition in conditions.iter().filter(|condition| {
+        step.object_is_active(&StepObjectRef::InitialCondition(
+            condition.initial_condition_id.clone(),
+        ))
+    }) {
+        let AuthoredInitialConditionKind::Temperature(value) = &condition.kind else {
+            return Some(CONJUGATE_HEAT_INITIAL_KIND);
+        };
+        let (AuthoredInitialConditionTarget::WholeModel, InitialValue::Uniform(t)) =
+            (&condition.target, value)
+        else {
+            return Some(CONJUGATE_HEAT_INITIAL_UNIFORM);
+        };
+        temperatures += 1;
+        if temperatures > 1 || !t.canonical_value().is_finite() || t.canonical_value() <= 0.0 {
+            return Some(CONJUGATE_HEAT_INITIAL_UNIFORM);
+        }
+    }
+    (temperatures == 0).then_some(CONJUGATE_HEAT_INITIAL_TEMPERATURE)
+}
+
+/// A fluid–structure interaction couples the flow to the structure through its declared
+/// interfaces only; with none, nothing couples. Run preparation reports the same rule.
+fn admit_interfaces(
+    realized: &RealizedStudy,
+    family: AdmittedFamily,
+    issues: &mut Vec<AdmissionIssue>,
+) {
+    use runmat_analysis_core::AuthoredInterfaceKind;
+    if family != AdmittedFamily::Fluid
+        || !realized.sequence.steps.iter().any(|step| {
+            step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
+        })
+    {
+        return;
+    }
+    let interfaces = std::iter::once(&realized.model)
+        .chain(&realized.included_models)
+        .flat_map(|model| &model.interfaces)
+        .collect::<Vec<_>>();
+    if interfaces.is_empty()
+        || interfaces
+            .iter()
+            .any(|interface| !matches!(interface.kind, AuthoredInterfaceKind::FluidStructureNoSlip))
+    {
+        issues.push(FLUID_STRUCTURE_INTERFACE.issue());
+    }
+}
+
+/// A flow step starts fresh. A transient conjugate heat transfer step may also select its
+/// authored initial temperature (`initial_conditions = [model.initial.<name>]`), the one
+/// state a conjugate warm-up starts from.
+pub(crate) fn fluid_step_initial_selection_supported(
+    step: &runmat_analysis_core::ProcedureStep,
+) -> bool {
+    use runmat_analysis_core::StepObjectRef;
+    if step.state_inputs.is_empty() && step.activations.is_empty() {
+        return true;
+    }
+    step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+        && step.procedure == AnalysisProcedure::TransientResponse
+        && crate::study::thermal_step_initial_selection_supported(step)
+        && step
+            .activations
+            .iter()
+            .all(|activation| matches!(activation.object, StepObjectRef::InitialCondition(_)))
 }
 
 /// Structural procedures with inertia (modal, transient, harmonic, spectrum and random
@@ -346,18 +472,23 @@ fn admit_observations(
     issues: &mut Vec<AdmissionIssue>,
 ) {
     // Families that publish sampled native fields select observations from them only.
-    if !matches!(family, AdmittedFamily::Magnetic | AdmittedFamily::Maxwell) {
-        return;
-    }
-    for step in &realized.sequence.steps {
-        if let Err(error) = crate::results::observation::validate_sampled_requests(step) {
-            issues.push(AdmissionIssue {
-                code: OBSERVATION_CODE,
-                pending: None,
-                message: format!("analysis `{}`: {error}", step.step_id.as_str()),
-            });
+    if matches!(family, AdmittedFamily::Magnetic | AdmittedFamily::Maxwell) {
+        let mut sampled = true;
+        for step in &realized.sequence.steps {
+            if let Err(error) = crate::results::observation::validate_sampled_requests(step) {
+                sampled = false;
+                issues.push(AdmissionIssue {
+                    code: OBSERVATION_CODE,
+                    pending: None,
+                    message: format!("analysis `{}`: {error}", step.step_id.as_str()),
+                });
+            }
+        }
+        if !sampled {
+            return;
         }
     }
+    super::observation::admit_observation_bindings(realized, family, issues);
 }
 
 /// Strict accelerator placement (`accelerators = required`) on a study whose families have no
@@ -477,8 +608,7 @@ pub fn select_family(
         )
         && step.solution_space == SolutionSpace::Direct
         && step.restart == RestartPolicy::Fresh
-        && step.state_inputs.is_empty()
-        && step.activations.is_empty()
+        && fluid_step_initial_selection_supported(step)
         && sequence.dependencies.is_empty()
         && sequence.transitions.is_empty()
         && sequence.branches.is_empty()
@@ -543,6 +673,18 @@ pub fn select_family(
         && sequence.branches.is_empty()
     {
         return Ok(AdmittedFamily::Acoustic);
+    }
+    if step.family == PhysicsFamily::Electromagnetic
+        && step.procedure == AnalysisProcedure::LineParameters
+        && step.solution_space == SolutionSpace::Direct
+        && step.restart == RestartPolicy::Fresh
+        && step.state_inputs.is_empty()
+        && step.activations.is_empty()
+        && sequence.dependencies.is_empty()
+        && sequence.transitions.is_empty()
+        && sequence.branches.is_empty()
+    {
+        return Ok(AdmittedFamily::LineParameters);
     }
     if is_electrothermal(sequence) {
         return Ok(AdmittedFamily::Thermal);
@@ -693,6 +835,69 @@ mod tests {
         ] {
             assert!(
                 super::select_family(&AnalysisSequence::from_steps("flow", steps), None).is_err()
+            );
+        }
+    }
+
+    /// A transient conjugate heat transfer step that selects its authored initial temperature
+    /// (`initial_conditions = [model.initial.<name>]`) is admitted: run requires that
+    /// temperature, so it must not also reject the step that names it. Other seeded flow steps
+    /// stay closed.
+    #[test]
+    fn seeded_transient_conjugate_heat_is_admitted_and_other_seeded_flow_is_not() {
+        use runmat_analysis_core::{
+            ActivationLifecycle, CoupledPhysicsFamily, InitialStateConflictPolicy, StateInput,
+            StateKind, StateSource, StateUse, StepObjectActivation, StepObjectRef,
+        };
+        let seed = |mut step: ProcedureStep, kind: StateKind| {
+            step.state_inputs.push(StateInput {
+                input_id: "initial".into(),
+                required_kind: kind,
+                source: StateSource::InitialConditions,
+                use_as: StateUse::PhysicalInitialState,
+                conflict: InitialStateConflictPolicy::Reject,
+            });
+            step.activations.push(StepObjectActivation {
+                object: StepObjectRef::InitialCondition("start".into()),
+                lifecycle: ActivationLifecycle::Activate,
+            });
+            step
+        };
+        let timed = |mut step: ProcedureStep| {
+            step.procedure = AnalysisProcedure::TransientResponse;
+            step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+                origin: 0.0,
+                start: 0.0,
+                end: 150.0,
+                interval_count: 150,
+            };
+            step
+        };
+        let conjugate = timed(ProcedureStep::coupled(
+            "warm_up",
+            CoupledPhysicsFamily::ConjugateHeatTransfer,
+            AnalysisProcedure::Static,
+        ));
+        let family =
+            |step: ProcedureStep| select_family(&AnalysisSequence::from_steps("s", vec![step]));
+        assert_eq!(family(conjugate.clone()).unwrap(), AdmittedFamily::Fluid);
+        assert_eq!(
+            family(seed(conjugate.clone(), StateKind::Thermal)).unwrap(),
+            AdmittedFamily::Fluid
+        );
+        let steady = ProcedureStep::coupled(
+            "operating_point",
+            CoupledPhysicsFamily::ConjugateHeatTransfer,
+            AnalysisProcedure::Static,
+        );
+        for closed in [
+            seed(conjugate, StateKind::Fluid),
+            seed(steady, StateKind::Thermal),
+            seed(timed(ProcedureStep::fluid_static("flow")), StateKind::Fluid),
+        ] {
+            assert_eq!(
+                family(closed).unwrap_err().code,
+                super::PROCEDURE_GRAPH_CODE
             );
         }
     }

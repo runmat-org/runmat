@@ -52,7 +52,9 @@ use evidence_filesystem::{atomic_write_bytes, fs_create_dir_all};
 mod modal_run_admission;
 mod render_topology;
 use modal_run_admission::analysis_admit_modal_run_with_id;
-use render_topology::{render_topology_from_solver_mesh, render_topology_from_solver_mesh_at};
+use render_topology::render_topology_from_solver_mesh;
+#[cfg(feature = "plot-core")]
+use render_topology::render_topology_from_solver_mesh_at;
 pub use render_topology::{DroppedMidsides, SurfaceDetail};
 pub mod assessment;
 mod nonlinear_result;
@@ -355,7 +357,8 @@ pub use contracts::{
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisFieldStorage, AnalysisFieldStorageRef,
-    AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
+    AnalysisImmutableValueSpec, AnalysisLineParametersRunOptions, AnalysisModalRunOptions,
+    AnalysisModelSourceEvidence,
     AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
     AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
     AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,

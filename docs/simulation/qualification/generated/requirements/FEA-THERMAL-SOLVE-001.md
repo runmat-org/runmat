@@ -69,7 +69,7 @@ Evidence kind: ResourceAdmission. Criterion: The steady thermal reservation stay
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| thermal_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::pipeline::thermal::physical::conduction_tests::steady_run_peak_fits_the_preassembly_reservation` (crates/runmat-analysis/fea/src/pipeline/thermal/physical/conduction_tests.rs:216) - The measured requested-heap peak of a whole steady linear run, on both solve paths, fits the preassembly reservation the run admits. |
+| thermal_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::pipeline::thermal::physical::conduction_tests::steady_run_peak_fits_the_preassembly_reservation` (crates/runmat-analysis/fea/src/pipeline/thermal/physical/conduction_tests.rs:224) - The measured requested-heap peak of a whole steady linear run (preassembly, solve, then manifest construction and header encoding), on both solve paths, fits th... |
 
 ## support_derivation_memory
 
@@ -77,7 +77,7 @@ Evidence kind: ResourceAdmission. Criterion: Thermal support-pattern derivation 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| thermal_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::planning::resource::thermal_operator::tests::thermal_support_derivation_peak_fits_the_planning_law` (crates/runmat-analysis/fea/src/planning/resource/thermal_operator/tests.rs:406) - The thermal support derivation (projection, clique support, symbolic factor analysis) never requests more heap than the planning law at the exact support size, ... |
+| thermal_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::planning::resource::thermal_operator::tests::thermal_support_derivation_peak_fits_the_planning_law` (crates/runmat-analysis/fea/src/planning/resource/thermal_operator/tests.rs:432) - The thermal support derivation (projection, clique support, symbolic factor analysis) never requests more heap than the planning law at the exact support size, ... |
 
 ## support_derivation_memory_interface
 

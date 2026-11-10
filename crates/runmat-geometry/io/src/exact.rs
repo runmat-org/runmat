@@ -72,6 +72,76 @@ pub struct ImportedExactCad {
         (u64, runmat_geometry_core::PersistentEntityKind, u64),
         runmat_geometry_core::PersistentEntityId,
     >,
+    /// Edges whose measured curve/pcurve gap exceeded the tolerance the file wrote: the import
+    /// rebuilt their pcurves and admitted the remaining gap up to the request's geometric
+    /// tolerance. Import evidence outside canonical geometry identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edge_tolerance_admissions: Vec<EdgeToleranceAdmission>,
+}
+
+/// How import settled one edge whose curve/pcurve gap exceeded its written tolerance.
+///
+/// Import measures each edge's gap between its 3D curve and its pcurve images at dense control
+/// points. An edge whose gap exceeds the tolerance its file wrote has its pcurves rebuilt against
+/// the 3D curve, and the gap is measured again. A remaining gap within the request's geometric
+/// tolerance (`bound_m`, the import's requested deviation) is admitted by raising the edge's
+/// tolerance to the gap plus 5%; later stages read only that edge tolerance. A larger gap is a
+/// defect: the edge keeps its written tolerance and any stage that evaluates it rejects it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EdgeToleranceAdmission {
+    /// The imported edge, when its curve endpoints (and, for several candidates, its midpoint)
+    /// identify one edge of the imported topology. `None` when later healing or interface sharing
+    /// rebuilt the edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_id: Option<runmat_geometry_core::PersistentEntityId>,
+    /// Curve start, parameter midpoint and end, in metres.
+    pub start_m: [f64; 3],
+    pub middle_m: [f64; 3],
+    pub end_m: [f64; 3],
+    pub written_tolerance_m: f64,
+    pub gap_before_m: f64,
+    pub gap_after_m: f64,
+    pub admitted_tolerance_m: f64,
+    /// The request's geometric tolerance that bounds admission.
+    pub bound_m: f64,
+    /// The rebuilt pcurves lie closer to the 3D curve than the file's did.
+    pub repaired: bool,
+    /// `gap_after_m` is within `bound_m`, so the edge tolerance was raised to admit it.
+    pub admitted: bool,
+}
+
+impl EdgeToleranceAdmission {
+    /// One line naming the edge, the gap before and after the repair, and the outcome.
+    pub fn describe(&self) -> String {
+        let edge = self.edge_id.as_ref().map_or_else(
+            || format!("at {:?}", self.middle_m),
+            |id| format!("{} (midpoint {:?})", id.source_topology_id, self.middle_m),
+        );
+        let repair = if self.repaired {
+            "pcurves rebuilt"
+        } else {
+            "rebuilt pcurves no closer"
+        };
+        if self.admitted {
+            format!(
+                "edge {edge}: curve/pcurve gap {:e} m, {repair}, {:e} m after; tolerance {:e} m admitted (written {:e} m, request geometric tolerance {:e} m)",
+                self.gap_before_m,
+                self.gap_after_m,
+                self.admitted_tolerance_m,
+                self.written_tolerance_m,
+                self.bound_m
+            )
+        } else {
+            format!(
+                "edge {edge}: curve/pcurve gap {:e} m after repair ({:e} m before, {repair}) exceeds the request's geometric tolerance {:e} m; the edge keeps its written tolerance {:e} m and is a geometry defect",
+                self.gap_after_m,
+                self.gap_before_m,
+                self.bound_m,
+                self.written_tolerance_m
+            )
+        }
+    }
 }
 
 /// Resolve source evidence and retained kernel coordinate scale once for every host.
@@ -182,6 +252,14 @@ pub(crate) fn exchange_reader_unit(
 impl ImportedExactCad {
     pub fn analysis_options(&self) -> &ExactCadAnalysisOptions {
         &self.analysis
+    }
+
+    /// Edges whose curve/pcurve gap exceeds the request's geometric tolerance even after their
+    /// pcurves were rebuilt.
+    pub fn edge_tolerance_defects(&self) -> impl Iterator<Item = &EdgeToleranceAdmission> {
+        self.edge_tolerance_admissions
+            .iter()
+            .filter(|admission| !admission.admitted)
     }
 
     /// Entities of one region role whose authored names include `name` (exact, case-sensitive).

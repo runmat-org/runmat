@@ -189,7 +189,7 @@ fn curved_tet10_thermal_integrals_match_weighted_simplex_moments() {
 }
 
 // witness: FEA-COUPLING-THERMOELASTIC-001/strain @ thermoelastic/tet4|tet10/numerical_kernel;
-//   boundary: Both-order single-tetrahedron recovery from an supplied linear temperature array:
+//   check: thermal-eigenstrain; boundary: Both-order single-tetrahedron recovery from an supplied linear temperature array:
 //   fixed point stresses/integrated energy and Tet10 compatible free displacement. Despite test
 //   name, no upstream thermal solve or sequence transition asserted.
 #[test]
@@ -301,7 +301,7 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
 }
 
 // witness: FEA-COUPLING-THERMOELASTIC-001/strain @ thermoelastic/tet4|tet10/numerical_kernel;
-//   boundary: Both-order single-element uniform eigenstrain free/fixed recovery; not coupled
+//   check: thermal-eigenstrain; boundary: Both-order single-element uniform eigenstrain free/fixed recovery; not coupled
 //   equilibrium, temperature-dependent property iteration or mapped transition.
 #[test]
 fn thermal_eigenstrain_recovery_is_stress_free_for_free_expansion_and_compressive_when_fixed() {

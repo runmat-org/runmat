@@ -362,8 +362,14 @@ fn test_set_view_angles_preserves_distance() {
 #[test]
 fn view_angles_follow_matlab_azimuth_convention() {
     let close = |a: Vec3, b: Vec3| (a - b).length() < 1.0e-5;
-    assert!(close(Camera::view_direction_deg(0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)));
-    assert!(close(Camera::view_direction_deg(90.0, 0.0), Vec3::new(1.0, 0.0, 0.0)));
+    assert!(close(
+        Camera::view_direction_deg(0.0, 0.0),
+        Vec3::new(0.0, -1.0, 0.0)
+    ));
+    assert!(close(
+        Camera::view_direction_deg(90.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0)
+    ));
     assert!(close(Camera::view_direction_deg(0.0, 90.0), Vec3::Z));
     let default = Camera::view_direction_deg(-37.5, 30.0);
     assert!(default.x < 0.0 && default.y < 0.0 && default.z > 0.0);
@@ -434,4 +440,25 @@ fn figure_fit_is_invariant_to_data_units_with_normalized_axes() {
             }
         }
     }
+}
+
+/// A 10 mm part 7 to 11 mm in front of the camera: the per-frame clip planes keep it
+/// between them.
+#[test]
+fn dynamic_clip_planes_keep_a_millimeter_part() {
+    let mut camera = Camera::new();
+    camera.position = Vec3::new(0.0, -0.009, 0.0);
+    camera.target = Vec3::ZERO;
+    camera.up = Vec3::Z;
+    camera.mark_dirty();
+    let (min, max) = (
+        Vec3::new(-0.005, -0.002, -0.0005),
+        Vec3::new(0.005, 0.002, 0.0005),
+    );
+    camera.update_clip_planes_from_world_aabb(min, max, &ClipPolicy::default());
+    let ProjectionType::Perspective { near, far, .. } = camera.projection else {
+        panic!("perspective camera");
+    };
+    assert!(near > 0.0 && near < 0.007, "near {near}");
+    assert!(far > 0.011, "far {far}");
 }

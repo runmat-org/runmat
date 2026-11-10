@@ -35,12 +35,14 @@ where
         ));
     }
     builder.insert_and_visit(ParsedFeaModule::from_source(request.root));
+    let resources = builder.load_resources();
     FeaModuleGraph {
         root,
         source_root: request.source_root,
         catalog_fingerprint: host.fingerprint(),
         modules: builder.modules,
         edges: builder.edges,
+        resources,
         diagnostics: builder.diagnostics,
     }
 }
@@ -59,6 +61,71 @@ impl<H> ModuleGraphBuilder<'_, H>
 where
     H: FeaModuleSource + AnalysisOperationCatalog + ?Sized,
 {
+    /// Load the board layouts the modules' cross-sections read their stackups from.
+    fn load_resources(&mut self) -> BTreeMap<LogicalSourcePath, crate::SourceModule> {
+        let mut resources = BTreeMap::new();
+        let references = self
+            .modules
+            .iter()
+            .flat_map(|(path, module)| {
+                module
+                    .syntax
+                    .iter()
+                    .flat_map(super::stackup_references)
+                    .map(move |reference| (path.clone(), reference))
+            })
+            .collect::<Vec<_>>();
+        for (module, (relative, span)) in references {
+            let location = FeaDiagnosticLocation {
+                path: module.clone(),
+                span,
+            };
+            let target = match resolve_logical_path(&self.source_root, &module, &relative) {
+                Ok(target) => target,
+                Err(error) => {
+                    self.diagnostics.push(FeaDiagnostic::error(
+                        "fea.module.invalid_path",
+                        format!("cannot resolve stackup `{relative}`: {error}"),
+                        FeaDiagnosticPhase::ModuleGraph,
+                        Some(location),
+                    ));
+                    continue;
+                }
+            };
+            if resources.contains_key(&target) {
+                continue;
+            }
+            match self.host.load(&ModuleRequest {
+                referrer: Some(module.clone()),
+                logical_path: target.clone(),
+            }) {
+                Ok(source) if source.logical_path == target => {
+                    resources.insert(target, source);
+                }
+                Ok(source) => self.diagnostics.push(FeaDiagnostic::error(
+                    "fea.module.identity_mismatch",
+                    format!(
+                        "source returned `{}` for requested stackup `{target}`",
+                        source.logical_path
+                    ),
+                    FeaDiagnosticPhase::ModuleGraph,
+                    Some(location),
+                )),
+                Err(error) => {
+                    let mut diagnostic = FeaDiagnostic::error(
+                        error.code,
+                        error.message,
+                        FeaDiagnosticPhase::ModuleGraph,
+                        Some(location),
+                    );
+                    diagnostic.availability = error.availability;
+                    self.diagnostics.push(diagnostic);
+                }
+            }
+        }
+        resources
+    }
+
     fn insert_and_visit(&mut self, module: ParsedFeaModule) {
         let path = module.source.logical_path.clone();
         self.diagnostics.extend(module.diagnostics.iter().cloned());

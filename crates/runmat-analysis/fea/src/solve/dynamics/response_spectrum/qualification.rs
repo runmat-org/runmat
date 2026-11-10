@@ -6,7 +6,7 @@ const RELATIVE_TOLERANCE: f64 = 2.0e-13;
 
 // witness: FEA-DYNAMICS-RESPONSE-001/spectrum_random_recovery @
 //   linear_structural_dynamics/mesh_independent/numerical_kernel;
-//   boundary: Scalar signed synthetic modal vectors verify SRSS, absolute sum and CQC against
+//   check: modal-combination-rules; boundary: Scalar signed synthetic modal vectors verify SRSS, absolute sum and CQC against
 //   independent formulas. Mesh-independent arithmetic only; no missing-mass, directional or
 //   random-vibration claim.
 #[test]

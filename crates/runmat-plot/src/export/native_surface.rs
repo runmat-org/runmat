@@ -890,7 +890,7 @@ impl NativeSurfaceRenderContext {
                     show_toolbar: false,
                     // CAD controls are surfaced by host UI, not native overlay.
                     show_cad_overlay: false,
-                    font_scale: 1.25,
+                    font_scale: crate::scalar_legend::EXPORT_FONT_SCALE,
                     show_axes: true,
                     show_title: self.renderer.shows_geometry_title(),
                     title: self.renderer.overlay_title().cloned(),

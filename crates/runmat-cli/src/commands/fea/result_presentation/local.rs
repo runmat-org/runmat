@@ -240,6 +240,37 @@ pub(in super::super) fn completed_summary(
                     anyhow::anyhow!("typed acoustic study publication omitted its result manifest")
                 })?,
         }),
+        CompletedFeaStudyResult::LineParameters(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
+            thermal_energy_balance: None,
+            root_id: root_id.into(),
+            procedure: "line_parameters",
+            study_definition_digest: result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(anyhow::Error::msg)?
+                .to_string(),
+            mesh_digest: super::stable_digest_hex(&result.mesh.canonical_digest),
+            nodes: result.mesh.topology.nodes.len(),
+            // A cross-section mesh is its triangles.
+            elements: result.mesh.topology.boundary_faces.len(),
+            boundary_faces: 0,
+            step_run_ids: publication
+                .steps
+                .iter()
+                .map(|step| step.run_id.clone())
+                .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
+            result_manifest_artifact_path: publication
+                .result_manifest_artifact_path
+                .clone()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("line-parameter publication omitted its result manifest")
+                })?,
+        }),
         CompletedFeaStudyResult::Thermal(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
             solve_placement: SolvePlacementSummary::default(),

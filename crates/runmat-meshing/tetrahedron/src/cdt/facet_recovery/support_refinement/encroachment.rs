@@ -54,7 +54,8 @@ fn deepest_encroached_at(
             continue;
         }
         let radius = radius_squared.sqrt();
-        if (0..3).any(|axis| center[axis] + radius < lower[axis] || center[axis] - radius > upper[axis])
+        if (0..3)
+            .any(|axis| center[axis] + radius < lower[axis] || center[axis] - radius > upper[axis])
         {
             continue;
         }
@@ -64,6 +65,50 @@ fn deepest_encroached_at(
         }
     }
     best.map(|(_, candidate)| candidate)
+}
+
+/// The recovered segment edge of `triangle` whose diametral ball holds the triangle's opposite
+/// corner, that is, the segment edge opposite an obtuse angle. The corner encroaches that edge,
+/// and the triangle's circumcenter lies beyond it, outside the facet. Ruppert's and Shewchuk's
+/// refinement split the encroached segment edge before the facet; a node inside such a needle
+/// lies close to all three of its corners. Floating point with a relative margin: the choice
+/// only directs a split that exact validation then admits or rejects.
+pub(super) fn segment_edge_encroached_by_apex(
+    topology: &impl TetrahedralTopology,
+    triangle: [StableDigest; 3],
+    protected_edges: &[[StableDigest; 2]],
+) -> Option<[StableDigest; 2]> {
+    encroached_by_apex_at(
+        |identity| {
+            node_index(topology, identity)
+                .map(|index| topology.nodes()[index].coordinates_m.canonical_value())
+        },
+        triangle,
+        protected_edges,
+    )
+}
+
+fn encroached_by_apex_at(
+    point: impl Fn(StableDigest) -> Option<[f64; 3]>,
+    triangle: [StableDigest; 3],
+    protected_edges: &[[StableDigest; 2]],
+) -> Option<[StableDigest; 2]> {
+    (0..3).find_map(|apex_slot| {
+        let mut edge = [triangle[(apex_slot + 1) % 3], triangle[(apex_slot + 2) % 3]];
+        edge.sort_unstable();
+        if !protected_edges.contains(&edge) {
+            return None;
+        }
+        let [Some(apex), Some(a), Some(b)] = [triangle[apex_slot], edge[0], edge[1]].map(&point)
+        else {
+            return None;
+        };
+        let to_a = [0, 1, 2].map(|axis| a[axis] - apex[axis]);
+        let to_b = [0, 1, 2].map(|axis| b[axis] - apex[axis]);
+        let cosine_scaled: f64 = (0..3).map(|axis| to_a[axis] * to_b[axis]).sum();
+        let scale = distance_squared(a, apex).sqrt() * distance_squared(b, apex).sqrt();
+        (cosine_scaled < -1e-9 * scale).then_some(edge)
+    })
 }
 
 fn distance_squared(p: [f64; 3], q: [f64; 3]) -> f64 {
@@ -76,7 +121,9 @@ fn closest_distance_squared(first: [f64; 3], last: [f64; 3], point: [f64; 3]) ->
     if length_squared == 0.0 {
         return distance_squared(first, point);
     }
-    let offset: f64 = (0..3).map(|axis| (point[axis] - first[axis]) * direction[axis]).sum();
+    let offset: f64 = (0..3)
+        .map(|axis| (point[axis] - first[axis]) * direction[axis])
+        .sum();
     let parameter = (offset / length_squared).clamp(0.0, 1.0);
     let closest = [0, 1, 2].map(|axis| first[axis] + direction[axis] * parameter);
     distance_squared(closest, point)
@@ -115,13 +162,55 @@ mod tests {
             (id(7), [3.25, 1.2, 0.0]),
         ]);
         let point = |identity| points.get(&identity).copied();
-        let protected = [[id(0), id(2)], [id(6), id(7)], [id(2), id(3)], [id(4), id(5)]];
+        let protected = [
+            [id(0), id(2)],
+            [id(6), id(7)],
+            [id(2), id(3)],
+            [id(4), id(5)],
+        ];
         assert_eq!(
             deepest_encroached_at(point, [id(0), id(1)], &protected),
             Some([id(2), id(3)])
         );
         assert_eq!(
             deepest_encroached_at(point, [id(0), id(1)], &[[id(0), id(2)], [id(4), id(5)]]),
+            None
+        );
+    }
+
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: A support triangle whose obtuse corner lies opposite a recovered segment edge
+    //   selects that edge for splitting; the same triangle selects nothing when the edge opposite
+    //   the obtuse corner is a plain support edge, and an acute triangle selects nothing. This
+    //   local fixture does not discharge original-model meshing, physical quality, resource or
+    //   scientific gates.
+    #[test]
+    fn obtuse_corner_selects_the_segment_edge_opposite_it() {
+        let points = BTreeMap::from([
+            // A needle with an angle of about 168 degrees at node 2, opposite edge 0-1.
+            (id(0), [0.0, 0.0, 0.0]),
+            (id(1), [3.57, 0.339, 0.0]),
+            (id(2), [2.07, 0.0, 0.0]),
+            (id(3), [1.0, 2.0, 0.0]),
+        ]);
+        let point = |identity| points.get(&identity).copied();
+        let needle = [id(0), id(1), id(2)];
+        let segments = [[id(0), id(1)], [id(0), id(2)]];
+        assert_eq!(
+            encroached_by_apex_at(point, needle, &segments),
+            Some([id(0), id(1)])
+        );
+        assert_eq!(
+            encroached_by_apex_at(point, needle, &[[id(0), id(2)]]),
+            None
+        );
+        assert_eq!(
+            encroached_by_apex_at(
+                point,
+                [id(0), id(2), id(3)],
+                &[[id(0), id(2)], [id(2), id(3)]]
+            ),
             None
         );
     }

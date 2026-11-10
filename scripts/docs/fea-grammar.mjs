@@ -1,7 +1,7 @@
 // The `.fea` TextMate grammar, generated from the compiler's own closed tables so that docs, site
 // code cards and any TextMate host color exactly the words the compiler knows:
 //   keywords            runmat-design-syntax lexer (the fea_keywords! table)
-//   statement words     `assessment` (procedure/assessment.rs)
+//   statement words     language authoring.rs `FeaContextualWord` block words (`assessment`)
 //   families, procedures analysis-core family_label / procedure_label, and the procedure words
 //                       language lowering accepts (`preload`, `steady`, `modal_harmonic`, ...)
 //   mesh words          element blocks and orders (language semantic/mesh.rs)
@@ -23,8 +23,8 @@ import { SURFACES } from "./ledger.mjs";
 
 /** Word groups, each with the scope it is colored with. Order is match priority. */
 export const VOCABULARY = [
-    { id: "keywords", scope: "keyword.control.fea", source: "crates/runmat-design-syntax/src/lexical/token.rs", from: /^fea_keywords! \{/m, to: /^\}/m, pattern: /\w+ => "([a-z_]+)"/g },
-    { id: "statements", scope: "keyword.control.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/assessment.rs", from: /./, to: /$^/, pattern: /== Some\("([a-z_]+)"\)/g },
+    { id: "keywords", scope: "keyword.control.fea", source: "crates/runmat-design-syntax/src/lexical/token.rs", from: /^fea_keywords! \{/m, to: /^\}/m, pattern: /=> "([a-z_]+)"/g },
+    { id: "statements", scope: "keyword.control.fea", authoring: "Block" },
     { id: "families", scope: "storage.type.fea", source: "crates/runmat-analysis/core/src/study/compatibility.rs", from: /pub const fn family_label\(/, to: /^}/m, pattern: /=> \{?\s*"([a-z_]+)"/g },
     { id: "procedures", scope: "storage.type.fea", source: "crates/runmat-analysis/core/src/study/compatibility.rs", from: /pub const fn procedure_label\(/, to: /^}/m, pattern: /=> "([a-z_]+)"/g },
     { id: "authored procedures", scope: "storage.type.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/lower.rs", from: /fn lower_procedure\(/, to: /^}/m, pattern: /\("[a-z_]+", "([a-z_]+)"\) =>/g },
@@ -36,7 +36,7 @@ export const VOCABULARY = [
     { id: "reference segments", scope: "keyword.control.fea", source: "crates/runmat-analysis/language/src/semantic/expression/reference.rs", from: /./, to: /$^/, pattern: /(?:state|field) == "([a-z_]+)"/g },
     { id: "step order", scope: "keyword.control.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/header.rs", from: /./, to: /$^/, pattern: /\[_, _, "([a-z_]+)", reference\]/g },
     { id: "retained states", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/lower.rs", from: /./, to: /$^/, pattern: /statements, "([a-z_]+)", diagnostics/g },
-    { id: "assessment evidence", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/assessment.rs", from: /./, to: /$^/, pattern: /Enum\(name\) if name == "([a-z_]+)"/g },
+    { id: "assessment evidence", scope: "constant.language.fea", authoring: "EnumValue" },
     { id: "modal static corrections", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/modal_reduction.rs", from: /fn static_correction_kind\(/, to: /_ => None/, pattern: /"([a-z_]+)" => Some\(ModalStaticCorrection/g },
     { id: "output policies", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/output/policy.rs", from: /fn parse_precision\(/, to: /fn enum_name\(/, pattern: /^\s*"([a-z_0-9]+)"(?: if [^\n]*?)? =>/gm },
     ...SURFACES.map(({ kind, registry }) => ({ id: `${kind}s`, scope: "support.function.fea", ...registry })),
@@ -47,9 +47,29 @@ export const VOCABULARY = [
 ];
 const UNITS = REGISTRIES.find(registry => registry.id === "units");
 
+const AUTHORING_WORDS = "crates/runmat-analysis/language/src/authoring.rs";
+
+/** `FeaContextualWord` source words whose `role()` is `role` (language authoring.rs). */
+function authoringWords(source, role) {
+    const text = readFileSync(join(source, AUTHORING_WORDS), "utf8");
+    const section = (from, to) => {
+        const start = text.search(from);
+        if (start < 0) return "";
+        const end = text.slice(start + 1).search(to);
+        return text.slice(start, end < 0 ? undefined : start + 1 + end);
+    };
+    const spelled = new Map();
+    for (const [, variant, word] of section(/pub const fn as_source\(/, /pub fn from_source\(/).matchAll(/Self::(\w+)(?:\([^)]*\))?\s*=>\s*\{?\s*"([a-z_]+)"/g))
+        spelled.set(variant, [...(spelled.get(variant) ?? []), word]);
+    const names = [];
+    for (const [, variants, assigned] of section(/pub const fn role\(/, /^    \}/m).matchAll(/((?:\|?\s*Self::\w+(?:\([^)]*\))?\s*)+)=>\s*FeaAuthoringWordRole::(\w+)/g))
+        if (assigned === role) for (const [, variant] of variants.matchAll(/Self::(\w+)/g)) names.push(...(spelled.get(variant) ?? []));
+    return [...new Set(names)].sort();
+}
+
 /** { id, scope, names } for each vocabulary group, read from the compiler sources. */
 export function vocabulary(source) {
-    return VOCABULARY.map(group => ({ id: group.id, scope: group.scope, names: registryNames(source, group) }));
+    return VOCABULARY.map(group => ({ id: group.id, scope: group.scope, names: group.authoring ? authoringWords(source, group.authoring) : registryNames(source, group) }));
 }
 
 const escape = word => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

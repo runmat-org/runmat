@@ -8,7 +8,7 @@
 use runmat_analysis_qualification::{
     catalog::{cells, Cell, TestResult, Totals, Verdict},
     requirement::Requirement,
-    requirements,
+    checks, requirements,
     witness::{repository_root, scan, validate_tags, Tag, Target, TestLocator},
 };
 use std::{
@@ -58,12 +58,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return Err("invalid witness tags; fix them before reporting".into());
     }
+    // The UTC date each result was produced: today for tests run now, the earlier run's date
+    // for results kept with `--reuse`.
+    let mut dates: BTreeMap<String, String> = BTreeMap::new();
     let results = if run {
         // `--reuse` keeps the results of an earlier catalog for tests whose locator is
         // unchanged and runs only the tests it has no result for.
         let mut known = BTreeMap::new();
         if let Some(path) = &reuse {
-            known = load_results(path)?;
+            (known, dates) = load_results(path)?;
         }
         let missing: Vec<Tag> = tags
             .iter()
@@ -75,6 +78,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             run_tests(&missing, &cargo, &only)?
         };
+        let today = utc_date();
+        for key in fresh.keys() {
+            dates.insert(key.clone(), today.clone());
+        }
         known.append(&mut fresh);
         Some(known)
     } else {
@@ -83,7 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let all = cells(&registry, &tags, results.as_ref());
     fs::create_dir_all(out_dir.join("requirements"))?;
     write_markdown(&out_dir, &registry, &all)?;
-    write_json(&out_dir, &registry, &all, run)?;
+    write_json(&out_dir, &registry, &all, &tags, results.as_ref(), &dates, run)?;
     write_scope(&out_dir, &all)?;
     let mut totals = Totals::default();
     for c in &all {
@@ -335,14 +342,51 @@ fn write_markdown(
     fs::write(dir.join("evidence-catalog.md"), index)
 }
 
+/// Today's date in UTC as YYYY-MM-DD (civil-from-days, so no date crate is needed).
+fn utc_date() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let z = seconds.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+fn result_json(result: Option<&TestResult>) -> serde_json::Value {
+    use serde_json::json;
+    match result {
+        None => json!("not_run"),
+        Some(TestResult::Passed) => json!("passed"),
+        Some(TestResult::Failed(m)) => json!({ "failed": m }),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn write_json(
     dir: &std::path::Path,
     registry: &[&'static Requirement],
     all: &[Cell],
+    tags: &[Tag],
+    results: Option<&BTreeMap<String, TestResult>>,
+    dates: &BTreeMap<String, String>,
     ran: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::json;
     let total = totals_of(all.iter());
+    let date_of = |locator: &TestLocator| {
+        dates
+            .get(&locator.describe())
+            .map(|date| json!(date))
+            .unwrap_or(serde_json::Value::Null)
+    };
     let requirements: Vec<_> = registry
         .iter()
         .map(|r| {
@@ -366,7 +410,8 @@ fn write_json(
                                     "source": t.locator.source,
                                     "line": t.locator.line,
                                     "boundary": t.boundary,
-                                    "result": match &t.result { None => json!("not_run"), Some(TestResult::Passed) => json!("passed"), Some(TestResult::Failed(m)) => json!({"failed": m}) },
+                                    "result": result_json(t.result.as_ref()),
+                                    "run_date": date_of(&t.locator),
                                 })).collect::<Vec<_>>(),
                             })
                         })
@@ -378,9 +423,33 @@ fn write_json(
             json!({"id": r.id, "title": r.title, "pass": t.pass, "partial": t.partial, "fail": t.fail, "open": t.open, "tagged": t.tagged, "obligations": obligations})
         })
         .collect();
+    // Reference checks: the tests whose witness tags name each ledger check, with results.
+    let checks: Vec<_> = checks()
+        .map(|id| {
+            let tests: BTreeMap<String, &TestLocator> = tags
+                .iter()
+                .filter(|tag| tag.checks.iter().any(|check| check == id))
+                .map(|tag| (tag.test.describe(), &tag.test))
+                .collect();
+            json!({
+                "id": id,
+                "tests": tests.values().map(|locator| json!({
+                    "package": locator.package,
+                    "target": format!("{:?}", locator.target),
+                    "name": locator.name,
+                    "source": locator.source,
+                    "line": locator.line,
+                    "result": result_json(results.map(|r| r.get(&locator.describe()).cloned().unwrap_or_else(|| TestResult::Failed("test not found in cargo test run".into()))).as_ref()),
+                    "run_date": date_of(locator),
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
     let doc = json!({
         "schema_version": 1,
         "tests_run": ran,
+        "run_date": dates.values().max(),
+        "checks": checks,
         "totals": {"cells": total.total(), "pass": total.pass, "partial": total.partial, "fail": total.fail, "open": total.open, "tagged": total.tagged},
         "requirements": requirements,
     });
@@ -461,11 +530,14 @@ fn write_scope(dir: &std::path::Path, all: &[Cell]) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-fn load_results(
-    path: &std::path::Path,
-) -> Result<BTreeMap<String, TestResult>, Box<dyn std::error::Error>> {
+type Reused = (BTreeMap<String, TestResult>, BTreeMap<String, String>);
+
+/// Passed results, and their run dates, from an earlier catalog. A result without a run date
+/// is not reused, so every date in a catalog is the date that test actually ran.
+fn load_results(path: &std::path::Path) -> Result<Reused, Box<dyn std::error::Error>> {
     let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
     let mut out = BTreeMap::new();
+    let mut dates = BTreeMap::new();
     for requirement in value["requirements"].as_array().into_iter().flatten() {
         for obligation in requirement["obligations"].as_array().into_iter().flatten() {
             for cell in obligation["cells"].as_array().into_iter().flatten() {
@@ -481,8 +553,10 @@ fn load_results(
                         target,
                         test["name"].as_str().unwrap_or("")
                     );
-                    match &test["result"] {
-                        serde_json::Value::String(s) if s == "passed" => {
+                    let date = test["run_date"].as_str();
+                    match (&test["result"], date) {
+                        (serde_json::Value::String(s), Some(date)) if s == "passed" => {
+                            dates.insert(key.clone(), date.to_string());
                             out.insert(key, TestResult::Passed);
                         }
                         // Failures are never reused: they are run again.
@@ -492,5 +566,5 @@ fn load_results(
             }
         }
     }
-    Ok(out)
+    Ok((out, dates))
 }

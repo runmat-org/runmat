@@ -67,6 +67,43 @@ fn unknown_legacy_inventory_defers_collection_without_blocking_supported_publica
     );
 }
 
+// Boundary: an observation attachment written by an older CLI (another schema version, fields
+// this reader does not know) is a miss for lookups and defers reclamation; it does not fail the
+// next publication with a decode error.
+#[test]
+fn legacy_observation_attachment_is_a_miss_and_defers_collection() {
+    let _guard = tests::analysis_test_guard();
+    reset_artifact_store_for_tests();
+    let run = run();
+    let root = tempfile::tempdir().unwrap();
+    let disk = FilesystemAnalysisArtifactStore::new(root.path().to_path_buf());
+    disk.commit_publication(prepare(&run, &["original"]))
+        .unwrap();
+    let publication = std::fs::read_dir(disk.root.join("publications"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.is_dir())
+        .unwrap();
+    std::fs::write(
+        publication.join("observations/original.json"),
+        br#"{"schema_version":1,"run_id":"original","publication":{"samples":[{"artifact":"a"}]}}"#,
+    )
+    .unwrap();
+    assert!(disk
+        .load_observation_publication("original")
+        .unwrap()
+        .is_none());
+    let orphan = Digest::sha256(b"orphan");
+    std::fs::write(disk.object_path(orphan), b"orphan").unwrap();
+    disk.commit_publication(prepare(&run, &["incoming"]))
+        .unwrap();
+    assert!(disk.object_path(orphan).exists());
+    assert_eq!(
+        disk.load_run("incoming").unwrap().unwrap().run.fields,
+        run.run.fields
+    );
+}
+
 #[test]
 fn unowned_object_name_rejects_before_reclaiming_valid_orphan() {
     let _guard = tests::analysis_test_guard();

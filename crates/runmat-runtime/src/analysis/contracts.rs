@@ -20,6 +20,9 @@ pub use acoustic_response_run_options::AnalysisAcousticResponseRunOptions;
 #[path = "electrical_run_options.rs"]
 mod electrical_run_options;
 pub use electrical_run_options::AnalysisElectricalRunOptions;
+#[path = "line_parameters_run_options.rs"]
+mod line_parameters_run_options;
+pub use line_parameters_run_options::AnalysisLineParametersRunOptions;
 mod frequency_results;
 pub use frequency_results::{
     AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData, StructuralFrequencyResultsData,
@@ -1572,6 +1575,7 @@ pub enum AnalysisSolverOptions {
     StructuralTransient(AnalysisTransientRunOptions),
     IncompressibleFlow(AnalysisCfdRunOptions),
     StructuralNonlinear(AnalysisNonlinearRunOptions),
+    LineParameters(AnalysisLineParametersRunOptions),
 }
 
 #[path = "contracts/solver_options.rs"]
@@ -2423,8 +2427,9 @@ mod tests {
         assert!(workflow[3].starts_with("runmat run "));
 
         let procedures = analysis_procedure_ids();
-        assert_eq!(procedures.len(), 11);
+        assert_eq!(procedures.len(), AnalysisProcedure::ALL.len());
         assert!(procedures.contains(&"modal_response_spectrum".to_string()));
+        assert!(procedures.contains(&"line_parameters".to_string()));
         assert!(procedures.contains(&"random_response".to_string()));
 
         let operations = analysis_output_operation_ids();

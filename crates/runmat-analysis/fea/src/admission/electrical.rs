@@ -27,6 +27,34 @@ pub fn admit_canonical_electrical_static(
     .map_err(Into::into)
 }
 
+/// Admit the cross-section line-parameter solve: the dielectric potential-gradient operator on
+/// linear triangles, solved with the real dielectrics and in vacuum.
+pub fn admit_cross_section_line_parameters() -> Result<AnalysisRunIdentity, FeaRunError> {
+    admit_formulation(FormulationAdmissionRequest {
+        family: PhysicsFamily::Electromagnetic,
+        procedure: AnalysisProcedure::LineParameters,
+        solution_space: SolutionSpace::Direct,
+        realization: line_parameters_realization(),
+    })
+    .map(|receipt| receipt.into_identity())
+    .map_err(Into::into)
+}
+
+pub(super) fn line_parameters_realization() -> ExactFormulationRealization {
+    ExactFormulationRealization {
+        components: vec![ExactFormulationComponent {
+            spatial_operator: SpatialOperatorImplementation::ElectricalGalerkinPotentialGradient,
+            constitutive: ConstitutiveImplementation::ElementOwnedIsotropicPermittivity,
+            recovery: RecoveryImplementation::CrossSectionLineParameterEnergy,
+            topologies: vec![TopologyImplementation::CanonicalSolverMeshTri3],
+            sources: vec![SourceImplementation::NotApplicable],
+        }],
+        temporals: vec![TemporalImplementation::ElectrostaticPotentialLinearSolve],
+        coupling: CouplingImplementation::Uncoupled,
+        boundary_transfers: vec![BoundaryTransferImplementation::NotApplicable],
+    }
+}
+
 pub(super) fn registered_realizations() -> Vec<ExactFormulationRealization> {
     [
         StaticElectricalEquation::Electrostatics,

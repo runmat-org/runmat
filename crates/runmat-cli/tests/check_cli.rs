@@ -76,6 +76,21 @@ fn repository_fixture(temp: &TempDir) -> PathBuf {
 }
 
 fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
+    runmat_from_repository_through(temp, args, None).0
+}
+
+/// Run from the repository against the test Server, optionally closing the Server's port
+/// mid-run. Returns the output, each lease route and status, the receipts and the outage.
+fn runmat_from_repository_through(
+    temp: &TempDir,
+    args: &[&str],
+    outage: Option<fea_admission::Outage>,
+) -> (
+    Output,
+    Vec<(String, &'static str)>,
+    Vec<Value>,
+    Option<std::time::Duration>,
+) {
     let repository = repository_fixture(temp);
     let config = temp.path().join("runmat.toml");
     let artifact_root =
@@ -107,8 +122,25 @@ fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
             "RUNMAT_EXECUTION_STATE_DIR",
             temp.path().join("execution-state"),
         );
-    let _admission = fea_admission::AdmissionServer::for_command(&mut command, temp.path());
-    command.output().expect("run repository FEA example")
+    let admission = match outage {
+        Some(_) => Some(fea_admission::AdmissionServer::configure_with(
+            &mut command,
+            temp.path(),
+            outage,
+        )),
+        None => fea_admission::AdmissionServer::for_command(&mut command, temp.path()),
+    };
+    let output = command.output().expect("run repository FEA example");
+    let Some(admission) = admission else {
+        return (output, Vec::new(), Vec::new(), None);
+    };
+    let journal = admission.journal();
+    (
+        output,
+        journal.requests.clone(),
+        journal.receipts.clone(),
+        journal.closed_for,
+    )
 }
 
 fn assert_fea_checks(temp: &TempDir, path: &str) {
@@ -204,9 +236,57 @@ fn canonical_fea_documentation_examples_check_cleanly() {
         "acoustic-cavity-harmonic.fea",
         "acoustic-duct-modes.fea",
         "acoustic-duct-pulse.fea",
+        "trace-impedance.fea",
     ] {
         let path = format!("docs/simulation/examples/{name}");
         assert_fea_checks(&temp, &path);
+    }
+}
+
+// witness: FEA-EM-LINE-001/public_study @ quasi_static_tem/tri3/public_study; coverage: partial;
+//   boundary: The page's trace-impedance example runs both studies through `runmat run`: the
+//   single-ended microstrip publishes Z0 within [49.7, 50.7] Ω and the edge-coupled pair Zdiff
+//   within [98.7, 100.7] Ω on the default graded mesh, inline stackup; the layout-file stackup
+//   is covered at check time only.
+#[test]
+fn trace_impedance_example_publishes_the_microstrip_and_pair_impedances() {
+    let temp = TempDir::new().unwrap();
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("trace-impedance.fea")).unwrap();
+    let anchor_single = "    output delay = analysis.line.delay.line\n";
+    let anchor_pair = "    output l = analysis.lines.inductance\n";
+    assert!(source.contains(anchor_single) && source.contains(anchor_pair));
+    let witness = source
+        .replace(
+            anchor_single,
+            &format!("{anchor_single}    assessment z0_band {{ value = output.z0; minimum = 49.7 V/A; maximum = 50.7 V/A; evidence = authored_samples }}\n"),
+        )
+        .replace(
+            anchor_pair,
+            &format!("{anchor_pair}    assessment zdiff_band {{ value = output.z_diff; minimum = 98.7 V/A; maximum = 100.7 V/A; evidence = authored_samples }}\n"),
+        );
+    fs::write(examples.join("trace-impedance.witness.fea"), witness).unwrap();
+    let path = "docs/simulation/examples/trace-impedance.witness.fea";
+    for (study, assessment, label) in [
+        ("microstrip", "z0_band", "Z0"),
+        ("differential_pair", "zdiff_band", "Zdiff"),
+    ] {
+        let output = runmat_from_repository(&temp, &["run", path, "--study", study, "--json"]);
+        assert!(
+            output.status.success(),
+            "{path} --study {study} failed:\nstdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let manifest_path = payload["result_manifest_artifact_path"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{study}: no manifest path in {payload}"));
+        let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+        assert_eq!(manifest["public_run"]["run_status"], "completed", "{study}");
+        assert_eq!(manifest["public_run"]["numerically_acceptable"], true, "{study}");
+        let value = passed_assessment(&payload, assessment);
+        eprintln!("trace-impedance {study}: {label} = {value} Ω");
     }
 }
 
@@ -412,10 +492,19 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     assert_eq!(evidence.artifact_digest, mesh.canonical_digest);
     // Golden counts for the authored independent-definition STEP fixture,
     // qualified by two byte-identical standalone meshes with seed zero.
-    // Face gaps are sized to at least one element layer across (thin-layer sizing).
-    assert_eq!(mesh.topology.nodes.len(), 632);
-    assert_eq!(mesh.topology.volume_elements.len(), 2524);
-    assert_eq!(mesh.topology.boundary_faces.len(), 848);
+    // Face gaps are sized to at least one element layer across (thin-layer sizing): over a
+    // whole face when all its edges face the gap, otherwise from the edges that do. Gaps are
+    // located where they are measured and narrow faces size only along their length, so the
+    // 1 x 2 x 3 m boxes mesh closer to the 1.5 m target than the (584, 2330, 776) of 9bb447a159;
+    // peak displacement is within 6.1 % of a 0.2 m reference mesh (4.5 % before).
+    assert_eq!(
+        (
+            mesh.topology.nodes.len(),
+            mesh.topology.volume_elements.len(),
+            mesh.topology.boundary_faces.len()
+        ),
+        (238, 582, 464)
+    );
 
     let model: AnalysisModel =
         serde_json::from_value(manifest["compiled"]["model"].clone()).unwrap();
@@ -719,6 +808,55 @@ fn acoustic_cavity_example_runs_its_certified_frequency_sweep() {
     let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
     assert_eq!(manifest["public_run"]["run_status"], "completed");
     assert_eq!(manifest["public_run"]["numerically_acceptable"], true);
+}
+
+/// A Server restart during a run (its port closed for 30 s) ends neither the lease nor the
+/// run, and the receipt carries exactly the operations of an uninterrupted run.
+#[test]
+fn a_server_restart_mid_run_keeps_the_lease_and_meters_the_same_operations() {
+    let path = "docs/simulation/examples/acoustic-cavity-harmonic.fea";
+    let steady_temp = TempDir::new().unwrap();
+    let (steady, _, steady_receipts, _) = runmat_from_repository_through(
+        &steady_temp,
+        &["run", path, "--json"],
+        Some(fea_admission::Outage {
+            after: usize::MAX,
+            down: std::time::Duration::ZERO,
+        }),
+    );
+    assert!(
+        steady.status.success(),
+        "{}",
+        String::from_utf8_lossy(&steady.stderr)
+    );
+    let temp = TempDir::new().unwrap();
+    let (output, requests, receipts, closed_for) = runmat_from_repository_through(
+        &temp,
+        &["run", path, "--json"],
+        Some(fea_admission::Outage {
+            after: 1,
+            down: std::time::Duration::from_secs(30),
+        }),
+    );
+    assert!(
+        output.status.success(),
+        "{path} failed through a Server restart:\nrequests={requests:?}\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let closed_for = closed_for.expect("the Server's port was closed mid-run");
+    assert!(closed_for >= std::time::Duration::from_secs(30));
+    eprintln!("lease requests through a {closed_for:?} outage: {requests:?}");
+    assert!(requests[0].0.ends_with("/simulation/leases"));
+    assert!(requests.iter().all(|(_, status)| status.starts_with("200")));
+    let metered = |receipts: &[Value]| {
+        receipts
+            .iter()
+            .map(|r| (r["outcome"].clone(), r["usedOps"].clone(), r["totalOps"].clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(metered(&receipts), metered(&steady_receipts));
 }
 
 #[test]
@@ -1169,7 +1307,7 @@ fn passed_assessment(payload: &Value, id: &str) -> f64 {
 
 // witness: FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate @
 //   incompressible_laminar_steady/tet4/public_study;
-//   coverage: partial; boundary: pressure_drop on the public plane Poiseuille example
+//   coverage: partial; check: plane-poiseuille; boundary: pressure_drop on the public plane Poiseuille example
 //   (L/h = 30, Re = 1) lies within 5% of the fully developed 12 mu U L / h^2 = 36 Pa; the
 //   uniform inlet's entrance loss (about 0.9 h of equivalent length, +3%) is inside the band.
 #[test]
@@ -1185,7 +1323,7 @@ fn plane_poiseuille_example_publishes_the_analytic_pressure_drop() {
 }
 
 // witness: FEA-ACOUSTIC-OUTPUTS-001/transmission_and_insertion_loss @
-//   acoustic_harmonic/tet10/public_study; coverage: partial; boundary: transmission_loss on the
+//   acoustic_harmonic/tet10/public_study; coverage: partial; check: two-fluid-interface; boundary: transmission_loss on the
 //   public two-fluid interface example (m = 4) lies within 0.1 dB of 1.938 dB at 500, 1000 and
 //   2000 Hz; no muffler or one-third-octave sweep.
 #[test]
@@ -1242,6 +1380,220 @@ fn fsi_compliant_tube_example_runs_as_a_coupled_study() {
         "    assessment pressurized { value = output.inlet_pressure; minimum = 0 Pa; evidence = authored_samples }\n",
     );
     passed_assessment(&payload, "pressurized");
+}
+
+/// `runmat check` applies the run's fluid–solid face rule to the CAD's shared faces: the
+/// compliant tube's bore with its declared interface checks clean, the bore with a fluid wall
+/// condition and no interface is a rigid wall, and the bore with neither is the same
+/// `fea.admission.fluid_solid_face` error the run reports.
+#[test]
+fn fsi_check_classifies_the_cad_faces_that_join_fluid_and_solid() {
+    let temp = TempDir::new().unwrap();
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("fsi-compliant-tube.fea")).unwrap();
+    assert_fea_checks(&temp, "docs/simulation/examples/fsi-compliant-tube.fea");
+    let start = source.find("    interface wetted {").unwrap();
+    let end = start + source[start..].find("\n    }\n").unwrap() + "\n    }\n".len();
+    let check = |name: &str, replacement: &str| -> Value {
+        fs::write(
+            examples.join(name),
+            format!("{}{replacement}{}", &source[..start], &source[end..]),
+        )
+        .unwrap();
+        let output = runmat_from_repository(
+            &temp,
+            &["check", &format!("docs/simulation/examples/{name}"), "--json"],
+        );
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+            panic!(
+                "{name}: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+    };
+    let undeclared = check("fsi-undeclared-bore.fea", "");
+    assert_eq!(undeclared["status"], "invalid", "{undeclared}");
+    let diagnostics = undeclared["diagnostics"].to_string();
+    assert!(
+        diagnostics.contains("fea.admission.fluid_solid_face") && diagnostics.contains("Bore"),
+        "{diagnostics}"
+    );
+    let rigid = check(
+        "fsi-rigid-bore.fea",
+        "    constraint bore_wall { fluid.no_slip_wall { target = geometry.tube.region.bore } }\n",
+    );
+    assert!(
+        !rigid["diagnostics"]
+            .to_string()
+            .contains("fea.admission.fluid_solid_face"),
+        "{rigid}"
+    );
+}
+
+/// Check one variant of a documentation example written next to it, returning the JSON report.
+fn check_variant(temp: &TempDir, name: &str, source: &str) -> Value {
+    let examples = repository_fixture(temp).join("docs/simulation/examples");
+    fs::write(examples.join(name), source).unwrap();
+    let output = runmat_from_repository(
+        temp,
+        &["check", &format!("docs/simulation/examples/{name}"), "--json"],
+    );
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+        panic!(
+            "{name}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+/// G2: `runmat check` binds every observation to a field its family declares, with the same
+/// rule run preparation applies. Steady conduction declares current density per element, so
+/// a nodal current density is the `fea.admission.observation` error run reports.
+#[test]
+fn check_rejects_an_observation_its_family_does_not_declare() {
+    let temp = TempDir::new().unwrap();
+    let study = |hole_edge: &str| {
+        format!(
+            r#"geometry bar {{
+    file = "./geometry/cantilever.step"
+    units = mm
+    region body : solid {{ select name "Beam"; expect exactly_one }}
+    region terminal_a : face {{ select name "Loaded end"; expect exactly_one }}
+    region terminal_b : face {{ select name "Fixed end"; expect exactly_one }}
+}}
+
+mesh bar on geometry.bar {{
+    tetrahedra {{
+        order = linear
+        target_size = 1 m
+        maximum_deviation = 0.001 m
+    }}
+}}
+
+material copper {{
+    electrical {{
+        reference_temperature = 20 degC
+        conductivity = 58000000 A/V/m
+        resistive_heating_coefficient = 0 K^-1
+        relative_permittivity = 1
+        relative_permeability = 1
+    }}
+}}
+
+model conducting_bar {{
+    electromagnetic {{ equation = steady_conduction }}
+    assign material.copper to geometry.bar.region.body
+    constraint return_terminal {{
+        electrical.potential {{ target = geometry.bar.region.terminal_b; value = 0 V }}
+    }}
+    load supply {{
+        electric_current on geometry.bar.region.terminal_a = 100 A
+    }}
+}}
+
+study bar_resistance {{
+    geometry = geometry.bar
+    mesh = mesh.bar
+    model = model.conducting_bar
+    analysis conduction {{ electromagnetic static {{}} }}
+    output potential = analysis.conduction.field.node.electric_potential
+    output peak_current_density = max(magnitude(analysis.conduction.field.element.electric_current_density), over = geometry.bar.region.body)
+    output end_current_density = max(magnitude(analysis.conduction.field.{hole_edge}.electric_current_density), over = geometry.bar.region.terminal_a)
+}}
+"#
+        )
+    };
+    let declared = check_variant(&temp, "conduction-element-density.fea", &study("element"));
+    assert_eq!(declared["status"], "valid", "{declared}");
+    let undeclared = check_variant(&temp, "conduction-node-density.fea", &study("node"));
+    assert_eq!(undeclared["status"], "invalid", "{undeclared}");
+    let diagnostics = undeclared["diagnostics"].to_string();
+    assert!(
+        diagnostics.contains("fea.admission.observation")
+            && diagnostics.contains("end_current_density")
+            && diagnostics.contains("no declaration matches quantity, location, and value shape"),
+        "{diagnostics}"
+    );
+}
+
+/// G19: a transient conjugate heat transfer study starts from an authored uniform initial
+/// temperature. `runmat check` reports a missing one with the run's rule, and admits the
+/// study both when the model declares it and when the analysis selects it with
+/// `initial_conditions`, so run never both requires and rejects it.
+#[test]
+fn transient_conjugate_heat_check_requires_and_admits_its_initial_temperature() {
+    let temp = TempDir::new().unwrap();
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("cht-plate-channel.fea")).unwrap();
+    let transient = |selection: &str| {
+        source.replace(
+            "conjugate_heat_transfer steady {}",
+            &format!(
+                "conjugate_heat_transfer transient {{\n        start_time = 0 s\n        end_time = 10 s\n        time_step = 1 s\n{selection}    }}"
+            ),
+        )
+    };
+    let declare = |source: String| {
+        source.replace(
+            "    interface wetted {",
+            "    initial start {\n        thermal.temperature {\n            target = whole_model\n            uniform = 293.15 K\n        }\n    }\n    interface wetted {",
+        )
+    };
+    let missing = check_variant(&temp, "cht-transient-no-initial.fea", &transient(""));
+    assert_eq!(missing["status"], "invalid", "{missing}");
+    let diagnostics = missing["diagnostics"].to_string();
+    assert!(
+        diagnostics.contains("fea.admission.initial_condition")
+            && diagnostics.contains("transient conjugate heat transfer needs an authored initial temperature"),
+        "{diagnostics}"
+    );
+    let declared = check_variant(&temp, "cht-transient-declared.fea", &declare(transient("")));
+    assert_eq!(declared["status"], "valid", "{declared}");
+    let selected = check_variant(
+        &temp,
+        "cht-transient-selected.fea",
+        &declare(transient(
+            "        initial_conditions = [model.initial.start]\n",
+        )),
+    );
+    assert_eq!(selected["status"], "valid", "{selected}");
+    let steady = check_variant(&temp, "cht-steady-initial.fea", &declare(source.clone()));
+    assert!(
+        steady["diagnostics"]
+            .to_string()
+            .contains("steady conjugate heat transfer takes no initial conditions"),
+        "{steady}"
+    );
+}
+
+/// G17: a fluid–structure study couples through its declared interfaces. With every wetted
+/// face a rigid wall and no interface, `runmat check` reports the run's
+/// `fea.admission.interface` rule.
+#[test]
+fn fsi_check_requires_a_declared_fluid_structure_interface() {
+    let temp = TempDir::new().unwrap();
+    let examples = repository_fixture(&temp).join("docs/simulation/examples");
+    let source = fs::read_to_string(examples.join("fsi-compliant-tube.fea")).unwrap();
+    let start = source.find("    interface wetted {").unwrap();
+    let end = start + source[start..].find("\n    }\n").unwrap() + "\n    }\n".len();
+    let rigid = check_variant(
+        &temp,
+        "fsi-no-interface.fea",
+        &format!(
+            "{}    constraint bore_wall {{ fluid.no_slip_wall {{ target = geometry.tube.region.bore }} }}\n{}",
+            &source[..start],
+            &source[end..]
+        ),
+    );
+    assert_eq!(rigid["status"], "invalid", "{rigid}");
+    let diagnostics = rigid["diagnostics"].to_string();
+    assert!(
+        diagnostics.contains("fea.admission.interface")
+            && diagnostics.contains("fluid–structure interaction needs a declared fluid–structure interface"),
+        "{diagnostics}"
+    );
 }
 
 // witness: FEA-COUPLING-CHAIN-001/thermal_to_prestress_to_modal @ thermoelastic/tet4/public_study;

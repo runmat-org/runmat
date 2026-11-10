@@ -6,6 +6,8 @@ mod authoring_feature_validation;
 mod authoring_tests;
 mod authoring_value;
 mod canonical;
+mod cross_section;
+pub use cross_section::*;
 pub use canonical::GeometryCanonicalControl;
 mod document;
 mod exact_artifact;

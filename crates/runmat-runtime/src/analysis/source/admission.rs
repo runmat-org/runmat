@@ -1,7 +1,10 @@
 //! Static run admission reported at check time.
 //!
 //! Every rule a run would apply before meshing (family x procedure registry, procedure graph,
-//! constraint, initial-condition and observation kinds, strict accelerator placement) runs here
+//! constraint and initial-condition kinds, the conjugate heat initial temperature, the
+//! fluid–structure interface, observation binding against the family's declared fields,
+//! strict accelerator placement, and the fluid–solid face rule on the imported CAD's shared
+//! faces) runs here
 //! through the same `runmat_analysis_fea::admission` functions native preparation calls, so
 //! `runmat check` and `runmat run` report the same diagnostic id.
 
@@ -9,7 +12,7 @@ use runmat_analysis_core::AuthoredStudyInputBinding;
 use runmat_analysis_fea::admission::{admit_accelerator_policy, admit_study, AdmissionIssue};
 use runmat_analysis_language::{
     CheckedFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
-    FeaDiagnosticSeverity, FeaSymbolKey, FeaSymbolKind, LogicalSourcePath, ResolvedAnalysisStudy,
+    FeaDiagnosticSeverity, GeometryInspection, FeaSymbolKey, FeaSymbolKind, LogicalSourcePath, ResolvedAnalysisStudy,
 };
 
 /// Sweep cases admitted per sweep. Admission depends on the authored shape, which inputs rarely
@@ -43,7 +46,8 @@ pub(super) fn append_admission_diagnostics(
         let Ok(resolved) = program.resolve_study(module, &id) else {
             continue;
         };
-        let issues = admit_resolved(&resolved, &[Vec::new()]);
+        let inspection = inspection_of(program, &resolved);
+        let issues = admit_resolved(&resolved, inspection, &[Vec::new()]);
         push(
             program,
             root,
@@ -79,7 +83,8 @@ pub(super) fn append_admission_diagnostics(
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let issues = admit_resolved(&resolved.study, &inputs);
+        let inspection = inspection_of(program, &resolved.study);
+        let issues = admit_resolved(&resolved.study, inspection, &inputs);
         push(
             program,
             root,
@@ -92,10 +97,26 @@ pub(super) fn append_admission_diagnostics(
     program.diagnostics.extend(diagnostics);
 }
 
+/// The check-time inspection of the study's imported geometry, when it has one.
+fn inspection_of<'a>(
+    program: &'a CheckedFeaProgram,
+    resolved: &ResolvedAnalysisStudy,
+) -> Option<&'a GeometryInspection> {
+    program
+        .geometry_inspections
+        .iter()
+        .find(|((module, geometry), _)| {
+            module.as_str() == resolved.geometry.module_path
+                && *geometry == resolved.geometry.geometry_id
+        })
+        .map(|(_, inspection)| &inspection.facts)
+}
+
 /// Admission issues over each input set the root realizes, deduplicated. A study whose inputs
 /// cannot be realized without a sweep case is left to run time.
 fn admit_resolved(
     resolved: &ResolvedAnalysisStudy,
+    inspection: Option<&GeometryInspection>,
     input_sets: &[Vec<AuthoredStudyInputBinding>],
 ) -> Vec<AdmissionIssue> {
     let mut issues = Vec::new();
@@ -117,7 +138,8 @@ fn admit_resolved(
             .collect(),
             Err(found) => found,
         };
-        for issue in found {
+        let faces = super::fluid_solid_faces::fluid_solid_face_issues(resolved, &realized, inspection);
+        for issue in found.into_iter().chain(faces) {
             if !issues.contains(&issue) {
                 issues.push(issue);
             }

@@ -57,6 +57,11 @@ impl ObservationPartitionPlanIdentity {
     pub const fn digest(self) -> Digest {
         self.0
     }
+
+    /// The one-partition plan of a directly evaluated observation.
+    pub(super) const fn derived(digest: Digest) -> Self {
+        Self(digest)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

@@ -77,7 +77,10 @@ pub struct AuthoredStudy {
     pub study_id: String,
     pub geometry: AuthoredGeometryInstance,
     pub mesh: AuthoredMeshRef,
-    pub model: AuthoredModelInstance,
+    /// `None` exactly for a study whose every step is `line_parameters`: its cross-section
+    /// geometry carries the dielectrics, and no model applies materials, loads or constraints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<AuthoredModelInstance>,
     pub inputs: Vec<AuthoredInputDefinition>,
     pub outputs: Vec<AuthoredOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -100,13 +103,37 @@ impl AuthoredStudy {
         token("geometry id", &self.geometry.definition.geometry_id)?;
         token("mesh module path", &self.mesh.module_path)?;
         token("mesh id", &self.mesh.mesh_id)?;
-        token("model module path", &self.model.model.module_path)?;
-        token("model id", &self.model.model.model_id)?;
-        if self.model.model.module_path != model.module_path
-            || self.model.model.model_id != model.model_id
-        {
-            return Err(AuthoredStudyError::WrongModel);
+        let line_parameters = !self.sequence.steps.is_empty()
+            && self
+                .sequence
+                .steps
+                .iter()
+                .all(|step| step.procedure == crate::AnalysisProcedure::LineParameters);
+        let section = matches!(
+            geometry.source,
+            runmat_geometry_core::GeometryDefinitionSource::CrossSection(_)
+        );
+        if line_parameters != section {
+            return Err(AuthoredStudyError::CrossSectionProcedure);
         }
+        let no_arguments = Vec::new();
+        let model_arguments = match &self.model {
+            Some(instance) => {
+                if line_parameters {
+                    return Err(AuthoredStudyError::UnexpectedModel);
+                }
+                token("model module path", &instance.model.module_path)?;
+                token("model id", &instance.model.model_id)?;
+                if instance.model.module_path != model.module_path
+                    || instance.model.model_id != model.model_id
+                {
+                    return Err(AuthoredStudyError::WrongModel);
+                }
+                &instance.arguments
+            }
+            None if line_parameters => &no_arguments,
+            None => return Err(AuthoredStudyError::MissingModel),
+        };
         if self.geometry.definition.module_path != geometry.module_path
             || self.geometry.definition.geometry_id != geometry.geometry_id
         {
@@ -134,7 +161,7 @@ impl AuthoredStudy {
             .map(|input| (input.input_id.as_str(), input))
             .collect::<BTreeMap<_, _>>();
         let mut arguments = BTreeSet::new();
-        for argument in &self.model.arguments {
+        for argument in model_arguments {
             token("model argument id", &argument.input_id)?;
             if !arguments.insert(argument.input_id.as_str()) {
                 return Err(AuthoredStudyError::DuplicateModelArgument(
@@ -316,6 +343,7 @@ fn validate_output_regions(
             validate_output_region(target, geometry, model)
         }
         AuthoredOutputExpression::AnalysisField { .. }
+        | AuthoredOutputExpression::LineParameter { .. }
         | AuthoredOutputExpression::OutputReference { .. } => Ok(()),
     }
 }
@@ -387,6 +415,12 @@ pub enum AuthoredStudyError {
     InvalidInput(String),
     #[error("study geometry identity does not match the validated geometry")]
     WrongGeometry,
+    #[error("study requires a `model`")]
+    MissingModel,
+    #[error("a `line_parameters` study takes no `model`: its cross-section carries the dielectrics")]
+    UnexpectedModel,
+    #[error("a `cross_section` geometry is solved only by `electromagnetic line_parameters`, which needs a `cross_section` geometry")]
+    CrossSectionProcedure,
     #[error("geometry argument `{0}` is duplicated")]
     DuplicateGeometryArgument(String),
     #[error("geometry argument references unknown parameter `{0}`")]

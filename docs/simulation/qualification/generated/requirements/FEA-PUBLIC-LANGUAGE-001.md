@@ -8,7 +8,7 @@ Evidence kind: SemanticRealization. Criterion: `runmat check` on a `.fea` file p
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat[test:check_cli]::fea_check_prints_located_diagnostics_like_m_files` (crates/runmat-cli/tests/check_cli.rs:991) - Checking a study with a force given as a traction prints error[fea.semantic.model], the file:line:col arrow, the source line, a caret underline labeled with the... |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat[test:check_cli]::fea_check_prints_located_diagnostics_like_m_files` (crates/runmat-cli/tests/check_cli.rs:997) - Checking a study with a force given as a traction prints error[fea.semantic.model], the file:line:col arrow, the source line, a caret underline labeled with the... |
 | shared_infrastructure | mesh_independent | public_study | OPEN |  |
 
 ## default_load_case
@@ -17,7 +17,7 @@ Evidence kind: SemanticRealization. Criterion: A model with loads and no `load_c
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat[test:check_cli]::fea_check_prints_located_diagnostics_like_m_files` (crates/runmat-cli/tests/check_cli.rs:991) - The same file with the unit corrected and no load_case checks cleanly, so the load joins the default case; multiple loads with an explicit case set are not comp... |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat[test:check_cli]::fea_check_prints_located_diagnostics_like_m_files` (crates/runmat-cli/tests/check_cli.rs:997) - The same file with the unit corrected and no load_case checks cleanly, so the load joins the default case; multiple loads with an explicit case set are not comp... |
 | shared_infrastructure | mesh_independent | public_study | OPEN |  |
 
 ## unit_prefixes

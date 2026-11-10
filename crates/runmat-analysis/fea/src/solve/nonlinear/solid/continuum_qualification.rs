@@ -109,7 +109,7 @@ fn relative_difference(a: &[f64], b: &[f64]) -> f64 {
 }
 
 // witness: FEA-NONLINEAR-OPERATOR-001/references @ small_strain_j2/tet4/numerical_kernel;
-//   boundary: Original uniform Tet4 continuum gate asserts
+//   check: j2-manufactured-cube; boundary: Original uniform Tet4 continuum gate asserts
 //   displacement/stress/point-history/energy/reaction refinement and load schedule sensitivity;
 //   linked executable is unassessed here and recorded scientific failures remain failures.
 #[test]
@@ -126,7 +126,7 @@ fn manufactured_fully_yielded_cube_refines_and_checks_load_step_sensitivity() {
 /// them. That discrete path error converges with the mesh, which is what this test asserts.
 // witness: FEA-NONLINEAR-OPERATOR-001/references @ small_strain_j2/tet10/numerical_kernel;
 //   coverage: partial;
-//   boundary: one increment reproduces the polynomial J2 solution to roundoff; eight increments
+//   check: j2-manufactured-cube; boundary: one increment reproduces the polynomial J2 solution to roundoff; eight increments
 //   carry a discrete path error because the force-controlled yield front crosses elements
 //   mid-step, and that error and its off-axis plastic flow fall at order >= 1.5 under refinement.
 #[test]

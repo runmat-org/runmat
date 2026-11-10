@@ -229,6 +229,16 @@ impl DurableCallerOutput {
         if !progress {
             let lookup = bridge.raw_output_attempt(handle.clone(), self.ordinal)?;
             if lookup.state.is_terminal() && !page.retired {
+                // The page above was read before this terminal observation.
+                // The producer marks its journal retired before it returns the
+                // outcome whose report makes the job terminal, so only a page
+                // read after the terminal state can prove a missing retirement.
+                let fresh = bridge
+                    .raw_output_page(handle.clone(), active.attempt_id, self.cursor)?
+                    .ok_or_else(|| invalid("durable output journal disappeared"))?;
+                if fresh.retired || fresh.next != self.cursor {
+                    return Ok(true);
+                }
                 return Err(ExecutionServiceError::WorkerLost(
                     "durable output has no verified process retirement".into(),
                 ));

@@ -5,7 +5,7 @@ const SHELL_BENDING_LOCAL_DOF: [usize; BENDING_DOF_PER_NODE] = [2, 3, 4];
 
 // witness: FEA-STRUCTURAL-SHELL-001/physical_shell_operator @
 //   linear_structural/shell/numerical_kernel;
-//   boundary: Dense test assembly of transverse simply-supported triangular plate; center
+//   check: navier-plate; boundary: Dense test assembly of transverse simply-supported triangular plate; center
 //   displacement decreases toward independent Navier value and fine error below8%. No membrane,
 //   mixed-shell, native or complete locking qualification.
 #[test]

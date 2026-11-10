@@ -34,10 +34,12 @@ pub enum AnalysisProcedure {
     RandomResponse,
     Nonlinear,
     Adaptive,
+    /// Per-length transmission-line parameters of a 2D cross-section (quasi-static TEM).
+    LineParameters,
 }
 
 impl AnalysisProcedure {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Static,
         Self::ModalExtraction,
         Self::PrestressedModalExtraction,
@@ -49,6 +51,7 @@ impl AnalysisProcedure {
         Self::RandomResponse,
         Self::Nonlinear,
         Self::Adaptive,
+        Self::LineParameters,
     ];
 }
 

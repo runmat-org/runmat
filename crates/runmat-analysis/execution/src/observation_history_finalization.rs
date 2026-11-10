@@ -32,6 +32,7 @@ use crate::{
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
+#[derive(Clone)]
 pub enum ObservationHistoryFinalizationSource {
     Structural {
         workload: ObservationWorkloadSource,
@@ -285,13 +286,11 @@ pub fn prepare_observation_history_finalization_task(
     let history_bound = observation_history_finalization_payload_bytes_upper_bound(
         &preparation.request,
         &checkpoint,
-        &facts,
     )
     .map_err(invalid)?;
     let series_bound = observation_history_series_reduction_payload_bytes_upper_bound(
         &preparation.request,
         &checkpoint,
-        &facts,
     )
     .map_err(invalid)?;
     let resource_plan = build_observation_history_finalization_resource_plan(
