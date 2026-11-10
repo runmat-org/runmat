@@ -79,6 +79,34 @@ fn parses_representative_language_surface() {
 }
 
 #[test]
+fn import_spans_match_lossless_nodes_with_line_endings_and_trailing_trivia() {
+    for suffix in ["\n", "\r\n", "  \r\n", " // imported source\r\n"] {
+        let statement = "import function pulse from \"./pulse.m\"";
+        let source = format!("{statement}{suffix}");
+        let module = parse_fea(&source);
+        assert!(module.is_valid(), "{:?}", module.diagnostics);
+        assert_eq!(module.syntax().text(), source);
+        let FeaModuleItem::Import(import) = &module.items[0] else {
+            panic!("expected import");
+        };
+        assert_eq!(
+            import.span,
+            runmat_types::Span {
+                start: 0,
+                end: statement.len()
+            }
+        );
+        let syntax = module
+            .syntax()
+            .descendants()
+            .into_iter()
+            .find(|node| node.kind() == crate::tree::NodeKind::Import)
+            .expect("lossless import node");
+        assert_eq!(syntax.trimmed_span(), import.span);
+    }
+}
+
+#[test]
 fn parses_typed_geometry_features_and_derived_lineage() {
     let module = parse_fea(
         "geometry base {\nconstruct {\nfeature stock = box(width = 1 m, depth = 1 m, height = 1 m)\nresult = feature.stock\n}\n}\ngeometry derived from geometry.base {\nderive {\nfeature cut = cylinder(radius = 1 mm, height = 1 m, axis = global([0, 0, 1]), origin = [0, 0, 0] m)\nresult = subtract(source.result, feature.cut)\n}\n}\n",

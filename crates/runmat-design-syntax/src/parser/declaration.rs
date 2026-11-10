@@ -59,7 +59,11 @@ impl FeaParser {
                 name,
                 source,
                 source_span,
-                span: fallback,
+                // Match the import's syntax node. The terminator's CR and any
+                // trailing spaces/comments are trivia, outside the import.
+                span: self
+                    .trimmed_range(start, end)
+                    .map_or(fallback, |range| range.span),
             }),
             _ => None,
         }
