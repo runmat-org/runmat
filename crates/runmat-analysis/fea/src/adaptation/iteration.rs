@@ -18,7 +18,7 @@ use validation::*;
 
 const CODEC_PREFIX: &[u8] = b"runmat-analysis-fea-canonical-cbor/v1\0";
 const CODEC_DOMAIN: &str = "analysis.fea.structural-adaptation-iteration/v3";
-const CODEC_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 4096, 32);
+const CODEC_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(4096, 32);
 pub const STRUCTURAL_ADAPTATION_ITERATION_SCHEMA_VERSION: u16 = 3;
 
 pub fn build_structural_adaptation_iteration(

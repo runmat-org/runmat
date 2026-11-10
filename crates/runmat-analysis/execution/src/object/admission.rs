@@ -18,10 +18,7 @@ impl AnalysisInputAdmission {
             maximum,
             retained: Cell::new(0),
         };
-        let profile = profile_serialized(
-            request,
-            CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64),
-        )?;
+        let profile = profile_serialized(request, CanonicalLimits::platform_content(65_536, 64))?;
         admission.charge(profile.materialization_resident_bytes_estimate)?;
         Ok(admission)
     }

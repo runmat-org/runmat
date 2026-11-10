@@ -25,8 +25,7 @@ const ROOT_PREFIX: &[u8] = b"runmat-geometry-meshing-root\0";
 const ROOT_DOMAIN: &str = "geometry-meshing-root";
 const ROOT_MEDIA_TYPE: &str = "application/vnd.runmat.geometry-meshing-root+cbor";
 const ROOT_VALUE_SCHEMA: &str = "runmat.meshing.geometry-root";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(16 * 1024 * 1024, 1_000_000, 65_536, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

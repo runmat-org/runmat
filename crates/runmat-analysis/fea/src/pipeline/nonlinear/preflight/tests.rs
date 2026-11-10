@@ -225,7 +225,7 @@ fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
 }
 
 #[test]
-fn resource_scaling_preserves_codec_capacity_admission() {
+fn resource_scaling_plans_every_output_envelope_without_a_fixed_codec_ceiling() {
     for cells in [2, 4, 6] {
         let (model, mesh, _) = fixture::prepare(cells, true);
         let mut model = model;
@@ -246,17 +246,8 @@ fn resource_scaling_preserves_codec_capacity_admission() {
                 &options,
                 limit,
             );
-            if cells == 6 && limit == 4096 {
-                // This output envelope exceeds the codec's collection capacity even
-                // without an authored memory cap. Rejection must precede allocation;
-                // an unbounded resident budget does not remove format limits.
-                assert!(matches!(planned, Err(FeaRunError::Resource(
-                    crate::planning::resource::ResourcePlanningError::CanonicalCollectionCapacity {
-                        required, maximum
-                    }
-                )) if required > maximum && maximum == 100_000_000));
-                continue;
-            }
+            // No fixed codec item ceiling caps the output envelope: with no authored memory
+            // cap every size plans, and the run's admitted budget decides at admission.
             let plan = planned.unwrap();
             let FeaResourceDemand::StructuralNonlinearPipeline(demand) = &plan.input.demand else {
                 panic!()

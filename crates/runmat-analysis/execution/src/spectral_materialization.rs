@@ -19,8 +19,7 @@ use crate::{
 };
 
 const CONTENT_PREFIX: &[u8] = b"runmat-analysis-spectral-content/v1\0";
-const CONTENT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(256 * 1024 * 1024, 4_000_000, 4096, 32);
+const CONTENT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(4096, 32);
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

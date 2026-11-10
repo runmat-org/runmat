@@ -58,13 +58,12 @@ impl AnalysisPublicationBuilder {
         mesh: &runmat_meshing_core::SolverMeshArtifact,
         evidence: &runmat_meshing_core::MeshingEvidence,
     ) -> Result<(), AnalysisPublicationError> {
-        let limits = CanonicalLimits::new(
+        let limits = CanonicalLimits::content_bounded(
             usize::try_from(self.maximum_bytes).map_err(|_| {
                 AnalysisPublicationError::ResourceLimit {
                     message: "mesh codec budget exceeds address space".into(),
                 }
             })?,
-            100_000_000,
             65_536,
             64,
         );
@@ -119,13 +118,12 @@ impl AnalysisPublicationBuilder {
         compiled: &runmat_analysis_fea::study::CompiledAnalysisStudy,
         metadata: &impl Serialize,
     ) -> Result<OwnedCopyReservation, AnalysisPublicationError> {
-        let limits = CanonicalLimits::new(
+        let limits = CanonicalLimits::content_bounded(
             usize::try_from(self.maximum_bytes).map_err(|_| {
                 AnalysisPublicationError::ResourceLimit {
                     message: "manifest clone budget exceeds address space".into(),
                 }
             })?,
-            100_000_000,
             65_536,
             64,
         );
@@ -161,13 +159,12 @@ impl AnalysisPublicationBuilder {
         }
         let profile = profile_serialized(
             value,
-            CanonicalLimits::new(
+            CanonicalLimits::content_bounded(
                 usize::try_from(self.maximum_bytes).map_err(|_| {
                     AnalysisPublicationError::ResourceLimit {
                         message: "manifest budget exceeds address space".into(),
                     }
                 })?,
-                100_000_000,
                 65_536,
                 64,
             ),

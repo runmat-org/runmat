@@ -53,8 +53,7 @@ const PUBLICATION_MEDIA_TYPE: &str =
 const PUBLICATION_VALUE_SCHEMA: &str = "runmat.analysis.exact-structural-study-publication.v3";
 const REGION_RESOLUTION_PREFIX: &[u8] = b"runmat-topology-region-resolution/v1\0";
 const REGION_RESOLUTION_DOMAIN: &str = "topology-region-resolution";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 
 fn read(source: &impl CacheImport, reference: &ValueRef) -> NativeExecutionResult<Vec<u8>> {
     let bytes = source

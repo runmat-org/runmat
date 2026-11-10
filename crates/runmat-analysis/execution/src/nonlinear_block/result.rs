@@ -18,9 +18,8 @@ impl ImportedNonlinearSolidBlock {
         let overflow = || ResourcePlanningError::Overflow("original nonlinear block retention");
         let profile = runmat_canonical_codec::profile_serialized(
             &(&self.block, &self.numerical_receipt),
-            runmat_canonical_codec::CanonicalLimits::new(
+            runmat_canonical_codec::CanonicalLimits::content_bounded(
                 usize::try_from(maximum_bytes).map_err(|_| overflow())?,
-                100_000_000,
                 65_536,
                 64,
             ),

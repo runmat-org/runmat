@@ -13,6 +13,8 @@ fn resource(error: ResourcePlanningError) -> AnalysisPublicationError {
         limited @ (ResourcePlanningError::Overflow(_)
         | ResourcePlanningError::AccuracyCeiling { .. }
         | ResourcePlanningError::Inventory(_)
+        | ResourcePlanningError::MemoryBudget { .. }
+        | ResourcePlanningError::CanonicalWireCapacity { .. }
         | ResourcePlanningError::Capability(_)
         | ResourcePlanningError::Accelerator { .. }) => limit(limited.to_string()),
         invalid => invalid.to_string().into(),

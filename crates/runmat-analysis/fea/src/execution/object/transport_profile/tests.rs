@@ -105,7 +105,7 @@ fn partition_remainders_are_not_coalesced() {
 }
 
 #[test]
-fn rejects_invalid_overflow_and_root_limits_without_chunk_allocations() {
+fn rejects_invalid_and_overflowing_chunks_without_chunk_allocations() {
     assert!(AnalysisTransportProfiler::new(0).is_err());
     assert!(AnalysisTransportProfiler::new(1)
         .unwrap()
@@ -122,11 +122,13 @@ fn rejects_invalid_overflow_and_root_limits_without_chunk_allocations() {
             .chunk_count_upper_bound,
         1
     );
-    let mut root_overflow = AnalysisTransportProfiler::new(1).unwrap();
-    root_overflow.push(MAX_CHUNKS as u64).unwrap();
-    assert!(root_overflow
+    // The root manifest has no fixed byte ceiling: a manifest listing the maximum chunk count
+    // profiles, and the run's admitted budget decides whether it fits.
+    let mut full_root = AnalysisTransportProfiler::new(1).unwrap();
+    full_root.push(MAX_CHUNKS as u64).unwrap();
+    assert!(full_root
         .finish(AnalysisNumericalObjectKind::SolverResult)
-        .is_err());
+        .is_ok());
     let mut overflow = AnalysisTransportProfiler::new(1).unwrap();
     overflow.payload_bytes = u64::MAX;
     assert!(overflow.push(1).is_err());

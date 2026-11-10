@@ -30,7 +30,7 @@ const PREFIX: &[u8] = b"runmat-family-study-publication/v1\0";
 const DOMAIN: &str = "family-study-publication-v1";
 const MEDIA_TYPE: &str = "application/vnd.runmat.family-study-publication.v1+cbor";
 const VALUE_SCHEMA: &str = "runmat.analysis.family-study-publication.v1";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

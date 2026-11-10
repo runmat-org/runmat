@@ -34,8 +34,7 @@ const PUBLICATION_DOMAIN: &str = "exact-structural-sweep-publication";
 const PUBLICATION_MEDIA_TYPE: &str =
     "application/vnd.runmat.exact-structural-sweep-publication+cbor";
 const PUBLICATION_VALUE_SCHEMA: &str = "runmat.analysis.exact-structural-sweep-publication";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(128 * 1024 * 1024, 2_000_000, 131_072, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(131_072, 64);
 
 fn protocol(error: impl std::fmt::Display) -> crate::NativeExecutionError {
     crate::NativeExecutionError::Protocol(error.to_string())

@@ -14,9 +14,8 @@ pub(in crate::analysis::storage) fn workspace(
     let values = checked_element_count(&field.shape)?;
     let profile = profile_serialized(
         &Values(values),
-        CanonicalLimits::new(
+        CanonicalLimits::content_bounded(
             usize::try_from(maximum).map_err(|_| "field read ceiling exceeds address space")?,
-            100_000_000,
             65_536,
             64,
         ),

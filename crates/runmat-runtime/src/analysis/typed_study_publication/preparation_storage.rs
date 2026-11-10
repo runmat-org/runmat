@@ -30,11 +30,10 @@ pub(super) fn inventory(
         ),
         maximum,
     )?;
-    let limits = runmat_canonical_codec::CanonicalLimits::new(
+    let limits = runmat_canonical_codec::CanonicalLimits::content_bounded(
         usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
             message: "typed storage budget exceeds address space".into(),
         })?,
-        100_000_000,
         65_536,
         64,
     );
