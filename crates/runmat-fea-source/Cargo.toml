@@ -1,6 +1,6 @@
 [package]
 name = "runmat-fea-source"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 license-file = "../../LICENSE.md"
 description = "Checked FEA source contracts and bounded semantic queries"

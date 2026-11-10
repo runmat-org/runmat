@@ -2,7 +2,92 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
-## v0.7.0
+## v0.7.1 - November 2026
+
+_November 10, 2026_
+
+### Runtime and Native Packaging
+
+#### Fixed
+
+* Fixed Windows standalone packaging to include Cargo-owned MSVC import archives and retain unversioned native imports.
+* Fixed remote execution output ordering so original console records remain ordered with terminal observations. Fixed CRLF diagnostic excerpts to omit carriage returns.
+* Bounded result replay reads by the caller's budget and the publication's closed object inventory.
+
+### Desktop, SDK, and Editor
+
+#### Added
+
+* Added an Outline tab with docked Properties, script sections and typed symbols, and a checked FEA study tree. Added command search, configurable keymaps, a shortcut command box, and shared command menus with unavailable-action explanations.
+
+#### Changed
+
+* Updated file, Outline, and Properties controls for compact rows, clearer selection, collapsible panels, and narrow editor layouts. Quantity fields retain typed expressions when their forms refresh.
+* Expanded the example catalog with captured runs that can open directly on their saved results, including FEA studies and multi-drone SLAM playback.
+* Added CAD canvas context menus, command forms populated from the current selection, and shared navigation controls with mouse presets, cursor-centered zoom, orbit, and pan.
+
+#### Fixed
+
+* Fixed test setup failures disappearing without an explanation; the Run menu now shows why tests did not start. Fixed browser test coverage reports reading zero when execution returned site coverage.
+* Fixed notebook scrolling unexpectedly zooming figures and detached notebook anchors leaving plots blank. Past-run figure tabs retain their recorded titles.
+* Fixed context menus accidentally executing the item under the mouse when the opening right-click was released.
+* Fixed simulation-usage reporting and settlement abandoning transient network or server errors; retries are bounded by the lease and retry limit. Fixed native and browser execution admission, including native test-worker attribution.
+
+### Mechanical Design
+
+#### Added
+
+* Added text-based `.part`, `.assembly`, and `.drawing` documents with unit-aware inputs, configurations, cross-file references, and regeneration through the OCCT geometry kernel.
+* Added part modeling, direct face edits, sheet-metal operations, assemblies with mates and patterns, and drawings with views, dimensions, notes, and parts lists. Supported design exports include STEP, meshes, and drawing sheets.
+* Added design commands for mate connectors, reference curves, sheet-metal conversion, material and appearance changes, body promotion, file splitting, and component configurations.
+
+#### Changed
+
+* Drawing standards, several surface-analysis tools, direct `.fea` part/assembly references, the MATLAB-language CAD API, and general `runmat check` support for mechanical design files remain pending. Threads created through the canvas are cosmetic.
+
+### Electronic Design
+
+#### Added
+
+* Added text-based `.circuit` schematics and `.circuit.layout` boards with hierarchical sheets, component variants, stackups, routing, copper pours, and electrical and design-rule checks.
+* Added circuit simulation sections with analyses, waveform probes, and measures checked against declared limits. Supported analyses include operating point, DC, AC, transient, noise, temperature, and seeded Monte Carlo runs.
+* Added fabrication exports including Gerber X2, Excellon drills, IPC-D-356A netlists, BOMs, pick-and-place files, IPC-2581C, and ODB++. Fabrication settings can be saved in the board.
+* Added design inspection, rendering, checks, import/export, and staged source-edit tools for design documents, plus `runmat-design` commands for supported checks and exports.
+
+#### Changed
+
+* KiCad imports report content that does not carry over; the general KiCad round-trip qualification gate remains open. Shared part libraries, board enclosure clearance checks, board-driven thermal/vibration studies, assembly-drawing polarity marks, and board-integrated field-solved impedance remain pending.
+
+#### Fixed
+
+* Reduced repeated via-contact searches during PCB stub and delay analysis by sharing one spatial index across each batch, while preserving exact contact checks across board layers.
+
+### Finite-Element Analysis
+
+#### Added
+
+* Added result snapshots with saved view descriptions, verification, section cuts, translucent context geometry, and light or dark presentation. Supported snapshots include transient instants and acoustic frequency responses.
+* Added `pressure_drop` outputs between fluid face regions and acoustic `transmission_loss` outputs between ports, with reference checks recorded in the simulation ledger.
+* Added residual vectors and static correction for supported modal-reduced response studies, and published a modal truncation measure.
+* Added CPU lossless quasi-static cross-section studies for trace impedance, effective permittivity, propagation delay, per-length capacitance and inductance, and supported differential-pair parameters.
+* Added step-progress reporting for fluid, fluid–structure, and electrothermal execution. Local workers can append logs to `RUNMAT_WORKER_LOG_FILE` when no OpenTelemetry collector is configured.
+
+#### Changed
+
+* Unified study commands under `runmat check`, `runmat plan`, `runmat run`, and `runmat snapshot`; the `runmat fea` command group has been removed.
+* Extended steady thermal conduction with a multigrid solve path and resource planning derived from the admitted run budget. Thermal placement limits remain separate from the authored study identity.
+* Improved tetrahedral boundary recovery, geometry-tolerance handling, and local sizing around opposed faces and narrow gaps. Tet10 curved-node repair tracks the geometry that changes.
+* Added saved histories for sampled study outputs, including acoustic frequency histories.
+* Improved convergence for convection-dominated fluid solves and reused the preceding fluid solution during fluid–structure coupling iterations.
+* Replaced fixed size limits on model-scaled numerical arrays and run data with limits derived from the admitted budget or platform. Memory-admission errors report required and available memory and scratch space.
+* Improved snapshot cameras, legend readability, and millimeter-scale clipping. Saved views record their study output and, for modal and buckling views, their mode number.
+* Linear-static structural solves currently require CPU execution. Authored frequency fan-out, cooperative partitioning, and resilience settings remain checked contracts where scheduler wiring and qualification are incomplete.
+
+RunMat FEA, mechanical design, and electrical design are currently in beta. We will mark them as production-ready when development and validation are complete. Many capabilities are available; see the documentation for supported workflows and current limitations.
+
+## v0.7.0 - November 2026
+
+_November 9, 2026_
 
 ### Runtime
 
@@ -41,10 +126,25 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 
 * Added a dedicated Settings window with grouped application, project, runtime, and organization controls. Runtime settings expose effective values and their sources, support individual override resets, and keep user defaults separate from project policy. Execution, memory, acceleration, language, simulation storage, and foreign-runtime controls use the same typed configuration authority as the CLI and SDK; unsupported host options return capability errors.
 * Added SDK APIs for runtime-setting resolution and editing, structured source checking, named script/function/study entrypoints, and cluster-program preparation. Hosts can inspect a named target's local and cluster availability before running it. Node hosts can initialize the packaged WASM runtime with supplied bytes and isolated in-memory application settings; reset preserves those session preferences until disposal.
+* Added a Home screen with recent and shared projects, project filters, Git import, and examples organized by topic and the user's field. New-project selection includes example previews and a blank-project option; the native app also offers Open folder.
+* Added a Run menu for named project entrypoints, the current and recently run files, selected or all tests, and local or available cluster targets. Added searchable quick actions for project and application tasks.
+* Added guided FEA setup with editable study fields, named-region selection, readiness checks, scope review, and explicit confirmation before execution. Study previews and results show geometry, solver mesh, field colors, and supported deformation, with live run progress and logs.
+* Added native coding-agent connection setup for installed Claude Code and Codex clients, with connection status and a browser sign-in handoff.
+
+#### Changed
+
+* Expanded shared editing with project presence, editor and figure pointers, draft recovery, and reconnect handling. Runs capture their input files before execution, and native cloud synchronization retries captured-run uploads after interruption.
+* Improved file and folder import with destination previews, explicit conflict choices, cancellation, and per-file failure reporting. Native file-open handling routes supported files into their owning workspace.
+* Changed the Command Window and output panes to keep their terminal mounted during output and semantic-highlighting updates, reducing transcript replay and preserving terminal selection and input handling.
 
 #### Fixed
 
 * Improved contextual signature help and compact builtin hovers, and bounded semantic tokens to UTF-16 physical lines. Fixed browser filesystem and artifact operations to retain their captured owners across asynchronous work and project changes.
+* Fixed project changes and repeated startup so the runtime binds to the selected workspace. Fixed rejected study requests leaving the Agent panel busy, and saved Agent sessions in local and browser-backed projects as well as cloud projects. Session-storage failures now report the storage failure.
+* Fixed newly created shared files failing to join collaborative editing while the server catches up, and made native event cleanup safe when called more than once.
+* Fixed sign-in destinations, email-code modal resets, and account-profile recovery. Added email-code sign-in and durable first-party sessions.
+* Fixed native FEA result redraws and deformation-toggle refreshes, reduced geometry-preview churn, and kept saved and embedded run figures interactive when their scene data is available.
+* Fixed test-worker output without a test attribution being omitted from Desktop results.
 
 ### Server and Remote Execution
 
@@ -63,7 +163,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 
 * Added opt-in OpenTelemetry trace and log export to user-owned collectors, with bounded queues, correlated records, and collector-acknowledged connection tests. Native hosts support HTTP/protobuf and gRPC; browser hosts support HTTP/protobuf. Collector export and product-telemetry consent are separate controls. Collector failures do not fail numerical runs.
 
-### Finite-Element Analysis (Alpha)
+### Finite-Element Analysis
 
 #### Added
 
@@ -73,7 +173,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 #### Changed
 
 * Replaced YAML `.fea` studies with a typed study language supporting physical units, modules, imported `.m` functions, reusable geometry and model declarations, load cases, sweeps, observations, and reductions. Use `runmat fea check`, `plan`, and `run` to inspect and execute a study, with explicit study or sweep selection when needed.
-* FEA remains alpha with breaking APIs and formulation-specific validation limits. Browser SDK hosts can check studies and execute supported local study forms through exact-geometry and numerical workers. Browser preparation of FEA cluster jobs remains unavailable; use the native OCCT-enabled CLI for that route. Unsupported execution requests fail closed.
+* FEA has breaking APIs and formulation-specific validation limits. Browser SDK hosts can check studies and execute supported local study forms through exact-geometry and numerical workers. Browser preparation of FEA cluster jobs remains unavailable; use the native OCCT-enabled CLI for that route. Unsupported execution requests fail closed.
 
 ### Licensing and Simulation Usage
 
@@ -82,6 +182,8 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 * Changed RunMat's license to Business Source License 1.1 with the versioned free-use grant in `FREE-USE.md` and conversion to Apache 2.0 three years after each version's first public distribution. The grant covers specified individual, academic, open-source, and size-limited organizational production use, subject to its conditions and competing-offering exclusion.
 * Added authenticated simulation admission and exact reference-operation accounting for new FEA meshing and solving, including local execution. Allowances use quantities of work displayed in GFLOP or TFLOP. Viewing and reusing computed outputs are unmetered; the accounting specification states numerical-library and OCCT exclusions. Ordinary local `.m` scripts and compiled programs remain offline and unmetered unless they execute FEA.
 * Eligible academic institutions may receive a simulation-usage charge waiver after RunMat verifies and approves eligibility. The free-use grant links to the eligibility-verification request; approval is required.
+
+RunMat FEA, mechanical design, and electrical design are currently in beta. We will mark them as production-ready when development and validation are complete. Many capabilities are available; see the documentation for supported workflows and current limitations.
 
 ## v0.6.3 - September 2026
 

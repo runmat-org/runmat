@@ -1,6 +1,6 @@
 [package]
 name = "runmat-circuit-wasm"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -13,10 +13,10 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-runmat-circuit = { path = "..", version = "=0.7.0" }
+runmat-circuit = { path = "..", version = "=0.7.1" }
 # Circuit simulation: the native engine (ours), its reports and its operation counts.
-runmat-circuit-spice = { path = "../../runmat-circuit-spice", version = "=0.7.0" }
-runmat-circuit-sim = { path = "../../runmat-circuit-sim", version = "=0.7.0" }
+runmat-circuit-spice = { path = "../../runmat-circuit-spice", version = "=0.7.1" }
+runmat-circuit-sim = { path = "../../runmat-circuit-sim", version = "=0.7.1" }
 runmat-simulation-usage = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

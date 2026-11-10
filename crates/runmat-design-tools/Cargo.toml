@@ -1,6 +1,6 @@
 [package]
 name = "runmat-design-tools"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -10,14 +10,14 @@ repository = "https://github.com/runmat-org/runmat"
 publish = false
 
 [dependencies]
-runmat-cad = { path = "../runmat-cad", version = "=0.7.0" }
-runmat-cad-wasm = { path = "../runmat-cad/wasm", version = "=0.7.0", default-features = false }
-runmat-circuit = { path = "../runmat-circuit", version = "=0.7.0" }
-runmat-circuit-sim = { path = "../runmat-circuit-sim", version = "=0.7.0" }
-runmat-circuit-spice = { path = "../runmat-circuit-spice", version = "=0.7.0", features = ["schema"] }
-runmat-design-commands = { path = "../runmat-design-commands", version = "=0.7.0" }
+runmat-cad = { path = "../runmat-cad", version = "=0.7.1" }
+runmat-cad-wasm = { path = "../runmat-cad/wasm", version = "=0.7.1", default-features = false }
+runmat-circuit = { path = "../runmat-circuit", version = "=0.7.1" }
+runmat-circuit-sim = { path = "../runmat-circuit-sim", version = "=0.7.1" }
+runmat-circuit-spice = { path = "../runmat-circuit-spice", version = "=0.7.1", features = ["schema"] }
+runmat-design-commands = { path = "../runmat-design-commands", version = "=0.7.1" }
 runmat-design-syntax = { workspace = true }
-runmat-rules = { path = "../runmat-rules", version = "=0.7.0" }
+runmat-rules = { path = "../runmat-rules", version = "=0.7.1" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = "0.8"
@@ -31,7 +31,7 @@ pollster = { version = "0.3", optional = true }
 glam = { version = "0.24", optional = true }
 # OCCT as the design kernel (native callers: the MCP and HTTP servers, the native LSP).
 runmat-geometry-io = { workspace = true, optional = true, features = ["occt-native", "occt-kernel"] }
-runmat-core = { path = "../runmat-core", version = "=0.7.0", optional = true }
+runmat-core = { path = "../runmat-core", version = "=0.7.1", optional = true }
 runmat-value = { workspace = true, optional = true }
 futures = { version = "0.3", optional = true }
 

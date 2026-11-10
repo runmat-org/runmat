@@ -1,6 +1,6 @@
 [package]
 name = "runmat-build-identity"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 license-file = "../../LICENSE.md"
 description = "Build-time configuration identity for dependency-aware artifact reuse"

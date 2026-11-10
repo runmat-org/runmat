@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.90.0"
 name = "runmat-clarabel"
-version = "0.7.0"
+version = "0.7.1"
 # Derived from Clarabel.rs 0.11.1; see UPSTREAM.md for the pinned release,
 # original license and the narrow cooperative execution extension.
 authors = ["Paul Goulart <paul.goulart@eng.ox.ac.uk>"]
