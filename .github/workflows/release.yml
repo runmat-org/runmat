@@ -258,6 +258,8 @@ jobs:
         shell: pwsh
         env:
           CARGO_PROFILE_RELEASE_STRIP: symbols
+          # Match the Windows branch product: do not generate an unused PDB.
+          _LINK_: /DEBUG:NONE
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
           RUNMAT_BUILD_TARGET: ${{ matrix.platform.target }}

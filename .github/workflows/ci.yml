@@ -744,6 +744,9 @@ jobs:
           # Exercise the PowerShell packager across the same color boundary.
           CARGO_TERM_COLOR: always
           CARGO_PROFILE_RELEASE_STRIP: symbols
+          # The stripped product does not ship a PDB. Prevent MSVC from
+          # generating one before stripping, where large links can hit LNK1318.
+          _LINK_: /DEBUG:NONE
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
           RUNMAT_BUILD_TARGET: ${{ matrix.platform.target }}
