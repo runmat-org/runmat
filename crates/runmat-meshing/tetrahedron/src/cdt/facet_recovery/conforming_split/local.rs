@@ -26,21 +26,31 @@ pub(super) struct CavitySplit {
     pub(super) retriangulated: Vec<DelaunayRecoveredFacetTriangle>,
 }
 
+/// A recovered segment edge, the node that splits it and how its cells are split.
+#[derive(Clone, Copy)]
+pub(super) struct SegmentEdgeSplit {
+    pub(super) node: DelaunayVolumeNode,
+    pub(super) edge: [StableDigest; 2],
+    pub(super) strategy: SplitStrategy,
+}
+
 /// Splits `edge` at the appended node `inserted`. Protected triangles of the facets on the edge
 /// whose circumcircle holds the node leave protection and are re-triangulated in their facet;
 /// the split and the link flips then see them as ordinary faces, and the caller's admission
 /// requires their replacements. `segment_edges` bounds the facet cavities and includes `edge`.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn split_edge_with_facet_cavities(
     topology: &TopologyMutation,
     inserted: u32,
-    node: DelaunayVolumeNode,
-    edge: [StableDigest; 2],
+    split: SegmentEdgeSplit,
     protected: &[DelaunayRecoveredFacetTriangle],
     segment_edges: &BTreeSet<[StableDigest; 2]>,
-    strategy: SplitStrategy,
     constraint_index: u32,
 ) -> Result<CavitySplit, DelaunayFacetRecoveryError> {
+    let SegmentEdgeSplit {
+        node,
+        edge,
+        strategy,
+    } = split;
     let cavities = super::super::facet_delaunay::segment_split_cavities(
         topology,
         protected,
@@ -130,18 +140,16 @@ pub(super) fn retriangulated_face_missing(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn split_and_admit_locally(
     topology: &mut TopologyMutation,
-    node: DelaunayVolumeNode,
-    edge: [StableDigest; 2],
+    split: SegmentEdgeSplit,
     protected: &[DelaunayRecoveredFacetTriangle],
     protected_edges: &[[StableDigest; 2]],
-    strategy: SplitStrategy,
     constraint_index: u32,
     options: crate::cdt::DelaunayInsertionOptions,
     cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
 ) -> Result<LocalSplit, DelaunayFacetRecoveryError> {
+    let SegmentEdgeSplit { node, edge, .. } = split;
     let mut split_edge_key = edge;
     split_edge_key.sort_unstable();
     let mut observed = topology.observe_edge_changes();
@@ -156,15 +164,13 @@ pub(super) fn split_and_admit_locally(
     } = split_edge_with_facet_cavities(
         &observed,
         inserted,
-        node,
-        edge,
+        split,
         protected,
         &protected_edges
             .iter()
             .copied()
             .chain([split_edge_key])
             .collect(),
-        strategy,
         constraint_index,
     )?;
     if removed.is_empty() {

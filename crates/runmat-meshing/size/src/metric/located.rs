@@ -188,7 +188,7 @@ fn segment_size(
         size + slope * (distance(point, location) - size).max(0.0)
     };
     let mut best = at(0.0).min(at(1.0));
-    if !(length > 0.0) {
+    if length.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
         return best;
     }
     let offset = difference(point, first.point_m);

@@ -13,7 +13,7 @@ use super::{
     cavity::{
         candidate_node, insert_candidate_in_place, recovered_segments_exist,
         segment_hits_triangle_interior, steiner_lineage, try_insert_candidate_with_conflicts,
-        CandidateInsertion, CandidateInsertionResult, InPlaceCandidate,
+        CandidateInsertion, CandidateInsertionResult, InPlaceCandidate, InPlaceCandidateRequest,
     },
     error, node_index, segment_error, support_edge_exists, DelaunayFacetRecoveryError,
     DelaunayFacetRecoveryErrorKind, DelaunayFacetSteinerInsertion, DelaunayRecoveredFacetTriangle,
@@ -688,11 +688,13 @@ pub(super) fn refine_support_triangle_interior_in_place(
     };
     match insert_candidate_in_place(
         working,
-        node,
+        InPlaceCandidateRequest {
+            node,
+            required_facet_edges: None,
+            near: triangle[0],
+        },
         protected_faces,
         protected_edges,
-        None,
-        triangle[0],
         constraint_index,
         work,
     )? {

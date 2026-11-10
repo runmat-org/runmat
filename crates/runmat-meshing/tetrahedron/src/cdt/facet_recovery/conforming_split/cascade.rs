@@ -7,20 +7,33 @@ pub(super) const MAXIMUM_ENCROACHMENT_DEPTH: u8 = 8;
 /// Triangles one facet may re-triangulate around a segment split node.
 pub(super) const MAXIMUM_SPLIT_FACET_CAVITY_TRIANGLES: usize = 64;
 
+/// One level of an encroachment cascade: the segment edge to split, the protected facet
+/// triangles and segment edges it must keep, its nesting depth and the edge whose split it
+/// serves.
+pub(super) struct EncroachmentCascade {
+    pub(super) edge: [StableDigest; 2],
+    pub(super) protected: Vec<DelaunayRecoveredFacetTriangle>,
+    pub(super) protected_edges: Vec<[StableDigest; 2]>,
+    pub(super) depth: u8,
+    pub(super) parent: Option<[StableDigest; 2]>,
+}
+
 /// Returns whether `edge` itself was split; `splits` receives every protected-facet split made,
 /// in application order, including those of encroached edges split first.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn split_with_encroachment_cascade(
     working: &mut super::super::working::FacetRecoveryWorking,
-    edge: [StableDigest; 2],
-    mut protected: Vec<DelaunayRecoveredFacetTriangle>,
-    mut protected_edges: Vec<[StableDigest; 2]>,
-    depth: u8,
-    parent: Option<[StableDigest; 2]>,
+    cascade: EncroachmentCascade,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
     splits: &mut Vec<ProtectedFacetSplit>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
+    let EncroachmentCascade {
+        edge,
+        mut protected,
+        mut protected_edges,
+        depth,
+        parent,
+    } = cascade;
     let insertion = work.options.segment_recovery.insertion;
     let cancellation = work.cancellation;
     let mut attempts = 0_u32;
@@ -68,11 +81,13 @@ pub(super) fn split_with_encroachment_cascade(
                 let mut trial = topology.cavity_trial();
                 let outcome = split_and_admit_locally(
                     &mut trial,
-                    node,
-                    edge,
+                    SegmentEdgeSplit {
+                        node,
+                        edge,
+                        strategy,
+                    },
                     &protected,
                     &protected_edges,
-                    strategy,
                     constraint_index,
                     insertion,
                     cancellation,
@@ -103,11 +118,13 @@ pub(super) fn split_with_encroachment_cascade(
                     // split both in one edit. The caller sees its edge split.
                     match split_pair_at_shared_vertex(
                         working,
-                        edge,
-                        encroached,
+                        SegmentEdgePair {
+                            edge,
+                            other: encroached,
+                            placement: DisjointPairPlacement::Midpoints,
+                        },
                         &protected,
                         &protected_edges,
-                        DisjointPairPlacement::Midpoints,
                         constraint_index,
                         work,
                     )? {
@@ -129,11 +146,13 @@ pub(super) fn split_with_encroachment_cascade(
                     // other's point in its diametral ball.
                     match split_pair_at_shared_vertex(
                         working,
-                        edge,
-                        encroached,
+                        SegmentEdgePair {
+                            edge,
+                            other: encroached,
+                            placement: DisjointPairPlacement::Midpoints,
+                        },
                         &protected,
                         &protected_edges,
-                        DisjointPairPlacement::Midpoints,
                         constraint_index,
                         work,
                     )? {
@@ -156,11 +175,13 @@ pub(super) fn split_with_encroachment_cascade(
                     let first = splits.len();
                     if !split_with_encroachment_cascade(
                         working,
-                        encroached,
-                        protected.clone(),
-                        protected_edges.clone(),
-                        depth + 1,
-                        Some(edge),
+                        EncroachmentCascade {
+                            edge: encroached,
+                            protected: protected.clone(),
+                            protected_edges: protected_edges.clone(),
+                            depth: depth + 1,
+                            parent: Some(edge),
+                        },
                         constraint_index,
                         work,
                         splits,
@@ -198,11 +219,13 @@ pub(super) fn split_with_encroachment_cascade(
                     blocked_done.push(segment);
                     match split_pair_at_shared_vertex(
                         working,
-                        edge,
-                        segment,
+                        SegmentEdgePair {
+                            edge,
+                            other: segment,
+                            placement: DisjointPairPlacement::Aligned,
+                        },
                         &protected,
                         &protected_edges,
-                        DisjointPairPlacement::Aligned,
                         constraint_index,
                         work,
                     )? {
@@ -237,11 +260,13 @@ pub(super) fn split_with_encroachment_cascade(
                     let first = splits.len();
                     if split_with_encroachment_cascade(
                         working,
-                        blocked,
-                        protected.clone(),
-                        protected_edges.clone(),
-                        depth + 1,
-                        Some(edge),
+                        EncroachmentCascade {
+                            edge: blocked,
+                            protected: protected.clone(),
+                            protected_edges: protected_edges.clone(),
+                            depth: depth + 1,
+                            parent: Some(edge),
+                        },
                         constraint_index,
                         work,
                         splits,

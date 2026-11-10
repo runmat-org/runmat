@@ -53,7 +53,7 @@ use buckling_completion::complete_structural_buckling;
 pub(in crate::analysis) use modal_completion::{
     complete_modal_study, complete_modal_transient_study,
 };
-use modal_frequency_completion::complete_structural_modal_frequency;
+use modal_frequency_completion::{complete_structural_modal_frequency, ModalFrequencyMeshes};
 use modal_intent_completion::{complete_structural_modal, complete_structural_modal_transient};
 pub use preparation::analysis_prepare_structural_study_intent_op;
 pub(in crate::analysis) use preparation::{
