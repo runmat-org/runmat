@@ -71,6 +71,10 @@ impl fmt::Display for DatumRef {
     }
 }
 
+/// How a plane is written, for messages that ask for one: the text forms `on` and plane fields take.
+pub const PLANE_REFERENCE_FORMS: &str = "an origin plane (`origin.xy`, `origin.yz` or `origin.zx`), \
+a datum plane (`plane.<name>`) or a planar face (`feature.<name>.face.<face>`, such as `feature.body.face.end`)";
+
 /// Where a sketch or a plane-taking feature sits: a datum plane or a planar face.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "on")]

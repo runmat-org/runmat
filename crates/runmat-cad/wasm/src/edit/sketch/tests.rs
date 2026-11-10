@@ -49,6 +49,30 @@ fn a_sketch_starts_on_a_picked_plane_or_face() {
     );
 }
 
+/// An agent that sent `part.sketch` with no plane, or with a plane in a form the part grammar
+/// doesn't take, got "pick a plane" with nothing to go on and gave up on the part.
+#[test]
+fn a_sketch_without_a_usable_plane_names_the_forms_with_an_example() {
+    for values in [json!({}), json!({ "plane": "plane:XY" }), json!({ "plane": "XY" })] {
+        let out = run(PLATE, "part.sketch", values.clone());
+        assert_eq!(out["ok"], false, "{out}");
+        let message = out["message"].as_str().unwrap();
+        for form in ["origin.xy", "origin:top", "plane.<name>", "feature.body.face.end", r#""values": {"plane": "origin.xy"}"#] {
+            assert!(message.contains(form), "{values}: {message}");
+        }
+    }
+    // The same in source text: `on XY` names the plane forms, not the model's internal types.
+    let text = PLATE.replace("sketch s1 on origin.xy", "sketch s1 on XY");
+    let diagnostics = match compile_part("/p/plate.part", &text) {
+        Ok(_) => panic!("`on XY` isn't a plane"),
+        Err(d) => format!("{d:?}"),
+    };
+    assert!(diagnostics.contains("origin.xy") && diagnostics.contains("sketch base on origin.xy"), "{diagnostics}");
+    assert!(!diagnostics.contains("PlaneRef") && !diagnostics.contains("internally tagged"), "{diagnostics}");
+    let on_xy = applied(PLATE, "part.sketch", json!({ "plane": "origin.xy" }));
+    assert_eq!(added(PLATE, &on_xy), vec!["    sketch sketch1 on origin.xy {"]);
+}
+
 #[test]
 fn drawing_tools_write_entities_into_the_open_sketch() {
     // A line from l2's end (snapped) along x: one statement and its horizontal relation.

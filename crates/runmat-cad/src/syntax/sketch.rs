@@ -669,8 +669,15 @@ fn lower_plane(expr: &Expr, hook: &dyn ValueSyntax) -> Result<PlaneRef, LowerErr
         return Ok(PlaneRef::Face { face: face? });
     }
     let json = lower_expr(expr, hook, "", &mut Vec::new())?;
-    json.decode::<PlaneRef>()
-        .map_err(|(_, message)| error(expr.span(), format!("expected a plane: {message}")))
+    json.decode::<PlaneRef>().map_err(|_| {
+        error(
+            expr.span(),
+            format!(
+                "expected a plane: {}; for example `sketch base on origin.xy {{ … }}`",
+                crate::model::PLANE_REFERENCE_FORMS
+            ),
+        )
+    })
 }
 
 /// A constraint's key among the sketch's written lines, for structured edits: its id, or

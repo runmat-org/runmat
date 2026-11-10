@@ -20,6 +20,12 @@ use runmat_design_syntax::{parse_source, Dialect};
 use serde_json::{json, Value};
 use std::cell::OnceCell;
 
+/// The plane forms a plane field takes, with an example, for messages that ask for a plane.
+pub const PLANE_PICK_FORMS: &str = "A plane field takes an origin plane (`origin.xy`, `origin.yz` or `origin.zx`; \
+the Outline's `origin:top`, `origin:right` or `origin:front`), a datum plane (`plane.<name>` or `feature:<name>`) \
+or a planar face (`feature.<name>.face.<face>`, such as `feature.body.face.end`). \
+Example: `{\"command\": \"part.sketch\", \"values\": {\"plane\": \"origin.xy\"}}`.";
+
 fn model(message: impl Into<String>) -> EditFailure {
     EditFailure::Model(message.into())
 }
@@ -147,14 +153,15 @@ impl<'a> Picks<'a> {
 
     /// A plane: a datum plane, or a planar face.
     pub fn plane(&self, pick: &str) -> Result<Value, EditFailure> {
-        let v = lower_text(&self.text_of(pick)?)?;
+        let not_a_plane = || model(format!("`{pick}` isn't a plane or a face. {PLANE_PICK_FORMS}"));
+        let v = lower_text(&self.text_of(pick)?).map_err(|_| not_a_plane())?;
         if v.get("on").is_some() {
             return Ok(v);
         }
         if v.get("ref").is_some() {
             return Ok(json!({ "on": "face", "face": v }));
         }
-        Err(model(format!("`{pick}` isn't a plane or a face")))
+        Err(not_a_plane())
     }
 
     /// An axis: a datum axis, or a linear edge.

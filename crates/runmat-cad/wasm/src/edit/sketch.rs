@@ -651,7 +651,12 @@ fn new_sketch(
     let pick = picks(values, "plane")
         .into_iter()
         .next()
-        .ok_or_else(|| model("pick a plane or a planar face to sketch on"))?;
+        .ok_or_else(|| {
+            model(format!(
+                "pick a plane or a planar face to sketch on: `part.sketch` reads it from `values.plane`. {}",
+                crate::picks::PLANE_PICK_FORMS
+            ))
+        })?;
     let plane: PlaneRef = serde_json::from_value(picks_of.plane(&pick)?)
         .map_err(|e| model(format!("the sketch plane: {e}")))?;
     let mut added = String::new();
