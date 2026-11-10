@@ -242,6 +242,116 @@ fn on_the_drone_a_clamp_seats_under_the_belly_and_a_tube_in_its_bore_in_two_call
     assert_eq!(check["data"]["errors"], 0, "{check:#}");
 }
 
+/// A 120 mm carbon skid tube, 8 mm outside.
+const LONG_TUBE: &str = r#"runmat 0.7
+std 1
+
+part skid_tube_long {
+    sketch s on origin.yz {
+        outer = circle(center = [0 mm, 0 mm], radius = 4 mm)
+        inner = circle(center = [0 mm, 0 mm], radius = 3.4 mm)
+    }
+    feature body = extrude(profile = sketch.s, distance = 120 mm)
+    output tube = { body = feature.body.body, material = "material.aluminum_6061" }
+}
+"#;
+
+/// The drone without its landing skids, plus the clamp and the long tube.
+fn skidless_drone() -> Vec<(String, String)> {
+    let mut all = drone();
+    for (path, text) in all.iter_mut() {
+        if path == "/p/drone/drone.assembly" {
+            let start = text.find("    // Landing gear:").expect("the skid block");
+            let right = start + text[start..].find("as skid_right {").expect("skid_right");
+            let end = right + text[right..].find("\n    }\n").expect("its block") + "\n    }\n".len();
+            text.replace_range(start..end, "");
+        }
+    }
+    all.push(("/p/drone/mechanical/ground/skid_clamp.part".into(), CLAMP.into()));
+    all.push(("/p/drone/mechanical/ground/skid_tube_long.part".into(), LONG_TUBE.into()));
+    all
+}
+
+/// The landing skid the agent builds: on each side a clamp under the belly fore and aft, the
+/// aft one levelled with the fore one, and a straight tube through both. The belly curves, so
+/// clamps seated to first contact sit at different heights and a straight tube clips one; on
+/// one axis the six parts overlap nothing. Each seating after the first, with the assembly's
+/// bodies regenerated once, takes seconds.
+#[test]
+fn on_the_drone_two_tubes_in_four_levelled_clamps_overlap_nothing_and_each_seating_takes_seconds() {
+    let mut all = skidless_drone();
+    let assembly = "/p/drone/drone.assembly";
+    let mut seconds: Vec<(String, f64)> = Vec::new();
+    let mut call = |all: &Vec<(String, String)>, input: Value| -> Value {
+        let files: Vec<(&str, &str)> = all.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        let started = std::time::Instant::now();
+        let out = tool("design.seat_part", input.clone(), &files);
+        seconds.push((input["component"].as_str().unwrap_or_default().to_owned(), started.elapsed().as_secs_f64()));
+        out.get("data").cloned().unwrap_or_else(|| panic!("a seating, not {out:#}"))
+    };
+    let keep = |all: &mut Vec<(String, String)>, out: &Value| {
+        let text = out["files"].as_array().unwrap().iter().find(|f| f["path"] == assembly).unwrap()["text"].as_str().unwrap().to_owned();
+        all.iter_mut().find(|(p, _)| p == assembly).unwrap().1 = text;
+    };
+    let clamp = "/p/drone/mechanical/ground/skid_clamp.part";
+    let bore = face_by_area(clamp, CLAMP, 2.0 * std::f64::consts::PI * 4.1 * 12.0);
+    let outside = face_by_area("/p/drone/mechanical/ground/skid_tube_long.part", LONG_TUBE, 2.0 * std::f64::consts::PI * 4.0 * 120.0);
+    let mut heights = Vec::new();
+    for (side, y) in [("left", 36.0), ("right", -36.0)] {
+        let (fore, aft, tube) = (format!("clamp_fore_{side}"), format!("clamp_aft_{side}"), format!("tube_{side}"));
+        let under = |x: f64| json!({ "component": "body_bottom", "from": [x, y, -100.0], "direction": [0.0, 0.0, 1.0] });
+        let z = |out: &Value| out["seat"]["pose"]["translation_mm"][2].as_f64().unwrap_or_else(|| panic!("{:#}", out["seat"]));
+        let out = call(&all, json!({ "path": assembly, "component": fore, "part": clamp, "target": under(28.0),
+            "own": { "side": "+z" }, "offset": 0.5, "along": [1.0, 0.0, 0.0] }));
+        assert_eq!(out["seat"]["interference"], json!([]), "{:#}", out["seat"]);
+        let mut fore_z = z(&out);
+        keep(&mut all, &out);
+        let out = call(&all, json!({ "path": assembly, "component": aft, "part": clamp, "target": under(-28.0),
+            "own": { "side": "+z" }, "offset": 0.5, "levelWith": fore }));
+        let aft_z = z(&out);
+        keep(&mut all, &out);
+        let notes = out["seat"]["notes"].to_string();
+        if notes.contains("would press") {
+            // The aft belly is lower: the fore clamp comes down to the aft one's axis instead.
+            let out = call(&all, json!({ "path": assembly, "component": fore, "target": under(28.0),
+                "own": { "side": "+z" }, "offset": 0.5, "levelWith": aft }));
+            assert!(out["seat"]["notes"].to_string().contains("axis: moved"), "{:#}", out["seat"]);
+            fore_z = z(&out);
+            keep(&mut all, &out);
+        } else {
+            assert!(notes.contains(&format!("on `{fore}`'s axis: moved")), "{:#}", out["seat"]);
+        }
+        assert!((fore_z - aft_z).abs() < 0.01, "{side}: fore {fore_z} mm, aft {aft_z} mm");
+        heights.push(fore_z);
+        // The tube in the fore clamp's bore, then moved along its axis to centre between the
+        // clamps (the axis's sign is the contact normal's).
+        let out = call(&all, json!({ "path": assembly, "component": tube, "part": "/p/drone/mechanical/ground/skid_tube_long.part",
+            "target": { "component": fore, "face": bore }, "own": { "face": outside } }));
+        let sign = out["seat"]["contact"]["normal"][0].as_f64().unwrap_or_else(|| panic!("{:#}", out["seat"])).signum();
+        keep(&mut all, &out);
+        let out = call(&all, json!({ "path": assembly, "component": tube, "target": { "component": fore, "face": bore },
+            "own": { "face": outside }, "offset": -28.0 * sign }));
+        assert_eq!(out["seat"]["mate_status"], "satisfied", "{:#}", out["seat"]);
+        keep(&mut all, &out);
+    }
+    let files: Vec<(&str, &str)> = all.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+    let out = tool("design.inspect", json!({ "path": assembly, "sections": ["interference"],
+        "changed": ["clamp_fore_left", "clamp_aft_left", "tube_left", "clamp_fore_right", "clamp_aft_right", "tube_right"] }), &files);
+    let interference = &out["data"]["sections"]["interference"];
+    assert_eq!(interference["result"]["overlaps"], json!([]), "{out:#}");
+    assert_eq!(interference["problems"].as_array().map(Vec::len), Some(0), "{out:#}");
+    let check = tool("design.check", json!({ "path": assembly }), &files);
+    assert_eq!(check["data"]["errors"], 0, "{check:#}");
+    eprintln!("clamp heights {heights:?} mm; seconds per seating {seconds:?}");
+    // The first seating regenerates the assembly's bodies; each later one reuses them and takes
+    // about 3 s here (the median, so a busy machine's odd slow call doesn't fail it; a seating
+    // that regenerates its neighbours again takes about 50 s).
+    let mut later: Vec<f64> = seconds[1..].iter().map(|(_, s)| *s).collect();
+    later.sort_by(f64::total_cmp);
+    let median = later[later.len() / 2];
+    assert!(median < 10.0, "the median seating after the first took {median:.1} s: {seconds:?}");
+}
+
 #[test]
 fn a_block_seated_under_a_plate_stops_its_offset_short_and_pressed_in_reports_the_overlap_volume() {
     const BLOCK: &str = "runmat 0.7\nstd 1\n\npart block {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [20 mm, 0 mm])\n        l2 = line(start = l1.end, end = [20 mm, 10 mm])\n        l3 = line(start = l2.end, end = [0 mm, 10 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature box = extrude(profile = sketch.s, distance = 5 mm)\n}\n";

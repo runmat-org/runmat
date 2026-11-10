@@ -130,22 +130,26 @@ pub fn assembly_clearance_of(
     let is_changed = |p: &str| {
         changed.is_none_or(|c| c.iter().any(|n| p == n || p.starts_with(&format!("{n}/"))))
     };
-    // Content key → the regenerated body and its box in the part's frame. The kernels stay alive
-    // while their bodies are queried.
-    let mut kernels = Vec::new();
-    let mut loaded: BTreeMap<String, Option<(BodyHandle, Aabb)>> = BTreeMap::new();
+    // Content key → the regenerated body and its box in the part's frame, kept between calls
+    // (`bodies`), so a seating checks its neighbours without regenerating them each time.
+    let mut loaded: BTreeMap<String, Option<std::rc::Rc<bodies::Body>>> = BTreeMap::new();
     let mut errors = Vec::new();
-    let mut load = |p: &Placement, kernels: &mut Vec<Box<dyn crate::kernel::DesignKernel>>, errors: &mut Vec<String>| -> Option<(BodyHandle, Aabb)> {
+    let mut load = |p: &Placement, errors: &mut Vec<String>| -> Option<std::rc::Rc<bodies::Body>> {
         let slot = format!("{}#{}", p.file, p.key.map_or_else(|| p.path.clone(), |k| k.to_string()));
         if let Some(entry) = loaded.get(&slot) {
             return entry.clone();
         }
+        if let Some(kept) = p.key.and_then(|_| bodies::get(&slot)) {
+            errors.extend(kept.problems.iter().cloned());
+            loaded.insert(slot, Some(kept.clone()));
+            return Some(kept);
+        }
         let entry = match p.source {
             Source::Board => match crate::board_solid::board_body(&p.file, files) {
                 Ok(board) => {
-                    errors.extend(board.problems.iter().map(|q| format!("{}: {q}", p.file)));
-                    kernels.push(board.kernel);
-                    Some((board.body, board.bbox))
+                    let problems: Vec<String> = board.problems.iter().map(|q| format!("{}: {q}", p.file)).collect();
+                    errors.extend(problems.iter().cloned());
+                    Some(bodies::Body { kernel: board.kernel, body: board.body, bbox: board.bbox, problems })
                 }
                 Err(e) => {
                     errors.push(format!("{}: {e}", p.path));
@@ -163,10 +167,13 @@ pub fn assembly_clearance_of(
                     min: bounds.min.map(f64::from),
                     max: bounds.max.map(f64::from),
                 };
-                kernels.push(kernel);
-                Some((body, bbox))
+                Some(bodies::Body { kernel, body, bbox, problems: Vec::new() })
             }),
         };
+        let entry = entry.map(|e| match p.key {
+            Some(_) => bodies::put(&slot, e),
+            None => std::rc::Rc::new(e),
+        });
         loaded.insert(slot, entry.clone());
         entry
     };
@@ -196,7 +203,7 @@ pub fn assembly_clearance_of(
         let local = match key.and_then(cache::bbox) {
             Some(bbox) => Some(bbox),
             None => {
-                let bbox = load(&placement, &mut kernels, &mut errors).map(|(_, bbox)| bbox);
+                let bbox = load(&placement, &mut errors).map(|b| b.bbox);
                 if let (Some(k), Some(b)) = (key, bbox) {
                     cache::set_bbox(k, b);
                 }
@@ -229,16 +236,17 @@ pub fn assembly_clearance_of(
             let found = match pair.and_then(cache::pair) {
                 Some(found) => Ok(found),
                 None => {
-                    let bodies = load(a, &mut kernels, &mut out.errors).zip(load(b, &mut kernels, &mut out.errors));
-                    match (bodies, kernels.first()) {
-                        (Some(((body_a, _), (body_b, _))), Some(kernel)) => kernel
+                    let pair_bodies = load(a, &mut out.errors).zip(load(b, &mut out.errors));
+                    match pair_bodies {
+                        Some((body_a, body_b)) => body_a
+                            .kernel
                             .proximity(
-                                &Placed { body: &body_a, transform: a.world },
-                                &Placed { body: &body_b, transform: b.world },
+                                &Placed { body: &body_a.body, transform: a.world },
+                                &Placed { body: &body_b.body, transform: b.world },
                             )
                             .map(|p| cache::Found { volume: p.common_volume, distance: p.distance })
                             .map_err(|e| format!("{e:?}")),
-                        _ => continue,
+                        None => continue,
                     }
                 }
             };
@@ -278,6 +286,56 @@ pub fn content_key(file: &str, digest: &str, files: &Files) -> Option<u64> {
 /// The part-frame box an interference check found for the body with content `key`.
 pub fn cached_bbox(key: u64) -> Option<Aabb> {
     cache::bbox(key)
+}
+
+/// The regenerated bodies interference checks keep between calls on this thread, by content
+/// key, each with the kernel that made it. A seating checks the neighbours of each part it
+/// places, call after call (a curved shell, a board, the arms), and regenerating them is most
+/// of a check's time. A check of a whole assembly holds every body at once anyway, so keeping
+/// them costs no more than that peak; the least recently used go first once more are kept.
+mod bodies {
+    use super::{Aabb, BodyHandle};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    pub struct Body {
+        pub kernel: Box<dyn crate::kernel::DesignKernel>,
+        pub body: BodyHandle,
+        pub bbox: Aabb,
+        /// What regenerating it reported (a board's), repeated on every check that uses it.
+        pub problems: Vec<String>,
+    }
+
+    /// Bodies kept: about two assemblies the size of the camera drone (63 parts).
+    const KEPT: usize = 160;
+
+    thread_local! {
+        static KEPT_BODIES: RefCell<Vec<(String, Rc<Body>)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn get(slot: &str) -> Option<Rc<Body>> {
+        KEPT_BODIES.with(|k| {
+            let mut k = k.borrow_mut();
+            let at = k.iter().position(|(s, _)| s == slot)?;
+            let entry = k.remove(at);
+            let body = entry.1.clone();
+            k.push(entry);
+            Some(body)
+        })
+    }
+
+    pub fn put(slot: &str, body: Body) -> Rc<Body> {
+        let body = Rc::new(body);
+        KEPT_BODIES.with(|k| {
+            let mut k = k.borrow_mut();
+            k.retain(|(s, _)| s != slot);
+            if k.len() >= KEPT {
+                k.remove(0);
+            }
+            k.push((slot.to_owned(), body.clone()));
+        });
+        body
+    }
 }
 
 /// What interference checks keep between calls on this thread, by content.
