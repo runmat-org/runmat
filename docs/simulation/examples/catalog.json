@@ -683,7 +683,7 @@
         "Node temperature, in kelvin",
         "Element heat flux, in watts per square meter"
       ],
-      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "host_note": "Open or download the complete project, then run it in RunMat Desktop or the native CLI to compute temperature and heat flux.",
       "actions": [
         "open_source",
         "download"
