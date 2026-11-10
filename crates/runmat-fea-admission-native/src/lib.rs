@@ -430,14 +430,31 @@ macro_rules! through_outage {
             $lease.expires_at,
         )
         .begin($operation);
+        let mut last_denial = None;
         loop {
-            match with_current_token!($session, |$client| $call) {
-                Err(failure) if failure.transient => {
+            let remaining = clock.remaining();
+            if remaining.is_zero() {
+                // Settlement of an expired lease still needs its initial request.
+                // A zero outage window disables retries, not durable settlement.
+                if clock.attempts() == 1 && last_denial.is_none() {
+                    break with_current_token!($session, |$client| $call)
+                        .map_err(FeaRunDenied::from);
+                }
+                break Err(last_denial.unwrap_or(FeaRunDenied::ServerUnreachable));
+            }
+            match tokio::time::timeout(remaining, async {
+                with_current_token!($session, |$client| $call)
+            })
+            .await
+            {
+                Err(_) => break Err(last_denial.unwrap_or(FeaRunDenied::ServerUnreachable)),
+                Ok(Err(failure)) if failure.transient => {
                     if !clock.retry(&failure.denied).await {
                         break Err(failure.denied);
                     }
+                    last_denial = Some(failure.denied);
                 }
-                other => {
+                Ok(other) => {
                     if other.is_ok() {
                         clock.recovered();
                     }

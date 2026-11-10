@@ -207,10 +207,11 @@ fn circuit_path(path: &str, files: &Files) -> String {
 /// The report as text lines, paths shown relative to `base`: each finding, each measurement and
 /// a closing verdict line. Command-line callers print it.
 pub fn report_lines(report: &CircuitCheck, base: &str) -> Vec<String> {
-    let shown = report
-        .path
+    let normalized_path = report.path.replace('\\', "/");
+    let base = base.replace('\\', "/");
+    let shown = normalized_path
         .strip_prefix(&format!("{}/", base.trim_end_matches('/')))
-        .unwrap_or(&report.path);
+        .unwrap_or(&normalized_path);
     let mut lines = Vec::new();
     for f in &report.findings {
         let items = if f.items.is_empty() {

@@ -25,6 +25,8 @@ class ScientificRoutingTests(unittest.TestCase):
         with patch.object(runner.sys, "platform", "linux"), patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/stale-runtime"}):
             with runner.test_runtime_environment() as environment:
                 directory = Path(environment["XDG_RUNTIME_DIR"])
+                self.assertEqual(environment["CARGO_PROFILE_DEV_LTO"],
+                                 os.environ.get("CARGO_PROFILE_DEV_LTO", "off"))
                 self.assertTrue(directory.is_dir())
                 if os.name != "nt":
                     self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
@@ -40,10 +42,13 @@ class ScientificRoutingTests(unittest.TestCase):
             {"name": "demo", "kind": ["example"]},
         ]} for name in members]}
         commands = runner.test_commands("language", True, metadata)
-        shards = [runner.shard_commands(commands, index, 2) for index in range(2)]
-        self.assertEqual(Counter(tuple(command) for command in commands),
-                         Counter(tuple(command) for shard in shards for command in shard))
-        self.assertFalse(set(map(tuple, shards[0])) & set(map(tuple, shards[1])))
+        for count in (2, 4):
+            shards = [runner.shard_commands(commands, index, count) for index in range(count)]
+            self.assertEqual(Counter(tuple(command) for command in commands),
+                             Counter(tuple(command) for shard in shards for command in shard))
+            for index, shard in enumerate(shards):
+                for other in shards[index + 1:]:
+                    self.assertFalse(set(map(tuple, shard)) & set(map(tuple, other)))
         self.assertEqual(runner.shard_commands(commands, 0, 1), commands)
         for index, count in ((-1, 2), (2, 2), (0, 0), (0, len(commands) + 1)):
             with self.assertRaises(ValueError):

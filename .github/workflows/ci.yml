@@ -159,10 +159,10 @@ jobs:
             task: test
             test_group: tooling-distributed
             needs_occt: true
-            # Disjoint root batches bound disk use; both retain the original
+            # Disjoint root batches bound disk use; all retain the original
             # package/feature union and restore the same compiled libraries.
             shard_index: 0
-            shard_count: 2
+            shard_count: 4
             cache_name: windows-tests-tooling-distributed
           - runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed-tail
@@ -170,7 +170,23 @@ jobs:
             test_group: tooling-distributed
             needs_occt: true
             shard_index: 1
-            shard_count: 2
+            shard_count: 4
+            cache_name: windows-tests-tooling-distributed
+          - runner: warp-windows-latest-x64-16x
+            name: windows-tests-tooling-distributed-third
+            task: test
+            test_group: tooling-distributed
+            needs_occt: true
+            shard_index: 2
+            shard_count: 4
+            cache_name: windows-tests-tooling-distributed
+          - runner: warp-windows-latest-x64-16x
+            name: windows-tests-tooling-distributed-fourth
+            task: test
+            test_group: tooling-distributed
+            needs_occt: true
+            shard_index: 3
+            shard_count: 4
             cache_name: windows-tests-tooling-distributed
     runs-on: ${{ matrix.runner }}
     # The macOS tooling cohort reached six hours while compiling a later

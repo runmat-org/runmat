@@ -32,6 +32,9 @@ def configure_output_streams() -> None:
 def test_environment() -> dict[str, str]:
     environment = os.environ.copy()
     environment["RUST_MIN_STACK"] = str(NATIVE_TEST_STACK_BYTES)
+    # Match profile.test for binaries exercised by integration tests. Cargo's
+    # artifact fingerprints select reusable copies from the existing cache.
+    environment.setdefault("CARGO_PROFILE_DEV_LTO", "off")
     return environment
 
 

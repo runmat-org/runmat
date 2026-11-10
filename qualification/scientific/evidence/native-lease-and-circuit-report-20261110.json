@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "source_base_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
+  "inputs": {
+    "sha256": "3ae1253a1f557a8401fbc06a32a94b400c27d70137cd233c7a50c66745621d0e",
+    "files": 26022,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "target": "linux-x86_64",
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--release",
+    "--all-features",
+    "-p",
+    "runmat",
+    "-p",
+    "runmat-fea-admission-native",
+    "-p",
+    "runmat-server-client",
+    "--lib",
+    "--no-fail-fast"
+  ],
+  "passed": 191,
+  "failed": 0,
+  "ignored": 0,
+  "filtered_out": 0,
+  "exit_code": 0,
+  "harnesses": [
+    {
+      "package": "runmat",
+      "passed": 154
+    },
+    {
+      "package": "runmat-fea-admission-native",
+      "passed": 12
+    },
+    {
+      "package": "runmat-server-client",
+      "passed": 25
+    }
+  ],
+  "log_sha256": "fea501cd4b27394a8d0bbba24de50c761c91d826f2a1ea11e7b3e5f0bfc7ea36",
+  "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-focused-repair.log",
+  "source_guard": {
+    "base_files": 27141,
+    "unchanged_files": 27136,
+    "reviewed_changed_files": 5,
+    "sha256": "8f14e8f9c36fd1e85665fb862e81965df8452e0ca1e311ef445ab849365898c9",
+    "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-focused-repair.postsource.json"
+  },
+  "artifacts": [
+    {
+      "sha256": "b6edb93516502e949172a30077e181de8611ba0cdb6944ce855fc11ba825a051",
+      "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-focused-repair.artifacts/runmat-89ca5bc2575f35f1"
+    },
+    {
+      "sha256": "724b7e62e4a85b2dc69d9e652caed239af72f14d225cd02c50d2585856fb5317",
+      "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-focused-repair.artifacts/runmat_fea_admission_native-6daf6fb985aeb269"
+    },
+    {
+      "sha256": "a097c8d40873f870802cd3e5b36fa29bea12c7634a1ff8837b809bda030e624b",
+      "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-focused-repair.artifacts/runmat_server_client-8008e81ef167e764"
+    }
+  ],
+  "scope": "Focused native reporting, lease deadline, outage, refresh and settlement acceptance. Final GitHub platform and native-product qualification remains required."
+}

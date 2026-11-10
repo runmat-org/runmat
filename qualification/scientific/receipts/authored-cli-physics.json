@@ -57,5 +57,22 @@
         "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.artifacts/runmat"
       }
     ]
+  },
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
+      "files": 26022,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "3ae1253a1f557a8401fbc06a32a94b400c27d70137cd233c7a50c66745621d0e",
+      "files": 26022,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Reviewed native report formatting and lease deadline repairs; numerical workloads and assertions remain unchanged. See the exact input inventory and focused acceptance evidence.",
+    "review": {
+      "path": "qualification/scientific/reviews/native-lease-and-circuit-report-20261110.json",
+      "sha256": "5cb0e344ffb7ca10e21b70e55ab1ba9f2298a79aedd7ad03b57f61d5ed410a83"
+    }
   }
 }

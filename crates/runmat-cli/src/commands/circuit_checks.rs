@@ -68,6 +68,9 @@ mod tests {
             .last()
             .unwrap()
             .starts_with("flight_controller.circuit.layout: "));
+        let mut windows_report = report.clone();
+        windows_report.path = r"C:\work\flight_controller.circuit.layout".into();
+        assert_eq!(report_lines(&windows_report, r"C:\work"), lines);
         use clap::Parser;
         let cli = crate::cli::Cli::try_parse_from([
             "runmat",

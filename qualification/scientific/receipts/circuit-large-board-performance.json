@@ -7,8 +7,26 @@
     "target": "macos-aarch64",
     "hardware": "Apple M5 Max, 48 GiB RAM",
     "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
-    "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat-circuit", "--test", "runtime_scale", "--", "--test-threads=1"],
-    "profile": {"release": true, "debug": 0, "cargo_build_jobs": 4, "incremental": false},
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat-circuit",
+      "--test",
+      "runtime_scale",
+      "--",
+      "--test-threads=1"
+    ],
+    "profile": {
+      "release": true,
+      "debug": 0,
+      "cargo_build_jobs": 4,
+      "incremental": false
+    },
     "log_sha256": "cd3f83f6598d25adec54fe44ec3cbc58c61c2e8d2532c87e4952715b2062234d",
     "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.tmp-rm1064/integration-071-777b5146bf-circuit-main-official.log",
     "passed": 1,
@@ -16,38 +34,62 @@
     "ignored": 0,
     "filtered_out": 0,
     "exit_code": 0,
-    "case_names": ["small_edits_on_a_large_board_stay_within_budget"],
+    "case_names": [
+      "small_edits_on_a_large_board_stay_within_budget"
+    ],
     "selected_filter": null,
     "inputs": {
       "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
       "files": 26022,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "artifacts": [{
-      "sha256": "1dc9e21a511fddcf8a44d282d0872c1170b2e8bc547fe48ecd06c18a5e6d8f9e",
-      "location": "Main:/Users/nallana/Source/runmat-acc-2/.tmp-rm1064/integration-071-circuit-artifacts/runtime_scale-777b5146bf-macos-aarch64"
-    }]
+    "artifacts": [
+      {
+        "sha256": "1dc9e21a511fddcf8a44d282d0872c1170b2e8bc547fe48ecd06c18a5e6d8f9e",
+        "location": "Main:/Users/nallana/Source/runmat-acc-2/.tmp-rm1064/integration-071-circuit-artifacts/runtime_scale-777b5146bf-macos-aarch64"
+      }
+    ]
   },
   "scope": "The unchanged 500 ms edit budget passed on the recorded reference Mac. This receipt does not establish that budget on other processors.",
-  "comparison_runs": [{
-    "source_revision": "a5ba07c1321391449e961bc3401300067672692b",
-    "target": "linux-x86_64",
-    "hardware": "GCP N1 highmem-16, Intel Xeon 2.00 GHz",
-    "passed": 0,
-    "failed": 1,
-    "move_and_compile_seconds": 1.187979635,
-    "log_sha256": "fccf508a24b68fe28b4435c7c36de6b2507abea2ae6f34028f2904555250d1a7",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-a5ba07c132-scientific.circuit-large-board-performance.log",
-    "disposition": "Retained failed measurement on the slower host; no threshold or numerical assertion changed."
-  }, {
-    "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
-    "target": "linux-x86_64",
-    "hardware": "GCP N1 highmem-16, Intel Xeon 2.00 GHz",
-    "passed": 0,
-    "failed": 1,
-    "move_and_compile_seconds": 1.222104462,
-    "log_sha256": "4d2cec0f59c4f433c0946cc96e543dcf738d375cb067c7a05bbc5fc5c56ce58a",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.circuit-large-board-performance.log",
-    "disposition": "Renewed failed N1 comparison; the reference-Mac receipt retains the unchanged 500 ms budget."
-  }]
+  "comparison_runs": [
+    {
+      "source_revision": "a5ba07c1321391449e961bc3401300067672692b",
+      "target": "linux-x86_64",
+      "hardware": "GCP N1 highmem-16, Intel Xeon 2.00 GHz",
+      "passed": 0,
+      "failed": 1,
+      "move_and_compile_seconds": 1.187979635,
+      "log_sha256": "fccf508a24b68fe28b4435c7c36de6b2507abea2ae6f34028f2904555250d1a7",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-a5ba07c132-scientific.circuit-large-board-performance.log",
+      "disposition": "Retained failed measurement on the slower host; no threshold or numerical assertion changed."
+    },
+    {
+      "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
+      "target": "linux-x86_64",
+      "hardware": "GCP N1 highmem-16, Intel Xeon 2.00 GHz",
+      "passed": 0,
+      "failed": 1,
+      "move_and_compile_seconds": 1.222104462,
+      "log_sha256": "4d2cec0f59c4f433c0946cc96e543dcf738d375cb067c7a05bbc5fc5c56ce58a",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.circuit-large-board-performance.log",
+      "disposition": "Renewed failed N1 comparison; the reference-Mac receipt retains the unchanged 500 ms budget."
+    }
+  ],
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
+      "files": 26022,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "3ae1253a1f557a8401fbc06a32a94b400c27d70137cd233c7a50c66745621d0e",
+      "files": 26022,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Reviewed native report formatting and lease deadline repairs; numerical workloads and assertions remain unchanged. See the exact input inventory and focused acceptance evidence.",
+    "review": {
+      "path": "qualification/scientific/reviews/native-lease-and-circuit-report-20261110.json",
+      "sha256": "5cb0e344ffb7ca10e21b70e55ab1ba9f2298a79aedd7ad03b57f61d5ed410a83"
+    }
+  }
 }

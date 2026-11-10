@@ -82,6 +82,11 @@ pub struct OutageClock {
 }
 
 impl OutageClock {
+    /// Time left for the complete request, including transport and token refresh.
+    pub fn remaining(&self) -> Duration {
+        self.policy.window.saturating_sub(self.started.elapsed())
+    }
+
     /// The next pause, or `None` when sleeping it would pass the window. Equal jitter:
     /// half the current backoff plus a random part of the other half.
     pub fn next_pause(&mut self) -> Option<Duration> {
@@ -188,6 +193,7 @@ mod tests {
         );
         assert_eq!(policy.window(), Duration::from_secs(300));
         let mut clock = policy.begin("test");
+        assert!(clock.remaining() <= policy.window());
         let mut total = Duration::ZERO;
         let mut step = Duration::from_secs(1);
         while let Some(pause) = clock.next_pause() {
@@ -202,6 +208,7 @@ mod tests {
         assert!(total >= Duration::from_secs(270), "{total:?}");
         // An expired lease has no window.
         let expired = LeaseRetry::for_lease(Duration::from_secs(30), Utc::now());
+        assert_eq!(expired.begin("expired").remaining(), Duration::ZERO);
         assert_eq!(expired.begin("expired").next_pause(), None);
     }
 }

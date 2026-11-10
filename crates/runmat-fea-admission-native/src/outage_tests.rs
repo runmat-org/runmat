@@ -293,9 +293,17 @@ async fn denials_and_unreadable_answers_are_not_retried() {
     assert_eq!(handle.await.unwrap().len(), 4);
 }
 
-#[test]
-fn the_fake_server_receipt_is_a_valid_receipt() {
+#[tokio::test]
+async fn the_fake_server_receipt_is_a_valid_receipt() {
     let body = serde_json::to_value(settlement(420)).unwrap();
     let receipt = served("/settle", &body);
     serde_json::from_str::<SimulationReceipt>(&receipt).unwrap();
+    // Expiry ends renewal retries; completed work can still be settled once.
+    let (server, handle) = scripted(vec![Step::Serve]).await;
+    let mut session = session(&server);
+    session
+        .settle(&lease("2000-01-01T00:00:00Z"), &settlement(420))
+        .await
+        .unwrap();
+    assert_eq!(totals(&handle.await.unwrap()), [(true, 420)]);
 }
