@@ -25,7 +25,7 @@ pub struct ProposeEditInput {
     /// A catalog command id (`part.extrude`, `part.fillet`, `part.suppress`,
     /// `assembly.fix`, `board.route`, `schematic.update-board`, …). Give this or `text`.
     /// A blank id counts as no command: models fill every optional field and send `""` beside
-    /// `replace`.
+    /// `replace` (or the word `null`).
     #[serde(default, deserialize_with = "blank_as_none")]
     pub command: Option<String>,
     /// The command's values by field id, numbers in the field's unit (`{ "depth": 12 }` for
@@ -45,7 +45,8 @@ pub struct ProposeEditInput {
 
 fn blank_as_none<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
     let value = Option::<String>::deserialize(deserializer)?;
-    Ok(value.filter(|text| !text.trim().is_empty()))
+    // Models also send the word `null` as text for a field they mean to leave out.
+    Ok(value.filter(|text| !text.trim().is_empty() && text.trim() != "null"))
 }
 
 /// One replacement of [`ProposeEditInput::replace`].
@@ -732,6 +733,8 @@ mod tests {
             "replace": [{ "old": "b", "new": "c" }],
         }))
         .unwrap();
+        assert!(input.command.is_none());
+        let input: ProposeEditInput = serde_json::from_value(json!({ "path": "/a.part", "command": "null", "text": "part a {}" })).unwrap();
         assert!(input.command.is_none());
         let input: ProposeEditInput =
             serde_json::from_value(json!({ "path": "/a.circuit", "command": "board.route" })).unwrap();
