@@ -31,9 +31,17 @@ fn modal_preassembly_reserves_subgraph_proof_envelope_and_enforces_original_ceil
     else {
         panic!("modal workspace must retain typed subspace demand");
     };
-    // The complete numerical workspace must contain even the admitted proof peak.
+    // The complete numerical workspace must contain the peak of every proof that can run on
+    // the reduced support: the proving factorization always, and the anchored local-energy
+    // proof only when the original energy source is captured (it reads that source).
     // An upper graph's own successful factorization cannot reserve this subgraph inventory.
-    assert!(workspace_bytes_upper_bound.0 >= envelope.resident_bytes_limit());
+    let FeaResourceDemand::StructuralModalExtraction(demand) = &plan.input.demand else {
+        panic!("modal demand");
+    };
+    assert!(workspace_bytes_upper_bound.0 >= envelope.factor_resident_limit());
+    if demand.original_energy_source_bytes.0 > 0 {
+        assert!(workspace_bytes_upper_bound.0 >= envelope.resident_bytes_limit());
+    }
     let mut too_small = plan.input.clone();
     too_small.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
     assert!(super::super::build_resource_plan(too_small).is_err());

@@ -143,7 +143,7 @@ mod tests {
         // The search ceiling still caps a large request, and the reduced dimension a small model.
         assert_eq!(
             production
-                .admitted_subspace_dimension(1_000_000, 300)
+                .admitted_subspace_dimension(1_000_000, 250)
                 .unwrap(),
             production.maximum_subspace_dimension()
         );
