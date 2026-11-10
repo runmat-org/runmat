@@ -3,9 +3,11 @@ use serde::Serialize;
 use std::path::Path;
 mod camera;
 mod legend;
+mod outputs;
 mod presentation;
 mod profiles;
 pub(super) use legend::authored_bound_units;
+pub(super) use outputs::OutputNames;
 pub(super) use presentation::Presentation;
 
 /// What a view's legend is written in terms of: the unit each assessment states its bound in
@@ -26,6 +28,13 @@ pub(super) struct View {
     /// The run whose original fields this view shows.
     pub run_id: String,
     pub label: String,
+    /// The study output this view draws, as the study declares it (`temperature`,
+    /// `current_density`, `buckled_shapes`); null for the solver mesh and for a field no
+    /// authored output republishes. Section and arrow views of an output follow its plain view.
+    pub output: Option<String>,
+    /// A mode shape's 1-based mode index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<usize>,
     pub field: Option<String>,
     /// The sample of `field` shown (a frequency, a mode, a time), when the field has several.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -176,6 +185,7 @@ pub(super) async fn capture(
     solver_mesh: impl Fn(&str) -> Option<String>,
     presentation: &Presentation,
     terms: &LegendTerms,
+    outputs: &OutputNames,
 ) -> Result<Vec<View>> {
     use runmat_runtime::analysis::field_scene::extrema;
     use runmat_runtime::builtins::plotting;
@@ -198,6 +208,7 @@ pub(super) async fn capture(
             mesh = Some((run_id.to_string(), entities));
         }
         let entities = mesh.as_ref().and_then(|(_, entities)| entities.as_ref());
+        let output_name = outputs.name(&spec);
         let extrema = spec
             .field
             .as_ref()
@@ -419,6 +430,8 @@ pub(super) async fn capture(
                 id,
                 run_id: spec.run_id,
                 label: spec.label,
+                output: output_name,
+                mode: spec.mode,
                 sample: spec.field.as_ref().and_then(|field| field.sample),
                 field: spec.field.map(|field| field.field_id),
                 deformation_field,

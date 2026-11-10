@@ -42,6 +42,10 @@ pub(super) struct ViewSpec {
     pub relative: bool,
     /// A view inside the part (section, streamlines, arrows) instead of its boundary.
     pub volume: Option<VolumeSpec>,
+    /// The quantity and location of the drawn field, which name the study output it draws.
+    pub source: Option<(Q, FieldLocation)>,
+    /// A mode shape's 1-based mode index.
+    pub mode: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -963,7 +967,7 @@ impl CaptureProfile {
     }
 
     /// The views for runs given by their published field descriptors.
-    fn from_published(
+    pub(super) fn from_published(
         runs: &[(&str, &[AnalysisFieldDescriptor])],
         values: &dyn PublishedValues,
     ) -> Result<Self> {
@@ -983,6 +987,8 @@ impl CaptureProfile {
             shape: "undeformed",
             relative: false,
             volume: None,
+            source: None,
+            mode: None,
         }];
         for display in DISPLAYS {
             if views.len() > MAXIMUM_FIELD_VIEWS {
@@ -1029,6 +1035,8 @@ impl CaptureProfile {
                 unit,
                 relative: false,
                 volume: None,
+                source: Some((descriptor.layout.quantity, descriptor.layout.location)),
+                mode: None,
             });
         }
         let mut volume_views = 0;
@@ -1091,6 +1099,8 @@ impl CaptureProfile {
                     reduction: display.reduction,
                     true_extrema: display.true_extrema,
                 }),
+                source: Some((descriptor.layout.quantity, descriptor.layout.location)),
+                mode: None,
             });
             volume_views += 1;
         }
@@ -1134,6 +1144,8 @@ impl CaptureProfile {
                 shape: if deforms { "exaggerated" } else { "undeformed" },
                 relative: true,
                 volume: None,
+                source: Some((mode.layout.quantity, mode.layout.location)),
+                mode: Some(mode_index(mode).map_or(number, |index| index + 1)),
             });
         }
         if views.len() == 1 {
@@ -1150,11 +1162,11 @@ impl CaptureProfile {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use runmat_analysis_core::{AnalysisField, AnalysisFieldLayout};
 
-    fn published(
+    pub(in crate::commands::fea::snapshot::views) fn published(
         id: &str,
         layout: AnalysisFieldLayout,
         shape: Vec<usize>,
@@ -1173,11 +1185,11 @@ mod tests {
 
     /// Published values by field id: peak magnitudes and small per-mode lists.
     #[derive(Default)]
-    struct Values {
-        peaks: std::collections::HashMap<String, f64>,
-        lists: std::collections::HashMap<String, Vec<f64>>,
+    pub(in crate::commands::fea::snapshot::views) struct Values {
+        pub peaks: std::collections::HashMap<String, f64>,
+        pub lists: std::collections::HashMap<String, Vec<f64>>,
         /// Retained transient times by step.
-        times: Vec<f64>,
+        pub times: Vec<f64>,
     }
 
     impl PublishedValues for Values {
