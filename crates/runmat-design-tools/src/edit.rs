@@ -4,6 +4,8 @@
 //! undo it, the feature and dimension diff (parts and assemblies) or the schematic-to-board
 //! change rows (circuits), and the diagnostics of every changed design file after the change.
 
+mod hand_placement;
+
 use crate::check::{check, CheckInput, DesignDiagnostic};
 use crate::{is_design_path, kind_of, text_of, DesignKind, Files, ToolError};
 use schemars::JsonSchema;
@@ -629,6 +631,9 @@ pub fn propose(input: &ProposeEditInput, files: &Files) -> Result<StagedChange, 
     let text_input = from_replace.as_ref().or(input.text.as_ref());
     match (text_input, &input.command) {
         (Some(new), None) => {
+            if kind == DesignKind::Assembly {
+                hand_placement::refuse_hand_placement(&input.path, text, new)?;
+            }
             let summary = format!("Edit {} ({} → {} bytes)", input.path, text.len(), new.len());
             Ok(stage(
                 summary,
@@ -672,6 +677,11 @@ pub fn propose(input: &ProposeEditInput, files: &Files) -> Result<StagedChange, 
                     "drawings change through their source text: pass `text`",
                 ));
             };
+            if kind == DesignKind::Assembly {
+                if let Some((_, after)) = changed.iter().find(|(p, _)| *p == input.path) {
+                    hand_placement::refuse_hand_placement(&input.path, text, after)?;
+                }
+            }
             Ok(stage(summary, changed, files, &input.path))
         }
         _ => Err(ToolError::invalid(

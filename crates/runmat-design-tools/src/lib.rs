@@ -282,7 +282,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         definition::<edit::ProposeEditInput, edit::StagedChange>(
             "design.propose_edit",
             "Propose design edit",
-            "Use this to change a design or add a design file: give the new source text (a path that doesn't exist yet creates that file), replacements on the current text, or a catalog command (for example part.extrude, part.fillet, board.route) with its values and selection. Returns a staged change: the feature and dimension diff or the schematic-to-board change rows, the diagnostics after it, and the patch that keeps it and the patch that undoes it.",
+            "Use this to change a design or add a design file: give the new source text (a path that doesn't exist yet creates that file), replacements on the current text, or a catalog command (for example part.extrude, part.fillet, board.route) with its values and selection. Returns a staged change: the feature and dimension diff or the schematic-to-board change rows, the diagnostics after it, and the patch that keeps it and the patch that undoes it. An edit that adds a part occurrence, connector or fasten, coincident or concentric mate to an assembly that already places parts is refused: place parts with design.seat_part.",
         ),
         definition::<seat::SeatInput, seat::SeatOutput>(
             "design.seat_part",

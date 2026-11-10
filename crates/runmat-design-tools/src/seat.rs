@@ -16,6 +16,9 @@
 //! turned by `rotation` about the contact normal. It then travels toward the target until it
 //! first touches it, by rays both ways between the two parts' tessellations, and stops
 //! `offset` short of it. On an axis it lines up with the target's axis, `offset` along it.
+//! With `levelWith` it then moves square to that component's round axis onto the axis, so a
+//! set of clamps under a curved belly holds one straight tube; where the axis would press it
+//! into the target it stays at first contact and the notes say how far off the axis it is.
 //!
 //! The mate is a fasten unless `mate` asks for `coincident` (a planar mate) or `concentric` (a
 //! cylindrical mate). A fasten moves the component from where it is: the solver seeds a fasten
@@ -74,6 +77,13 @@ pub struct SeatInput {
     /// `fasten` (the default), `coincident` (planes) or `concentric` (axes).
     #[serde(default)]
     pub mate: Option<String>,
+    /// A component already seated (a clamp, or the tube it holds) whose round face's axis this
+    /// one's bore goes on: the component keeps the station along that axis that the target picks
+    /// and stops short of the target instead of touching it, so a straight member runs through
+    /// a set of clamps under a curved body. Its long axis runs along that axis unless `along`
+    /// says otherwise. Only with a target face or ray.
+    #[serde(default)]
+    pub level_with: Option<String>,
     /// Neighbours to report the clearance to (occurrence names).
     #[serde(default)]
     pub clearance: Option<Vec<String>>,
@@ -241,15 +251,31 @@ struct Placed {
     display: Rc<PartDisplay>,
 }
 
-fn placed(path: &str, text: &str, files: &Files, name: &str, role: &str) -> Result<Placed, ToolError> {
-    let found = runmat_cad_wasm::probe::placed_parts(path, text, files, &[name.to_owned()])
-        .map_err(|e| ToolError::new("not_compiled", format!("{path} doesn't resolve: {e}")))?;
-    match found.into_iter().find(|p| p.occurrence == name) {
-        Some(p) => Ok(Placed { world: p.world, display: p.display }),
-        None => Err(ToolError::invalid(format!(
-            "{role} `{name}` isn't a part occurrence of {path}; its part occurrences are {}",
-            occurrence_names(path, text, files).join(", ")
-        ))),
+/// The part occurrences a seating works on, from one resolution of the assembly.
+struct PlacedSet<'a> {
+    path: &'a str,
+    text: &'a str,
+    files: &'a Files,
+    found: Vec<runmat_cad_wasm::probe::PlacedPart>,
+}
+
+impl<'a> PlacedSet<'a> {
+    fn new(path: &'a str, text: &'a str, files: &'a Files, names: &[&str]) -> Result<Self, ToolError> {
+        let names: Vec<String> = names.iter().map(|n| (*n).to_owned()).collect();
+        let found = runmat_cad_wasm::probe::placed_parts(path, text, files, &names)
+            .map_err(|e| ToolError::new("not_compiled", format!("{path} doesn't resolve: {e}")))?;
+        Ok(Self { path, text, files, found })
+    }
+
+    fn get(&self, name: &str, role: &str) -> Result<Placed, ToolError> {
+        match self.found.iter().find(|p| p.occurrence == name) {
+            Some(p) => Ok(Placed { world: p.world, display: p.display.clone() }),
+            None => Err(ToolError::invalid(format!(
+                "{role} `{name}` isn't a part occurrence of {}; its part occurrences are {}",
+                self.path,
+                occurrence_names(self.path, self.text, self.files).join(", ")
+            ))),
+        }
     }
 }
 
@@ -291,6 +317,10 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
     let offset = input.offset.unwrap_or(0.0) / 1000.0;
     let turn_by = input.rotation.unwrap_or(0.0).to_radians();
     let own = input.own.clone().unwrap_or_default();
+    let level_with = input.level_with.as_deref().map(str::trim).filter(|l| !l.is_empty());
+    if level_with == Some(name) {
+        return Err(ToolError::invalid(format!("component `{name}` can't be levelled with itself; name a component seated earlier")));
+    }
 
     // The assembly with the component in it and free to move, and its old seat taken out.
     let mut tentative = text::without_seat(original, name);
@@ -308,7 +338,10 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
             ToolError::invalid(format!("component `{name}` isn't a top-level occurrence of {path}; give `part` to insert a new one"))
         })?,
     };
-    let moving = placed(path, &tentative, files, name, "component")?;
+    let mut wanted = vec![name, target_name];
+    wanted.extend(level_with);
+    let set = PlacedSet::new(path, &tentative, files, &wanted)?;
+    let moving = set.get(name, "component")?;
 
     // The connectors: exact frames when either side names a connector, else from the geometry.
     let target_connector = input.target.connector.as_deref().map(str::trim).filter(|c| !c.is_empty());
@@ -317,6 +350,9 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
     let (target_line, own_line, seated, contact) = if target_connector.is_some() || own_connector.is_some() {
         if kind != "fasten" {
             return Err(ToolError::invalid(format!("a connector pick seats with a fasten; mate `{}` needs a face, side or ray on both", input.mate.as_deref().unwrap_or(""))));
+        }
+        if level_with.is_some() {
+            return Err(ToolError::invalid("levelWith lines the component up from a target face or ray; leave out the connectors"));
         }
         let own_line = match own_connector {
             Some(c) => text::own_published(name, c, !flip),
@@ -329,7 +365,7 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
             Some(c) if text::declares_connector(&tentative, c) => text::TargetLine::Existing(c.to_owned()),
             Some(c) => return Err(ToolError::invalid(format!("target connector `{c}` isn't a connector of {path}"))),
             None => {
-                let target = placed(path, &tentative, files, target_name, "target component")?;
+                let target = set.get(target_name, "target component")?;
                 let (contact, _) = target_contact(input, &target)?;
                 let (point, z) = match contact {
                     Contact::Plane { origin, normal } => (origin, normal),
@@ -343,8 +379,13 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
         notes.push("placed by the connector frames: the fasten puts the frames together, with no search for first contact".to_owned());
         (target_line, own_line, None, None)
     } else {
-        let target = placed(path, &tentative, files, target_name, "target component")?;
-        let (target_frame, own_frame, seated, is_axis) = seat_frames(input, &target, &moving, &own, flip, turn_by, along, offset)?;
+        let target = set.get(target_name, "target component")?;
+        let level = match level_with {
+            Some(l) => Some(set.get(l, "levelWith component")?),
+            None => None,
+        };
+        let picks = Picks { own: &own, flip, turn_by, along, offset, level: level.as_ref().zip(level_with) };
+        let (target_frame, own_frame, seated, is_axis) = seat_frames(input, &target, &moving, &picks, &mut notes)?;
         match (kind, is_axis) {
             ("planar", true) => return Err(ToolError::invalid(format!("mate coincident joins planes; target face `{}` on `{target_name}` is a cylinder: use concentric", input.target.face.as_deref().unwrap_or_default()))),
             ("cylindrical", false) => return Err(ToolError::invalid(format!("mate concentric joins axes; pick cylindrical faces for target.face on `{target_name}` and own.face on `{name}`"))),
@@ -547,23 +588,36 @@ fn own_alone(moving: &Placed, own: &SeatOwn, name: &str) -> Result<(Frame, bool)
     })
 }
 
-/// The target's connector frame, the component's, the seated pose, and whether they meet on an
-/// axis.
-#[allow(clippy::too_many_arguments)]
-fn seat_frames(
-    input: &SeatInput,
-    target: &Placed,
-    moving: &Placed,
-    own: &SeatOwn,
+/// The component's picks besides the target.
+struct Picks<'a> {
+    own: &'a SeatOwn,
     flip: bool,
     turn_by: f64,
     along: Option<V3>,
     offset: f64,
-) -> Result<(Frame, Frame, Seated, bool), ToolError> {
+    /// The component whose round axis this one goes on, and its name.
+    level: Option<(&'a Placed, &'a str)>,
+}
+
+/// The world axis of `placed`'s largest round face across `normal` (world): a point and its
+/// unit direction.
+fn world_round_axis(placed: &Placed, normal: V3) -> Option<(V3, V3)> {
+    let inv = placed.world.inverse();
+    let (p, a) = round_axis(&placed.display, inv.apply_vector(normal))?;
+    Some((placed.world.apply(p), unit(placed.world.apply_vector(a))?))
+}
+
+/// The target's connector frame, the component's, the seated pose, and whether they meet on an
+/// axis.
+fn seat_frames(input: &SeatInput, target: &Placed, moving: &Placed, picks: &Picks, notes: &mut Vec<String>) -> Result<(Frame, Frame, Seated, bool), ToolError> {
+    let Picks { own, flip, turn_by, along, offset, level } = *picks;
     let tname = input.target.component.trim();
     let name = input.component.trim();
     let world = &target.world;
     let (contact, approach) = target_contact(input, target)?;
+    if let (Contact::Axis { .. }, Some((_, l))) = (contact, level) {
+        return Err(ToolError::invalid(format!("levelWith `{l}` lines the component up from a flat target face or a ray; on a cylinder it already shares the target's axis")));
+    }
     // The component's own contact, in its part's coordinates.
     let own_contact = match (&own.face, &own.side) {
         (Some(face), _) => {
@@ -586,7 +640,16 @@ fn seat_frames(
         (Contact::Plane { origin, normal }, Contact::Plane { origin: own_at, normal: own_n }) => {
             let own_x = long_axis(&moving.display, own_n);
             let to_z = if flip { normal } else { scale(normal, -1.0) };
-            let lean = along.unwrap_or_else(|| geometry::apply(&current, own_x));
+            // The axis to level on, and the component's own bore, before it turns.
+            let level = match level {
+                Some((l, lname)) => {
+                    let line = world_round_axis(l, normal).ok_or_else(|| ToolError::invalid(format!("levelWith `{lname}` has no round face lying across the contact (a bore or a tube's outside) to line up with")))?;
+                    let bore = round_axis(&moving.display, own_n).ok_or_else(|| ToolError::invalid(format!("component `{name}` has no round face lying across its contact (a bore) to put on `{lname}`'s axis")))?;
+                    Some((line, bore, lname))
+                }
+                None => None,
+            };
+            let lean = along.or(level.map(|((_, v), _, _)| v)).unwrap_or_else(|| geometry::apply(&current, own_x));
             let to_x = turn(square_to(lean, normal).unwrap_or_else(|| perpendicular(normal)), normal, turn_by);
             let rotation = frame_rotation(own_x, own_n, to_x, to_z);
             // Face to face at the contact point, then pulled back and moved in until it touches.
@@ -603,7 +666,33 @@ fn seat_frames(
             let d = travel(&pulled, &fixed, a).ok_or_else(|| {
                 ToolError::invalid(format!("`{name}` never meets `{tname}` moving along {:?} from the picked point; pick a point under the target", a.map(|v| round(v, 3))))
             })?;
-            let translation = add(back, scale(a, d - offset));
+            let mut translation = add(back, scale(a, d - offset));
+            if let Some(((at, v), (bore_at, bore_axis), lname)) = level {
+                let u = geometry::apply(&rotation, bore_axis);
+                if dot(u, v).abs() < 0.999 {
+                    return Err(ToolError::invalid(format!(
+                        "`{name}`'s bore would run along {:?}, `{lname}`'s axis along {:?}; leave out `along` or give it `{lname}`'s direction",
+                        u.map(|c| round(c, 3)),
+                        v.map(|c| round(c, 3))
+                    )));
+                }
+                // Square to the axis, from the bore's line onto it.
+                let p = add(geometry::apply(&rotation, bore_at), translation);
+                let gap = sub(at, p);
+                let shift = sub(gap, scale(v, dot(gap, v)));
+                // How far the shift moves it on toward the target past first contact.
+                let press = dot(shift, a) - offset;
+                if press > 1e-6 {
+                    notes.push(format!(
+                        "on `{lname}`'s axis `{name}` would press {:.2} mm into `{tname}`, so it is seated at first contact, {:.2} mm off that axis; seat `{lname}` again with levelWith `{name}` to line both up here",
+                        press * 1000.0,
+                        norm(shift) * 1000.0
+                    ));
+                } else {
+                    translation = add(translation, shift);
+                    notes.push(format!("on `{lname}`'s axis: moved {:.2} mm from first contact, about {:.2} mm short of `{tname}`", norm(shift) * 1000.0, -press * 1000.0));
+                }
+            }
             let seated = Seated { rotation, translation };
             // The component's frame (flipped when written) and the target's, where they meet.
             let own_frame = Frame { at: own_at, z: own_n, x: own_x };

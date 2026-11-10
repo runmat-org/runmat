@@ -220,13 +220,7 @@ pub fn facing_side(rotation: &M3, toward: V3) -> &'static str {
 /// clamp seated `along` a member holds it along the member. Otherwise it is the box axis of
 /// greatest extent that lies across the contact, made square to it.
 pub fn long_axis(display: &PartDisplay, normal: V3) -> V3 {
-    let round = faces(display)
-        .filter_map(|f| match f.surface {
-            Some(SurfaceKind::Cylinder { axis_direction, .. }) => unit(axis_direction).filter(|a| dot(*a, normal).abs() < 0.3).map(|a| (a, face_area(f))),
-            _ => None,
-        })
-        .max_by(|a, b| a.1.total_cmp(&b.1));
-    if let Some(axis) = round.and_then(|(a, _)| square_to(a, normal)) {
+    if let Some(axis) = round_axis(display, normal).and_then(|(_, a)| square_to(a, normal)) {
         return axis;
     }
     let Some((lo, hi)) = bounds(display) else { return perpendicular(normal) };
@@ -236,6 +230,18 @@ pub fn long_axis(display: &PartDisplay, normal: V3) -> V3 {
         .max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b])))
         .and_then(|k| square_to(axes[k], normal))
         .unwrap_or_else(|| perpendicular(normal))
+}
+
+/// The axis of the part's largest round face whose axis lies across `normal` (a clamp's bore,
+/// a tube's outside): a point on it and its unit direction, in the part's coordinates.
+pub fn round_axis(display: &PartDisplay, normal: V3) -> Option<(V3, V3)> {
+    faces(display)
+        .filter_map(|f| match f.surface {
+            Some(SurfaceKind::Cylinder { axis_point, axis_direction, .. }) => unit(axis_direction).filter(|a| dot(*a, normal).abs() < 0.3).map(|a| (axis_point, a, face_area(f))),
+            _ => None,
+        })
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(p, a, _)| (p, a))
 }
 
 /// A part's triangles and vertices, placed by `place`.

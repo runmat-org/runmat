@@ -34,7 +34,9 @@ pub struct InspectInput {
     #[serde(default)]
     pub sections: Option<Vec<String>>,
     /// Keep rows whose name, reference, path or designator matches (`*` globs; otherwise a
-    /// case-insensitive substring).
+    /// case-insensitive substring). A filter that is a row's whole name or reference keeps only
+    /// the rows it names exactly, so `feature.body.face.end` doesn't also return the faces
+    /// whose references mention it.
     #[serde(default)]
     pub filter: Option<String>,
     /// Density for mass properties, kg/m³. Without it a part's mass uses 7850 (steel) and an
@@ -101,21 +103,26 @@ impl Sections<'_> {
         }
         self.out.totals.insert(name.to_owned(), rows.len());
         let limit = self.input.limit.unwrap_or(200);
+        // Whether one of the row's key texts passes `test`.
+        let any_key = |r: &Value, test: &dyn Fn(&str) -> bool| {
+            keys.iter().any(|k| match &r[*k] {
+                Value::String(s) => test(s),
+                Value::Array(a) => a.iter().any(|x| x.as_str().is_some_and(test)),
+                _ => false,
+            })
+        };
+        let filter = self.input.filter.as_deref().filter(|f| !f.is_empty());
+        let exact = |s: &str| filter.is_some_and(|f| !f.contains('*') && s.eq_ignore_ascii_case(f));
+        let only_exact = rows.iter().any(|r| any_key(r, &exact));
         let kept: Vec<Value> = rows
             .into_iter()
             .filter(|r| {
-                self.input.filter.is_none()
-                    || keys.iter().any(|k| {
-                        let v = &r[*k];
-                        match v {
-                            Value::String(s) => name_matches(self.input.filter.as_deref(), s),
-                            Value::Array(a) => a.iter().any(|x| {
-                                x.as_str()
-                                    .is_some_and(|s| name_matches(self.input.filter.as_deref(), s))
-                            }),
-                            _ => false,
-                        }
-                    })
+                filter.is_none()
+                    || if only_exact {
+                        any_key(r, &exact)
+                    } else {
+                        any_key(r, &|s| name_matches(filter, s))
+                    }
             })
             .take(limit)
             .collect();
@@ -697,5 +704,34 @@ mod overlap_unit_tests {
         let mut value = serde_json::json!({ "result": { "overlaps": [{ "a": "body", "b": "clamp", "volume": 1.6925e-7 }] } });
         overlap_volumes_in_mm3(&mut value);
         assert_eq!(value["result"]["overlaps"][0], serde_json::json!({ "a": "body", "b": "clamp", "volume_mm3": 169.3 }));
+    }
+}
+
+#[cfg(test)]
+mod filter_unit_tests {
+    use super::*;
+
+    /// A face's reference names a face; a filleted plate's round face's reference mentions the
+    /// face it rounds. The filter by the end face's reference returns the end face alone, and a
+    /// part of a name still matches every row that contains it.
+    #[test]
+    fn a_whole_reference_keeps_only_the_row_it_names() {
+        let rows = || {
+            vec![
+                serde_json::json!({ "reference": "feature.round.face.blend(feature.body.face.end, feature.body.face.side(s1.l9))", "names": [] }),
+                serde_json::json!({ "reference": "feature.body.face.end", "names": ["top"] }),
+                serde_json::json!({ "reference": "feature.body.face.side(s1.l9)", "names": [] }),
+            ]
+        };
+        let kept = |filter: &str| {
+            let input: InspectInput = serde_json::from_value(serde_json::json!({ "path": "/p.part", "filter": filter })).unwrap();
+            let mut s = Sections { input: &input, out: InspectOutput { path: input.path.clone(), kind: DesignKind::Part, sections: BTreeMap::new(), totals: BTreeMap::new(), notes: Vec::new() } };
+            s.add("faces", rows(), &["reference", "names"]);
+            s.out.sections["faces"].as_array().unwrap().iter().map(|r| r["reference"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
+        };
+        assert_eq!(kept("feature.body.face.end"), ["feature.body.face.end"]);
+        assert_eq!(kept("TOP"), ["feature.body.face.end"]);
+        assert_eq!(kept("face.end").len(), 2);
+        assert_eq!(kept("feature.body.face.*").len(), 2);
     }
 }
