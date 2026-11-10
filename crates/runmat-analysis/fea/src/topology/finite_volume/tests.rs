@@ -199,6 +199,41 @@ fn rigid_rotation_tiny_scale_and_translation_preserve_vector_geometry() {
     assert!(geometry::length(sum) < 1e-25);
 }
 
+/// Cells far from the origin relative to their size (0.2 mm cells 0.2 m away, as at the wall
+/// of a 200 mm tube) derive their finite-volume geometry: the source centroid of a linear
+/// tetrahedron is its corner mean, so the centroid check never sees quadrature rounding.
+#[test]
+fn small_cells_far_from_the_origin_keep_their_source_centroids() {
+    for offset in [[0.2, 0.15, -0.1], [0.05, -0.2, 0.18], [-0.19, 0.01, 0.2]] {
+        let mut mesh = fixtures::slab_mesh(3);
+        for node in &mut mesh.topology.nodes {
+            let [x, y, z] = node.coordinates_m.canonical_value();
+            node.coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                offset[0] + 6e-4 * x + 1e-4 * y,
+                offset[1] + 6e-4 * y,
+                offset[2] + 6e-4 * z - 1e-4 * x,
+            ]);
+        }
+        mesh.seal_canonical_digest().unwrap();
+        let source = AnalysisProjection::derive(&mesh).unwrap();
+        for element in &source.elements {
+            let corners = &element.node_indices[..4];
+            let mean: [f64; 3] = std::array::from_fn(|axis| {
+                corners
+                    .iter()
+                    .map(|&n| source.nodes[n].coordinates_m.canonical_value()[axis])
+                    .sum::<f64>()
+                    / 4.0
+            });
+            assert_eq!(element.centroid_m, mean);
+        }
+        FiniteVolumeTopology::derive(&source, policy()).unwrap();
+    }
+}
+
 // witness: FEA-FLUID-TOPOLOGY-001/quality @
 //   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
 //   boundary: Selected malformed source cases only, not complete quality-envelope convergence.
