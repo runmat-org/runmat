@@ -472,7 +472,8 @@ pub fn execute_coupled_electrothermal(
     loop {
         let mut electrical = Vec::with_capacity(times.len());
         let mut samples = Vec::with_capacity(times.len());
-        for (time, element_temperature) in times.iter().zip(&temperatures) {
+        for (index, (time, element_temperature)) in times.iter().zip(&temperatures).enumerate() {
+            let started = runmat_time::Instant::now();
             let conductivity = laws
                 .iter()
                 .zip(element_temperature)
@@ -499,6 +500,14 @@ pub fn execute_coupled_electrothermal(
             else {
                 return Err(invalid("conduction response expected"));
             };
+            crate::progress::report_step(
+                "fea.run_electrothermal_conduction",
+                index + 1,
+                times.len(),
+                *time,
+                started,
+                format_args!(" (coupling sweep {})", sweeps.len() + 1),
+            );
             samples.push((
                 runmat_types::physical::Time::new(*time),
                 joule_density_w_per_m3.clone(),

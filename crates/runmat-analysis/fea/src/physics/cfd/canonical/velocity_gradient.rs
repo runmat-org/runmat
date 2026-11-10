@@ -71,8 +71,8 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[V]) -> Result<Ve
     {
         return Err(Error::Invalid("velocity gradient original field"));
     }
-    let mut gradients = Vec::with_capacity(values.len());
-    for (c, stencil) in p.velocity_stencils.iter().enumerate() {
+    super::geometry_ops::indexed(values.len(), |c| {
+        let stencil = &p.velocity_stencils[c];
         let mut gradient = [[0.0; 3]; 3];
         for &(sample, weight) in &stencil.weights {
             let delta = match sample {
@@ -97,9 +97,8 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[V]) -> Result<Ve
         if gradient.iter().flatten().any(|x| !x.is_finite()) {
             return Err(Error::Invalid("nonfinite velocity reconstruction"));
         }
-        gradients.push(gradient);
-    }
-    Ok(gradients)
+        Ok(gradient)
+    })
 }
 
 /// Linear part of the reconstruction: per cell, the cells it reads and the coefficients

@@ -316,6 +316,7 @@ impl<'a> FluidTransientBlock<'a> {
         // Only the latest interval is held beyond the retained set: it is the next predecessor.
         let mut latest: Option<CanonicalFluidResult> = None;
         for ordinal in self.range.clone() {
+            let started = runmat_time::Instant::now();
             let previous = latest
                 .as_ref()
                 .map_or(self.initial, |r| r.original_fields());
@@ -336,6 +337,17 @@ impl<'a> FluidTransientBlock<'a> {
                 continuity_relative: result.residual.continuity_relative,
                 fields_digest: fields_digest(&result)?,
             });
+            crate::progress::report_step(
+                "fea.run_fluid_transient",
+                ordinal + 1,
+                self.schedule.points_s().len() - 1,
+                self.schedule.points_s()[ordinal + 1],
+                started,
+                format_args!(
+                    " ({} outer, {} linear iterations)",
+                    result.outer_iterations, result.linear_iterations
+                ),
+            );
             if self.retain.binary_search(&ordinal).is_ok() {
                 retained.push((ordinal, result.clone()));
             }

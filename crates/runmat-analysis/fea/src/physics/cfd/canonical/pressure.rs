@@ -13,11 +13,8 @@ pub(super) fn h_flux(
     // Reconstruct velocity geometrically, but interpolate rAU*grad(p) separately:
     // the compact pressure action must cancel this original Rhie-Chow term.
     let gu = velocity_gradients(p, u)?;
-    p.topology
-        .faces
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
+    indexed(p.topology.faces.len(), |i| {
+            let f = &p.topology.faces[i];
             if let Some(n) = f.neighbor {
                 let (_, _, w) = face_geometry(p, f)?;
                 Ok(dot(
@@ -46,19 +43,15 @@ pub(super) fn h_flux(
                 }
             }
         })
-        .collect()
 }
 
 pub(super) fn coefficients(p: &CanonicalFluidProblem<'_>, rau: &[f64]) -> Result<Vec<f64>, Error> {
-    p.topology
-        .faces
-        .iter()
-        .map(|f| {
-            let (_, _, w) = face_geometry(p, f)?;
-            Ok(f.neighbor
-                .map_or(rau[f.owner], |n| w * rau[f.owner] + (1.0 - w) * rau[n]))
-        })
-        .collect()
+    indexed(p.topology.faces.len(), |i| {
+        let f = &p.topology.faces[i];
+        let (_, _, w) = face_geometry(p, f)?;
+        Ok(f.neighbor
+            .map_or(rau[f.owner], |n| w * rau[f.owner] + (1.0 - w) * rau[n]))
+    })
 }
 
 pub(super) fn corrected_flux(
@@ -67,12 +60,19 @@ pub(super) fn corrected_flux(
     rf: &[f64],
     pressure: &[f64],
 ) -> Result<Vec<f64>, Error> {
-    let gp = pressure_gradient(p, pressure)?;
-    p.topology
-        .faces
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
+    corrected_flux_with(p, qh, rf, pressure, &pressure_gradient(p, pressure)?)
+}
+
+/// [`corrected_flux`] with the pressure gradient `gp` of `pressure` already evaluated.
+pub(super) fn corrected_flux_with(
+    p: &CanonicalFluidProblem<'_>,
+    qh: &[f64],
+    rf: &[f64],
+    pressure: &[f64],
+    gp: &[V],
+) -> Result<Vec<f64>, Error> {
+    indexed(p.topology.faces.len(), |i| {
+            let f = &p.topology.faces[i];
             let (alpha, tangent, w) = face_geometry(p, f)?;
             let action = if let Some(n) = f.neighbor {
                 alpha * (pressure[n] - pressure[f.owner])
@@ -97,7 +97,6 @@ pub(super) fn corrected_flux(
             }
             Ok(flux)
         })
-        .collect()
 }
 
 pub(super) fn solve(
