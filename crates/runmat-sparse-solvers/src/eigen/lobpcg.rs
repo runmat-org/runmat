@@ -32,6 +32,27 @@ impl Default for LobpcgOptions {
     }
 }
 
+/// Block width LOBPCG iterates with for `options` on an `n`-dimensional pencil.
+pub fn lobpcg_block_size(options: &LobpcgOptions, n: usize) -> usize {
+    (options.count + options.guard)
+        .min(n / 3)
+        .max(options.count.min(n))
+}
+
+/// Upper bound on the `f64` values [`lobpcg`] holds at once: the iterate, its operator and
+/// metric images, the residual, the preconditioned residual and the previous direction (one
+/// block each), the Rayleigh–Ritz basis with its two images (three blocks each), the next
+/// iterate and direction, the projected Gram matrices, and the returned pairs with their
+/// residual scratch. Returns `None` on arithmetic overflow.
+pub fn lobpcg_working_value_count(options: &LobpcgOptions, n: usize) -> Option<usize> {
+    let block = lobpcg_block_size(options, n);
+    let basis = block.checked_mul(3)?;
+    let blocks = n.checked_mul(block)?.checked_mul(17)?;
+    let projected = basis.checked_mul(basis)?.checked_mul(6)?;
+    let returned = n.checked_mul(options.count.min(n).checked_add(2)?)?;
+    blocks.checked_add(projected)?.checked_add(returned)
+}
+
 /// Solves the projected problem `Sᵀ K S y = θ Sᵀ M S y` after removing dependent directions.
 fn rayleigh_ritz(gk: &[f64], gm: &[f64], s: usize) -> SolverResult<(Vec<f64>, Vec<f64>)> {
     // Scale to unit diagonal of Gm, eigen-decompose Gm, keep well-conditioned directions.
@@ -102,9 +123,7 @@ pub fn lobpcg(
     control: SolveControl<'_>,
 ) -> SolverResult<EigenResult> {
     let n = k.nrows();
-    let block = (options.count + options.guard)
-        .min(n / 3)
-        .max(options.count.min(n));
+    let block = lobpcg_block_size(options, n);
     if block == 0 {
         return Err(SolverError::Dimension("empty eigenproblem".into()));
     }

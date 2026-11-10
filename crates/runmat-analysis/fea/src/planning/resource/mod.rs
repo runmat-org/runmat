@@ -205,7 +205,8 @@ pub use contract::{
     PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, PreparedPhaseResourceFacts,
     PreparedStructuralModalResourceFacts, ResourceAdmission, ResourceBreakdown,
     ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy, SparseResourceFacts,
-    StaticSolvePath, StaticSolveSelection, StructuralBucklingResourceDemand,
+    StaticSolvePath, StaticSolveSelection, StructuralBucklingResourceDemand, SubspaceSolvePath,
+    ModalSolveSelection,
     StructuralFrequencyOperatorResourceDemand, StructuralFrequencyResultAssemblyResourceDemand,
     StructuralModalResourceDemand, StructuralModalResponseSpectrumAssemblyResourceDemand,
     StructuralModalResponseSpectrumDirectionResourceDemand, StructuralOperatorResourceDemand,
@@ -232,6 +233,7 @@ pub use local_execution::{
 };
 pub use modal::{
     build_structural_modal_resource_plan, build_structural_modal_resource_plan_from_compilation,
+    build_structural_modal_resource_plan_selecting, recorded_modal_solve_path,
     structural_modal_receipt_payload_bytes_upper_bound,
     structural_modal_result_output_resource_facts,
     structural_modal_result_payload_bytes_upper_bound,

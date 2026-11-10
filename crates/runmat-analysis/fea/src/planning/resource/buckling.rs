@@ -21,6 +21,7 @@ use super::{
     ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
     PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, ResourcePlanningError,
     SolveResourcePolicy, StructuralBucklingResourceDemand, StructuralOperatorResourceDemand,
+    SubspaceSolvePath,
     WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
@@ -287,6 +288,7 @@ pub fn build_structural_buckling_resource_plan(
                         "buckling maximum projected values",
                     )?),
                     workspace_bytes_upper_bound: ByteCount(workspace_bytes),
+                    path: SubspaceSolvePath::ShiftInvertFactorization,
                 },
                 phase_resources: PhaseResourcePolicy {
                     resident_value_count: Count(phase_values),

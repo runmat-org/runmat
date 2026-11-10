@@ -49,7 +49,6 @@ use runmat_analysis_fea::planning::resource::{
     build_structural_frequency_entry_resource_plan_from_compilation,
     build_structural_frequency_recovery_resource_plan_from_compilation,
     build_structural_frequency_result_assembly_resource_plan,
-    build_structural_modal_resource_plan_from_compilation,
     build_structural_transient_block_resource_plan, observation_artifact_payload_bytes_upper_bound,
     observation_history_checkpoint_payload_bytes_upper_bound,
     observation_partition_payload_bytes_upper_bound,

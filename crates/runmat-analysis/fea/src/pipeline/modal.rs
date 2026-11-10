@@ -20,6 +20,7 @@ use crate::{
     pipeline::modal_basis::{ModalBasisArtifact, ModalBasisInputs},
     pipeline::observation_history::required_mode_history_indices,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
+    planning::resource::SubspaceSolvePath,
     solve::modal::solve_modal_system_reusing,
 };
 
@@ -55,12 +56,25 @@ pub fn execute_structural_modal_workload(
     workload: &StructuralModalWorkload,
     solver_mesh: &SolverMeshArtifact,
 ) -> Result<StructuralModalSolverResult, FeaRunError> {
+    execute_structural_modal_workload_on_path(
+        workload,
+        solver_mesh,
+        SubspaceSolvePath::ShiftInvertFactorization,
+    )
+}
+
+/// Executes the workload on the solve path its admitted resource plan recorded.
+pub fn execute_structural_modal_workload_on_path(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    path: SubspaceSolvePath,
+) -> Result<StructuralModalSolverResult, FeaRunError> {
     if workload.prestress_transition().is_some() {
         return Err(FeaRunError::InvalidModel(
             "prestressed modal extraction requires its exact geometric-stiffness state".into(),
         ));
     }
-    execute_structural_modal_workload_with_state(workload, solver_mesh, None)
+    execute_structural_modal_workload_with_state(workload, solver_mesh, None, path)
 }
 
 pub fn execute_structural_prestressed_modal_workload(
@@ -68,13 +82,29 @@ pub fn execute_structural_prestressed_modal_workload(
     solver_mesh: &SolverMeshArtifact,
     prestress_state: &CanonicalSemanticState,
 ) -> Result<StructuralModalSolverResult, FeaRunError> {
-    execute_structural_modal_workload_with_state(workload, solver_mesh, Some(prestress_state))
+    execute_structural_prestressed_modal_workload_on_path(
+        workload,
+        solver_mesh,
+        prestress_state,
+        SubspaceSolvePath::ShiftInvertFactorization,
+    )
+}
+
+/// Executes the prestressed workload on the solve path its admitted resource plan recorded.
+pub fn execute_structural_prestressed_modal_workload_on_path(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: &CanonicalSemanticState,
+    path: SubspaceSolvePath,
+) -> Result<StructuralModalSolverResult, FeaRunError> {
+    execute_structural_modal_workload_with_state(workload, solver_mesh, Some(prestress_state), path)
 }
 
 fn execute_structural_modal_workload_with_state(
     workload: &StructuralModalWorkload,
     solver_mesh: &SolverMeshArtifact,
     prestress_state: Option<&CanonicalSemanticState>,
+    path: SubspaceSolvePath,
 ) -> Result<StructuralModalSolverResult, FeaRunError> {
     workload
         .validate()
@@ -122,6 +152,7 @@ fn execute_structural_modal_workload_with_state(
         },
         procedure_step.procedure,
         linearization,
+        path,
     )?;
     StructuralModalSolverResult::new(workload, topology_digest, modal.run, modal.basis)
         .map_err(|error| FeaRunError::Solve(error.to_string()))
@@ -147,6 +178,7 @@ fn execute_modal_numerics(
         options,
         AnalysisProcedure::ModalExtraction,
         None,
+        SubspaceSolvePath::ShiftInvertFactorization,
     )?;
     recover_modal_core(model, execution_step, solver_mesh.as_ref(), core)
 }
@@ -159,6 +191,7 @@ fn execute_modal_core(
     linearization: Option<
         &crate::pipeline::structural_linearization::StructuralLinearizationArtifact,
     >,
+    path: SubspaceSolvePath,
 ) -> Result<CompletedModalCore, FeaRunError> {
     let execution_step = super::admission::require_structural(model, procedure)?;
     crate::contracts::accelerator_admission::admit_accelerator(
@@ -250,6 +283,7 @@ fn execute_modal_core(
         options.convergence,
         backend,
         &mut solid_energy.into_reuse(),
+        path,
     );
     emit_phase(
         "fea.run_modal",

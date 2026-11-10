@@ -184,3 +184,155 @@ fn modal_working_set_follows_the_requested_count() {
     assert!(modal_working_value_count(&options(13), small).unwrap() >= 5 * small * small);
     assert_eq!(modal_working_value_count(&options(13), usize::MAX), None);
 }
+
+/// A consistent-mass-like SPD pencil on a 3D grid: `M = I + 0.1·L` with `L` the graph
+/// Laplacian pattern, so `K` and `M` share a pattern with off-diagonal mass coupling.
+fn coupled_mass(k: &CsrMatrix<f64>) -> CsrMatrix<f64> {
+    let n = k.nrows();
+    let identity = CsrMatrix::<f64>::identity(n);
+    CsrMatrix::linear_combination(&[(1.0, identity.as_ref()), (0.02, k.as_ref())]).unwrap()
+}
+
+fn dense_eigenvalues(k: &CsrMatrix<f64>, m: &CsrMatrix<f64>) -> Vec<f64> {
+    let (values, _) = dense_generalized(k.as_ref(), m.as_ref()).unwrap();
+    let mut values = values;
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    values
+}
+
+#[test]
+fn factor_free_inertia_counts_every_eigenvalue_below_each_shift() {
+    let k = poisson3d::<f64>(9, 8, 7);
+    let m = coupled_mass(&k);
+    let values = dense_eigenvalues(&k, &m);
+    let inertia = PencilInertia::analyze(
+        k.as_ref(),
+        m.as_ref(),
+        &crate::ordering::Ordering::Auto,
+        SolveControl::NONE,
+    )
+    .unwrap();
+    for index in [0usize, 1, 7, 40, 200, 503] {
+        // Midway between neighbouring eigenvalues: the count is exact.
+        let shift = if index == 0 {
+            0.5 * values[0]
+        } else {
+            0.5 * (values[index - 1] + values[index])
+        };
+        let counted = inertia.count(shift, SolveControl::NONE).unwrap();
+        assert_eq!(counted.negative, index, "shift {shift}");
+        assert_eq!(counted.negative + counted.positive, k.nrows());
+        assert_eq!(counted.zero, 0);
+    }
+}
+
+#[test]
+fn factor_free_inertia_matches_on_elasticity_and_quotes_its_peak_from_the_pattern() {
+    let problem = crate::testutil::elasticity::elasticity3d(4, 3, 6);
+    let k = problem.matrix;
+    let m = coupled_mass(&k);
+    let values = dense_eigenvalues(&k, &m);
+    let inertia = PencilInertia::analyze(
+        k.as_ref(),
+        m.as_ref(),
+        &crate::ordering::Ordering::Auto,
+        SolveControl::NONE,
+    )
+    .unwrap();
+    for index in [1usize, 5, 13, 60] {
+        let shift = 0.5 * (values[index - 1] + values[index]);
+        assert_eq!(
+            inertia.count(shift, SolveControl::NONE).unwrap().negative,
+            index
+        );
+    }
+    // The planner's quote from the union pattern alone equals the analyzed peak.
+    let estimate = pencil_inertia_estimate(
+        k.nrows(),
+        m.row_ptr(),
+        m.col_idx(),
+        &crate::ordering::Ordering::Auto,
+    )
+    .unwrap();
+    assert_eq!(estimate.resident_bytes, inertia.resident_bytes());
+    assert!(estimate.flops > 0.0);
+}
+
+#[test]
+fn sturm_check_runs_after_the_factor_is_released_and_proves_completeness() {
+    let k = poisson3d::<f64>(16, 15, 14);
+    let m = coupled_mass(&k);
+    let options = EigenOptions {
+        count: 9,
+        sturm_check: true,
+        ..Default::default()
+    };
+    let result = modal(k.as_ref(), m.as_ref(), &options, SolveControl::NONE).unwrap();
+    let sturm = result.sturm.expect("modal runs the Sturm check");
+    assert!(sturm.complete(), "{sturm:?}");
+    assert_eq!(sturm.returned, 9);
+}
+
+#[test]
+fn lobpcg_modal_path_matches_shift_invert_frequencies_with_its_own_proof() {
+    let problem = crate::testutil::elasticity::elasticity3d(5, 4, 10);
+    let k = problem.matrix;
+    let m = coupled_mass(&k);
+    let count = 6;
+    let direct = modal(
+        k.as_ref(),
+        m.as_ref(),
+        &EigenOptions {
+            count,
+            sturm_check: true,
+            ..Default::default()
+        },
+        SolveControl::NONE,
+    )
+    .unwrap();
+    let iterative = modal_lobpcg(
+        k.as_ref(),
+        m.as_ref(),
+        &IterativeModalOptions {
+            lobpcg: LobpcgOptions {
+                count,
+                guard: 6,
+                tolerance: 1e-9,
+                max_iterations: 2000,
+            },
+            ordering: crate::ordering::Ordering::Auto,
+        },
+        SolveControl::NONE,
+    )
+    .unwrap();
+    assert!(iterative.converged);
+    let sturm = iterative.sturm.expect("the iterative path proves completeness");
+    assert!(sturm.complete(), "{sturm:?}");
+    for (a, b) in iterative.values.iter().zip(&direct.values) {
+        // Frequencies (√λ) agree to 1e-7 relative.
+        assert!((a.sqrt() - b.sqrt()).abs() <= 1e-7 * b.sqrt(), "{a} vs {b}");
+    }
+}
+
+#[test]
+fn lobpcg_modal_path_refuses_an_indefinite_stiffness() {
+    let k = poisson3d::<f64>(9, 9, 9).with_shifted_diagonal(-0.5);
+    let m = CsrMatrix::<f64>::identity(k.nrows());
+    let refused = modal_lobpcg(
+        k.as_ref(),
+        m.as_ref(),
+        &IterativeModalOptions {
+            lobpcg: LobpcgOptions {
+                count: 3,
+                guard: 3,
+                tolerance: 1e-8,
+                max_iterations: 50,
+            },
+            ordering: crate::ordering::Ordering::Auto,
+        },
+        SolveControl::NONE,
+    );
+    // Either the preconditioner, the iteration or the zero-shift inertia refuses; modes are
+    // never returned for an indefinite stiffness.
+    assert!(refused.is_err(), "{refused:?}");
+}

@@ -446,3 +446,58 @@ fn modal_continuum(quadratic: bool) {
         }
     }
 }
+
+/// Cross-check of the two modal solve paths on one model that fits the direct path: the
+/// shift-invert factorization and preconditioned LOBPCG return the same four axial-rod
+/// frequencies to 1e-7 relative, and each path's factor-free Sturm count proves that no mode
+/// below the reported ones was missed.
+#[test]
+fn solid_rod_modal_paths_agree_and_each_proves_completeness() {
+    use crate::planning::resource::SubspaceSolvePath;
+    let mesh = rod_mesh(4, true);
+    let model = modal_model(&rod_model(&mesh, &[1.0]));
+    let solve = |path| {
+        super::execute_modal_core(
+            &model,
+            ComputeBackend::Cpu,
+            ModalSolveOptions {
+                solver_mesh: Some(mesh.clone()),
+                truncation: ModalTruncationPolicy::requested(4),
+                ..ModalSolveOptions::default()
+            },
+            runmat_analysis_core::AnalysisProcedure::ModalExtraction,
+            None,
+            path,
+        )
+        .unwrap()
+    };
+    let direct = solve(SubspaceSolvePath::ShiftInvertFactorization);
+    let iterative = solve(SubspaceSolvePath::PreconditionedLobpcg);
+    let frequencies = |core: &super::CompletedModalCore| -> Vec<f64> {
+        core.basis
+            .modes()
+            .iter()
+            .map(|mode| mode.frequency_hz())
+            .collect()
+    };
+    let (a, b) = (frequencies(&direct), frequencies(&iterative));
+    assert!(a.len() >= 4 && b.len() >= 4, "{a:?} {b:?}");
+    for (x, y) in a.iter().zip(&b).take(4) {
+        assert!((x - y).abs() <= 1e-7 * x, "direct {x} Hz vs LOBPCG {y} Hz");
+    }
+    // The fundamental is the quarter-wave axial mode.
+    assert!((a[0] / (WAVE_SPEED / 4.0) - 1.0).abs() < 0.001, "{}", a[0]);
+    for (core, method) in [
+        (&direct, crate::contracts::SolverMethod::ShiftInvertBlockLanczos),
+        (&iterative, crate::contracts::SolverMethod::PreconditionedLobpcg),
+    ] {
+        assert_eq!(core.run.solver_method, method);
+        let sturm = core
+            .run
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "FEA_MODAL_STURM_CHECK")
+            .expect("each path runs the Sturm check");
+        assert!(sturm.message.ends_with("complete=true"), "{}", sturm.message);
+    }
+}

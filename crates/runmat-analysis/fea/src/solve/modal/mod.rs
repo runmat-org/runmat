@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assembly::AssemblySummary,
+    planning::resource::SubspaceSolvePath,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     planning::resource::LocalExecutionPlan,
@@ -43,6 +44,31 @@ pub(crate) fn modal_eigen_options(
         ..Default::default()
     }
 }
+/// LOBPCG options for one modal search of `subspace_dimension` vectors on the factor-free
+/// path. The resource planner sizes the path's working set from these same options.
+///
+/// The iteration stops at half the policy's relative residual tolerance so the true residuals
+/// it reports pass the policy; it may take up to four LOBPCG steps per admitted Lanczos restart
+/// because each step applies the preconditioner once per unconverged vector instead of a
+/// factor solve.
+pub(crate) fn modal_lobpcg_options(
+    subspace_dimension: usize,
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+) -> runmat_sparse_solvers::eigen::IterativeModalOptions {
+    runmat_sparse_solvers::eigen::IterativeModalOptions {
+        lobpcg: runmat_sparse_solvers::eigen::LobpcgOptions {
+            count: subspace_dimension,
+            guard: MODAL_LANCZOS_BLOCK_SIZE,
+            tolerance: 0.5 * convergence.relative_residual_tolerance(),
+            max_iterations: convergence
+                .maximum_subspace_iterations()
+                .max(1)
+                .saturating_mul(4),
+        },
+        ordering: runmat_sparse_solvers::ordering::Ordering::Auto,
+    }
+}
+
 pub(crate) const MODAL_MASS_ORTHOGONALIZATION_PASSES: usize = 2;
 type ModalCandidate = (f64, Vec<f64>, f64);
 
@@ -76,7 +102,17 @@ pub(crate) fn solve_modal_system_reusing(
     convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
     backend: ComputeBackend,
     reuse: &mut crate::algebra::LinearPreparationReuse,
+    path: SubspaceSolvePath,
 ) -> ModalSolveResult {
+    let (solver_method, path_preconditioner) = match path {
+        SubspaceSolvePath::ShiftInvertFactorization => (
+            SolverMethod::ShiftInvertBlockLanczos,
+            SolverPreconditioner::SparseCholesky,
+        ),
+        SubspaceSolvePath::PreconditionedLobpcg => {
+            (SolverMethod::PreconditionedLobpcg, SolverPreconditioner::Amg)
+        }
+    };
     if summary.dof_count == 0 || requested_mode_count == 0 {
         return ModalSolveResult {
             converged: false,
@@ -181,8 +217,11 @@ pub(crate) fn solve_modal_system_reusing(
             };
         }
     };
-    let prepared = match reduced_operator.prepare_linear_reusing(reuse) {
-        Ok(prepared) => prepared,
+    // The factor-free path proves coercivity by its own inertia count, so it never factors K.
+    let prepared = match path {
+        SubspaceSolvePath::PreconditionedLobpcg => None,
+        SubspaceSolvePath::ShiftInvertFactorization => match reduced_operator.prepare_linear_reusing(reuse) {
+        Ok(prepared) => Some(prepared),
         Err(error) => {
             return ModalSolveResult {
                 converged: false,
@@ -196,7 +235,7 @@ pub(crate) fn solve_modal_system_reusing(
                         "modal stiffness admission failed on the constraint space: {error}"
                     ),
                 }],
-                solver_method: SolverMethod::ShiftInvertBlockLanczos,
+                solver_method,
                 solver_backend: LinearAlgebraBackendKind::CpuReference,
                 preconditioner: SolverPreconditioner::None,
                 solver_host_sync_count: 0,
@@ -209,6 +248,7 @@ pub(crate) fn solve_modal_system_reusing(
                 boundary_unresolved_at_capacity: None,
             }
         }
+    },
     };
     let mut linear_diagnostics = Vec::new();
     // Strict placement fails closed at the modal entry; here the shared admission only supplies
@@ -228,10 +268,33 @@ pub(crate) fn solve_modal_system_reusing(
             Err(error) => return capacity::failure(error, unconstrained_count),
         };
     // The Cholesky factor that proved K coercive is the σ = 0 shift-invert operator.
-    let factor = prepared
-        .admissibility()
+    let mut factor = prepared
+        .as_ref()
+        .and_then(|prepared| prepared.admissibility())
         .and_then(|evidence| evidence.factor())
         .map(|factor| factor.0.clone());
+    // The LOBPCG preconditioner, built once for every search of this solve.
+    let mut multigrid = None;
+    if path == SubspaceSolvePath::PreconditionedLobpcg {
+        match crate::solve::shared_sparse::with_plan(LocalExecutionPlan::serial(), || {
+            runmat_sparse_solvers::precond::Amg::new(
+                crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().stiffness())
+                    .view(),
+                runmat_sparse_solvers::precond::AmgOptions::default(),
+                crate::solve::shared_sparse::control(),
+            )
+        }) {
+            Ok(amg) => multigrid = Some(amg),
+            Err(error) => {
+                linear_diagnostics.push(FeaDiagnostic {
+                    code: "FEA_MODAL_SOLVER_ADMISSION_FAILED".into(),
+                    severity: FeaDiagnosticSeverity::Error,
+                    message: format!("modal multigrid preconditioner setup failed: {error}"),
+                });
+            }
+        }
+    }
+    let mut last_values: Vec<f64> = Vec::new();
     let stiffness =
         crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().stiffness());
     let mass = crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().mass());
@@ -248,24 +311,33 @@ pub(crate) fn solve_modal_system_reusing(
     let mut subspace_converged = false;
     let mut sturm = None;
     let tolerance = convergence.relative_residual_tolerance();
-    while subspace_dimension > 0 && !crate::is_fea_cancelled() {
+    let admitted = path == SubspaceSolvePath::ShiftInvertFactorization || multigrid.is_some();
+    while admitted && subspace_dimension > 0 && !crate::is_fea_cancelled() {
         let options = modal_eigen_options(subspace_dimension, convergence);
         let solved = crate::solve::shared_sparse::with_plan(LocalExecutionPlan::serial(), || {
             let (k, m) = (stiffness.view(), mass.view());
-            match factor.as_deref() {
-                Some(solver) => runmat_sparse_solvers::eigen::modal_with_factor(
-                    k,
-                    m,
-                    solver,
-                    0.0,
-                    &options,
-                    crate::solve::shared_sparse::control(),
+            let control = crate::solve::shared_sparse::control();
+            match (path, factor.as_deref(), multigrid.as_ref()) {
+                (SubspaceSolvePath::PreconditionedLobpcg, _, Some(amg)) => {
+                    runmat_sparse_solvers::eigen::lobpcg(
+                        k,
+                        m,
+                        Some(amg),
+                        &modal_lobpcg_options(subspace_dimension, convergence).lobpcg,
+                        control,
+                    )
+                }
+                (_, Some(solver), _) => runmat_sparse_solvers::eigen::modal_with_factor(
+                    k, m, solver, 0.0, &options, control,
                 ),
-                None => runmat_sparse_solvers::eigen::modal(
+                (_, None, _) => runmat_sparse_solvers::eigen::modal(
                     k,
                     m,
-                    &options,
-                    crate::solve::shared_sparse::control(),
+                    &runmat_sparse_solvers::eigen::EigenOptions {
+                        sturm_check: false,
+                        ..options
+                    },
+                    control,
                 ),
             }
         });
@@ -283,7 +355,7 @@ pub(crate) fn solve_modal_system_reusing(
         subspace_iteration_count = subspace_iteration_count.saturating_add(result.restarts.max(1));
         subspace_maximum_residual = result.residuals.iter().copied().fold(0.0, f64::max);
         subspace_converged = result.converged && subspace_maximum_residual <= tolerance;
-        sturm = result.sturm;
+        last_values.clone_from(&result.values);
         let n = unconstrained_count;
         let mut candidates = Vec::with_capacity(result.values.len());
         for (index, eigenvalue) in result.values.iter().copied().enumerate() {
@@ -323,6 +395,40 @@ pub(crate) fn solve_modal_system_reusing(
         subspace_dimension = subspace_dimension
             .saturating_add(MODAL_BOUNDARY_PROBE_WIDTH)
             .min(maximum_subspace_dimension);
+    }
+    // Completeness proof, after every factor and preconditioner is released: the shift-invert
+    // factor and the Sturm count never coexist, and the LOBPCG path first proves K positive
+    // definite with a factor-free inertia count at shift 0.
+    drop(multigrid);
+    let _ = factor.take();
+    drop(prepared);
+    reuse.release_factor();
+    if subspace_converged && !last_values.is_empty() && !crate::is_fea_cancelled() {
+        let proved = crate::solve::shared_sparse::with_plan(LocalExecutionPlan::serial(), || {
+            modal_completeness_proof(
+                stiffness.view(),
+                mass.view(),
+                &last_values,
+                path,
+                convergence,
+                subspace_dimension,
+            )
+        });
+        match proved {
+            Ok(check) => sturm = Some(check),
+            Err(error) => {
+                subspace_converged = false;
+                linear_diagnostics.push(FeaDiagnostic {
+                    code: match error {
+                        ModalProofError::Coercivity(_) => "FEA_MODAL_SOLVER_ADMISSION_FAILED",
+                        ModalProofError::Inertia(_) => "FEA_MODAL_STURM_CHECK",
+                    }
+                    .into(),
+                    severity: FeaDiagnosticSeverity::Error,
+                    message: error.to_string(),
+                });
+            }
+        }
     }
     if let Some(sturm) = sturm {
         linear_diagnostics.push(FeaDiagnostic {
@@ -368,9 +474,15 @@ pub(crate) fn solve_modal_system_reusing(
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_MODAL_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
-        message:
-            "solver=shift_invert_block_lanczos shift=0 factor=sparse_cholesky sturm_check=true"
-                .to_string(),
+        message: match path {
+            SubspaceSolvePath::ShiftInvertFactorization => {
+                "solver=shift_invert_block_lanczos shift=0 factor=sparse_cholesky sturm_check=factor_free_inertia"
+            }
+            SubspaceSolvePath::PreconditionedLobpcg => {
+                "solver=block_lobpcg preconditioner=smoothed_aggregation_amg coercivity=factor_free_inertia sturm_check=factor_free_inertia"
+            }
+        }
+        .to_string(),
     }];
     diagnostics.extend(linear_diagnostics);
     diagnostics.push(FeaDiagnostic {
@@ -431,9 +543,9 @@ pub(crate) fn solve_modal_system_reusing(
         mode_shapes,
         residual_norms,
         diagnostics,
-        solver_method: SolverMethod::ShiftInvertBlockLanczos,
+        solver_method,
         solver_backend,
-        preconditioner: SolverPreconditioner::SparseCholesky,
+        preconditioner: path_preconditioner,
         solver_host_sync_count,
         device_apply_k_count,
         device_apply_k_attempt_count,
@@ -443,4 +555,48 @@ pub(crate) fn solve_modal_system_reusing(
         boundary_probe_frequency_hz,
         boundary_unresolved_at_capacity: capacity_reached.then_some(maximum_subspace_dimension),
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ModalProofError {
+    #[error("the factor-free inertia count does not prove the stiffness positive definite on the constraint space: {0}")]
+    Coercivity(String),
+    #[error("the factor-free Sturm inertia count failed: {0}")]
+    Inertia(String),
+}
+
+/// The proof that no mode below the reported ones was missed: one factor-free inertia analysis
+/// of the reduced pencil, counted at the Sturm probe above the highest returned value. The
+/// LOBPCG path first counts at shift 0 and requires no negative or zero pivot, which proves K
+/// positive definite in place of the Cholesky proof it never ran.
+fn modal_completeness_proof(
+    stiffness: runmat_sparse_solvers::csr::CsrRef<'_, f64>,
+    mass: runmat_sparse_solvers::csr::CsrRef<'_, f64>,
+    values: &[f64],
+    path: SubspaceSolvePath,
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    subspace_dimension: usize,
+) -> Result<runmat_sparse_solvers::eigen::SturmCheck, ModalProofError> {
+    let control = crate::solve::shared_sparse::control();
+    let options = modal_eigen_options(subspace_dimension, convergence);
+    let inertia = runmat_sparse_solvers::eigen::PencilInertia::analyze(
+        stiffness,
+        mass,
+        &options.ordering,
+        control,
+    )
+    .map_err(|error| ModalProofError::Inertia(error.to_string()))?;
+    if path == SubspaceSolvePath::PreconditionedLobpcg {
+        let at_zero = inertia
+            .count(0.0, control)
+            .map_err(|error| ModalProofError::Coercivity(error.to_string()))?;
+        if at_zero.negative != 0 || at_zero.zero != 0 {
+            return Err(ModalProofError::Coercivity(format!(
+                "{} negative and {} zero pivots at shift 0",
+                at_zero.negative, at_zero.zero
+            )));
+        }
+    }
+    runmat_sparse_solvers::eigen::sturm_check_with(&inertia, values, options.tolerance, control)
+        .map_err(|error| ModalProofError::Inertia(error.to_string()))
 }

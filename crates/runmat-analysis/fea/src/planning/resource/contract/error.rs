@@ -55,6 +55,16 @@ pub enum ResourcePlanningError {
         multigrid_resident_bytes: u64,
         maximum: u64,
     },
+    /// Neither modal solve path fits the effective resident ceiling, min(authored, the memory
+    /// the run is admitted to use). Both paths' plan requirements are named.
+    #[error(
+        "no modal solve path fits the resident memory ceiling of {maximum} bytes: the shift-invert factorization requires {factorization_resident_bytes} bytes and the preconditioned LOBPCG path requires {lobpcg_resident_bytes} bytes"
+    )]
+    ModalSolveCeiling {
+        factorization_resident_bytes: u64,
+        lobpcg_resident_bytes: u64,
+        maximum: u64,
+    },
     /// The modes that share the eigenvalue of the last requested mode need more vectors than
     /// the modal subspace the plan admitted for the request. The solver stops at the admitted
     /// size and publishes no result. Requesting more modes admits a larger subspace.

@@ -7,14 +7,21 @@
 //! - [`buckling`]: `(K + λ K_G) φ = 0`, smallest positive load factors via Lanczos on
 //!   `K⁻¹(−K_G)` in the `K` inner product.
 //! - [`lobpcg`]: preconditioned block solver (e.g. with AMG) for the lowest modes when a
-//!   factorization does not fit in memory.
+//!   factorization does not fit in memory; [`modal_lobpcg`] pairs it with an AMG preconditioner
+//!   and the factor-free inertia proofs of [`PencilInertia`].
+//! - [`sturm_check`]: the completeness proof for either path. It counts the eigenvalues below a
+//!   probe just above the highest returned one with a multifrontal inertia count that keeps no
+//!   factor ([`PencilInertia`]), so it runs after the caller has released any shift-invert
+//!   factor.
 
 mod blas;
+mod inertia;
 mod lanczos;
 mod lobpcg;
 
+pub use inertia::{pencil_inertia_estimate, PencilInertia, PencilInertiaEstimate};
 pub use lanczos::Selection;
-pub use lobpcg::{lobpcg, LobpcgOptions};
+pub use lobpcg::{lobpcg, lobpcg_block_size, lobpcg_working_value_count, LobpcgOptions};
 
 use crate::control::SolveControl;
 use crate::csr::{CsrMatrix, CsrRef};
@@ -300,11 +307,22 @@ pub fn modal(
     let Some((shift, solver)) = chosen else {
         return Err(last_error.unwrap_or(SolverError::Breakdown("no admissible shift".into())));
     };
-    modal_with_factor(k, m, &solver, shift, options, control)
+    let below_shift_known_empty = solver.kind() == FactorKind::Cholesky;
+    let mut result = modal_with_factor(k, m, &solver, shift, options, control)?;
+    // The factor and the Sturm count never coexist.
+    drop(solver);
+    if options.sturm_check && below_shift_known_empty && !result.values.is_empty() {
+        result.sturm = Some(sturm_check(k, m, &result.values, options, control)?);
+    }
+    Ok(result)
 }
 
 /// Shift-invert Lanczos with a caller-provided factorization of `K − shift·M` (for example the
 /// Cholesky factor that proved `K` coercive, with `shift = 0`).
+///
+/// The result carries no Sturm check: the caller releases the factor and then runs
+/// [`sturm_check`] on the returned values (when `shift` lies below the spectrum), so the two
+/// never occupy memory at once.
 pub fn modal_with_factor(
     k: CsrRef<'_, f64>,
     m: CsrRef<'_, f64>,
@@ -324,7 +342,6 @@ pub fn modal_with_factor(
         return dense_modal(k, m, options, shift);
     }
     let p = options.block_size.max(1);
-    let below_shift_known_empty = solver.kind() == FactorKind::Cholesky;
     let config = LanczosConfig {
         n,
         nev: count,
@@ -353,11 +370,6 @@ pub fn modal_with_factor(
         vectors[c * n..(c + 1) * n].copy_from_slice(&output.vectors[i * n..(i + 1) * n]);
     }
     let residuals = true_residuals(k, m, &values, &vectors);
-    let sturm = if options.sturm_check && below_shift_known_empty && !values.is_empty() {
-        Some(sturm_count(k, m, &values, options, control)?)
-    } else {
-        None
-    };
     Ok(EigenResult {
         converged: output.converged >= count,
         values,
@@ -368,7 +380,7 @@ pub fn modal_with_factor(
         shift,
         factorization: Some(solver.symbolic().estimate()),
         factor_kind: Some(solver.kind()),
-        sturm,
+        sturm: None,
     })
 }
 
@@ -430,30 +442,103 @@ fn dense_modal(
     });
 }
 
-fn sturm_count(
+/// The Sturm probe for `values` (ascending): just above the highest, separated from it by
+/// `max(100·tolerance, 1e-8)` relative.
+pub fn sturm_probe(values: &[f64], tolerance: f64) -> Option<f64> {
+    let top = *values.last()?;
+    Some(top + (top.abs() * (100.0 * tolerance).max(1e-8)).max(f64::MIN_POSITIVE))
+}
+
+/// Completeness proof for eigenvalues `values` of `K x = λ M x` (ascending) returned by a
+/// search from the bottom of the spectrum: the inertia of `K − σ'M` at the probe σ' just above
+/// the highest value counts every eigenvalue below σ' (Sylvester), and the check is complete
+/// when that count equals the number of returned values below σ'. The count keeps no factor.
+pub fn sturm_check(
     k: CsrRef<'_, f64>,
     m: CsrRef<'_, f64>,
     values: &[f64],
     options: &EigenOptions,
     control: SolveControl<'_>,
 ) -> SolverResult<SturmCheck> {
-    let top = *values.last().unwrap();
-    let probe = top + (top.abs() * (100.0 * options.tolerance).max(1e-8)).max(f64::MIN_POSITIVE);
-    let shifted = CsrMatrix::linear_combination(&[(1.0, k), (-probe, m)])?;
-    let solver = DirectSolver::<f64>::new(
-        shifted.as_ref().into(),
-        DirectOptions {
-            ordering: options.ordering.clone(),
-            ..DirectOptions::new(FactorKind::BunchKaufman)
-        },
-        control,
-    )?;
-    let inertia = solver.inertia().expect("symmetric factorization");
+    let inertia = PencilInertia::analyze(k, m, &options.ordering, control)?;
+    sturm_check_with(&inertia, values, options.tolerance, control)
+}
+
+/// [`sturm_check`] on an analyzed pencil.
+pub fn sturm_check_with(
+    inertia: &PencilInertia,
+    values: &[f64],
+    tolerance: f64,
+    control: SolveControl<'_>,
+) -> SolverResult<SturmCheck> {
+    let probe = sturm_probe(values, tolerance)
+        .ok_or_else(|| SolverError::Dimension("Sturm check of an empty spectrum".into()))?;
+    let counted = inertia.count(probe, control)?;
     Ok(SturmCheck {
         shift: probe,
-        counted: inertia.negative,
+        counted: counted.negative,
         returned: values.iter().filter(|&&v| v < probe).count(),
     })
+}
+
+/// Options of [`modal_lobpcg`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct IterativeModalOptions {
+    pub lobpcg: LobpcgOptions,
+    /// Ordering of the inertia counts.
+    pub ordering: Ordering,
+}
+
+/// Lowest eigenpairs of `K x = λ M x` without a retained factorization: block LOBPCG with a
+/// smoothed-aggregation AMG preconditioner of `K`, then two inertia counts of the pencil
+/// ([`PencilInertia`]) after the preconditioner and the iteration's workspace are released:
+///
+/// - at shift 0, `K` must have no negative or zero pivot, which proves it positive definite
+///   (otherwise [`SolverError::NotPositiveDefinite`]);
+/// - at the Sturm probe above the highest returned value ([`sturm_check_with`]), the count of
+///   eigenvalues below the probe, returned in [`EigenResult::sturm`].
+pub fn modal_lobpcg(
+    k: CsrRef<'_, f64>,
+    m: CsrRef<'_, f64>,
+    options: &IterativeModalOptions,
+    control: SolveControl<'_>,
+) -> SolverResult<EigenResult> {
+    let n = k.nrows();
+    if k.ncols() != n || m.nrows() != n || m.ncols() != n {
+        return Err(SolverError::Dimension(
+            "modal operators must be square and equal".into(),
+        ));
+    }
+    let mut result = {
+        let amg = crate::precond::Amg::new(k, crate::precond::AmgOptions::default(), control)?;
+        lobpcg(k, m, Some(&amg), &options.lobpcg, control)?
+    };
+    let inertia = PencilInertia::analyze(k, m, &options.ordering, control)?;
+    let stiffness = match inertia.count(0.0, control) {
+        Ok(counted) => counted,
+        Err(SolverError::Singular { pivot }) => {
+            return Err(SolverError::NotPositiveDefinite { pivot })
+        }
+        Err(error) => return Err(error),
+    };
+    if stiffness.negative != 0 || stiffness.zero != 0 {
+        return Err(SolverError::NotPositiveDefinite { pivot: 0 });
+    }
+    if !result.values.is_empty() {
+        result.sturm = Some(sturm_check_with(
+            &inertia,
+            &result.values,
+            options.lobpcg.tolerance,
+            control,
+        )?);
+    }
+    Ok(result)
+}
+
+/// Upper bound on the `f64` working values [`modal_lobpcg`] holds at once apart from the
+/// preconditioner and the inertia counts: the LOBPCG blocks and the returned pairs.
+pub fn modal_lobpcg_working_value_count(options: &IterativeModalOptions, n: usize) -> Option<usize> {
+    lobpcg_working_value_count(&options.lobpcg, n)
 }
 
 /// Linear buckling `(K + λ K_G) φ = 0`: the `count` smallest positive load factors.

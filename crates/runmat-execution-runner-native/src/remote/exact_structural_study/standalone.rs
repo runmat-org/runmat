@@ -41,6 +41,9 @@ pub(super) async fn modal(
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: Default::default(),
             accelerator_requests: decoded.analysis_accelerator_requests.clone(),
+            solve_selection: runmat_analysis_fea::planning::resource::ModalSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
         },
         policy,
     )

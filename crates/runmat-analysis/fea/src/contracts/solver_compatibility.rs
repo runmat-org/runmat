@@ -127,7 +127,10 @@ const fn method_is_compatible(
         ),
         TemporalImplementation::StructuralSubspaceIteration
         | TemporalImplementation::StructuralPrestressedSubspaceIteration => {
-            matches!(method, SolverMethod::ShiftInvertBlockLanczos)
+            matches!(
+                method,
+                SolverMethod::ShiftInvertBlockLanczos | SolverMethod::PreconditionedLobpcg
+            )
         }
         TemporalImplementation::StructuralEigenvalueBuckling => {
             matches!(method, SolverMethod::BucklingBlockLanczos)
@@ -238,6 +241,7 @@ const fn preconditioner_is_compatible(
         SolverMethod::ShiftInvertBlockLanczos | SolverMethod::BucklingBlockLanczos => {
             matches!(preconditioner, SolverPreconditioner::SparseCholesky)
         }
+        SolverMethod::PreconditionedLobpcg => matches!(preconditioner, SolverPreconditioner::Amg),
         SolverMethod::SparseDirectCholesky
         | SolverMethod::SparseDirectLdlt
         | SolverMethod::SparseDirectLu => matches!(preconditioner, SolverPreconditioner::None),
