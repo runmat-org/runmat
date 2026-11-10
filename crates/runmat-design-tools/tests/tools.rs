@@ -274,7 +274,14 @@ fn parts_export_as_step_stl_3mf_and_gltf() {
     );
     let text = step["files"][0]["content"].as_str().unwrap();
     assert!(text.starts_with("ISO-10303-21;"));
+    #[cfg(not(feature = "occt"))]
     assert!(text.contains("FACETED_BREP(") && text.contains("SI_UNIT(.MILLI.,.METRE.)"));
+    #[cfg(feature = "occt")]
+    {
+        assert!(text.contains("MANIFOLD_SOLID_BREP"), "{text}");
+        assert!(text.contains("AP242"), "{text}");
+        assert!(!text.contains("FACETED_BREP("), "{text}");
+    }
     assert!(text.trim_end().ends_with("END-ISO-10303-21;"));
     assert_eq!(step["files"][0]["name"], "bracket.step");
     let mf = ok(
@@ -634,18 +641,10 @@ fn an_assembly_reports_interference_by_name_and_mass_from_its_materials() {
         json!({ "path": "/p/pair.assembly", "sections": ["interference", "mass"] }),
         &files,
     );
-    // The Evaluate tab's check runs on the pair. The grid test kernel has no exact proximity, so
-    // it says so per pair rather than reporting a clean result (OCCT finds the overlap: the CAD
-    // host's cad_design_tools test).
+    // The reference kernel reports its unsupported query; OCCT measures the overlap.
     let interference = &out["sections"]["interference"];
     assert_eq!(interference["result"]["parts"], 2, "{out:#}");
-    assert!(
-        interference["problems"][0]
-            .as_str()
-            .unwrap()
-            .contains("lower / upper"),
-        "{out:#}"
-    );
+    assert_plate_overlap(interference);
     // Two 40 cm³ aluminium plates: 108 g each from their material, not steel's 314 g.
     let mass = out["sections"]["mass"]["result"]["parts"]
         .as_array()
@@ -701,7 +700,7 @@ fn an_interference_check_limited_to_a_change_checks_only_its_pairs() {
             .contains("only the pairs skid is in were checked")),
         "{out:#}"
     );
-    // Naming `upper` checks its pair with `lower` (the grid kernel says it can't measure it).
+    // Naming `upper` checks its pair with `lower`.
     let out = ok(
         "design.inspect",
         json!({ "path": "/p/trio.assembly", "sections": ["interference"], "changed": ["upper"] }),
@@ -711,13 +710,7 @@ fn an_interference_check_limited_to_a_change_checks_only_its_pairs() {
         out["sections"]["interference"]["result"]["candidates"], 1,
         "{out:#}"
     );
-    assert!(
-        out["sections"]["interference"]["problems"][0]
-            .as_str()
-            .unwrap()
-            .contains("lower / upper"),
-        "{out:#}"
-    );
+    assert_plate_overlap(&out["sections"]["interference"]);
     // A name that matches no occurrence is an error that lists them.
     let err = runmat_design_tools::call(
         "design.inspect",
@@ -730,6 +723,38 @@ fn an_interference_check_limited_to_a_change_checks_only_its_pairs() {
         "{}",
         err.message
     );
+}
+
+fn assert_plate_overlap(interference: &Value) {
+    #[cfg(not(feature = "occt"))]
+    {
+        assert!(
+            interference["problems"][0]
+                .as_str()
+                .is_some_and(|problem| problem.contains("lower / upper")),
+            "{interference:#}"
+        );
+        assert!(interference["result"]["overlaps"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+    #[cfg(feature = "occt")]
+    {
+        assert!(
+            interference["problems"].as_array().unwrap().is_empty(),
+            "{interference:#}"
+        );
+        let overlaps = interference["result"]["overlaps"].as_array().unwrap();
+        assert_eq!(overlaps.len(), 1, "{interference:#}");
+        assert_eq!(overlaps[0]["a"], "lower");
+        assert_eq!(overlaps[0]["b"], "upper");
+        // 80 x 50 x 5 mm of shared material.
+        assert!(
+            (overlaps[0]["volume_mm3"].as_f64().unwrap() - 20_000.0).abs() < 0.1,
+            "{interference:#}"
+        );
+    }
 }
 
 #[test]

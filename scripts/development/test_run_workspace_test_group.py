@@ -215,6 +215,24 @@ class ScientificRoutingTests(unittest.TestCase):
                 with self.subTest(group=group):
                     self.assertTrue(runner.test_commands(group, include_extended=True))
 
+    def test_boolean_step_corpus_routes_to_manual_without_skipping_bounded_box_checks(self):
+        policy_path = Path(__file__).resolve().parents[2] / "qualification/scientific/policy.json"
+        cohort = next(c for c in json.loads(policy_path.read_text())["cohorts"]
+                      if c["id"] == "occt-boolean-step-corpus")
+        self.assertFalse(cohort["required"])
+        self.assertIn("failed constrained-Delaunay facet recovery", cohort["exception"])
+        self.assertIn("--include-ignored", cohort["command"])
+        self.assertIn("occt_boolean_step_meshing", cohort["command"])
+        self.assertEqual(len(cohort["ordinary_skip"]), 6)
+        self.assertTrue(set(cohort["ordinary_skip"]).issubset(
+            runner.scientific_filters("tooling-distributed")))
+        for name in ("occt_box_executes_the_complete_serial_exact_dag",
+                     "runmat_and_independent_meshers_agree_on_box_invariants",
+                     "occt_box_artifact_is_independent_of_legal_partition_layout",
+                     "disconnected_cad_solids_retain_distinct_region_identity_through_meshing"):
+            self.assertFalse(any(pattern in name for pattern in
+                                 runner.scientific_filters("tooling-distributed")))
+
     def test_policy_patterns_are_scoped_to_the_selected_group(self):
         policy = {"schema_version": 1, "cohorts": [
             {"group": "runtime", "ordinary_skip": ["first::", "second::"]},

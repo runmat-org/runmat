@@ -300,8 +300,8 @@ jobs:
       - name: Install Python interoperability test dependencies
         shell: bash
         run: |
-          python -m pip install 'numpy>=2,<3'
-          python -c "import sys, numpy; print(sys.executable); print(numpy.__version__)"
+          python -m pip install 'numpy>=2,<3' 'lxml>=6,<7'
+          python -c "import sys, numpy, lxml.etree; print(sys.executable); print(numpy.__version__); print(lxml.etree.LIBXML_VERSION)"
 
       - name: Restore Windows native dependency cache
         if: runner.os == 'Windows' && matrix.needs_occt

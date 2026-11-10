@@ -68,7 +68,7 @@ fn extents(tris: &[[[f64; 3]; 3]]) -> [f64; 3] {
     [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]
 }
 
-/// The model part validated by xmllint against the vendored 3MF core and production XSDs.
+/// Validate against the vendored XSDs with libxml2 through Python's cross-platform lxml wheel.
 fn xsd_valid(package: &[u8], name: &str) {
     let entries = runmat_design_tools::formats::opc::unzip(package).unwrap();
     let model = &entries
@@ -81,12 +81,14 @@ fn xsd_valid(package: &[u8], name: &str) {
     let file = dir.join("3dmodel.model");
     std::fs::write(&file, model).unwrap();
     let schema = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/3mf/schema.xsd");
-    let out = Command::new("xmllint")
-        .args(["--noout", "--nonet", "--schema"])
+    let out = Command::new(if cfg!(windows) { "python" } else { "python3" })
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/3mf/validate_xsd.py"))
         .arg(&schema)
         .arg(&file)
         .output()
-        .expect("xmllint (libxml2) validates the 3MF schema; install libxml2-utils");
+        .expect(
+            "3MF schema validation requires Python with lxml (python -m pip install 'lxml>=6,<7')",
+        );
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
         out.status.success(),

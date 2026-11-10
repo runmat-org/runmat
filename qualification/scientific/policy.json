@@ -76,6 +76,22 @@
       "description": "Full CAD meshing and three-frequency harmonic Maxwell study. Run explicitly on suitable hardware; retain numerical assertions and bounded Maxwell regressions in ordinary CI."
     },
     {
+      "id": "occt-boolean-step-corpus",
+      "group": "tooling-distributed",
+      "required": false,
+      "exception": "Governed meshing qualification is deferred under the owner's 2026-11-04 release disposition. Linux dev 2012f077cf ran the active cases in 1459 seconds: 3 passed, the arm/motor-pod case failed constrained-Delaunay facet recovery, and 2 were already ignored. Keep those outcomes and the existing assertions for explicit manual runs.",
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat-execution-runner-native", "--test", "occt_boolean_step_meshing", "--", "--include-ignored", "--test-threads=1"],
+      "ordinary_skip": [
+        "a_lofted_beam_alone_meshes",
+        "cylinders_joined_by_a_planar_beam_mesh",
+        "cylinders_unioned_with_a_lofted_beam_mesh",
+        "the_arm_and_its_motor_pod_mesh_with_a_shared_interface",
+        "the_docs_heat_sink_meshes",
+        "a_trimmed_and_cut_lofted_shell_with_its_board_meshes_with_a_shared_interface"
+      ],
+      "description": "Full boolean STEP part and shared-interface meshing corpus. Ordinary CI retains bounded exact-box geometry, volume, energy, partition and region-identity regressions. No successful receipt exists for the failing arm or ignored cases."
+    },
+    {
       "id": "meshing-release",
       "required_target": "linux-x86_64",
       "expected_passed": 12,
