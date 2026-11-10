@@ -45,7 +45,7 @@ use wire::{CompletionWire, PreparationWire};
 const PREFIX: &[u8] = b"runmat-nonlinear-solid-study-completion\0";
 // Full original task history replaces the previous winning-attempt payload.
 const COMPLETION_SCHEMA_VERSION: u16 = 2;
-const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 
 /// New objects must be written to the shared store. Remaining catalog members already belong
 /// to completed phase responses. Copy exactly `catalog.objects` to obtain a cold closure.

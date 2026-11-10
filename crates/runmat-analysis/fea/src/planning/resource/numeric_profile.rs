@@ -1,21 +1,27 @@
 //! Algebraic numeric-array inventory using the shared codec's actual scalar cost.
 //! No array proportional to the requested count is allocated or traversed.
+//!
+//! The profile sizes the array; it does not cap it. The run's admitted memory and scratch
+//! budget is the only ceiling on a planned array (`admit_resource_plan` compares the plan's
+//! request, which includes this profile, with the worker inventory). The one remaining bound
+//! is the platform's largest single allocation, which no budget can raise.
 use super::ResourcePlanningError;
-use runmat_canonical_codec::{profile_serialized, CanonicalLimits, SerializedCanonicalProfile};
+use runmat_canonical_codec::{
+    profile_serialized, CanonicalLimits, SerializedCanonicalProfile, PLATFORM_MAXIMUM_ENCODED_BYTES,
+};
+
+/// Profiling limits. Collections are bounded by the platform allocation ceiling; the run's
+/// admitted budget governs the actual size. String and nesting bounds are unused by numeric
+/// arrays.
+const PROFILE_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 32);
 
 pub(super) fn numeric_inventory_profile(
     count: u64,
 ) -> Result<SerializedCanonicalProfile, ResourcePlanningError> {
     let overflow = || ResourcePlanningError::Overflow("numeric serialization inventory");
-    let limits = CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32);
-    if count > limits.maximum_collection_items as u64 {
-        return Err(ResourcePlanningError::CanonicalCollectionCapacity {
-            required: count,
-            maximum: limits.maximum_collection_items as u64,
-        });
-    }
     let profile = |v: &[f64]| {
-        profile_serialized(v, limits).map_err(|e| ResourcePlanningError::Invalid(e.to_string()))
+        profile_serialized(v, PROFILE_LIMITS)
+            .map_err(|e| ResourcePlanningError::Invalid(e.to_string()))
     };
     let empty = profile(&[])?;
     let one = profile(&[f64::MAX])?;
@@ -39,10 +45,10 @@ pub(super) fn numeric_inventory_profile(
         .and_then(|n| n.checked_add(empty.materialization_resident_bytes_estimate))
         .and_then(|n| n.checked_add(16))
         .ok_or_else(overflow)?;
-    if wire > limits.maximum_encoded_bytes as u64 {
+    if wire > PLATFORM_MAXIMUM_ENCODED_BYTES as u64 {
         return Err(ResourcePlanningError::CanonicalWireCapacity {
             required: wire,
-            maximum: limits.maximum_encoded_bytes as u64,
+            maximum: PLATFORM_MAXIMUM_ENCODED_BYTES as u64,
         });
     }
     if wire > runmat_types::wire_integer::MAX_WIRE_INTEGER
@@ -69,7 +75,7 @@ mod tests {
     //   measured RSS or whole study admission.
     #[test]
     fn count_only_inventory_covers_real_codec_headers_and_large_arrays() {
-        let limits = CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32);
+        let limits = PROFILE_LIMITS;
         for n in [0, 1, 23, 24, 255, 256, 65535, 65536] {
             let values = vec![f64::MAX; n];
             let actual = profile_serialized(&values, limits).unwrap();
@@ -80,12 +86,15 @@ mod tests {
                     >= actual.materialization_resident_bytes_estimate
             );
         }
-        // Constant profiling work does not waive canonical transport capacity.
-        assert!(numeric_inventory_profile(100_000_000).is_ok());
-        assert!(matches!(
-            numeric_inventory_profile(10_000_000_000),
-            Err(ResourcePlanningError::CanonicalCollectionCapacity { .. })
-        ));
+        // No fixed item or byte constant caps the profile: the drone arm's retained modal
+        // basis (290,919,200 values) and a ten-billion-value array both profile; the run's
+        // admitted budget decides whether they fit.
+        let arm = numeric_inventory_profile(290_919_200).unwrap();
+        assert!(arm.encoded_bytes_upper_bound > 1024 * 1024 * 1024);
+        let large = numeric_inventory_profile(10_000_000_000).unwrap();
+        assert!(large.encoded_bytes_upper_bound > 10_000_000_000);
+        // The platform allocation ceiling and checked arithmetic still refuse.
+        assert!(numeric_inventory_profile(PLATFORM_MAXIMUM_ENCODED_BYTES as u64 / 8).is_err());
         assert!(numeric_inventory_profile(u64::MAX).is_err());
     }
 }

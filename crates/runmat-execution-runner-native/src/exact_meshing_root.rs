@@ -35,8 +35,7 @@ const SOURCE_PREFIX: &[u8] = b"runmat-source-cad-manifest/v1\0";
 const SOURCE_DOMAIN: &str = "source-cad-manifest";
 const ADMISSION_PREFIX: &[u8] = b"runmat-exact-geometry-admission/v1\0";
 const ADMISSION_DOMAIN: &str = "exact-geometry-admission";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(16 * 1024 * 1024, 1_000_000, 65_536, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 const ROOT_MEDIA_TYPE: &str = "application/vnd.runmat.exact-meshing-root+cbor";
 const ROOT_VALUE_SCHEMA: &str = "runmat.meshing.exact-root";
 const SOURCE_MANIFEST_MEDIA_TYPE: &str = "application/vnd.runmat.source-cad-manifest+cbor";

@@ -35,9 +35,8 @@ fn estimates(completed: &CompletedNonlinearSolidStudy) -> AnalysisBridgeResult<(
             &completed.baseline_usage.evidence,
             &completed.terminal_usage.evidence,
         ),
-        CanonicalLimits::new(
+        CanonicalLimits::content_bounded(
             usize::try_from(ceiling).map_err(|_| limit("nonlinear encoding limit overflow"))?,
-            100_000_000,
             65_536,
             64,
         ),

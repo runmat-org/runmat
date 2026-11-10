@@ -29,11 +29,10 @@ pub(super) fn admit(
                 .resources
                 .resident_byte_budget(),
         );
-    let limits = CanonicalLimits::new(
+    let limits = CanonicalLimits::content_bounded(
         usize::try_from(ceiling).map_err(|_| storage::AnalysisPublicationError::ResourceLimit {
             message: "nonlinear host workspace exceeds address space".into(),
         })?,
-        100_000_000,
         65_536,
         64,
     );

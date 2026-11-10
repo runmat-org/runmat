@@ -12,10 +12,9 @@ pub(super) fn admit_pending<T: serde::Serialize>(
         .resident_byte_budget();
     let profile = runmat_canonical_codec::profile_serialized(
         pending,
-        runmat_canonical_codec::CanonicalLimits::new(
+        runmat_canonical_codec::CanonicalLimits::content_bounded(
             usize::try_from(ceiling)
                 .map_err(|_| limit("nonlinear pending scope exceeds address space"))?,
-            100_000_000,
             65_536,
             64,
         ),

@@ -65,10 +65,9 @@ impl NonlinearSolidStudyCoordinator {
                 }),
                 self.fields.as_ref().map(|f| (&f.manifest, &f.output)),
             ),
-            CanonicalLimits::new(
+            CanonicalLimits::content_bounded(
                 usize::try_from(ceiling)
                     .map_err(|_| limit("nonlinear retention limit exceeds address space"))?,
-                100_000_000,
                 65_536,
                 64,
             ),
@@ -77,10 +76,9 @@ impl NonlinearSolidStudyCoordinator {
         // Cold replay profiles borrowed state and imports separately admitted wire
         // objects. It never encodes this entire coordinator. Root publication owns
         // its separate encoding peak; keep the conservative producer allowance.
-        let state_limits = CanonicalLimits::new(
+        let state_limits = CanonicalLimits::content_bounded(
             usize::try_from(ceiling)
                 .map_err(|_| limit("nonlinear state retention exceeds address space"))?,
-            100_000_000,
             65_536,
             64,
         );

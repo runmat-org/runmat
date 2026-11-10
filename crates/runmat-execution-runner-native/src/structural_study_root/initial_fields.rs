@@ -11,8 +11,7 @@ use runmat_analysis_fea::{
 };
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 
-const SOURCE_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const SOURCE_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 const SOURCE_CHUNK_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
