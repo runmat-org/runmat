@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { inputFile } from "./manifest.mjs";
 import { requireGraphicsReplayBootstrap } from "./graphics.mjs";
 import { requireCompleteSnapshot, snapshotExamples } from "./snapshot-capture.mjs";
@@ -33,9 +34,16 @@ export async function verifyExampleReplay(source, captures, graphics, selectedId
         const colours = scene.figure.plots.flatMap(plot => plot.vertex_colors_rgba ?? []);
         assert(new Set(colours.map(colour => JSON.stringify(colour))).size > 1, `${label}: missing field colours`);
         const legend = scene.figure.geometryOverlay.scalar_legend;
-        assert.equal(legend.unit, view.unit, `${label}: legend unit differs`);
-        assert.equal(legend.minimum, view.minimum, `${label}: legend minimum differs`);
-        assert.equal(legend.maximum, view.maximum, `${label}: legend maximum differs`);
+        const displayUnit = view.display_unit ?? view.unit;
+        assert.equal(legend.unit, displayUnit, `${label}: legend unit differs`);
+        // Field extrema remain in the source unit; presentation may use the
+        // assessment's unit. Use the same Rust conversion authority as the CLI.
+        const [minimum, maximum] = displayUnit === view.unit ? [view.minimum, view.maximum]
+          : JSON.parse(execFileSync("cargo", ["run", "--locked", "--quiet", "-p", "runmat-types",
+            "--example", "convert_physical_values", "--", view.unit, displayUnit,
+            String(view.minimum), String(view.maximum)], { cwd: source, encoding: "utf8" }));
+        assert.equal(legend.minimum, minimum, `${label}: legend minimum differs`);
+        assert.equal(legend.maximum, maximum, `${label}: legend maximum differs`);
         assert(Number.isFinite(view.minimum) && Number.isFinite(view.maximum) && view.maximum > view.minimum, `${label}: invalid field range`);
       }
       const handle = renderer.importGeometryScene(bytes);
