@@ -16,12 +16,14 @@ pub mod run_set;
 #[cfg(feature = "m-values")]
 pub mod m_values;
 mod frame;
+mod stance;
 mod surface;
 pub use surface::Ray;
 
 /// What to read. Parts: `faces`, `regions`, `published`, `inputs`, `features`, `bodies`,
 /// `mass`, `surface` (named, with `rays`). Assemblies: `occurrences`, `mates`, `bom`, `mass`,
-/// `interference` and `surface` (named; `changed` and `rays`). Circuits: `components`, `nets`,
+/// `interference`, `surface` (named; `changed` and `rays`) and `stance` (named, with `contact`).
+/// Circuits: `components`, `nets`,
 /// `net_classes`, `bom`, `sheets`, `erc_power`, and with a board `rooms`, `footprints`, `layers`,
 /// `unplaced` and `eco`. Drawings: `sheets`, `views`, `annotations`, `models` (the inputs of
 /// the parts the views show).
@@ -62,6 +64,16 @@ pub struct InspectInput {
     /// bodies, with the face and its normal there. Give every ray a seating needs in one call.
     #[serde(default)]
     pub rays: Option<Vec<Ray>>,
+    /// Assemblies, with the `stance` section: the components the assembly stands on (skid
+    /// tubes, feet; names or paths, `*` globs). The section reports every other component's
+    /// clearance above the ground under them, whether the centre of mass lies inside their
+    /// support with its margin and tip-over angle to each edge, and the stance against the
+    /// overall size.
+    #[serde(default)]
+    pub contact: Option<Vec<String>>,
+    /// With `stance`: the assembly's up direction (default `[0, 0, 1]`); the ground is square to it.
+    #[serde(default)]
+    pub up: Option<Vec<f64>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -444,6 +456,10 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
         let value = surface::surface(s.input.rays.as_deref(), path, text, files, Some(&occurrence_paths))?;
         s.value("surface", value);
     }
+    if s.named("stance") {
+        let value = stance::stance(path, text, files, s.input.contact.as_deref(), s.input.up.as_deref())?;
+        s.value("stance", value);
+    }
     if s.wants("mass") && s.input.density.is_none() {
         // Each part's own material (or density property), as the Evaluate tab's mass properties.
         let value = evaluated(path, text, files, "evaluate.mass-properties").unwrap_or_else(|e| {
@@ -573,6 +589,8 @@ fn drawing(s: &mut Sections, path: &str, text: &str, files: &Files) {
                 limit: None,
                 changed: None,
                 rays: None,
+                contact: None,
+                up: None,
             };
             if let Ok(out) = inspect(&input, files) {
                 models.push(json!({ "path": model, "inputs": out.sections.get("inputs").cloned().unwrap_or(Value::Null) }));

@@ -317,6 +317,8 @@ pub fn status(guide: &Guide, path: &str, files: &Files) -> Result<GuideStatus, T
             limit: Some(1),
             changed: None,
             rays: None,
+            contact: None,
+            up: None,
         };
         if let Ok(seen) = inspect(&input, files) {
             for (k, v) in seen.totals {
