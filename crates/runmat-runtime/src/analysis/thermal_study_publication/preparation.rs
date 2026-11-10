@@ -17,11 +17,10 @@ pub(super) fn capture(
     let maximum = crate::analysis::configuration::publication_staging_budget()?;
     let mesh_bytes = storage::publication::retained_mesh_storage(mesh, maximum)?;
     let original_metadata = storage::publication::resident(&(evidence, options), maximum)?;
-    let limits = runmat_canonical_codec::CanonicalLimits::new(
+    let limits = runmat_canonical_codec::CanonicalLimits::content_bounded(
         usize::try_from(maximum).map_err(|_| storage::AnalysisPublicationError::ResourceLimit {
             message: "thermal preparation exceeds address space".into(),
         })?,
-        100_000_000,
         65_536,
         64,
     );

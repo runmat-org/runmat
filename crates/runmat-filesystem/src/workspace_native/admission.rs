@@ -17,9 +17,8 @@ fn multiply(a: u64, b: u64) -> io::Result<u64> {
 fn metadata(value: &(impl Serialize + ?Sized), maximum: u64) -> io::Result<u64> {
     serialized_materialization_resident_bytes_estimate(
         value,
-        CanonicalLimits::new(
+        CanonicalLimits::content_bounded(
             usize::try_from(maximum).map_err(io::Error::other)?,
-            100_000,
             4096,
             32,
         ),

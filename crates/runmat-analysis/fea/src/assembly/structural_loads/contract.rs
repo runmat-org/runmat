@@ -18,8 +18,7 @@ use crate::{
 
 const PLAN_PREFIX: &[u8] = b"runmat-fea-structural-load-plan/v1\0";
 const PLAN_DOMAIN: &str = "fea-structural-load-plan";
-const PLAN_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 1_000_000, 64);
+const PLAN_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1_000_000, 64);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

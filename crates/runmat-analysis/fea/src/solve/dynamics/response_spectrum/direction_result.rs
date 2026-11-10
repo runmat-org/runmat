@@ -12,9 +12,8 @@ use super::{
 };
 
 const DIRECTION_RESULT_PREFIX: &[u8] = b"runmat-modal-response-spectrum-direction-result\0";
-const DIRECTION_RESULT_LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 65_536, 24),
-);
+const DIRECTION_RESULT_LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::platform_content(65_536, 24));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]

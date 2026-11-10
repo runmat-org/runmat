@@ -416,8 +416,8 @@ fn local_flip_can_connect_endpoints(
             if vertices[first] == left || !right_link.contains(&vertices[first]) {
                 continue;
             }
-            for second in (first + 1)..4 {
-                if vertices[second] != left && right_link.contains(&vertices[second]) {
+            for &second in &vertices[(first + 1)..4] {
+                if second != left && right_link.contains(&second) {
                     return true;
                 }
             }

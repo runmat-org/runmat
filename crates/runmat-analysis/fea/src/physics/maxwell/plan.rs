@@ -9,9 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 const PREFIX: &[u8] = b"runmat-maxwell-system-plan/v2\0";
-const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
-    CanonicalLimits::new(512 * 1024 * 1024, 64_000_000, 256, 16),
-);
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::platform_content(256, 16));
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MaxwellSystemPlan {

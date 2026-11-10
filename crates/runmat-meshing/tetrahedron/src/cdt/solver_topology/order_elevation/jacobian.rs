@@ -87,14 +87,17 @@ pub(super) fn validate_elements(
     Ok(())
 }
 
+/// An element index, its Tet10 node coordinates and its Jacobian certification result.
+type CertifiedElement = (
+    usize,
+    [[f64; 3]; 10],
+    Result<(), DelaunaySolverTopologyError>,
+);
+
 /// The shared Tet10 element rule (Jacobian margin and stiffness-quadrature convergence) for
 /// every element whose Jacobian was certified, on all admitted cores, in input order.
 fn shared_rule_results(
-    certified: &[(
-        usize,
-        [[f64; 3]; 10],
-        Result<(), DelaunaySolverTopologyError>,
-    )],
+    certified: &[CertifiedElement],
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<Result<(), DelaunaySolverTopologyError>>, DelaunaySolverTopologyError> {
     if cancellation.is_cancelled() {
@@ -416,12 +419,14 @@ fn certify_jacobian(
     let mut deepest = 0_u32;
     let result = certify_element_within(
         coordinates,
-        maximum_search_work,
-        maximum_recursion_depth,
+        JacobianSearchLimits {
+            maximum_search_work,
+            maximum_recursion_depth,
+            cancellation_check_interval,
+        },
         cancellation,
         &storage,
         &mut element_work,
-        cancellation_check_interval,
         &mut deepest,
     );
     *total_work = total_work.saturating_add(element_work);
@@ -477,16 +482,27 @@ fn shared_element_rule(coordinates: &[[f64; 3]; 10]) -> Result<(), DelaunaySolve
         })
 }
 
-fn certify_element_within(
-    coordinates: [[f64; 3]; 10],
+/// The search bounds of one element's Jacobian certification.
+#[derive(Clone, Copy)]
+struct JacobianSearchLimits {
     maximum_search_work: u64,
     maximum_recursion_depth: u32,
+    cancellation_check_interval: u64,
+}
+
+fn certify_element_within(
+    coordinates: [[f64; 3]; 10],
+    limits: JacobianSearchLimits,
     cancellation: &dyn MeshingCancellationSignal,
     storage: &Storage<'_>,
     work: &mut u64,
-    cancellation_check_interval: u64,
     deepest: &mut u32,
 ) -> Result<(), DelaunaySolverTopologyError> {
+    let JacobianSearchLimits {
+        maximum_search_work,
+        maximum_recursion_depth,
+        cancellation_check_interval,
+    } = limits;
     if cancellation_check_interval == 0 {
         return Err(error::failure(
             DelaunaySolverTopologyErrorKind::InvalidOptions,

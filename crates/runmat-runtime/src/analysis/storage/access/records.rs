@@ -17,13 +17,12 @@ impl FilesystemAccess<'_> {
     ) -> Result<u64, AnalysisPublicationError> {
         runmat_canonical_codec::json_materialization_resident_bytes_estimate(
             bytes,
-            runmat_canonical_codec::CanonicalLimits::new(
+            runmat_canonical_codec::CanonicalLimits::content_bounded(
                 usize::try_from(self.remaining_bytes()).map_err(|_| {
                     AnalysisPublicationError::ResourceLimit {
                         message: "artifact budget exceeds address space".into(),
                     }
                 })?,
-                100_000_000,
                 65_536,
                 64,
             ),

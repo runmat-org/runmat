@@ -12,6 +12,16 @@ pub(super) enum SplitStrategy {
     EdgeStar,
 }
 
+/// The node a conforming insertion adds, the protected facet triangles it must keep, the
+/// recovered segment edge it splits (if any) and the protected triangles it lies on.
+#[derive(Clone, Copy)]
+pub(super) struct ConformingInsertionRequest<'a> {
+    pub(super) node: DelaunayVolumeNode,
+    pub(super) protected: &'a [DelaunayRecoveredFacetTriangle],
+    pub(super) selected_edge: Option<[StableDigest; 2]>,
+    pub(super) hits: &'a [(DelaunayRecoveredFacetTriangle, PointLocation)],
+}
+
 /// Splits with the constrained cavity first. In thin layers between parallel interfaces,
 /// splitting only the edge star can leave an illegal link face that no flip removes; the
 /// cavity removes those cells before refilling. The edge-star split remains the fallback.
@@ -24,13 +34,16 @@ pub(super) fn insert_conformingly(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Option<ConformingInsertion>, DelaunayFacetRecoveryError> {
+    let request = ConformingInsertionRequest {
+        node,
+        protected,
+        selected_edge,
+        hits,
+    };
     if selected_edge.is_some() {
         if let Some(insertion) = insert_conformingly_with(
             current,
-            node,
-            protected,
-            selected_edge,
-            hits,
+            request,
             SplitStrategy::ConstrainedCavity,
             constraint_index,
             work,
@@ -41,10 +54,7 @@ pub(super) fn insert_conformingly(
     let cavity_rejection = work.last_rejection().map(str::to_owned);
     let insertion = insert_conformingly_with(
         current,
-        node,
-        protected,
-        selected_edge,
-        hits,
+        request,
         SplitStrategy::EdgeStar,
         constraint_index,
         work,
@@ -58,17 +68,19 @@ pub(super) fn insert_conformingly(
     Ok(insertion)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn insert_conformingly_with(
     current: &DelaunaySegmentRecovery,
-    node: DelaunayVolumeNode,
-    protected: &[DelaunayRecoveredFacetTriangle],
-    selected_edge: Option<[StableDigest; 2]>,
-    hits: &[(DelaunayRecoveredFacetTriangle, PointLocation)],
+    request: ConformingInsertionRequest<'_>,
     strategy: SplitStrategy,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Option<ConformingInsertion>, DelaunayFacetRecoveryError> {
+    let ConformingInsertionRequest {
+        node,
+        protected,
+        selected_edge,
+        hits,
+    } = request;
     let mut mutation = TopologyMutation::from_canonical(current.topology.clone());
     let inserted = mutation.append_node(node).map_err(|failure| {
         error(

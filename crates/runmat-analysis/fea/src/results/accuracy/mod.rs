@@ -34,8 +34,7 @@ const ACCURACY_EVIDENCE_PREFIX: &[u8] = b"runmat-fea-accuracy-evidence/v1\0";
 const ACCURACY_PLAN_PREFIX: &[u8] = b"runmat-fea-accuracy-plan/v1\0";
 const ACCURACY_PLAN_DOMAIN: &str = "analysis.fea.accuracy-plan/v1";
 const ACCURACY_EVIDENCE_DOMAIN: &str = "analysis.fea.accuracy-evidence/v1";
-const ACCURACY_REPORT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(16 * 1024 * 1024, 1_000_000, 4096, 32);
+const ACCURACY_REPORT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(4096, 32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

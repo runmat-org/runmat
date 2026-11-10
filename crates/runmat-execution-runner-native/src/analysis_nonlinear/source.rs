@@ -128,10 +128,9 @@ impl<S: CacheImport> OriginalSource<S> {
         }
         let profile = runmat_canonical_codec::profile_serialized(
             &(&self.root, &self.catalog, &self.access),
-            runmat_canonical_codec::CanonicalLimits::new(
+            runmat_canonical_codec::CanonicalLimits::content_bounded(
                 usize::try_from(ceiling)
                     .map_err(|_| limit("nonlinear workspace exceeds address space"))?,
-                100_000_000,
                 65_536,
                 64,
             ),

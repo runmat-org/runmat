@@ -13,8 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::{AnalysisBridgeError, AnalysisBridgeResult, StructuralTransientSequencePreparation};
 
 const CHECKPOINT_PREFIX: &[u8] = b"runmat-structural-transient-execution-checkpoint\0";
-const CHECKPOINT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+const CHECKPOINT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 pub const STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_MEDIA_TYPE: &str =
     "application/vnd.runmat.structural-transient-execution-checkpoint+cbor";
 pub const STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA: &str =

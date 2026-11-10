@@ -2,10 +2,22 @@ use runmat_execution::resource::Capability;
 
 #[derive(Clone, Debug, thiserror::Error, Eq, PartialEq)]
 pub enum ResourcePlanningError {
-    #[error("canonical numeric inventory requires {required} items, maximum {maximum}")]
-    CanonicalCollectionCapacity { required: u64, maximum: u64 },
-    #[error("canonical numeric inventory requires {required} encoded bytes, maximum {maximum}")]
+    /// A numeric array's encoding exceeds the platform's largest single allocation.
+    #[error(
+        "canonical numeric inventory requires {required} encoded bytes, above the platform allocation ceiling of {maximum}"
+    )]
     CanonicalWireCapacity { required: u64, maximum: u64 },
+    /// The plan's memory or scratch request exceeds what the worker's admitted budget offers.
+    /// Available memory is min(worker inventory, authored resident budget).
+    #[error(
+        "the study needs {required_memory_bytes} bytes of memory and {required_scratch_bytes} bytes of scratch; the admitted budget offers {available_memory_bytes} bytes of memory and {available_scratch_bytes} bytes of scratch"
+    )]
+    MemoryBudget {
+        required_memory_bytes: u64,
+        available_memory_bytes: u64,
+        required_scratch_bytes: u64,
+        available_scratch_bytes: u64,
+    },
     #[error("invalid FEA resource fact: {0}")]
     Invalid(String),
     #[error("FEA resource arithmetic overflow: {0}")]

@@ -1284,9 +1284,65 @@ fn inventory_admits_or_rejects_a_monolithic_plan() {
             &inventory(plan.request.memory_bytes - 1, 100)
         ),
         ResourceAdmission::Reject {
-            reason: ResourcePlanningError::Inventory("memory or scratch")
-        }
+            reason: ResourcePlanningError::MemoryBudget {
+                required_memory_bytes,
+                available_memory_bytes,
+                ..
+            }
+        } if required_memory_bytes == plan.request.memory_bytes
+            && available_memory_bytes == plan.request.memory_bytes - 1
     ));
+}
+
+// G25: the drone arm modal study (378,609 Tet10 nodes, 1,135,827 DOFs, 256-vector admitted
+// search capacity) plans a 290,919,200-value retained basis. No fixed item or byte constant
+// refuses it; the worker's admitted memory and scratch decide, and a refusal names the bytes
+// needed and the bytes available.
+#[test]
+fn modal_basis_above_one_hundred_million_values_plans_within_the_admitted_budget() {
+    let (full_dofs, modes, nodes) = (1_135_827_u64, 256_u64, 378_609_u64);
+    let values = full_dofs * modes + 2 * modes * modes + 64 * modes + 32;
+    assert_eq!(values, 290_919_200);
+    let output = modal::output::result_output(values, modes, 0, full_dofs, nodes).unwrap();
+    assert!(output.encoded_payload_bytes_upper_bound.0 > 1024 * 1024 * 1024);
+
+    let arm_input = || {
+        let mut input = input(PartitioningPolicy::Monolithic);
+        input.accuracy_ceiling.maximum_resident_bytes = None;
+        let FeaResourceDemand::StructuralLinearPipeline(demand) = &mut input.demand else {
+            unreachable!()
+        };
+        demand.state_profiles_output = output.clone();
+        input
+    };
+    let plan = build_resource_plan(arm_input()).unwrap();
+    assert!(plan.request.memory_bytes > output.encoded_payload_bytes_upper_bound.0);
+    let scratch = plan.request.scratch_bytes;
+    assert!(matches!(
+        admit_resource_plan(arm_input(), &inventory(plan.request.memory_bytes, scratch)),
+        ResourceAdmission::Admit { .. }
+    ));
+    let available = 1024 * 1024 * 1024;
+    match admit_resource_plan(arm_input(), &inventory(available, scratch)) {
+        ResourceAdmission::Reject {
+            reason:
+                reason @ ResourcePlanningError::MemoryBudget {
+                    required_memory_bytes,
+                    available_memory_bytes,
+                    required_scratch_bytes,
+                    available_scratch_bytes,
+                },
+        } => {
+            assert_eq!(required_memory_bytes, plan.request.memory_bytes);
+            assert_eq!(available_memory_bytes, available);
+            assert_eq!(required_scratch_bytes, scratch);
+            assert_eq!(available_scratch_bytes, scratch);
+            let message = reason.to_string();
+            assert!(message.contains(&required_memory_bytes.to_string()));
+            assert!(message.contains(&available.to_string()));
+        }
+        other => panic!("expected a memory-budget refusal, got {other:?}"),
+    }
 }
 
 #[test]

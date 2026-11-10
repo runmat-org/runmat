@@ -3,12 +3,16 @@
 use super::modal_completion::{modal_basis_states_for_completion, prepared_completion};
 use super::*;
 
-#[allow(clippy::too_many_arguments)]
+/// The study's persisted mesh and the solver mesh artifact the modal-frequency run used.
+pub(super) struct ModalFrequencyMeshes {
+    pub(super) persisted: crate::analysis::meshing::ResolvedStudyMesh,
+    pub(super) solver: runmat_meshing_core::SolverMeshArtifact,
+}
+
 pub(super) fn complete_structural_modal_frequency(
     intent: PreparedStructuralStudyIntent,
     study_model: runmat_analysis_core::AnalysisModel,
-    persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
-    solver_mesh: runmat_meshing_core::SolverMeshArtifact,
+    meshes: ModalFrequencyMeshes,
     authored_workloads: BTreeMap<
         runmat_analysis_core::ProcedureStepId,
         runmat_analysis_fea::execution::StructuralStepWorkload,
@@ -17,6 +21,10 @@ pub(super) fn complete_structural_modal_frequency(
     completion_identity: AnalysisStudyCompletionIdentity,
     preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
 ) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
+    let ModalFrequencyMeshes {
+        persisted: persisted_mesh,
+        solver: solver_mesh,
+    } = meshes;
     let [modal_step, frequency_step] = intent.steps.as_slice() else {
         return Err(intent_completion_error(
             &intent,

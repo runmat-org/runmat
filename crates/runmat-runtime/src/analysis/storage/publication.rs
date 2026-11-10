@@ -92,7 +92,7 @@ fn canonical_digest(domain: &'static str, value: &impl Serialize) -> Result<Dige
         b"runmat-analysis-publication/v1\0",
         domain,
         value,
-        CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64),
+        CanonicalLimits::platform_content(65_536, 64),
     )
     .map(Digest::sha256)
     .map_err(|e| e.to_string())
@@ -642,11 +642,10 @@ pub(in crate::analysis) fn typed_resident(
 ) -> Result<u64, AnalysisPublicationError> {
     runmat_canonical_codec::profile_typed_resident_bytes(
         value,
-        CanonicalLimits::new(
+        CanonicalLimits::content_bounded(
             usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
                 message: "publication budget exceeds address space".into(),
             })?,
-            100_000_000,
             65_536,
             64,
         ),

@@ -128,10 +128,9 @@ impl<S: CacheImport + Send + Sync> ThermalStudySource for RetainedThermalSource<
         {
             return Err("thermal source workspace catalog differs from original closure".into());
         }
-        let codec = runmat_canonical_codec::CanonicalLimits::new(
+        let codec = runmat_canonical_codec::CanonicalLimits::content_bounded(
             usize::try_from(maximum)
                 .map_err(|_| limit("thermal source workspace address space"))?,
-            100_000_000,
             65_536,
             64,
         );

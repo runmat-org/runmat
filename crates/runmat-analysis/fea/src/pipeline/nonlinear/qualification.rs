@@ -336,12 +336,7 @@ fn public_completion_retains_original_history_and_cold_scope_validation() {
         let result = run_nonlinear_with_options(&model, ComputeBackend::Cpu, opts.clone()).unwrap();
         let profile = runmat_canonical_codec::profile_serialized(
             &result,
-            runmat_canonical_codec::CanonicalLimits::new(
-                1024 * 1024 * 1024,
-                100_000_000,
-                65_536,
-                32,
-            ),
+            runmat_canonical_codec::CanonicalLimits::platform_content(65_536, 32),
         )
         .unwrap();
         let demand = resource.input.structural_operator().unwrap();

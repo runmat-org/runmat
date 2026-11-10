@@ -43,6 +43,7 @@ use simultaneous::{refill_cavity_sides, CavityRefillRequest};
 use star::star_refill;
 pub(super) use in_place::{
     insert_candidate_in_place, try_recover_facet_with_cavity_in_place, InPlaceCandidate,
+    InPlaceCandidateRequest,
 };
 pub(super) use steiner::{
     candidate_node, steiner_identity, steiner_lineage, try_insert_candidate_with_conflicts,

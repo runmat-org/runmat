@@ -36,8 +36,7 @@ const ROOT_PREFIX: &[u8] = b"runmat-structural-study-root\0";
 const ROOT_DOMAIN: &str = "structural-study-root";
 const ROOT_MEDIA_TYPE: &str = "application/vnd.runmat.structural-study-root+cbor";
 const ROOT_VALUE_SCHEMA: &str = "runmat.analysis.structural-study-root";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 96);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 96);
 
 mod contract;
 mod initial_fields;
