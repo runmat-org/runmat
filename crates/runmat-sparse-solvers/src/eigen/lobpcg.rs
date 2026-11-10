@@ -1,7 +1,10 @@
 //! LOBPCG (Knyazev) for the lowest eigenpairs of `K x = λ M x` with an SPD preconditioner
-//! `T ≈ K⁻¹` (typically AMG). Rayleigh–Ritz on `[X, W, P]` uses an eigen-decomposition of the
-//! Gram matrix to drop numerically dependent directions, which makes the method robust without
-//! explicit orthogonalization of `W` and `P`.
+//! `T ≈ K⁻¹` (typically AMG). Each step M-orthogonalizes the search directions `[W, P]` against
+//! the iterate `X` and M-orthonormalizes them by an eigen-decomposition of their Gram matrix
+//! (dropping numerically dependent directions), as Hetmaniuk and Lehoucq (2006) do. On an
+//! M-orthonormal basis the Rayleigh–Ritz Gram matrices stay well conditioned while the residuals
+//! shrink, so the iteration reaches tight residual tolerances instead of stagnating where `W`
+//! falls into the span of `X` and `P`.
 
 use super::blas::{gemm_nn, gemm_tn, spmm, ProductScale};
 use super::{true_residuals, EigenResult};
@@ -115,6 +118,97 @@ fn rayleigh_ritz(gk: &[f64], gm: &[f64], s: usize) -> SolverResult<(Vec<f64>, Ve
     Ok((theta, y))
 }
 
+/// M-orthogonalizes the `c = v.len() / n` columns of `v` against the M-orthonormal block `x`
+/// (with `mx = M x`) and M-orthonormalizes what remains, dropping numerically dependent
+/// directions. Two passes recover the orthogonality the first loses to cancellation. Returns the
+/// basis and its image under `M`.
+fn m_orthonormal_complement(
+    m: CsrRef<'_, f64>,
+    x: &[f64],
+    mx: &[f64],
+    block: usize,
+    mut v: Vec<f64>,
+    n: usize,
+) -> SolverResult<(Vec<f64>, Vec<f64>)> {
+    let mut mv = Vec::new();
+    for _ in 0..2 {
+        let c = v.len() / n;
+        if c == 0 {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        // V ← V − X (M X)ᵀ V.
+        let coefficients = gemm_tn(mx, block, &v, c, n);
+        gemm_nn(
+            &mut v,
+            c,
+            ProductScale {
+                alpha: -1.0,
+                beta: 1.0,
+            },
+            x,
+            block,
+            &coefficients,
+            n,
+        );
+        mv = vec![0.0; n * c];
+        spmm(m, &v, &mut mv, c);
+        let gram = gemm_tn(&v, c, &mv, c, n);
+        let z = orthonormalizing_transform(&gram, c)?;
+        let r = z.len() / c.max(1);
+        let mut orthonormal = vec![0.0; n * r];
+        gemm_nn(
+            &mut orthonormal,
+            r,
+            ProductScale {
+                alpha: 1.0,
+                beta: 0.0,
+            },
+            &v,
+            c,
+            &z,
+            n,
+        );
+        let mut m_orthonormal = vec![0.0; n * r];
+        gemm_nn(
+            &mut m_orthonormal,
+            r,
+            ProductScale {
+                alpha: 1.0,
+                beta: 0.0,
+            },
+            &mv,
+            c,
+            &z,
+            n,
+        );
+        v = orthonormal;
+        mv = m_orthonormal;
+    }
+    Ok((v, mv))
+}
+
+/// `Z = D U_keep diag(μ^-1/2)` for the Gram matrix `G` (c × c): `Zᵀ G Z = I` on the directions
+/// whose unit-diagonal-scaled eigenvalue exceeds a rounding-level fraction of the largest.
+fn orthonormalizing_transform(gram: &[f64], c: usize) -> SolverResult<Vec<f64>> {
+    let d: Vec<f64> = (0..c)
+        .map(|i| gram[i * c + i].max(f64::MIN_POSITIVE).sqrt().recip())
+        .collect();
+    let scaled: Vec<f64> = (0..c * c).map(|e| gram[e] * d[e / c] * d[e % c]).collect();
+    let (mu, u) = symmetric_eigen(&scaled, c)?;
+    let top = mu.iter().fold(0.0f64, |a, &b| a.max(b));
+    let keep: Vec<usize> = (0..c)
+        .filter(|&i| mu[i] > 1e-13 * top && mu[i] > 0.0)
+        .collect();
+    let mut z = vec![0.0; c * keep.len()];
+    for (column, &i) in keep.iter().enumerate() {
+        let scale = mu[i].sqrt().recip();
+        for row in 0..c {
+            z[column * c + row] = d[row] * u[i * c + row] * scale;
+        }
+    }
+    Ok(z)
+}
+
 pub fn lobpcg(
     k: CsrRef<'_, f64>,
     m: CsrRef<'_, f64>,
@@ -210,21 +304,25 @@ pub fn lobpcg(
             }
             applications += 1;
         }
-        // Basis S = [X, W, P] and its Gram matrices.
-        let p_cols = p_block.as_ref().map_or(0, |p| p.len() / n);
-        let s = block + a + p_cols;
-        let mut basis = Vec::with_capacity(n * s);
-        basis.extend_from_slice(&x);
-        basis.extend_from_slice(&w);
-        if let Some(p) = &p_block {
-            basis.extend_from_slice(p);
+        // Basis S = [X, Q] with Q an M-orthonormal basis of [W, P] M-orthogonal to X.
+        let mut directions = w;
+        if let Some(p) = p_block.take() {
+            directions.extend_from_slice(&p);
         }
+        let mut basis = Vec::with_capacity(n * (block + directions.len() / n));
+        basis.extend_from_slice(&x);
+        let (directions, m_directions) =
+            m_orthonormal_complement(m, &x, &mx, block, directions, n)?;
+        basis.extend_from_slice(&directions);
+        drop(directions);
+        let s = basis.len() / n;
         let mut kb = vec![0.0; n * s];
         let mut mb = vec![0.0; n * s];
         kb[..n * block].copy_from_slice(&kx);
         mb[..n * block].copy_from_slice(&mx);
         spmm(k, &basis[n * block..], &mut kb[n * block..], s - block);
-        spmm(m, &basis[n * block..], &mut mb[n * block..], s - block);
+        mb[n * block..].copy_from_slice(&m_directions);
+        drop(m_directions);
         let gk = gemm_tn(&basis, s, &kb, s, n);
         let gm = gemm_tn(&basis, s, &mb, s, n);
         let (t, y) = rayleigh_ritz(&gk, &gm, s)?;

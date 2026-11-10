@@ -338,3 +338,64 @@ fn lobpcg_modal_path_refuses_an_indefinite_stiffness() {
     // never returned for an indefinite stiffness.
     assert!(refused.is_err(), "{refused:?}");
 }
+
+/// A slender clamped elastic beam (bending dominated) at a tight tolerance: every multigrid
+/// variant reaches it once the search directions are M-orthonormalized, and the rigid-body
+/// near-nullspace (which broke down without that) needs the fewest steps.
+#[test]
+fn lobpcg_reaches_a_tight_tolerance_on_a_slender_beam_with_each_multigrid_variant() {
+    use crate::precond::rigid_body_modes;
+    let p = crate::testutil::elasticity::elasticity3d(4, 4, 60);
+    let k = p.matrix;
+    let m = CsrMatrix::<f64>::identity(k.nrows());
+    let options = LobpcgOptions {
+        count: 8,
+        guard: 6,
+        tolerance: 5e-9,
+        max_iterations: 400,
+    };
+    let blocked = AmgOptions {
+        block_size: 3,
+        strength_threshold: 0.02,
+        coarse_size: 200,
+        ..Default::default()
+    };
+    let variants = [
+        AmgOptions {
+            coarse_size: 200,
+            ..Default::default()
+        },
+        blocked.clone(),
+        AmgOptions {
+            near_nullspace: Some(rigid_body_modes(&p.coordinates, 3)),
+            ..blocked
+        },
+    ];
+    let mut steps = Vec::new();
+    let mut reference: Option<Vec<f64>> = None;
+    for amg_options in variants {
+        let amg = Amg::new(k.as_ref(), amg_options, SolveControl::NONE).unwrap();
+        let r = lobpcg(
+            k.as_ref(),
+            m.as_ref(),
+            Some(&amg),
+            &options,
+            SolveControl::NONE,
+        )
+        .unwrap();
+        assert!(
+            r.converged,
+            "{} steps, residuals {:?}",
+            r.restarts, r.residuals
+        );
+        if let Some(reference) = &reference {
+            for (a, b) in r.values.iter().zip(reference) {
+                assert!((a - b).abs() <= 1e-7 * b, "{a} vs {b}");
+            }
+        } else {
+            reference = Some(r.values.clone());
+        }
+        steps.push(r.restarts);
+    }
+    assert!(steps[2] < steps[1] && steps[1] < steps[0], "{steps:?}");
+}
