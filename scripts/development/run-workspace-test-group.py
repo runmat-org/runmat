@@ -8,6 +8,7 @@ from collections import Counter
 from contextlib import contextmanager
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -299,6 +300,40 @@ WINDOWS_ARCHIVE_FREE_SPACE = 64 * 1024 ** 3
 WINDOWS_ARCHIVE_MIN_BYTES = 16 * 1024 ** 2
 
 
+def reclaim_cached_root_binaries(target_directory: Path, metadata: dict) -> int:
+    """Reclaim cached linked roots before testing on an isolated CI runner.
+
+    Cargo relinks missing roots from the retained compiler libraries. This
+    includes binaries left by interrupted jobs, which have no completed-test
+    JSON event. Build scripts, libraries and fingerprints stay in the cache.
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        raise RuntimeError("cached root reclamation requires an isolated GitHub Actions job")
+    if target_directory.is_symlink() or (hasattr(target_directory, "is_junction") and target_directory.is_junction()):
+        raise RuntimeError("cached root reclamation refuses a redirected target")
+    names = {name for package in metadata["packages"] for target in package["targets"]
+             for name in (target["name"], target["name"].replace("-", "_"))}
+    removed = 0
+    for relative in ("debug", "debug/deps", "debug/examples"):
+        directory = target_directory / relative
+        if not directory.exists():
+            continue
+        if (directory.is_symlink() or (hasattr(directory, "is_junction") and directory.is_junction())
+                or not directory.resolve().is_relative_to(target_directory.resolve())):
+            raise RuntimeError("cached root reclamation refuses a redirected directory")
+        for file in directory.iterdir():
+            if file.suffix.lower() != ".exe" or file.is_symlink() or not file.is_file():
+                continue
+            match = re.fullmatch(r"(.+)-[a-f0-9]{16}", file.stem)
+            if file.stem not in names and (not match or match[1] not in names):
+                continue
+            file.unlink()
+            file.with_suffix(".pdb").unlink(missing_ok=True)
+            removed += 1
+    print(f"Reclaimed {removed} cached workspace executables; retained compiler libraries", flush=True)
+    return removed
+
+
 def compact_windows_archives(target_directory: Path) -> int:
     """Compress completed dependency archives under disk pressure; retain their bytes."""
     if os.name != "nt" or not target_directory.is_dir():
@@ -434,6 +469,9 @@ def main() -> int:
     if args.check:
         print(f"{sum(map(len, GROUPS.values()))} workspace packages assigned across {len(GROUPS)} groups")
         return 0
+
+    if args.reclaim_completed_test_binaries and os.name == "nt":
+        reclaim_cached_root_binaries(Path(metadata["target_directory"]), metadata)
 
     failure = 0
     commands = test_commands(args.group, args.include_extended, metadata)

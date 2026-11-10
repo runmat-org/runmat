@@ -34,6 +34,28 @@ class ScientificRoutingTests(unittest.TestCase):
                 self.assertEqual(os.environ["XDG_RUNTIME_DIR"], "/stale-runtime")
             self.assertFalse(directory.exists())
 
+    def test_cached_workspace_roots_are_reclaimed_without_libraries_or_build_scripts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            metadata = {"packages": [{"targets": [{"name": "my-bin"}, {"name": "integration"}]}]}
+            candidates = ["debug/my-bin.exe", "debug/deps/my_bin-0123456789abcdef.exe",
+                          "debug/examples/integration-0123456789abcdef.exe"]
+            retained = ["debug/deps/my_bin-0123456789abcdef.rlib",
+                        "debug/deps/unrelated-0123456789abcdef.exe",
+                        "debug/build/my-bin/build-script-build.exe",
+                        "debug/deps/my_bin-0123456789abcdef.dll"]
+            for name in candidates + retained:
+                file = target / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(b"test")
+            with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
+                with self.assertRaisesRegex(RuntimeError, "isolated"):
+                    runner.reclaim_cached_root_binaries(target, metadata)
+            with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
+                self.assertEqual(runner.reclaim_cached_root_binaries(target, metadata), 3)
+            self.assertTrue(all(not (target / name).exists() for name in candidates))
+            self.assertTrue(all((target / name).exists() for name in retained))
+
     def test_batches_cover_roots_once_and_keep_package_feature_union(self):
         members = runner.GROUPS["language"]
         metadata = {"packages": [{"name": name, "targets": [
