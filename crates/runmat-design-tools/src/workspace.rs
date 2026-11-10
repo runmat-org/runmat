@@ -93,6 +93,15 @@ pub fn output_path(root: &Path, relative: &Path) -> io::Result<PathBuf> {
     Ok(root.join(relative))
 }
 
+/// A `.circuit` or `.circuit.layout` path: the files the circuit checks run on.
+pub fn is_circuit_file(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    name.ends_with(".circuit") || name.ends_with(".circuit.layout")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,13 +138,4 @@ mod tests {
             .is_err());
         }
     }
-}
-
-/// A `.circuit` or `.circuit.layout` path: the files the circuit checks run on.
-pub fn is_circuit_file(path: &Path) -> bool {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy())
-        .unwrap_or_default();
-    name.ends_with(".circuit") || name.ends_with(".circuit.layout")
 }
