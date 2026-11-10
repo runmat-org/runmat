@@ -19,8 +19,8 @@ use crate::{
     execution::{CanonicalSemanticState, StructuralModalSolverResult, StructuralModalWorkload},
     pipeline::modal_basis::{ModalBasisArtifact, ModalBasisInputs},
     pipeline::observation_history::required_mode_history_indices,
-    progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     planning::resource::SubspaceSolvePath,
+    progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system_reusing,
 };
 

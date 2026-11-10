@@ -88,9 +88,10 @@ impl StructuralModalProducerCoordinator {
             inventory_limits: self.preparation.inventory_limits,
             required_capabilities: self.preparation.required_capabilities.clone(),
             accelerator_requests: self.preparation.accelerator_requests.clone(),
-            solve_selection: runmat_analysis_fea::planning::resource::ModalSolveSelection::WithinCeiling {
-                machine_memory_bytes: None,
-            },
+            solve_selection:
+                runmat_analysis_fea::planning::resource::ModalSolveSelection::WithinCeiling {
+                    machine_memory_bytes: None,
+                },
         })?;
         self.phase = ProducerPhase::AwaitingModal(prepared.host.workload.identity.digest());
         Ok(prepared)

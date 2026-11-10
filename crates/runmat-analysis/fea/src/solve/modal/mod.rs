@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assembly::AssemblySummary,
-    planning::resource::SubspaceSolvePath,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     planning::resource::LocalExecutionPlan,
+    planning::resource::SubspaceSolvePath,
     solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend,
 };
@@ -123,9 +123,10 @@ pub(crate) fn solve_modal_system_reusing(
             SolverMethod::ShiftInvertBlockLanczos,
             SolverPreconditioner::SparseCholesky,
         ),
-        SubspaceSolvePath::PreconditionedLobpcg => {
-            (SolverMethod::PreconditionedLobpcg, SolverPreconditioner::Amg)
-        }
+        SubspaceSolvePath::PreconditionedLobpcg => (
+            SolverMethod::PreconditionedLobpcg,
+            SolverPreconditioner::Amg,
+        ),
     };
     if summary.dof_count == 0 || requested_mode_count == 0 {
         return ModalSolveResult {
@@ -234,35 +235,37 @@ pub(crate) fn solve_modal_system_reusing(
     // The factor-free path proves coercivity by its own inertia count, so it never factors K.
     let prepared = match path {
         SubspaceSolvePath::PreconditionedLobpcg => None,
-        SubspaceSolvePath::ShiftInvertFactorization => match reduced_operator.prepare_linear_reusing(reuse) {
-        Ok(prepared) => Some(prepared),
-        Err(error) => {
-            return ModalSolveResult {
-                converged: false,
-                frequencies_hz: Vec::new(),
-                mode_shapes: Vec::new(),
-                residual_norms: Vec::new(),
-                diagnostics: vec![FeaDiagnostic {
-                    code: "FEA_MODAL_SOLVER_ADMISSION_FAILED".into(),
-                    severity: FeaDiagnosticSeverity::Error,
-                    message: format!(
-                        "modal stiffness admission failed on the constraint space: {error}"
-                    ),
-                }],
-                solver_method,
-                solver_backend: LinearAlgebraBackendKind::CpuReference,
-                preconditioner: SolverPreconditioner::None,
-                solver_host_sync_count: 0,
-                device_apply_k_count: 0,
-                device_apply_k_attempt_count: 0,
-                accelerator_evidence: Vec::new(),
-                available_mode_count: reduced_operator.dof_count(),
-                boundary_probe_count: 0,
-                boundary_probe_frequency_hz: None,
-                boundary_unresolved_at_capacity: None,
+        SubspaceSolvePath::ShiftInvertFactorization => {
+            match reduced_operator.prepare_linear_reusing(reuse) {
+                Ok(prepared) => Some(prepared),
+                Err(error) => {
+                    return ModalSolveResult {
+                        converged: false,
+                        frequencies_hz: Vec::new(),
+                        mode_shapes: Vec::new(),
+                        residual_norms: Vec::new(),
+                        diagnostics: vec![FeaDiagnostic {
+                            code: "FEA_MODAL_SOLVER_ADMISSION_FAILED".into(),
+                            severity: FeaDiagnosticSeverity::Error,
+                            message: format!(
+                                "modal stiffness admission failed on the constraint space: {error}"
+                            ),
+                        }],
+                        solver_method,
+                        solver_backend: LinearAlgebraBackendKind::CpuReference,
+                        preconditioner: SolverPreconditioner::None,
+                        solver_host_sync_count: 0,
+                        device_apply_k_count: 0,
+                        device_apply_k_attempt_count: 0,
+                        accelerator_evidence: Vec::new(),
+                        available_mode_count: reduced_operator.dof_count(),
+                        boundary_probe_count: 0,
+                        boundary_probe_frequency_hz: None,
+                        boundary_unresolved_at_capacity: None,
+                    }
+                }
             }
         }
-    },
     };
     let mut linear_diagnostics = Vec::new();
     // Strict placement fails closed at the modal entry; here the shared admission only supplies
@@ -300,8 +303,10 @@ pub(crate) fn solve_modal_system_reusing(
         };
         match crate::solve::shared_sparse::with_plan(LocalExecutionPlan::serial(), || {
             runmat_sparse_solvers::precond::Amg::new(
-                crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().stiffness())
-                    .view(),
+                crate::solve::shared_sparse::CsrArrays::of(
+                    reduced_operator.operators().stiffness(),
+                )
+                .view(),
                 runmat_sparse_solvers::precond::AmgOptions {
                     block_size,
                     strength_threshold: if block_size > 1 { 0.02 } else { 0.0 },

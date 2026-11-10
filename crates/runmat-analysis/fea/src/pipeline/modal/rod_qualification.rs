@@ -488,8 +488,14 @@ fn solid_rod_modal_paths_agree_and_each_proves_completeness() {
     // The fundamental is the quarter-wave axial mode.
     assert!((a[0] / (WAVE_SPEED / 4.0) - 1.0).abs() < 0.001, "{}", a[0]);
     for (core, method) in [
-        (&direct, crate::contracts::SolverMethod::ShiftInvertBlockLanczos),
-        (&iterative, crate::contracts::SolverMethod::PreconditionedLobpcg),
+        (
+            &direct,
+            crate::contracts::SolverMethod::ShiftInvertBlockLanczos,
+        ),
+        (
+            &iterative,
+            crate::contracts::SolverMethod::PreconditionedLobpcg,
+        ),
     ] {
         assert_eq!(core.run.solver_method, method);
         let sturm = core
@@ -498,6 +504,10 @@ fn solid_rod_modal_paths_agree_and_each_proves_completeness() {
             .iter()
             .find(|diagnostic| diagnostic.code == "FEA_MODAL_STURM_CHECK")
             .expect("each path runs the Sturm check");
-        assert!(sturm.message.ends_with("complete=true"), "{}", sturm.message);
+        assert!(
+            sturm.message.ends_with("complete=true"),
+            "{}",
+            sturm.message
+        );
     }
 }

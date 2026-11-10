@@ -169,9 +169,10 @@ impl StructuralRandomResponseStudyCoordinator {
             inventory_limits: self.preparation.inventory_limits,
             required_capabilities: self.preparation.required_capabilities.clone(),
             accelerator_requests: Vec::new(),
-            solve_selection: runmat_analysis_fea::planning::resource::ModalSolveSelection::WithinCeiling {
-                machine_memory_bytes: None,
-            },
+            solve_selection:
+                runmat_analysis_fea::planning::resource::ModalSolveSelection::WithinCeiling {
+                    machine_memory_bytes: None,
+                },
         })?;
         self.phase = StudyPhase::AwaitingModal(task.host.workload.identity.digest());
         Ok(task)

@@ -10,9 +10,9 @@ use runmat_analysis_fea::{
         StructuralModalSolverResult, StructuralModalWorkload, StudyIdentity,
     },
     planning::resource::{
-        build_structural_modal_resource_plan_selecting, ModalSolveSelection,
+        build_structural_modal_resource_plan_selecting,
         structural_modal_receipt_payload_bytes_upper_bound,
-        structural_modal_result_output_resource_facts, FeaResourcePlan,
+        structural_modal_result_output_resource_facts, FeaResourcePlan, ModalSolveSelection,
         PreparedStructuralModalResourceFacts,
     },
     post::fields::structural_observable_field_definitions,

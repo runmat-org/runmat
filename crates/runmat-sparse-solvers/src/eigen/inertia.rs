@@ -22,8 +22,8 @@
 
 use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::linalg::cholesky::lblt as bunch_kaufman;
-use faer::prelude::{Reborrow, ReborrowMut};
 use faer::linalg::matmul::triangular::BlockStructure;
+use faer::prelude::{Reborrow, ReborrowMut};
 use faer::sparse::linalg::cholesky::{
     factorize_symbolic_cholesky, CholeskySymbolicParams, SymbolicCholeskyRaw, SymmetricOrdering,
 };
@@ -488,16 +488,14 @@ impl PencilInertia {
             let mut perm = vec![0usize; width];
             let mut perm_inv = vec![0usize; width];
             {
-                let mut buffer = MemBuffer::try_new(
-                    bunch_kaufman::factor::cholesky_in_place_scratch::<usize, f64>(
-                        width,
-                        parallel,
-                        Default::default(),
-                    ),
-                )
-                .map_err(|_| SolverError::OutOfMemory {
-                    bytes: (width as u64) * DENSE_BLOCK_COLUMNS * SCALAR,
-                })?;
+                let mut buffer =
+                    MemBuffer::try_new(bunch_kaufman::factor::cholesky_in_place_scratch::<
+                        usize,
+                        f64,
+                    >(width, parallel, Default::default()))
+                    .map_err(|_| SolverError::OutOfMemory {
+                        bytes: (width as u64) * DENSE_BLOCK_COLUMNS * SCALAR,
+                    })?;
                 let (_, permutation) = bunch_kaufman::factor::cholesky_in_place(
                     block.rb_mut(),
                     faer::diag::DiagMut::from_slice_mut(&mut subdiag),
@@ -516,14 +514,14 @@ impl PencilInertia {
                 if rows > 0 {
                     // Z = F₁₁⁻¹ F₂₁ᵀ, then F₂₂ ← F₂₂ − F₂₁ Z (lower triangle).
                     let mut z = coupling.rb().transpose().to_owned();
-                    let mut solve = MemBuffer::try_new(
-                        bunch_kaufman::solve::solve_in_place_scratch::<usize, f64>(
-                            width, rows, parallel,
-                        ),
-                    )
-                    .map_err(|_| SolverError::OutOfMemory {
-                        bytes: (width as u64) * (rows as u64) * SCALAR,
-                    })?;
+                    let mut solve =
+                        MemBuffer::try_new(bunch_kaufman::solve::solve_in_place_scratch::<
+                            usize,
+                            f64,
+                        >(width, rows, parallel))
+                        .map_err(|_| SolverError::OutOfMemory {
+                            bytes: (width as u64) * (rows as u64) * SCALAR,
+                        })?;
                     bunch_kaufman::solve::solve_in_place_with_conj(
                         block.rb(),
                         block.rb().diagonal(),

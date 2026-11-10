@@ -117,8 +117,8 @@ pub(super) fn execute_structural_modal_extraction(
     // solver follows it.
     let path = runmat_analysis_fea::planning::resource::recorded_modal_solve_path(&resource_plan)
         .ok_or_else(|| {
-            AnalysisBridgeError::Invalid("structural modal resource plan records no solve path".into())
-        })?;
+        AnalysisBridgeError::Invalid("structural modal resource plan records no solve path".into())
+    })?;
     let expected_resource_plan =
         runmat_analysis_fea::planning::resource::build_structural_modal_resource_plan_selecting(
         Some(&mesh),

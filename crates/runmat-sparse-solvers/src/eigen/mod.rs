@@ -537,7 +537,10 @@ pub fn modal_lobpcg(
 
 /// Upper bound on the `f64` working values [`modal_lobpcg`] holds at once apart from the
 /// preconditioner and the inertia counts: the LOBPCG blocks and the returned pairs.
-pub fn modal_lobpcg_working_value_count(options: &IterativeModalOptions, n: usize) -> Option<usize> {
+pub fn modal_lobpcg_working_value_count(
+    options: &IterativeModalOptions,
+    n: usize,
+) -> Option<usize> {
     lobpcg_working_value_count(&options.lobpcg, n)
 }
 

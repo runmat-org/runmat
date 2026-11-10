@@ -306,7 +306,9 @@ fn lobpcg_modal_path_matches_shift_invert_frequencies_with_its_own_proof() {
     )
     .unwrap();
     assert!(iterative.converged);
-    let sturm = iterative.sturm.expect("the iterative path proves completeness");
+    let sturm = iterative
+        .sturm
+        .expect("the iterative path proves completeness");
     assert!(sturm.complete(), "{sturm:?}");
     for (a, b) in iterative.values.iter().zip(&direct.values) {
         // Frequencies (√λ) agree to 1e-7 relative.

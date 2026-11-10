@@ -45,9 +45,8 @@ pub use pipeline::linear_static::{
 pub use pipeline::modal::{
     execute_structural_modal_workload, execute_structural_modal_workload_on_path,
     execute_structural_prestressed_modal_workload,
-    execute_structural_prestressed_modal_workload_on_path,
-    recover_completed_structural_modal_run, recover_completed_structural_prestressed_modal_run,
-    run_modal, run_modal_with_options,
+    execute_structural_prestressed_modal_workload_on_path, recover_completed_structural_modal_run,
+    recover_completed_structural_prestressed_modal_run, run_modal, run_modal_with_options,
 };
 pub use pipeline::modal_basis::{
     ModalBasisArtifact, ModalBasisIdentity, ModalBasisMode, ModalDirectionalMetric,

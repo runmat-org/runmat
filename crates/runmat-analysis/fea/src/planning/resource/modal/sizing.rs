@@ -136,11 +136,16 @@ pub(super) fn modal_workspace_bytes(
         "modal eigen-search",
     )?;
     let phases = search.max(inertia_bytes);
-    [reduced_operator_bytes, phases, candidates, residual_workspace]
-        .into_iter()
-        .try_fold(0_u64, |total, value| {
-            checked_add(total, value, "modal workspace")
-        })
+    [
+        reduced_operator_bytes,
+        phases,
+        candidates,
+        residual_workspace,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, value| {
+        checked_add(total, value, "modal workspace")
+    })
 }
 
 pub(super) fn modal_output_value_count(

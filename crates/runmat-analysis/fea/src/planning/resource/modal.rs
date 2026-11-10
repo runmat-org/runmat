@@ -16,12 +16,11 @@ use super::{
     build_resource_plan,
     structural_facts::derive_structural_resource_facts,
     AcceleratorRequirement, AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount,
-    ModalSolveSelection, SubspaceSolvePath,
     CheckpointArtifactPolicy, Count, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
-    FeaResourcePlanningInput, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
-    PreparedStructuralModalResourceFacts, ResourcePlanningError, SolveResourcePolicy,
-    StructuralModalResourceDemand, StructuralOperatorResourceDemand, WorkerResourcePolicy,
-    RESOURCE_ESTIMATION_MODEL_REVISION,
+    FeaResourcePlanningInput, ModalSolveSelection, ObservationResourceFacts, PartitioningPolicy,
+    PhaseResourcePolicy, PreparedStructuralModalResourceFacts, ResourcePlanningError,
+    SolveResourcePolicy, StructuralModalResourceDemand, StructuralOperatorResourceDemand,
+    SubspaceSolvePath, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const ACCELERATOR_CG_RESIDENT_VECTOR_COUNT: u64 = 6;
@@ -165,7 +164,10 @@ pub fn build_structural_modal_resource_plan_selecting(
     };
     let required = |planned: Result<FeaResourcePlan, ResourcePlanningError>| match planned {
         Ok(plan) if fits(&plan) => Ok(Ok(plan)),
-        Ok(plan) => Ok(Err(plan.request.memory_bytes.max(plan.request.scratch_bytes))),
+        Ok(plan) => Ok(Err(plan
+            .request
+            .memory_bytes
+            .max(plan.request.scratch_bytes))),
         Err(ResourcePlanningError::AccuracyCeiling {
             resource: super::RESIDENT_MEMORY_RESOURCE,
             required,
@@ -178,7 +180,8 @@ pub fn build_structural_modal_resource_plan_selecting(
             Ok(plan) => return Ok(plan),
             Err(bytes) => bytes,
         };
-    let lobpcg_resident_bytes = match required(plan_path(SubspaceSolvePath::PreconditionedLobpcg))? {
+    let lobpcg_resident_bytes = match required(plan_path(SubspaceSolvePath::PreconditionedLobpcg))?
+    {
         Ok(plan) => return Ok(plan),
         Err(bytes) => bytes,
     };
