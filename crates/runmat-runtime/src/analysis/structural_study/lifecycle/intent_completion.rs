@@ -161,8 +161,10 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
         ) => complete_structural_modal_frequency(
             intent,
             study_model,
-            persisted_mesh,
-            meshing_output.artifact,
+            ModalFrequencyMeshes {
+                persisted: persisted_mesh,
+                solver: meshing_output.artifact,
+            },
             workloads,
             *result,
             completion_identity,

@@ -176,11 +176,13 @@ pub(super) fn split_recovered_segment_edge_in_place(
     // constrained-Delaunay refinements of recovered segments.
     let result = split_with_encroachment_cascade(
         working,
-        edge,
-        protected,
-        protected_edges,
-        0,
-        None,
+        EncroachmentCascade {
+            edge,
+            protected,
+            protected_edges,
+            depth: 0,
+            parent: None,
+        },
         constraint_index,
         work,
         &mut trial_splits,

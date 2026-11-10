@@ -222,11 +222,13 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity_in_place(
             // and recover the facet again around it.
             match insert_candidate_in_place(
                 working,
-                node,
+                InPlaceCandidateRequest {
+                    node,
+                    required_facet_edges: Some(facet),
+                    near: facet[0],
+                },
                 &barrier_faces,
                 protected_edges,
-                Some(facet),
-                facet[0],
                 constraint_index,
                 work,
             )? {
@@ -517,21 +519,32 @@ fn refill_sides_in_place(
     Ok(accepted.then_some(retained))
 }
 
+/// The Steiner node [`insert_candidate_in_place`] inserts, the facet whose edges must survive
+/// the insertion, and the node whose star seeds point location.
+#[derive(Clone, Copy)]
+pub(in crate::cdt::facet_recovery) struct InPlaceCandidateRequest {
+    pub(in crate::cdt::facet_recovery) node: DelaunayVolumeNode,
+    pub(in crate::cdt::facet_recovery) required_facet_edges: Option<[StableDigest; 3]>,
+    pub(in crate::cdt::facet_recovery) near: StableDigest,
+}
+
 /// Inserts `node` with its constrained Bowyer-Watson cavity (protected faces and region
 /// interfaces are barriers), then link flips keep every recovered segment edge. With
 /// `required_facet_edges`, the insertion is kept only when that facet's three edges exist after
 /// it. Point location starts from a cell of `near`'s star (a node close to the candidate).
-#[allow(clippy::too_many_arguments)]
 pub(in crate::cdt::facet_recovery) fn insert_candidate_in_place(
     working: &mut FacetRecoveryWorking,
-    node: DelaunayVolumeNode,
+    candidate: InPlaceCandidateRequest,
     protected_faces: &[[StableDigest; 3]],
     protected_edges: &[[StableDigest; 2]],
-    required_facet_edges: Option<[StableDigest; 3]>,
-    near: StableDigest,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<InPlaceCandidate, DelaunayFacetRecoveryError> {
+    let InPlaceCandidateRequest {
+        node,
+        required_facet_edges,
+        near,
+    } = candidate;
     let insertion = work.options.segment_recovery.insertion;
     let cancellation = work.cancellation;
     let protected_set = protected_faces

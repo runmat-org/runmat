@@ -14,6 +14,8 @@
 //! margin of about 1e-7 ‖K‖, while a Tet10 sliver falls to about 1e-14 ‖K‖, below the ~1.7e-13
 //! ‖K‖ assembly requires. [`assembly_minimum_scaled_jacobian`] finds, per element order, the
 //! scaled Jacobian of the flattest canonical sliver that still passes.
+use std::cmp::Ordering;
+
 use crate::{ElementOrder, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
 
 /// Multiplier `c` of the roundoff-relative element margin `c·(d+1)·ε·tr(A)`: covers the rounding
@@ -72,7 +74,7 @@ fn cholesky_in_place(a: &mut [f64], n: usize) -> bool {
         for k in 0..j {
             pivot -= a[j * n + k] * a[j * n + k];
         }
-        if !(pivot > 0.0) || !pivot.is_finite() {
+        if pivot.partial_cmp(&0.0) != Some(Ordering::Greater) || !pivot.is_finite() {
             return false;
         }
         let pivot = pivot.sqrt();
@@ -104,7 +106,7 @@ pub fn element_rigidity(points: &[[f64; 3]], k: &[f64]) -> Result<(), ElementRig
         .iter()
         .map(|p| norm(&[p[0] - center[0], p[1] - center[1], p[2] - center[2]]))
         .fold(0.0, f64::max);
-    if !(scale > 0.0) || !scale.is_finite() {
+    if scale.partial_cmp(&0.0) != Some(Ordering::Greater) || !scale.is_finite() {
         return Err(ElementRigidityShortfall::DegenerateGeometry);
     }
     // Rigid basis U (d × 6, column-major), orthonormalized by two Gram–Schmidt passes.
@@ -129,7 +131,7 @@ pub fn element_rigidity(points: &[[f64; 3]], k: &[f64]) -> Result<(), ElementRig
             }
         }
         let length = norm(&u[c * d..(c + 1) * d]);
-        if !(length > 1.0e-6 * original) {
+        if length.partial_cmp(&(1.0e-6 * original)) != Some(Ordering::Greater) {
             return Err(ElementRigidityShortfall::DegenerateGeometry);
         }
         for i in 0..d {
@@ -137,7 +139,7 @@ pub fn element_rigidity(points: &[[f64; 3]], k: &[f64]) -> Result<(), ElementRig
         }
     }
     let k_norm = norm(k);
-    if !(k_norm > 0.0) || !k_norm.is_finite() {
+    if k_norm.partial_cmp(&0.0) != Some(Ordering::Greater) || !k_norm.is_finite() {
         return Err(ElementRigidityShortfall::EnergyMargin {
             margin_ratio: f64::NAN,
             smallest_ratio: f64::NAN,
@@ -151,7 +153,10 @@ pub fn element_rigidity(points: &[[f64; 3]], k: &[f64]) -> Result<(), ElementRig
         }
     }
     let residual = norm(&ku) / k_norm;
-    if !(residual <= RIGID_MODE_RESIDUAL_RATIO) {
+    if !matches!(
+        residual.partial_cmp(&RIGID_MODE_RESIDUAL_RATIO),
+        Some(Ordering::Less | Ordering::Equal)
+    ) {
         return Err(ElementRigidityShortfall::RigidMotionEnergy {
             residual_ratio: residual,
         });
@@ -278,7 +283,7 @@ fn straight_element_passes(order: ElementOrder, corners: [[f64; 3]; 4]) -> bool 
             let det = e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1])
                 - e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0])
                 + e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]);
-            if !(det.abs() > 0.0) {
+            if det.abs().partial_cmp(&0.0) != Some(Ordering::Greater) {
                 return false;
             }
             // Rows of the inverse of [e₁ e₂ e₃]ᵀ are the gradients of nodes 1..3.

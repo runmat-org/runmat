@@ -167,6 +167,16 @@ mod deformation;
 pub mod extrema;
 pub mod volume;
 
+/// How [`build_scene`] draws the body's shape: `mode` is `"undeformed"`, `"true"` or
+/// `"exaggerated"`, `exaggeration` is the displacement factor (finite, 0 to 100), and
+/// `show_undeformed_outline` overlays the undeformed outline.
+#[derive(Clone, Copy, Debug)]
+pub struct SceneShape<'a> {
+    pub mode: &'a str,
+    pub exaggeration: f64,
+    pub show_undeformed_outline: bool,
+}
+
 /// Build one complete view of a run: `field` colors the surface and `deformation`, a nodal
 /// vector field of the same run, displaces it. Both are explicit selections of published
 /// fields (with their sample), so the caller decides from the field descriptors.
@@ -180,18 +190,20 @@ pub mod volume;
 /// `detail` [`SurfaceDetail::Corners`] draws each quadratic boundary face as one corner
 /// triangle (from the solver mesh), for a scene that must fit a payload budget; the returned
 /// [`SurfaceApproximation`] states what that leaves out.
-#[allow(clippy::too_many_arguments)]
 pub fn build_scene(
     run_id: &str,
     solver_mesh: Option<&str>,
     field: Option<&AnalysisFieldSelection>,
     deformation: Option<&AnalysisFieldSelection>,
     scalar_range: Option<(f64, f64)>,
-    shape_mode: &str,
-    exaggeration: f64,
-    show_undeformed_outline: bool,
+    shape: SceneShape<'_>,
     detail: super::SurfaceDetail,
 ) -> Result<(GeometryScene, f64, SurfaceApproximation), String> {
+    let SceneShape {
+        mode: shape_mode,
+        exaggeration,
+        show_undeformed_outline,
+    } = shape;
     if !matches!(shape_mode, "undeformed" | "true" | "exaggerated") {
         return Err(format!("unknown FEA shape mode '{shape_mode}'"));
     }

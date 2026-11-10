@@ -169,9 +169,11 @@ fn facet_support_is_the_exact_delaunay_triangulation_of_the_boundary_polygon() {
     let triangles = delaunay::triangulate_delaunay(
         &view,
         &boundary,
-        source,
-        projection,
-        sign,
+        delaunay::SupportPolygonPlane {
+            source,
+            axes: projection,
+            polygon_sign: sign,
+        },
         &memberships,
         1,
         &mut work,

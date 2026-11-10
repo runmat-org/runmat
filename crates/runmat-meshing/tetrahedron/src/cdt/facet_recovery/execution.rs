@@ -193,10 +193,12 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                     push_split(
                         &working,
                         &mut pending,
-                        pending_triangle,
-                        triangles,
-                        vanished,
-                        &insertions,
+                        SupportSplit {
+                            split: pending_triangle,
+                            children: triangles,
+                            vanished,
+                            insertions: &insertions,
+                        },
                         &protected_edges,
                         options.maximum_pending_support_triangles,
                         constraint_index as u32,
@@ -440,10 +442,12 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                             push_split(
                                 &working,
                                 &mut pending,
-                                pending_triangle,
-                                triangles,
-                                vanished,
-                                &insertions,
+                                SupportSplit {
+                                    split: pending_triangle,
+                                    children: triangles,
+                                    vanished,
+                                    insertions: &insertions,
+                                },
                                 &protected_edges,
                                 options.maximum_pending_support_triangles,
                                 constraint_index as u32,
@@ -707,24 +711,35 @@ fn insert_segment_split_nodes(
     Ok(())
 }
 
+/// A split support triangle, the children the split made, the recovered triangles the step
+/// removed and the Steiner insertions that made the split.
+struct SupportSplit<'a> {
+    split: PendingSupportTriangle,
+    children: Vec<PendingSupportTriangle>,
+    vanished: Vec<DelaunayRecoveredFacetTriangle>,
+    insertions: &'a [DelaunayFacetSteinerInsertion],
+}
+
 /// Queues the support that replaces a split support triangle. The split's new nodes are inserted
 /// into the facet's unrecovered triangles (the split triangle, the recovered triangles the step
 /// removed and the pending ones) by 2D Bowyer-Watson steps, so the pending support matches the
 /// facet triangulation that the 3D Delaunay insertion produced and fan splits leave no slivers.
 /// A split without new nodes, or a cavity that is not star-shaped from its node, keeps the
 /// split's own children.
-#[allow(clippy::too_many_arguments)]
 fn push_split(
     working: &FacetRecoveryWorking,
     pending: &mut VecDeque<PendingSupportTriangle>,
-    split: PendingSupportTriangle,
-    children: Vec<PendingSupportTriangle>,
-    vanished: Vec<DelaunayRecoveredFacetTriangle>,
-    insertions: &[DelaunayFacetSteinerInsertion],
+    support: SupportSplit<'_>,
     protected_edges: &[[StableDigest; 2]],
     maximum_pending: u64,
     constraint_index: u32,
 ) -> Result<(), DelaunayFacetRecoveryError> {
+    let SupportSplit {
+        split,
+        children,
+        vanished,
+        insertions,
+    } = support;
     if !insertions.is_empty() {
         let mut region = Vec::with_capacity(pending.len() + vanished.len() + 1);
         region.push(PendingSupportTriangle {

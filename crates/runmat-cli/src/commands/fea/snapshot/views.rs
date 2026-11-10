@@ -265,11 +265,14 @@ pub(super) async fn capture(
                             extrema
                                 .as_ref()
                                 .map(|extrema| (extrema.minimum.value, extrema.maximum.value)),
-                            spec.shape,
-                            1.0,
-                            // Posters show the deformed body alone; an undeformed overlay drawn
-                            // over a shape a few micrometres away only fights it for depth.
-                            false,
+                            runmat_runtime::analysis::field_scene::SceneShape {
+                                mode: spec.shape,
+                                exaggeration: 1.0,
+                                // Posters show the deformed body alone; an undeformed overlay
+                                // drawn over a shape a few micrometres away only fights it for
+                                // depth.
+                                show_undeformed_outline: false,
+                            },
                             detail.surface,
                         )
                         .map_err(anyhow::Error::msg)?;

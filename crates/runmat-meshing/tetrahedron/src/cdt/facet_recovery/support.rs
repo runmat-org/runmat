@@ -195,9 +195,11 @@ fn triangulate_boundary(
     if let Some(triangles) = delaunay::triangulate_delaunay(
         recovery,
         &boundary,
-        source,
-        projection,
-        polygon_sign,
+        delaunay::SupportPolygonPlane {
+            source,
+            axes: projection,
+            polygon_sign,
+        },
         source_edge_membership,
         constraint_index,
         work,
