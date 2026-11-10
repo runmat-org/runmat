@@ -143,7 +143,13 @@ fn completion_metadata_references_separate_chunked_source_and_requires_matching_
         identity: source.identity().unwrap(),
         payload_digest: objects.manifest.payload_digest,
     });
-    let bytes = encode_contract(PREFIX, "thermal-preparation-test", &wire, LIMITS).unwrap();
+    let bytes = encode_contract(
+        PREFIX,
+        "thermal-preparation-test",
+        &wire,
+        completion_codec_limits(ObjectInventoryLimits::default()),
+    )
+    .unwrap();
     assert!(!String::from_utf8_lossy(&bytes).contains("joule_density_w_per_m3"));
     assert!(roundtrip(&wire).into_preparation(access.clone()).is_err());
     let restored = roundtrip(&wire)

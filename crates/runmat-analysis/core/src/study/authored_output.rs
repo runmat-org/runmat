@@ -397,6 +397,47 @@ impl AuthoredOutputExpression {
                     }
                 }
             }
+            Self::LineParameter {
+                step_id,
+                quantity,
+                conductor,
+                signal_conductors,
+            } => {
+                let step = steps
+                    .get(step_id.as_str())
+                    .ok_or_else(|| AuthoredOutputError::UnknownStep(step_id.clone()))?;
+                if !procedure_produces_observation_quantity(step, *quantity) {
+                    return Err(AuthoredOutputError::UnsupportedQuantity {
+                        step_id: step_id.clone(),
+                        quantity: *quantity,
+                    });
+                }
+                let scope = quantity.line_parameter_scope().ok_or_else(|| {
+                    AuthoredOutputError::UnsupportedQuantity {
+                        step_id: step_id.clone(),
+                        quantity: *quantity,
+                    }
+                })?;
+                let valid = *signal_conductors > 0
+                    && match scope {
+                        crate::LineParameterScope::Conductor => conductor
+                            .as_ref()
+                            .is_some_and(|name| !name.trim().is_empty()),
+                        crate::LineParameterScope::Pair => {
+                            conductor.is_none() && *signal_conductors == 2
+                        }
+                        crate::LineParameterScope::Matrix => conductor.is_none(),
+                    };
+                if !valid {
+                    return Err(AuthoredOutputError::LineParameterTarget(*quantity));
+                }
+                Ok(AuthoredOutputType::Reduced {
+                    value: AuthoredOutputValue::Physical(*quantity),
+                    shape: quantity
+                        .line_parameter_shape(*signal_conductors)
+                        .expect("line parameter scope"),
+                })
+            }
             Self::SpatialSelection { source, target } => {
                 validate_region(target)?;
                 let output @ AuthoredOutputType::Field { .. } = source.validate(steps, outputs)?
@@ -664,6 +705,8 @@ pub enum AuthoredOutputError {
     PortReductionRequiresRealScalar,
     #[error("transmission loss reads the acoustic port intensity of a harmonic analysis")]
     TransmissionLossRequiresPortIntensity,
+    #[error("`{0:?}` names one signal conductor when it is a per-line value; a pair value needs exactly two signal conductors, and a matrix names none")]
+    LineParameterTarget(ObservationQuantity),
     #[error("spatial selection requires a field source")]
     SpatialSelectionRequiresField,
     #[error("interpolation requires a field source")]

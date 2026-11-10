@@ -32,7 +32,7 @@ The table below is generated from the capability ledger, the same source as the 
 | --- | --- | --- |
 | Structural mechanics | static, modal, prestressed modal, buckling, transient, harmonic, prestressed harmonic, nonlinear, transient (modal superposition), harmonic (modal superposition), prestressed harmonic (modal superposition), response spectrum (modal superposition), random response (modal superposition) | none |
 | Heat transfer | static, transient | none |
-| Electromagnetics | static, harmonic | transient, nonlinear, line parameters |
+| Electromagnetics | static, harmonic, line parameters | transient, nonlinear |
 | Acoustics | harmonic, modal, transient | static, nonlinear |
 | Fluid flow | static, transient | harmonic, nonlinear |
 | Thermomechanical | static, nonlinear | transient, harmonic |
@@ -121,7 +121,7 @@ analysis response after analysis.modes {
 | `electromagnetic harmonic` | `frequencies` |
 | `electromagnetic transient` [not yet in the current release](pending:electromagnetic.transient) | `start_time`, `end_time`, `time_step` |
 | `electromagnetic nonlinear` [not yet in the current release](pending:electromagnetic.nonlinear) | `start_load_factor`, `end_load_factor` |
-| `electromagnetic line_parameters` [not yet in the current release](pending:electromagnetic.line_parameters) | none; the `cross_section` geometry carries the stackup and traces ([trace impedance](../../physics/trace-impedance.md)) |
+| `electromagnetic line_parameters` | none; the `cross_section` geometry carries the stackup and traces ([trace impedance](../../physics/trace-impedance.md)) |
 
 ## Acoustic procedures
 

@@ -434,6 +434,7 @@ fn substitute_output_regions(
             substitute_region(second, inputs)
         }
         crate::AuthoredOutputExpression::AnalysisField { .. }
+        | crate::AuthoredOutputExpression::LineParameter { .. }
         | crate::AuthoredOutputExpression::OutputReference { .. } => Ok(()),
     }
 }

@@ -167,6 +167,16 @@ mod deformation;
 pub mod extrema;
 pub mod volume;
 
+/// How [`build_scene`] draws the body's shape: `mode` is `"undeformed"`, `"true"` or
+/// `"exaggerated"`, `exaggeration` is the displacement factor (finite, 0 to 100), and
+/// `show_undeformed_outline` overlays the undeformed outline.
+#[derive(Clone, Copy, Debug)]
+pub struct SceneShape<'a> {
+    pub mode: &'a str,
+    pub exaggeration: f64,
+    pub show_undeformed_outline: bool,
+}
+
 /// Build one complete view of a run: `field` colors the surface and `deformation`, a nodal
 /// vector field of the same run, displaces it. Both are explicit selections of published
 /// fields (with their sample), so the caller decides from the field descriptors.
@@ -180,18 +190,20 @@ pub mod volume;
 /// `detail` [`SurfaceDetail::Corners`] draws each quadratic boundary face as one corner
 /// triangle (from the solver mesh), for a scene that must fit a payload budget; the returned
 /// [`SurfaceApproximation`] states what that leaves out.
-#[allow(clippy::too_many_arguments)]
 pub fn build_scene(
     run_id: &str,
     solver_mesh: Option<&str>,
     field: Option<&AnalysisFieldSelection>,
     deformation: Option<&AnalysisFieldSelection>,
     scalar_range: Option<(f64, f64)>,
-    shape_mode: &str,
-    exaggeration: f64,
-    show_undeformed_outline: bool,
+    shape: SceneShape<'_>,
     detail: super::SurfaceDetail,
 ) -> Result<(GeometryScene, f64, SurfaceApproximation), String> {
+    let SceneShape {
+        mode: shape_mode,
+        exaggeration,
+        show_undeformed_outline,
+    } = shape;
     if !matches!(shape_mode, "undeformed" | "true" | "exaggerated") {
         return Err(format!("unknown FEA shape mode '{shape_mode}'"));
     }
@@ -543,6 +555,23 @@ pub fn append_solver_mesh_edges(scene: &mut GeometryScene) {
     }
 }
 
+/// Suffix of the chunk ids of a full solver-mesh wireframe.
+const FULL_MESH_EDGES_SUFFIX: &str = ":solver-mesh-edges";
+
+/// Edges for a view that colors a result field: a full wireframe drawn over the field reads as a
+/// grid of dots at poster size, so the full mesh edges give way to feature edges (creases and
+/// open boundary loops). Scenes of the mesh itself keep their full wireframe.
+pub fn use_result_view_edges(scene: &mut GeometryScene) {
+    let before = scene.chunks.len();
+    scene
+        .chunks
+        .retain(|chunk| !chunk.chunk_id.ends_with(FULL_MESH_EDGES_SUFFIX));
+    if scene.chunks.len() != before {
+        append_feature_edges(scene, FEATURE_EDGE_CREASE_DEGREES);
+        scene.revision = scene.revision.saturating_add(1);
+    }
+}
+
 /// Edges where adjacent surface triangles meet at more than `crease_degrees`, plus edges with
 /// a single adjacent triangle (open boundary loops), taken across every surface chunk so tile
 /// seams are not mistaken for boundaries.
@@ -679,7 +708,7 @@ fn append_full_mesh_edges(scene: &mut GeometryScene) {
             ..Material::default()
         };
         let mut edge_chunk = GeometrySceneChunk::from_render_data(
-            format!("{}:solver-mesh-edges", chunk.chunk_id),
+            format!("{}{FULL_MESH_EDGES_SUFFIX}", chunk.chunk_id),
             RenderData {
                 pipeline_type: PipelineType::Lines,
                 vertices,

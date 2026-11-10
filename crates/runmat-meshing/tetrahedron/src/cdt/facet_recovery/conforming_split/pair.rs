@@ -2,6 +2,15 @@
 //! it in one cavity trial.
 use super::*;
 
+/// Two recovered segment edges [`split_pair_at_shared_vertex`] splits in one cavity trial, and
+/// where the points go when the edges are disjoint.
+#[derive(Clone, Copy)]
+pub(super) struct SegmentEdgePair {
+    pub(super) edge: [StableDigest; 2],
+    pub(super) other: [StableDigest; 2],
+    pub(super) placement: DisjointPairPlacement,
+}
+
 /// Splits `edge` and `other`, which share one endpoint, at dyadic points the same distance from
 /// that endpoint, in one cavity trial. The distance is half the shorter edge: `edge` is split at
 /// its midpoint unless `other` is shorter, in which case `edge` is split at half the length of
@@ -9,17 +18,19 @@ use super::*;
 /// sliver facet triangle there and encroaches the segments at that end. `other` is split through
 /// its edge star first, so `edge` survives for its constrained Bowyer-Watson split; link flips
 /// around both nodes and the exact admission of every changed cell decide the edit.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn split_pair_at_shared_vertex(
     working: &mut super::super::working::FacetRecoveryWorking,
-    edge: [StableDigest; 2],
-    other: [StableDigest; 2],
+    pair: SegmentEdgePair,
     protected: &[DelaunayRecoveredFacetTriangle],
     protected_edges: &[[StableDigest; 2]],
-    placement: DisjointPairPlacement,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Result<Vec<ProtectedFacetSplit>, String>, DelaunayFacetRecoveryError> {
+    let SegmentEdgePair {
+        edge,
+        other,
+        placement,
+    } = pair;
     let (Some(edge_location), Some(other_location)) = (
         segment_edge_location(&working.segments, edge),
         segment_edge_location(&working.segments, other),
@@ -190,11 +201,13 @@ pub(super) fn split_pair_at_shared_vertex(
                 } = split_edge_with_facet_cavities(
                     &observed,
                     index,
-                    node,
-                    split,
+                    SegmentEdgeSplit {
+                        node,
+                        edge: split,
+                        strategy,
+                    },
                     &protected,
                     &kept_edges,
-                    strategy,
                     constraint_index,
                 )?;
                 // A constrained cavity that holds the whole star of a kept edge (a recovered
@@ -228,11 +241,13 @@ pub(super) fn split_pair_at_shared_vertex(
                     split_edge_with_facet_cavities(
                         &observed,
                         index,
-                        node,
-                        split,
+                        SegmentEdgeSplit {
+                            node,
+                            edge: split,
+                            strategy: SplitStrategy::EdgeStar,
+                        },
                         &protected,
                         &kept_edges,
-                        SplitStrategy::EdgeStar,
                         constraint_index,
                     )?
                 } else {

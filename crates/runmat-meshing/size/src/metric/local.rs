@@ -77,10 +77,19 @@ pub(super) fn validate_supports(
 /// One entity-local tensor applicable to a constant query scope, with its support bounds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LocalMetricSource {
-    support: usize,
+    support: SourceSupport,
     metric: MetricTensor3,
     characteristic_length_m: f64,
     bounds: ([f64; 3], [f64; 3]),
+}
+
+/// Where a local source's support lives in the request.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SourceSupport {
+    /// An entity support: the tensor holds at full strength along the whole entity.
+    Entity(usize),
+    /// A located source, with the largest size scale along its support.
+    Located { index: usize, maximum_scale: f64 },
 }
 
 impl ResolvedMetricField {
@@ -167,8 +176,36 @@ impl ResolvedMetricField {
             }
         }
         Ok(LocalMetricSource {
-            support,
+            support: SourceSupport::Entity(support),
             metric,
+            characteristic_length_m,
+            bounds: (minimum, maximum),
+        })
+    }
+
+    /// The graded source of the request's located source `index`.
+    pub(super) fn located_source(
+        &self,
+        index: usize,
+    ) -> Result<LocalMetricSource, MetricContractError> {
+        let located = &self.request.located_sources[index];
+        let characteristic_length_m = located.metric.conservative_minimum_length_m()?;
+        let mut minimum = [f64::INFINITY; 3];
+        let mut maximum = [f64::NEG_INFINITY; 3];
+        let mut maximum_scale = 1.0_f64;
+        for sample in &located.samples {
+            maximum_scale = maximum_scale.max(sample.size_scale);
+            for axis in 0..3 {
+                minimum[axis] = minimum[axis].min(sample.point_m[axis]);
+                maximum[axis] = maximum[axis].max(sample.point_m[axis]);
+            }
+        }
+        Ok(LocalMetricSource {
+            support: SourceSupport::Located {
+                index,
+                maximum_scale,
+            },
+            metric: located.metric,
             characteristic_length_m,
             bounds: (minimum, maximum),
         })
@@ -238,34 +275,51 @@ impl ResolvedMetricField {
         // including the independent validator, evaluates through this function.
         let mut metric = constant;
         let mut reach_length = coarsest_length_bound(metric)?;
+        // A lower bound on a source's graded size from the distance to its support's bounds.
+        let lower_size = |source: &LocalMetricSource, distance: f64| match source.support {
+            SourceSupport::Entity(_) => {
+                source.characteristic_length_m
+                    + slope * (distance - source.characteristic_length_m).max(0.0)
+            }
+            SourceSupport::Located { maximum_scale, .. } => located::located_size_lower_bound(
+                source.characteristic_length_m,
+                source.characteristic_length_m * maximum_scale,
+                slope,
+                distance,
+            ),
+        };
         let mut order = sources
             .filter_map(|source| {
                 let lower_bound = bounds_distance(source.bounds, point_m);
-                let reach = source.characteristic_length_m
-                    + (reach_length - source.characteristic_length_m) / slope;
-                (lower_bound <= reach).then_some((lower_bound, source))
+                (lower_size(source, lower_bound) <= reach_length).then_some((lower_bound, source))
             })
             .collect::<Vec<_>>();
         order.sort_by(|left, right| left.0.total_cmp(&right.0));
         for (lower_bound, source) in order {
-            let reach = source.characteristic_length_m
-                + (reach_length - source.characteristic_length_m) / slope;
-            if lower_bound > reach {
-                continue;
-            }
-            let distance = polyline_distance(
-                &self.request.entity_supports[source.support].points_m,
-                point_m,
-            );
-            if distance > reach {
+            if lower_size(source, lower_bound) > reach_length {
                 continue;
             }
             // Full strength across the element layer touching the support: the volume applies
             // an entity's sizing to every cell with a corner on it, so boundary facets touching
             // the entity must already satisfy it. Grading starts one characteristic length out.
-            let graded_distance = (distance - source.characteristic_length_m).max(0.0);
-            let scale = 1.0 + slope * graded_distance / source.characteristic_length_m;
-            let graded = scaled(source.metric, scale)?;
+            let size = match source.support {
+                SourceSupport::Entity(support) => {
+                    let distance =
+                        polyline_distance(&self.request.entity_supports[support].points_m, point_m);
+                    source.characteristic_length_m
+                        + slope * (distance - source.characteristic_length_m).max(0.0)
+                }
+                SourceSupport::Located { index, .. } => located::located_size(
+                    &self.request.located_sources[index].samples,
+                    source.characteristic_length_m,
+                    slope,
+                    point_m,
+                ),
+            };
+            if size > reach_length {
+                continue;
+            }
+            let graded = scaled(source.metric, size / source.characteristic_length_m)?;
             let tightened = intersection::intersect(metric, graded)?;
             if tightened != metric {
                 metric = tightened;

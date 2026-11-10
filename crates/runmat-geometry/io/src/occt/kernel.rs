@@ -240,6 +240,9 @@ mod backend {
         let v = b::kernel_extent(bodies, &axis).map_err(err)?;
         Ok((v[0], v[1]))
     }
+    pub fn face_loops(body: u64, face: u32, frame: &[f64; 12]) -> Result<Vec<f64>, KernelError> {
+        b::kernel_face_loops(body, face, frame).map_err(err)
+    }
     pub fn analyze(kind: u32, reals: &[f64], bodies: &[u64]) -> Result<Vec<f64>, KernelError> {
         b::kernel_analyze(kind, reals, bodies).map_err(err)
     }
@@ -313,6 +316,9 @@ mod backend {
         Err(no())
     }
     pub fn extent(_: &[u64], _: [f64; 6]) -> Result<(f64, f64), KernelError> {
+        Err(no())
+    }
+    pub fn face_loops(_: u64, _: u32, _: &[f64; 12]) -> Result<Vec<f64>, KernelError> {
         Err(no())
     }
     pub fn analyze(_: u32, _: &[f64], _: &[u64]) -> Result<Vec<f64>, KernelError> {
@@ -424,6 +430,97 @@ fn not_supported(what: impl Into<String>) -> KernelError {
     KernelError::NotSupported {
         what: format!("OCCT kernel: {}", what.into()),
     }
+}
+
+/// A face's loops as `kernel_face_loops` returns them (`exact_sketch_profile.cc`): profile
+/// segments with the curve ids [`ToolOp::face_edge_curve`] gives the face's edges in order.
+fn decode_face_loops(v: &[f64]) -> Result<Vec<Vec<ProfileSegment>>, KernelError> {
+    struct R<'a>(&'a [f64], usize);
+    impl R<'_> {
+        fn next(&mut self) -> Result<f64, KernelError> {
+            let x = self
+                .0
+                .get(self.1)
+                .copied()
+                .ok_or_else(|| failed("the face's loops ended early"))?;
+            self.1 += 1;
+            Ok(x)
+        }
+        fn p2(&mut self) -> Result<[f64; 2], KernelError> {
+            Ok([self.next()?, self.next()?])
+        }
+        fn many(&mut self, n: usize) -> Result<Vec<f64>, KernelError> {
+            (0..n).map(|_| self.next()).collect()
+        }
+    }
+    let mut r = R(v, 0);
+    let mut loops = Vec::new();
+    let mut k = 0usize;
+    for _ in 0..r.next()? as usize {
+        let mut segs = Vec::new();
+        for _ in 0..r.next()? as usize {
+            let code = r.next()? as u32;
+            let (kind, start, end) = match code {
+                0 => {
+                    let (s, e) = (r.p2()?, r.p2()?);
+                    (SegmentKind::Line, s, e)
+                }
+                1 | 2 => {
+                    let (s, e, c) = (r.p2()?, r.p2()?, r.p2()?);
+                    (
+                        SegmentKind::Arc {
+                            center: c,
+                            clockwise: code == 2,
+                        },
+                        s,
+                        e,
+                    )
+                }
+                3 => {
+                    let c = r.p2()?;
+                    let radius = r.next()?;
+                    let at = [c[0] + radius, c[1]];
+                    (SegmentKind::Circle { center: c, radius }, at, at)
+                }
+                6 => {
+                    let degree = r.next()? as u32;
+                    let n = r.next()? as usize;
+                    let mut poles = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        poles.push(r.p2()?);
+                    }
+                    let weights = r.many(n)?;
+                    let m = r.next()? as usize;
+                    let knots = r.many(m)?;
+                    let multiplicities = r.many(m)?.into_iter().map(|x| x as u32).collect();
+                    let _periodic = r.next()?;
+                    if n < 2 {
+                        return Err(failed("a face edge's spline has too few poles"));
+                    }
+                    let rational = weights.iter().any(|w| (w - 1.0).abs() > 1e-12);
+                    let (s, e) = (poles[0], poles[n - 1]);
+                    let kind = SegmentKind::Spline {
+                        degree,
+                        poles,
+                        weights: if rational { weights } else { Vec::new() },
+                        knots,
+                        multiplicities,
+                    };
+                    (kind, s, e)
+                }
+                other => return Err(failed(format!("unknown face loop segment {other}"))),
+            };
+            segs.push(ProfileSegment {
+                curve: ToolOp::face_edge_curve(k),
+                kind,
+                start,
+                end,
+            });
+            k += 1;
+        }
+        loops.push(segs);
+    }
+    Ok(loops)
 }
 
 fn failed(message: impl Into<String>) -> KernelError {
@@ -2868,6 +2965,14 @@ impl OcctKernel {
     }
 
     fn lower_tool(&self, t: &ToolOp, l: &mut Lower<'_>) -> Result<(), KernelError> {
+        let t = &t.with_face_loops(|face, frame| {
+            let body = l.body(face.operand)?;
+            let mut f = [0.0; 12];
+            for (k, v) in [frame.origin, frame.x, frame.y, frame.z].iter().enumerate() {
+                f[3 * k..3 * k + 3].copy_from_slice(v);
+            }
+            decode_face_loops(&backend::face_loops(body.id, face.entity, &f)?)
+        })?;
         let n = l.operands.len();
         let n_ref = (t.references as usize).min(n);
         let n_comb = n - n_ref;

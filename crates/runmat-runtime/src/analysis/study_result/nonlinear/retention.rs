@@ -33,10 +33,9 @@ impl NonlinearSolidStudyCompletion {
         &self,
         maximum_bytes: u64,
     ) -> Result<u64, AnalysisPublicationError> {
-        let limits = CanonicalLimits::new(
+        let limits = CanonicalLimits::content_bounded(
             usize::try_from(maximum_bytes)
                 .map_err(|_| limited("nonlinear handoff exceeds address space"))?,
-            100_000_000,
             65_536,
             64,
         );

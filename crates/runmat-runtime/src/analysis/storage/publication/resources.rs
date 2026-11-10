@@ -468,11 +468,10 @@ impl AnalysisPublicationBuilder {
 fn json_projection(value: &impl Serialize, maximum: u64) -> Result<u64, AnalysisPublicationError> {
     runmat_canonical_codec::profile_serialized(
         value,
-        CanonicalLimits::new(
+        CanonicalLimits::content_bounded(
             usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
                 message: "publication budget exceeds address space".into(),
             })?,
-            100_000_000,
             65_536,
             64,
         ),

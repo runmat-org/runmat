@@ -8,6 +8,7 @@ fn resolver_conservatively_intersects_only_incident_contributions() {
     let unit = MetricTensor3::isotropic_length_m(1.0).unwrap();
     let request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: unit,
         maximum_grading_ratio: 1.25,
@@ -71,6 +72,7 @@ fn contract_rejects_duplicate_and_ambiguous_global_contributions() {
     };
     let mut request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: unit,
         maximum_grading_ratio: 1.25,
@@ -102,6 +104,7 @@ fn request_intersects_and_canonicalizes_derived_contributions() {
     let unit = MetricTensor3::isotropic_length_m(1.0).unwrap();
     let request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: unit,
         maximum_grading_ratio: 1.25,
@@ -142,6 +145,7 @@ fn id(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
 fn uniform_resolution_is_entity_independent_and_scoped_requests_cannot_claim_it() {
     let mut request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3 {
             xx: 4.0,
@@ -195,6 +199,7 @@ fn topology_multiplicity_preserves_density_and_all_constraint_provenance() {
     ] {
         let mut request = MetricFieldRequest {
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
             maximum_grading_ratio: 1.5,
@@ -292,6 +297,7 @@ fn compact_scope_index_matches_exhaustive_incident_selection() {
     let unit = MetricTensor3::isotropic_length_m(1.0).unwrap();
     let mut request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: unit,
         maximum_grading_ratio: 1.5,
@@ -345,6 +351,7 @@ fn graded_request(
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(10.0).unwrap(),
         maximum_grading_ratio: ratio,
+        located_sources: Vec::new(),
         contributions: vec![MetricContribution {
             source: MetricSourceKind::Proximity,
             scope: MetricContributionScope::Entity {

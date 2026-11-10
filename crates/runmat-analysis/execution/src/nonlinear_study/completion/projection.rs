@@ -34,10 +34,9 @@ impl OriginalNonlinearSolidBlockProjection {
 }
 
 fn limits(maximum: u64) -> AnalysisBridgeResult<CanonicalLimits> {
-    Ok(CanonicalLimits::new(
+    Ok(CanonicalLimits::content_bounded(
         usize::try_from(maximum)
             .map_err(|_| limit("original projection limit exceeds address space"))?,
-        100_000_000,
         65_536,
         64,
     ))

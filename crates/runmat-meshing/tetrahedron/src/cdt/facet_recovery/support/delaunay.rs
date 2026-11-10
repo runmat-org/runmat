@@ -12,9 +12,13 @@ use runmat_meshing_core::quality::predicate::{
     insphere3d_constructed, orient3d_constructed, Point3Construction,
 };
 
-pub(super) struct FacetProjection {
+/// The source triangle a support polygon lies in, the two coordinate axes it is projected on
+/// and the orientation sign of the polygon in that projection.
+#[derive(Clone, Copy)]
+pub(super) struct SupportPolygonPlane {
+    pub(super) source: [StableDigest; 3],
     pub(super) axes: [usize; 2],
-    pub(super) sign: PredicateSign,
+    pub(super) polygon_sign: PredicateSign,
 }
 
 /// Returns `None` when a cocircular tie or a degenerate chord leaves the triangulation
@@ -22,16 +26,16 @@ pub(super) struct FacetProjection {
 pub(super) fn triangulate_delaunay(
     recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     boundary: &[StableDigest],
-    source: [StableDigest; 3],
-    projection: FacetProjection,
+    plane: SupportPolygonPlane,
     source_edge_membership: &BTreeMap<StableDigest, BTreeSet<usize>>,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Option<Vec<DelaunayRecoveredFacetTriangle>>, DelaunayFacetRecoveryError> {
-    let FacetProjection {
+    let SupportPolygonPlane {
+        source,
         axes,
-        sign: polygon_sign,
-    } = projection;
+        polygon_sign,
+    } = plane;
     let count = boundary.len();
     if count < 4 {
         return Ok(None);

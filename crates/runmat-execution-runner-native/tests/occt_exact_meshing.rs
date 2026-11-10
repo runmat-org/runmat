@@ -290,6 +290,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             cells_across_gap: None,
         },
         quality: MeshingQualityTargets {

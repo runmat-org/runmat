@@ -23,18 +23,13 @@
 //! solver's true-residual (backward-error) certificate, never by an eigenvalue bound.
 use std::collections::HashMap;
 
-/// Multiplier `c` of the roundoff-relative element margin `c·(d+1)·ε·tr(A)`: covers the rounding
-/// of forming the projected block and of its Cholesky factorization (Rump's criterion uses
-/// `γ_{d+1} ≈ (d+1)ε` for the factorization alone).
-pub const ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR: f64 = 3.0;
-
-/// The roundoff-relative margin subtracted before the element Cholesky test.
-fn element_energy_margin(dimension: usize, trace: f64) -> f64 {
-    let gamma = ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR * (dimension as f64 + 1.0) * f64::EPSILON;
-    gamma / (1.0 - gamma) * trace
-}
-/// Largest admitted `‖Kₑ U‖_F / ‖Kₑ‖_F` for the orthonormal rigid-motion basis `U`.
-pub const RIGID_MODE_RESIDUAL_RATIO: f64 = 1.0e-8;
+/// The element margin factor and rigid-mode tolerance are the shared element rigidity rule's
+/// (`runmat_meshing_core::element_rigidity`), from which the mesher also derives its volume
+/// shape floor.
+pub use runmat_meshing_core::{
+    ELEMENT_RIGIDITY_MARGIN_ROUNDING_FACTOR as ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR,
+    RIGID_MODE_RESIDUAL_RATIO,
+};
 /// Smallest admitted ratio of the anchor Gram matrix's smallest eigenvalue to its trace.
 pub const ANCHOR_MINIMUM_RANK_RATIO: f64 = 1.0e-8;
 /// Smallest admitted area of a shared face relative to its longest edge squared.
@@ -431,126 +426,28 @@ fn cholesky_in_place(a: &mut [f64], n: usize) -> bool {
     true
 }
 
-/// Element test: rigid motions are (numerically) null and the block is positive definite on their
-/// orthogonal complement with the stated margin.
+/// Element test: the shared element rigidity rule, reported against this element.
 fn check_element(element: u64, points: &[[f64; 3]], k: &[f64]) -> Result<(), ElasticRigidityError> {
-    let n = points.len();
-    let d = 3 * n;
-    let mut center = [0.0; 3];
-    for p in points {
-        for a in 0..3 {
-            center[a] += p[a] / n as f64;
+    use runmat_meshing_core::ElementRigidityShortfall as Shortfall;
+    runmat_meshing_core::element_rigidity(points, k).map_err(|shortfall| match shortfall {
+        Shortfall::DegenerateGeometry => {
+            ElasticRigidityError::DegenerateElementGeometry { element }
         }
-    }
-    let scale = points
-        .iter()
-        .map(|p| norm(&[p[0] - center[0], p[1] - center[1], p[2] - center[2]]))
-        .fold(0.0, f64::max);
-    if !(scale > 0.0) || !scale.is_finite() {
-        return Err(ElasticRigidityError::DegenerateElementGeometry { element });
-    }
-    // Rigid basis U (d × 6, column-major), orthonormalized by two Gram–Schmidt passes.
-    let mut u = vec![0.0; d * 6];
-    for (node, p) in points.iter().enumerate() {
-        let q = [0, 1, 2].map(|a| (p[a] - center[a]) / scale);
-        for axis in 0..3 {
-            let row = rigid_row(q, axis);
-            for c in 0..6 {
-                u[c * d + 3 * node + axis] = row[c];
+        Shortfall::RigidMotionEnergy { residual_ratio } => {
+            ElasticRigidityError::RigidMotionEnergy {
+                element,
+                residual_ratio_bits: residual_ratio.to_bits(),
             }
         }
-    }
-    for c in 0..6 {
-        let original = norm(&u[c * d..(c + 1) * d]);
-        for _ in 0..2 {
-            for p in 0..c {
-                let dot = (0..d).map(|i| u[c * d + i] * u[p * d + i]).sum::<f64>();
-                for i in 0..d {
-                    u[c * d + i] -= dot * u[p * d + i];
-                }
-            }
-        }
-        let length = norm(&u[c * d..(c + 1) * d]);
-        if !(length > 1.0e-6 * original) {
-            return Err(ElasticRigidityError::DegenerateElementGeometry { element });
-        }
-        for i in 0..d {
-            u[c * d + i] /= length;
-        }
-    }
-    let k_norm = norm(k);
-    if !(k_norm > 0.0) || !k_norm.is_finite() {
-        return Err(ElasticRigidityError::ElementEnergyMargin {
+        Shortfall::EnergyMargin {
+            margin_ratio,
+            smallest_ratio,
+        } => ElasticRigidityError::ElementEnergyMargin {
             element,
-            margin_ratio_bits: f64::NAN.to_bits(),
-            smallest_ratio_bits: f64::NAN.to_bits(),
-        });
-    }
-    // KU (d × 6, column-major).
-    let mut ku = vec![0.0; d * 6];
-    for c in 0..6 {
-        for i in 0..d {
-            ku[c * d + i] = (0..d).map(|j| k[i * d + j] * u[c * d + j]).sum();
-        }
-    }
-    let residual = norm(&ku) / k_norm;
-    if !(residual <= RIGID_MODE_RESIDUAL_RATIO) {
-        return Err(ElasticRigidityError::RigidMotionEnergy {
-            element,
-            residual_ratio_bits: residual.to_bits(),
-        });
-    }
-    // A = P K P + ‖K‖ U Uᵀ with P = I − U Uᵀ; A ≻ margin ‖K‖ iff the complement block is.
-    // UᵀKU (6 × 6).
-    let mut utku = [0.0; 36];
-    for a in 0..6 {
-        for b in 0..6 {
-            utku[a * 6 + b] = (0..d).map(|i| u[a * d + i] * ku[b * d + i]).sum();
-        }
-    }
-    let mut matrix = vec![0.0; d * d];
-    for i in 0..d {
-        for j in 0..d {
-            // (I − UUᵀ) K (I − UUᵀ) = K − KUUᵀ − UUᵀK + U(UᵀKU)Uᵀ.
-            let mut value = 0.5 * (k[i * d + j] + k[j * d + i]);
-            for a in 0..6 {
-                value -= 0.5 * (ku[a * d + i] * u[a * d + j] + ku[a * d + j] * u[a * d + i]);
-                value -= 0.5 * (u[a * d + i] * ku[a * d + j] + u[a * d + j] * ku[a * d + i]);
-                for b in 0..6 {
-                    value += u[a * d + i] * utku[a * 6 + b] * u[b * d + j];
-                }
-                value += k_norm * u[a * d + i] * u[a * d + j];
-            }
-            matrix[i * d + j] = value;
-        }
-    }
-    let trace = (0..d).map(|i| matrix[i * d + i]).sum::<f64>();
-    let margin = element_energy_margin(d, trace.abs());
-    let succeeds = |shift: f64| {
-        let mut shifted = matrix.clone();
-        for i in 0..d {
-            shifted[i * d + i] -= shift;
-        }
-        cholesky_in_place(&mut shifted, d)
-    };
-    if !succeeds(margin) {
-        // Diagnostics only: bisect the largest shift that still factors (≈ λ_min of the block).
-        let (mut low, mut high) = (-k_norm, margin);
-        for _ in 0..60 {
-            let middle = 0.5 * (low + high);
-            if succeeds(middle) {
-                low = middle;
-            } else {
-                high = middle;
-            }
-        }
-        return Err(ElasticRigidityError::ElementEnergyMargin {
-            element,
-            margin_ratio_bits: (margin / k_norm).to_bits(),
-            smallest_ratio_bits: (low / k_norm).to_bits(),
-        });
-    }
-    Ok(())
+            margin_ratio_bits: margin_ratio.to_bits(),
+            smallest_ratio_bits: smallest_ratio.to_bits(),
+        },
+    })
 }
 
 #[cfg(test)]

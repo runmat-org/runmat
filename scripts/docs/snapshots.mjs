@@ -11,7 +11,10 @@ export function collectSnapshot(root, output, example, packagePath) {
   if (typeof snapshot.run_id !== "string" || !snapshot.run_id || snapshot.views.some(view =>
     typeof view.id !== "string" || !view.id || typeof view.label !== "string" || !view.label ||
     typeof view.unit !== "string" || !view.unit || (view.scalar_scale !== undefined && (!Number.isFinite(view.scalar_scale) || view.scalar_scale <= 0)) || !Number.isFinite(view.deformation_scale) || view.deformation_scale < 0 ||
-    ![view.minimum, view.maximum].every(value => value === null || Number.isFinite(value)))) throw new Error("Invalid saved-view metadata");
+    ![view.minimum, view.maximum].every(value => value === null || Number.isFinite(value)) ||
+    // The study output a view draws (null for the solver mesh) and a mode shape's 1-based index.
+    !(view.output === undefined || view.output === null || (typeof view.output === "string" && view.output)) ||
+    !(view.mode === undefined || view.mode === null || (Number.isInteger(view.mode) && view.mode >= 1)))) throw new Error("Invalid saved-view metadata");
   for (const view of snapshot.views) validateSavedCamera(view.initial_camera);
   if (new Set(snapshot.views.map(view => view.id)).size !== snapshot.views.length) throw new Error("Duplicate saved view");
   // Bind captured inputs to the current canonical example before publishing old results.
@@ -33,8 +36,11 @@ export function collectSnapshot(root, output, example, packagePath) {
   const views = snapshot.views.map(view => {
     const path = ".snapshot/" + safePath(view.scene); const scene = files.find(file => file.path === path);
     const poster = ".snapshot/" + safePath(view.poster);
-    if (!scene || !files.some(file => file.path === poster)) throw new Error("Snapshot view has missing assets");
-    return { ...view, scene: { url: "/docs-assets/" + projectPath + "/files/" + path, sha256: scene.sha256, bytes: scene.bytes }, poster: "/docs-assets/" + projectPath + "/files/" + poster };
+    // The light-theme poster beside the dark one, when the capture drew one.
+    const posterLight = view.poster_light === undefined ? null : ".snapshot/" + safePath(view.poster_light);
+    if (!scene || !files.some(file => file.path === poster) || (posterLight && !files.some(file => file.path === posterLight))) throw new Error("Snapshot view has missing assets");
+    const url = file => "/docs-assets/" + projectPath + "/files/" + file;
+    return { ...view, scene: { url: url(path), sha256: scene.sha256, bytes: scene.bytes }, poster: url(poster), ...(posterLight ? { poster_light: url(posterLight) } : {}) };
   });
   return { run_id: snapshot.run_id, views, project: { manifest_path: projectPath + "/project.json", sha256: hash(bytes) }, publication: snapshot.publication };
 }

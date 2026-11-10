@@ -832,6 +832,12 @@ kind: "port_reduction" }
   target: AuthoredRegionSource;
 kind: "spatial_selection" }
   | {
+  step_id: string;
+  quantity: ObservationQuantity;
+  conductor: string | null;
+  signal_conductors: WireU64;
+kind: "line_parameter" }
+  | {
   source: AuthoredOutputExpression;
   positions: Position[];
 kind: "interpolation" }
@@ -2723,7 +2729,23 @@ export type ObservationQuantity = "displacement"
   | "temperature_jump"
   | "iteration_count"
   | "time"
-  | "frequency";
+  | "frequency"
+  | "line_impedance"
+  | "line_effective_permittivity"
+  | "line_delay"
+  | "line_capacitance"
+  | "line_vacuum_capacitance"
+  | "line_inductance"
+  | "differential_impedance"
+  | "common_mode_impedance"
+  | "odd_mode_impedance"
+  | "even_mode_impedance"
+  | "odd_mode_effective_permittivity"
+  | "even_mode_effective_permittivity"
+  | "odd_mode_delay"
+  | "even_mode_delay"
+  | "near_end_coupling"
+  | "far_end_coupling";
 
 export type ObservationRequest = { field: ObservationSpec }
   | { history: ObservationSpec }
@@ -2771,6 +2793,9 @@ export type ObservationTarget = { spatial: ExcitationTarget }
 } }
   | { connector: {
   connector_id: string;
+} }
+  | { conductor: {
+  conductor_id: string;
 } }
   | { constraint: {
   constraint_id: string;
@@ -3497,7 +3522,8 @@ export type SpatialReduction = "none"
 } }
   | "normal_flux"
   | "mean_difference"
-  | "transmission_loss";
+  | "transmission_loss"
+  | "line_parameter";
 
 export interface SpecificAcousticImpedance {
   pascal_seconds_per_meter: number;

@@ -74,6 +74,15 @@ impl RelocationSearchScope {
     }
 }
 
+/// The sliver one relocation search repairs, the topology it starts from and the search policy.
+pub(super) struct RelocationSearchRequest<'a> {
+    pub(super) input: DelaunayVolumeRefinementInput<'a>,
+    pub(super) source: &'a DelaunayTetrahedronQuality,
+    pub(super) current_spectrum: &'a [f64],
+    pub(super) policy: SliverSearchPolicy,
+    pub(super) scope: RelocationSearchScope,
+}
+
 #[cfg(test)]
 pub(super) fn relocation_candidates(
     input: DelaunayVolumeRefinementInput<'_>,
@@ -85,13 +94,15 @@ pub(super) fn relocation_candidates(
     scope: RelocationSearchScope,
 ) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
     search(
-        input,
-        source,
-        current_spectrum,
+        RelocationSearchRequest {
+            input,
+            source,
+            current_spectrum,
+            policy,
+            scope,
+        },
         cancellation,
         work,
-        policy,
-        scope,
         None,
     )
 }
@@ -100,40 +111,28 @@ pub(super) fn relocation_candidates(
 /// produced candidate added or removed and the changed cells' quality of every candidate that
 /// lost only the quality ranking, so a caller can tell when a rejected search would decide the
 /// same.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn relocation_candidates_recording_changes(
-    input: DelaunayVolumeRefinementInput<'_>,
-    source: &DelaunayTetrahedronQuality,
-    current_spectrum: &[f64],
+    request: RelocationSearchRequest<'_>,
     cancellation: &dyn MeshingCancellationSignal,
     work: &mut OptimizationWork<'_>,
-    policy: SliverSearchPolicy,
-    scope: RelocationSearchScope,
     recording: &mut SearchRecording,
 ) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
-    search(
+    search(request, cancellation, work, Some(recording))
+}
+
+fn search(
+    request: RelocationSearchRequest<'_>,
+    cancellation: &dyn MeshingCancellationSignal,
+    work: &mut OptimizationWork<'_>,
+    mut recording: Option<&mut SearchRecording>,
+) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
+    let RelocationSearchRequest {
         input,
         source,
         current_spectrum,
-        cancellation,
-        work,
         policy,
         scope,
-        Some(recording),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn search(
-    input: DelaunayVolumeRefinementInput<'_>,
-    source: &DelaunayTetrahedronQuality,
-    current_spectrum: &[f64],
-    cancellation: &dyn MeshingCancellationSignal,
-    work: &mut OptimizationWork<'_>,
-    policy: SliverSearchPolicy,
-    scope: RelocationSearchScope,
-    mut recording: Option<&mut SearchRecording>,
-) -> Result<RelocationSearch, DelaunayVolumeSliverError> {
+    } = request;
     let SliverSearchPolicy {
         options,
         refinement: refinement_policy,
@@ -154,6 +153,12 @@ fn search(
         .iter()
         .map(|facet| facet.node_identities)
         .collect::<Vec<_>>();
+    let evaluation = CandidateEvaluation {
+        input,
+        protected_faces: &protected_faces,
+        current_spectrum,
+        cancellation,
+    };
     let mut source_nodes = source.node_identities;
     source_nodes.sort_unstable();
     let eligible_sources = source_nodes
@@ -215,16 +220,13 @@ fn search(
                 recording.as_deref_mut(),
                 topology,
                 &candidate_topology,
-                input,
-                &protected_faces,
-                current_spectrum,
+                &evaluation,
                 CandidateAdmissionPolicy {
                     topology_contract: CandidateTopologyContract::CertifiedConformingCavity,
                     refinement: refinement_policy,
                     objective,
                     options,
                 },
-                cancellation,
                 &mut rejection_counts,
             )?
             else {
@@ -285,16 +287,13 @@ fn search(
                 recording.as_deref_mut(),
                 topology,
                 &candidate_topology,
-                input,
-                &protected_faces,
-                current_spectrum,
+                &evaluation,
                 CandidateAdmissionPolicy {
                     topology_contract: CandidateTopologyContract::Delaunay,
                     refinement: refinement_policy,
                     objective,
                     options,
                 },
-                cancellation,
                 &mut rejection_counts,
             )? {
                 return Ok(RelocationSearch {
@@ -370,16 +369,13 @@ fn search(
                         recording.as_deref_mut(),
                         topology,
                         &candidate_topology,
-                        input,
-                        &protected_faces,
-                        current_spectrum,
+                        &evaluation,
                         CandidateAdmissionPolicy {
                             topology_contract: CandidateTopologyContract::CertifiedConformingCavity,
                             refinement: refinement_policy,
                             objective,
                             options,
                         },
-                        cancellation,
                         &mut rejection_counts,
                     )? {
                         return Ok(RelocationSearch {
@@ -437,16 +433,13 @@ fn search(
                 recording.as_deref_mut(),
                 topology,
                 &candidate_topology,
-                input,
-                &protected_faces,
-                current_spectrum,
+                &evaluation,
                 CandidateAdmissionPolicy {
                     topology_contract: CandidateTopologyContract::Delaunay,
                     refinement: refinement_policy,
                     objective,
                     options,
                 },
-                cancellation,
                 &mut rejection_counts,
             )?
             else {
@@ -556,21 +549,32 @@ pub(super) fn relocation_identity_is_valid(relocation: &DelaunayVolumeSliverRelo
 #[cfg(test)]
 mod tests;
 
+/// The search-wide inputs every candidate in one relocation search is evaluated against.
+#[derive(Clone, Copy)]
+struct CandidateEvaluation<'a> {
+    input: DelaunayVolumeRefinementInput<'a>,
+    protected_faces: &'a [[StableDigest; 3]],
+    current_spectrum: &'a [f64],
+    cancellation: &'a dyn MeshingCancellationSignal,
+}
+
 /// [`evaluate_candidate`] that, with a recording, also records the nodes of the cells the
 /// candidate changed, and the changed cells' quality ratios when the candidate loses only the
 /// quality ranking.
-#[allow(clippy::too_many_arguments)]
 fn evaluate_recorded(
     recording: Option<&mut SearchRecording>,
     current: &DelaunayVolumeTopology,
     candidate: &DelaunayVolumeTopology,
-    input: DelaunayVolumeRefinementInput<'_>,
-    protected_faces: &[[StableDigest; 3]],
-    current_spectrum: &[f64],
+    evaluation: &CandidateEvaluation<'_>,
     policy: CandidateAdmissionPolicy,
-    cancellation: &dyn MeshingCancellationSignal,
     rejection_counts: &mut BTreeMap<&'static str, u64>,
 ) -> Result<Option<DelaunayVolumeQuality>, DelaunayVolumeSliverError> {
+    let CandidateEvaluation {
+        input,
+        protected_faces,
+        current_spectrum,
+        cancellation,
+    } = *evaluation;
     let Some(recording) = recording else {
         return evaluate_candidate(
             candidate,

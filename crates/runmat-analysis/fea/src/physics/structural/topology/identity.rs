@@ -15,7 +15,7 @@ use serde::{Serialize, Serializer};
 use thiserror::Error;
 
 const PREFIX: &[u8] = b"runmat-fea-explicit-structural-topology/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 64);
+const LIMITS: CanonicalLimits = CanonicalLimits::platform_content(4_000_000, 64);
 const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 

@@ -1,9 +1,11 @@
 mod electrical;
 mod fluid;
+mod fluid_solid;
 mod identity;
 mod magnetic;
 mod maxwell;
 mod nonstructural;
+mod observation;
 mod realizations;
 mod registry;
 mod structural;
@@ -17,13 +19,17 @@ use runmat_analysis_core::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use electrical::admit_canonical_electrical_static;
 pub(crate) use electrical::realization as canonical_electrical_realization;
+pub use electrical::{admit_canonical_electrical_static, admit_cross_section_line_parameters};
 pub use fluid::{
     admit_canonical_conjugate_heat_steady, admit_canonical_conjugate_heat_transient,
     admit_canonical_fluid_steady, admit_canonical_fluid_structure_steady,
     admit_canonical_fluid_structure_transient, admit_canonical_fluid_transient,
     canonical_fluid_steady_realization, canonical_fluid_transient_realization,
+};
+pub use fluid_solid::{
+    classify_fluid_solid_face, is_authored_fluid_wall, is_fluid_wall, FluidSolidFaceRole,
+    FLUID_SOLID_FACE_CODE,
 };
 pub use identity::AnalysisRunIdentity;
 pub use magnetic::admit_canonical_magnetostatic;
@@ -36,14 +42,17 @@ pub use structural::{
     structural_exact_realization, thermomechanical_exact_realization, StructuralRealizationInput,
     ThermomechanicalRealizationInput,
 };
+pub(crate) use study::fluid_step_initial_selection_supported;
 pub use study::{
     admit_accelerator_policy, admit_study, is_electrothermal, select_family, AdmissionIssue,
     AdmittedFamily, StaticRule, ACCELERATOR_REQUIRED_CODE, ACOUSTIC_ROTATED_PERIODIC,
     ACOUSTIC_TRANSIENT_CONSTRAINT, ACOUSTIC_TRANSIENT_INITIAL_CONDITION,
+    CONJUGATE_HEAT_INITIAL_KIND, CONJUGATE_HEAT_INITIAL_TEMPERATURE,
+    CONJUGATE_HEAT_INITIAL_UNIFORM, CONJUGATE_HEAT_STEADY_INITIAL,
     ELECTROMAGNETIC_INITIAL_CONDITION, FAMILY_PROCEDURE_CODE, FLUID_INITIAL_CONDITION,
-    FLUID_PERIODIC, MAGNETIC_STATIC_CONSTRAINT, MAGNETIC_STATIC_GAUGE, MAXWELL_CONSTRAINT,
-    MAXWELL_FAR_FIELD, MAXWELL_NONELECTROMAGNETIC_CONSTRAINT, OBSERVATION_CODE,
-    PROCEDURE_GRAPH_CODE,
+    FLUID_PERIODIC, FLUID_STRUCTURE_INITIAL_CONDITION, FLUID_STRUCTURE_INTERFACE,
+    MAGNETIC_STATIC_CONSTRAINT, MAGNETIC_STATIC_GAUGE, MAXWELL_CONSTRAINT, MAXWELL_FAR_FIELD,
+    MAXWELL_NONELECTROMAGNETIC_CONSTRAINT, OBSERVATION_CODE, PROCEDURE_GRAPH_CODE,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

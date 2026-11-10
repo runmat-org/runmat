@@ -107,10 +107,9 @@ impl StudyEvidenceAccess {
             runmat_filesystem::AtomicCreateResult::Existing(existing_bytes) => {
                 let decoded = runmat_canonical_codec::json_materialization_resident_bytes_estimate(
                     &existing_bytes,
-                    runmat_canonical_codec::CanonicalLimits::new(
+                    runmat_canonical_codec::CanonicalLimits::content_bounded(
                         usize::try_from(available)
                             .map_err(|_| limited("evidence allowance exceeds address space"))?,
-                        100_000_000,
                         65_536,
                         64,
                     ),

@@ -18,8 +18,7 @@ mod resources;
 pub(crate) use resources::node_space_workspace_profile;
 
 const IDENTITY_PREFIX: &[u8] = b"runmat-fea-mixed-structural-topology/v1\0";
-const IDENTITY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 64);
+const IDENTITY_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(4_000_000, 64);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct CanonicalStructuralNode {

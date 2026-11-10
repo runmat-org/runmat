@@ -164,14 +164,16 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
     let mut work = 0;
     certify_element_within(
         coordinates,
-        10_000,
-        0,
+        JacobianSearchLimits {
+            maximum_search_work: 10_000,
+            maximum_recursion_depth: 0,
+            cancellation_check_interval: 1,
+        },
         &NeverCancelled,
         ValidationWork {
             storage: Storage(None),
             counter: &mut work,
         },
-        1,
         &mut 0,
     )
     .unwrap();

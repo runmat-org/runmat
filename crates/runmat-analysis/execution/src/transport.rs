@@ -36,12 +36,7 @@ impl PreparedAnalysisProgram {
     pub(crate) fn retained_storage_bytes(&self) -> AnalysisBridgeResult<u64> {
         let metadata = runmat_canonical_codec::profile_serialized(
             &self.request,
-            runmat_canonical_codec::CanonicalLimits::new(
-                1024 * 1024 * 1024,
-                100_000_000,
-                65_536,
-                64,
-            ),
+            runmat_canonical_codec::CanonicalLimits::platform_content(65_536, 64),
         )?;
         let mut bytes = crate::object::logical_objects_storage(&self.logical_objects)?
             .checked_add(metadata.materialization_resident_bytes_estimate)
@@ -60,12 +55,7 @@ impl PreparedAnalysisProgram {
         for (reference, _) in &self.references {
             let reference = runmat_canonical_codec::profile_serialized(
                 reference,
-                runmat_canonical_codec::CanonicalLimits::new(
-                    1024 * 1024 * 1024,
-                    100_000_000,
-                    65_536,
-                    64,
-                ),
+                runmat_canonical_codec::CanonicalLimits::platform_content(65_536, 64),
             )?;
             bytes = bytes
                 .checked_add(reference.materialization_resident_bytes_estimate)

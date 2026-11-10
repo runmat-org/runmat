@@ -1,7 +1,7 @@
 //! Real derivative/occurrence paths, independent of matrix-entry orientation.
 use super::*;
 use runmat_geometry_core::*;
-use runmat_meshing_core::MetricTensor3;
+use runmat_meshing_core::{CurveQualityTargets, MetricTensor3, SurfaceQualityTargets};
 
 fn density(metric: MetricTensor3, v: [f64; 3]) -> f64 {
     let [x, y, z] = v;
@@ -99,6 +99,7 @@ fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusio
         let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
         let request = MetricFieldRequest {
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(1.).unwrap(),
             maximum_grading_ratio: 1.3,
@@ -123,8 +124,7 @@ fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusio
             &evaluator,
             &Control,
             &request,
-            curve_quality,
-            surface_quality,
+            quality_targets(curve_quality, surface_quality),
         )
         .unwrap();
         derived.validate().unwrap();
@@ -151,11 +151,26 @@ fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusio
                 &evaluator,
                 &Control,
                 &request,
-                curve_quality,
-                surface_quality
+                quality_targets(curve_quality, surface_quality),
             )
             .unwrap(),
             derived
         );
+    }
+}
+
+/// Curve and surface targets with the default volume target (radius-edge ratio 10).
+fn quality_targets(
+    curve: runmat_meshing_core::CurveQualityTargets,
+    surface: runmat_meshing_core::SurfaceQualityTargets,
+) -> runmat_meshing_core::MeshingQualityTargets {
+    runmat_meshing_core::MeshingQualityTargets {
+        curve,
+        surface,
+        volume: runmat_meshing_core::VolumeQualityTargets {
+            maximum_radius_edge_ratio: 10.0,
+            minimum_scaled_jacobian: 0.001,
+            maximum_metric_edge_length: 1.0,
+        },
     }
 }

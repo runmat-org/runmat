@@ -44,6 +44,15 @@ pub(super) fn spline_segment(
 /// Closed loops from a solved sketch: explicit loops as listed, or every closed chain of
 /// non-construction lines and arcs (circles are loops alone). The outer loop (largest area)
 /// comes first.
+/// Every closed loop of a sketch's profile curves, the largest first (the regions the model
+/// view offers as profiles).
+pub(crate) fn profile_loops(
+    sketch: &Sketch,
+    solved: &SolvedSketch,
+) -> Result<Vec<Vec<ProfileSegment>>, String> {
+    build_loops(sketch, solved, &[])
+}
+
 pub(super) fn build_loops(
     sketch: &Sketch,
     solved: &SolvedSketch,
@@ -89,12 +98,44 @@ pub(super) fn build_loops(
     let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
     let mut loops: Vec<Vec<ProfileSegment>> = Vec::new();
     if !explicit.is_empty() {
+        // Each listed loop in chain order, whatever order and direction its curves are listed
+        // in (a region picked in the view lists them as found).
         for l in explicit {
-            let mut segs = Vec::new();
+            let mut pool = Vec::new();
             for id in l {
-                segs.push(seg_of(id).ok_or_else(|| format!("`{}` is not a profile curve", id))?);
+                pool.push(seg_of(id).ok_or_else(|| format!("`{}` is not a profile curve", id))?);
             }
-            loops.push(segs);
+            let mut chain = vec![pool.remove(0)];
+            if !chain[0].is_closed_curve() {
+                let start = chain[0].start;
+                loop {
+                    let end = chain.last().expect("non-empty").end;
+                    if close(end, start) {
+                        break;
+                    }
+                    let Some(k) = pool
+                        .iter()
+                        .position(|s| close(s.start, end) || close(s.end, end))
+                    else {
+                        return Err(format!(
+                            "the loop of `{}` is open at ({:.6}, {:.6})",
+                            chain[0].curve, end[0], end[1]
+                        ));
+                    };
+                    let mut s = pool.remove(k);
+                    if !close(s.start, end) {
+                        reverse_segment(&mut s);
+                    }
+                    chain.push(s);
+                }
+            }
+            if let Some(extra) = pool.first() {
+                return Err(format!(
+                    "`{}` is not on the loop of `{}`",
+                    extra.curve, chain[0].curve
+                ));
+            }
+            loops.push(chain);
         }
     } else {
         let mut pool: Vec<ProfileSegment> = sketch

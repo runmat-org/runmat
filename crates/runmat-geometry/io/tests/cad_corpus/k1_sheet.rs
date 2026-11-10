@@ -80,7 +80,7 @@ fn window_cut(id: &str, sketch: &str) -> Feature {
     Feature::new(
         id,
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch(sketch),
+            profile: ProfileRef::sketch(sketch).into(),
             extent: Extent::Symmetric {
                 distance: mm(400.0),
             },

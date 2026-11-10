@@ -1538,7 +1538,7 @@ fn delete_face_heals_a_pocket_and_a_dimension_edit_is_recorded() {
     d.features.push(Feature::new(
         "pocket",
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch("s_pocket"),
+            profile: ProfileRef::sketch("s_pocket").into(),
             extent: Extent::Blind { distance: mm(4.0) },
             reverse: true,
             mode: BodyMode::cut(),
@@ -2293,7 +2293,7 @@ fn threads_embosses_ribs_curves_connectors_and_library_features() {
             Feature::new(
                 "e",
                 FeatureKind::Extrude(Extrude {
-                    profile: ProfileRef::sketch("s"),
+                    profile: ProfileRef::sketch("s").into(),
                     extent: Extent::Blind {
                         distance: input("h"),
                     },

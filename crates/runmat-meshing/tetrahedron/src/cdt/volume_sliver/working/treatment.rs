@@ -287,17 +287,19 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
             let spectrum = admission::candidate_spectrum(&quality, policy.refinement, objective);
             let mut recording = SearchRecording::default();
             let search = relocation::relocation_candidates_recording_changes(
-                context.with_state(&topology, &quality),
-                &source,
-                &spectrum,
+                relocation::RelocationSearchRequest {
+                    input: context.with_state(&topology, &quality),
+                    source: &source,
+                    current_spectrum: &spectrum,
+                    policy,
+                    scope: if mode == QualityConvergenceMode::ShapeOnly {
+                        relocation::RelocationSearchScope::Complete
+                    } else {
+                        relocation::RelocationSearchScope::TopologyChanging
+                    },
+                },
                 cancellation,
                 &mut work,
-                policy,
-                if mode == QualityConvergenceMode::ShapeOnly {
-                    relocation::RelocationSearchScope::Complete
-                } else {
-                    relocation::RelocationSearchScope::TopologyChanging
-                },
                 &mut recording,
             )?;
             tracing::info!(

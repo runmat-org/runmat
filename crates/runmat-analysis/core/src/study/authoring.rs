@@ -343,6 +343,7 @@ fn validate_output_regions(
             validate_output_region(target, geometry, model)
         }
         AuthoredOutputExpression::AnalysisField { .. }
+        | AuthoredOutputExpression::LineParameter { .. }
         | AuthoredOutputExpression::OutputReference { .. } => Ok(()),
     }
 }

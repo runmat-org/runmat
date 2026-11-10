@@ -502,3 +502,162 @@ fn calibrate_mesh_defaults() {
         }
     }
 }
+
+/// The published mesh is exactly the mesh the potential solves ran on, as one canonical
+/// surface artifact whose geometry identity is the section digest.
+#[test]
+fn solved_section_publishes_its_mesh_as_one_canonical_artifact() {
+    use runmat_meshing_core::{CanonicalMeshingContract, MeshDimension, StableDigest};
+    let section = example_section(&[("p", -0.2 * MM, 0.23 * MM), ("n", 0.2 * MM, 0.23 * MM)]);
+    let tolerance = runmat_meshing_core::GeometryTolerancePolicy {
+        source_tolerance_m: runmat_types::physical::Length::new(0.0),
+        absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
+        model_relative_term: 1.0e-9,
+        requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+        maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
+    };
+    let request = runmat_meshing_core::resolve_meshing_request(
+        tolerance,
+        runmat_meshing_core::MeshingRequestSettings::default(),
+    )
+    .unwrap();
+    let digest = StableDigest::from_bytes([7; 32]);
+    let solved = solve_cross_section_with_mesh(&section, digest, request).unwrap();
+    let reference = solve_cross_section(&section).unwrap();
+    assert_eq!(solved.parameters, reference);
+    let mesh = &solved.mesh;
+    mesh.validate_canonical().unwrap();
+    assert_eq!(mesh.resolved_request.dimension, MeshDimension::Surface);
+    assert_eq!(mesh.topology.nodes.len(), reference.mesh.nodes);
+    assert_eq!(mesh.topology.boundary_faces.len(), reference.mesh.elements);
+    assert_eq!(mesh.geometry, cross_section_geometry(digest));
+    assert!(mesh
+        .topology
+        .nodes
+        .iter()
+        .all(|node| node.coordinates_m.canonical_value()[2] == 0.0));
+    let platform = runmat_meshing_core::PlatformBuildIdentity {
+        capability_cohort: "test-native".into(),
+        target_triple: "test-target".into(),
+        build_digest: StableDigest::from_bytes([9; 32]),
+        exact_kernel_abi: None,
+    };
+    let evidence = cross_section_meshing_evidence(
+        mesh,
+        runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
+        platform,
+        solved.meshing_time_ms,
+    )
+    .unwrap();
+    evidence.validate(mesh).unwrap();
+}
+
+/// Every authored line-parameter output becomes one observation result, valid under the
+/// step's plan identity; scalar outputs feed assessments as scalar evidence.
+#[test]
+fn line_parameter_outputs_publish_one_observation_result_each() {
+    use runmat_analysis_core::{
+        AnalysisProcedure, AnalysisSequence, AuthoredOutput, AuthoredOutputExpression,
+        AuthoredOutputPolicy, IndependentDomain, ObservationQuantity, PhysicsFamily, ProcedureStep,
+        SolutionSpace,
+    };
+    use runmat_meshing_core::StableDigest;
+    let section = example_section(&[("p", -0.2 * MM, 0.23 * MM), ("n", 0.2 * MM, 0.23 * MM)]);
+    let request = runmat_meshing_core::resolve_meshing_request(
+        runmat_meshing_core::GeometryTolerancePolicy {
+            source_tolerance_m: runmat_types::physical::Length::new(0.0),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
+            model_relative_term: 1.0e-9,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
+        },
+        runmat_meshing_core::MeshingRequestSettings::default(),
+    )
+    .unwrap();
+    let solved =
+        solve_cross_section_with_mesh(&section, StableDigest::from_bytes([7; 32]), request)
+            .unwrap();
+    let step = ProcedureStep::new(
+        "lines",
+        PhysicsFamily::Electromagnetic,
+        AnalysisProcedure::LineParameters,
+        SolutionSpace::Direct,
+        IndependentDomain::Static,
+        vec![runmat_analysis_core::StateOutput {
+            state_id: runmat_analysis_core::StateId("primary".into()),
+            kind: runmat_analysis_core::StateKind::ElectromagneticStatic,
+            completeness: runmat_analysis_core::StateCompleteness::Complete,
+            persistence: runmat_analysis_core::StatePersistence::UntilDependentsComplete,
+        }],
+    );
+    let mut sequence = AnalysisSequence::from_steps("lines", vec![step]);
+    let output = |id: &str, quantity, conductor: Option<&str>| AuthoredOutput {
+        output_id: id.into(),
+        expression: AuthoredOutputExpression::LineParameter {
+            step_id: "lines".into(),
+            quantity,
+            conductor: conductor.map(Into::into),
+            signal_conductors: 2,
+        },
+        policy: AuthoredOutputPolicy::default(),
+    };
+    let outputs = vec![
+        output("z_p", ObservationQuantity::LineImpedance, Some("p")),
+        output("zdiff", ObservationQuantity::DifferentialImpedance, None),
+        output("c", ObservationQuantity::LineCapacitance, None),
+    ];
+    runmat_analysis_core::attach_authored_outputs(&outputs, &mut sequence).unwrap();
+    let step = &sequence.steps[0];
+    let results = crate::results::observation::evaluate_line_parameter_observations(
+        step,
+        &solved.mesh,
+        &solved.parameters,
+    )
+    .unwrap();
+    crate::results::observation::validate_line_parameter_observations(step, &solved.mesh, &results)
+        .unwrap();
+    assert_eq!(results.len(), 3);
+    let value = |index: usize| results[index].field.as_host_f64().unwrap().to_vec();
+    assert_eq!(value(0), vec![solved.parameters.impedance_ohm[0]]);
+    assert_eq!(
+        value(1),
+        vec![solved.parameters.pair.unwrap().differential_impedance_ohm]
+    );
+    assert_eq!(value(2).len(), 4);
+    let scalar = crate::results::assessment::scalar_observation_evidence(&results[1]).unwrap();
+    assert!((scalar.value - 100.0).abs() < 5.0);
+    // The step's declared state carries the solved parameters under the step's solver result.
+    let sequence_identity =
+        crate::execution::SequenceIdentity::from_solver_contract(&sequence).unwrap();
+    let producer =
+        crate::execution::StepIdentity::from_solver_contract(sequence_identity, step).unwrap();
+    let state = crate::execution::CanonicalSemanticState::from_line_parameters(
+        producer,
+        &step.state_outputs[0],
+        &solved.mesh,
+        &solved.parameters,
+    )
+    .unwrap();
+    assert_eq!(
+        state.source_result,
+        crate::execution::SolverResultIdentity::from_step_result(
+            producer,
+            solved.parameters.numerical_digest().unwrap()
+        )
+        .unwrap()
+    );
+    let mut altered = state.clone();
+    if let crate::execution::CanonicalSemanticStatePayload::LineParameters { state } =
+        &mut altered.payload
+    {
+        state.parameters.impedance_ohm[0] += 1.0;
+    }
+    assert!(altered.validate().is_err());
+    // A result from another mesh does not satisfy this plan.
+    let mut moved = solved.mesh.clone();
+    moved.canonical_digest = StableDigest::from_bytes([3; 32]);
+    assert!(
+        crate::results::observation::validate_line_parameter_observations(step, &moved, &results)
+            .is_err()
+    );
+}

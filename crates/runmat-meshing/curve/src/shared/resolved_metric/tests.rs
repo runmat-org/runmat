@@ -51,6 +51,7 @@ fn curve_boundary_trace_satisfies_every_adjacent_fine_face_before_surface_execut
         let required = MetricTensor3::isotropic_length_m(0.05).unwrap();
         let request = MetricFieldRequest {
             entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(1.).unwrap(),
             maximum_grading_ratio: 1.3,
@@ -159,6 +160,7 @@ fn an_edge_local_source_refines_its_neighbors_only_near_its_support() {
     let source = &topology.edges[0];
     let fine = 0.01;
     let request = MetricFieldRequest {
+        located_sources: Vec::new(),
         entity_supports: vec![runmat_meshing_size::metric::MetricEntitySupport {
             entity_id: source.id.clone(),
             points_m: (0..9)

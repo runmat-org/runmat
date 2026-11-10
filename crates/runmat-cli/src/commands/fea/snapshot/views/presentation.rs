@@ -18,6 +18,9 @@ const CONTEXT_EDGE_RGB: [f32; 3] = [0.64, 0.75, 0.90];
 /// Posters are drawn with text at this many device pixels per point for each 1200 px of
 /// width, so a wide poster's labels keep their size relative to the picture.
 const POSTER_REFERENCE_WIDTH: f32 = 1200.0;
+/// A poster's legend labels are at least this share of its height, so they stay readable on a
+/// card a few hundred pixels tall.
+pub(in crate::commands::fea) const LEGEND_LABEL_SHARE: f32 = 0.025;
 
 /// One context file drawn in every view, as the view records it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -32,7 +35,16 @@ pub(in crate::commands::fea) struct ContextRecord {
 
 struct ContextGeometry {
     record: ContextRecord,
-    chunks: Vec<GeometrySceneChunk>,
+    /// One surface or edge chunk per CAD part, as imported; merged when drawn.
+    parts: Vec<GeometrySceneChunk>,
+}
+
+/// One poster drawn of each view: its theme and the suffix its file name takes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(in crate::commands::fea) struct PosterTheme {
+    pub variant: runmat_plot::styling::ThemeVariant,
+    /// Inserted before `.png`: empty for the main poster, `.light` for the light one beside it.
+    pub suffix: &'static str,
 }
 
 /// What the poster camera frames.
@@ -46,6 +58,9 @@ pub(in crate::commands::fea) enum Frame {
 
 pub(in crate::commands::fea) struct Presentation {
     context: Vec<ContextGeometry>,
+    /// Every context part merged into a few large chunks, drawn in every view's scene; empty
+    /// when the context is cropped to the frame.
+    merged_context: Vec<GeometrySceneChunk>,
     pub caption: Option<String>,
     pub poster_width: u32,
     pub poster_height: u32,
@@ -54,6 +69,11 @@ pub(in crate::commands::fea) struct Presentation {
     pub frame: Frame,
     /// The camera frames this multiple of the framed bounds, about their center.
     pub frame_padding: f32,
+    /// The framed bounds span this share of the poster width, when set; otherwise they fill
+    /// the poster less its margin.
+    pub frame_width: Option<f32>,
+    /// Draw only the context parts that lie wholly inside the poster frame.
+    pub crop_context: bool,
     pub show_grid: bool,
     pub show_triad: bool,
     /// Text and overlay size relative to the standard poster.
@@ -62,26 +82,29 @@ pub(in crate::commands::fea) struct Presentation {
     pub section: Option<runmat_runtime::analysis::field_scene::volume::SectionPlaneChoice>,
     /// Largest scene file one view may write, in bytes.
     pub max_scene_bytes: usize,
-    /// The plot theme posters are drawn in; scenes carry no theme.
-    pub theme: runmat_plot::styling::ThemeVariant,
+    /// The posters drawn of each view; scenes carry no theme.
+    pub themes: Vec<PosterTheme>,
 }
 
 impl Default for Presentation {
     fn default() -> Self {
         Self {
             context: Vec::new(),
+            merged_context: Vec::new(),
             caption: None,
             poster_width: 1200,
             poster_height: 750,
             view_angle: None,
             frame: Frame::All,
             frame_padding: 1.0,
+            frame_width: None,
+            crop_context: false,
             show_grid: true,
             show_triad: true,
             text_scale: 1.0,
             section: None,
             max_scene_bytes: 16 * 1024 * 1024,
-            theme: runmat_plot::styling::ThemeVariant::ModernDark,
+            themes: parse_theme("both").expect("the default poster themes parse"),
         }
     }
 }
@@ -94,26 +117,39 @@ impl Presentation {
         let context = args
             .context
             .iter()
-            .enumerate()
-            .map(|(index, spec)| {
+            .map(|spec| {
                 let (file, opacity) = parse_context(spec)?;
-                load_context(index, Path::new(file), opacity, units)
+                load_context(Path::new(file), opacity, units)
             })
             .collect::<Result<Vec<_>>>()?;
+        let frame = parse_frame(&args.frame)?;
+        let crop_context = args.crop_context;
+        ensure!(
+            !crop_context || frame == Frame::Result,
+            "--crop-context needs --frame result: the frame must not depend on the context"
+        );
+        let merged_context = if crop_context {
+            Vec::new()
+        } else {
+            merge_context(&context, |_| true)?
+        };
         Ok(Self {
             context,
+            merged_context,
             caption: args.caption.clone(),
             poster_width,
             poster_height,
             view_angle: args.view_angle.as_deref().map(parse_angle).transpose()?,
-            frame: parse_frame(&args.frame)?,
+            frame,
             frame_padding: parse_padding(args.frame_padding)?,
+            frame_width: args.frame_width.map(parse_frame_width).transpose()?,
+            crop_context,
             show_grid: !args.no_grid,
             show_triad: !args.no_triad,
             text_scale: parse_text_scale(args.text_scale)?,
             section: args.section.as_deref().map(parse_section).transpose()?,
             max_scene_bytes: parse_scene_budget(args.max_scene_bytes)?,
-            theme: parse_theme(&args.theme)?,
+            themes: parse_theme(&args.theme)?,
         })
     }
 
@@ -121,13 +157,8 @@ impl Presentation {
     pub fn dress(&self, scene: &mut GeometryScene) {
         scene.show_grid &= self.show_grid;
         scene.show_orientation_triad &= self.show_triad;
-        let chunks: Vec<_> = self
-            .context
-            .iter()
-            .flat_map(|context| context.chunks.iter().cloned())
-            .collect();
-        if !chunks.is_empty() {
-            scene.append_chunks(chunks);
+        if !self.merged_context.is_empty() {
+            scene.append_chunks(self.merged_context.iter().cloned());
         }
         if let Some(caption) = &self.caption {
             scene.title = Some(caption.clone());
@@ -141,16 +172,49 @@ impl Presentation {
             .collect()
     }
 
+    /// Text density of the posters: at least one pixel per point for each 1200 px of width,
+    /// and enough that the legend's labels are LEGEND_LABEL_SHARE of the poster height; then
+    /// `text_scale` times that.
     pub fn pixels_per_point(&self) -> f32 {
-        (self.poster_width as f32 / POSTER_REFERENCE_WIDTH).max(1.0) * self.text_scale
+        let by_width = (self.poster_width as f32 / POSTER_REFERENCE_WIDTH).max(1.0);
+        let by_legend = runmat_plot::scalar_legend::export_pixels_per_point_for_label(
+            LEGEND_LABEL_SHARE * self.poster_height as f32,
+        );
+        by_width.max(by_legend) * self.text_scale
     }
 
-    /// The app's plot theme for posters: its dark or light tokens.
-    pub fn theme_config(&self) -> runmat_plot::styling::PlotThemeConfig {
+    /// The legend's footprint in the poster, from its top-right corner, as shares of the
+    /// poster's width and height.
+    pub fn legend_footprint(&self, has_note: bool) -> runmat_plot::scalar_legend::LegendFootprint {
+        runmat_plot::scalar_legend::exported_footprint(
+            self.poster_width,
+            self.poster_height,
+            self.pixels_per_point(),
+            has_note,
+        )
+    }
+
+    /// The app's plot theme in `variant`: its dark or light tokens.
+    pub fn theme_config(
+        variant: runmat_plot::styling::ThemeVariant,
+    ) -> runmat_plot::styling::PlotThemeConfig {
         runmat_plot::styling::PlotThemeConfig {
-            variant: self.theme,
+            variant,
             ..Default::default()
         }
+    }
+
+    /// The context parts `keep` accepts (by their bounds), merged for drawing.
+    pub fn cropped_context(
+        &self,
+        keep: impl Fn(&runmat_plot::core::BoundingBox) -> bool,
+    ) -> Result<Vec<GeometrySceneChunk>> {
+        merge_context(&self.context, keep)
+    }
+
+    /// Every context part, with its bounds.
+    pub fn context_parts(&self) -> impl Iterator<Item = &GeometrySceneChunk> {
+        self.context.iter().flat_map(|context| context.parts.iter())
     }
 
     pub fn aspect_ratio(&self) -> f32 {
@@ -158,12 +222,7 @@ impl Presentation {
     }
 }
 
-fn load_context(
-    index: usize,
-    path: &Path,
-    opacity: f32,
-    units: LengthUnit,
-) -> Result<ContextGeometry> {
+fn load_context(path: &Path, opacity: f32, units: LengthUnit) -> Result<ContextGeometry> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("cannot read context geometry {}", path.display()))?;
     let name = path.display().to_string();
@@ -213,41 +272,11 @@ fn load_context(
     let edge_opacity = (0.03 + 0.6 * opacity).min(0.9);
     let [r, g, b] = CONTEXT_FACE_RGB;
     let [er, eg, eb] = CONTEXT_EDGE_RGB;
-    // Context is drawn as one piece: merge the per-part chunks of the import (one surface and
-    // one edge chunk per CAD part; a pack has thousands) into a few large ones.
-    let (surfaces, edges): (Vec<_>, Vec<_>) = scene
+    let parts: Vec<_> = scene
         .chunks
         .into_iter()
         .map(|chunk| chunk.into_context([r, g, b, opacity], [er, eg, eb, edge_opacity]))
-        .partition(|chunk| {
-            chunk.render_data.pipeline_type == runmat_plot::core::PipelineType::Triangles
-        });
-    let mut chunks = Vec::new();
-    for (kind, group) in [("surface", surfaces), ("edges", edges)] {
-        let mut batch = Vec::new();
-        let mut batch_vertices = 0;
-        let mut flush = |batch: &mut Vec<GeometrySceneChunk>| -> Result<()> {
-            if batch.is_empty() {
-                return Ok(());
-            }
-            // Unique beside the result's chunks and the other context files' chunks.
-            let id = format!("context{index}:{kind}:{}", chunks.len());
-            chunks.push(
-                GeometrySceneChunk::merged(id, std::mem::take(batch))
-                    .context("context geometry chunks do not merge")?,
-            );
-            Ok(())
-        };
-        for chunk in group {
-            if batch_vertices + chunk.vertices.len() > CONTEXT_CHUNK_VERTICES {
-                flush(&mut batch)?;
-                batch_vertices = 0;
-            }
-            batch_vertices += chunk.vertices.len();
-            batch.push(chunk);
-        }
-        flush(&mut batch)?;
-    }
+        .collect();
     log::info!(
         "context geometry {name}: {} triangles; peak resident {}",
         asset
@@ -264,8 +293,53 @@ fn load_context(
             opacity,
             shows: "geometry",
         },
-        chunks,
+        parts,
     })
+}
+
+/// Merge the context parts `keep` accepts into a few large chunks: an assembly of thousands of
+/// parts is drawn as one piece.
+fn merge_context(
+    context: &[ContextGeometry],
+    keep: impl Fn(&runmat_plot::core::BoundingBox) -> bool,
+) -> Result<Vec<GeometrySceneChunk>> {
+    let mut chunks = Vec::new();
+    for (index, context) in context.iter().enumerate() {
+        let (surfaces, edges): (Vec<_>, Vec<_>) = context
+            .parts
+            .iter()
+            .filter(|part| keep(&part.bounds))
+            .cloned()
+            .partition(|chunk| {
+                chunk.render_data.pipeline_type == runmat_plot::core::PipelineType::Triangles
+            });
+        for (kind, group) in [("surface", surfaces), ("edges", edges)] {
+            let mut batch = Vec::new();
+            let mut batch_vertices = 0;
+            let mut flush = |batch: &mut Vec<GeometrySceneChunk>| -> Result<()> {
+                if batch.is_empty() {
+                    return Ok(());
+                }
+                // Unique beside the result's chunks and the other context files' chunks.
+                let id = format!("context{index}:{kind}:{}", chunks.len());
+                chunks.push(
+                    GeometrySceneChunk::merged(id, std::mem::take(batch))
+                        .context("context geometry chunks do not merge")?,
+                );
+                Ok(())
+            };
+            for chunk in group {
+                if batch_vertices + chunk.vertices.len() > CONTEXT_CHUNK_VERTICES {
+                    flush(&mut batch)?;
+                    batch_vertices = 0;
+                }
+                batch_vertices += chunk.vertices.len();
+                batch.push(chunk);
+            }
+            flush(&mut batch)?;
+        }
+    }
+    Ok(chunks)
 }
 
 /// `FILE` or `FILE@OPACITY`.
@@ -349,13 +423,36 @@ fn parse_scene_budget(bytes: usize) -> Result<usize> {
     Ok(bytes)
 }
 
-fn parse_theme(text: &str) -> Result<runmat_plot::styling::ThemeVariant> {
+/// `both` (the default): a dark poster and a light one beside it, `<view>.light.png`. `dark` or
+/// `light`: that poster alone, `<view>.png`.
+fn parse_theme(text: &str) -> Result<Vec<PosterTheme>> {
     use runmat_plot::styling::ThemeVariant;
+    let (dark, light) = (ThemeVariant::ModernDark, ThemeVariant::ClassicLight);
+    let main = |variant| PosterTheme {
+        variant,
+        suffix: "",
+    };
     Ok(match text {
-        "dark" => ThemeVariant::ModernDark,
-        "light" => ThemeVariant::ClassicLight,
-        _ => bail!("--theme must be dark or light, not '{text}'"),
+        "both" => vec![
+            main(dark),
+            PosterTheme {
+                variant: light,
+                suffix: ".light",
+            },
+        ],
+        "dark" => vec![main(dark)],
+        "light" => vec![main(light)],
+        _ => bail!("--theme must be both, dark or light, not '{text}'"),
     })
+}
+
+fn parse_frame_width(share: f32) -> Result<f32> {
+    ensure!(
+        share.is_finite() && (0.05..=1.0 - 2.0 * super::camera::FRAME_MARGIN).contains(&share),
+        "frame width must be 0.05 to {} of the poster width, got {share}",
+        1.0 - 2.0 * super::camera::FRAME_MARGIN
+    );
+    Ok(share)
 }
 
 fn parse_text_scale(scale: f32) -> Result<f32> {
@@ -408,16 +505,85 @@ mod tests {
         assert!(parse_units("furlong").is_err());
     }
 
+    /// The legend size rule: at every poster size, the legend's labels are at least 2.5% of
+    /// the poster height, and its footprint is a fixed share of the frame at a fixed aspect.
     #[test]
-    fn text_scales_with_poster_width() {
+    fn legend_labels_are_sized_from_the_frame_height() {
+        for (width, height) in [
+            (1200, 750),
+            (1600, 1000),
+            (2400, 1500),
+            (800, 600),
+            (640, 400),
+            (1200, 1200),
+            (3000, 750),
+        ] {
+            let poster = Presentation {
+                poster_width: width,
+                poster_height: height,
+                ..Default::default()
+            };
+            for has_note in [false, true] {
+                let footprint = poster.legend_footprint(has_note);
+                assert!(
+                    footprint.label_px >= LEGEND_LABEL_SHARE * height as f32 * 0.9999,
+                    "{width}x{height}: labels {} px",
+                    footprint.label_px
+                );
+                assert!(
+                    footprint.width_share < 0.5 && footprint.height_share < 0.4,
+                    "{width}x{height}: {footprint:?}"
+                );
+            }
+        }
+        // A 16:10 poster's legend covers the same share of the frame at any size.
+        let share = |width, height| {
+            Presentation {
+                poster_width: width,
+                poster_height: height,
+                ..Default::default()
+            }
+            .legend_footprint(false)
+        };
+        let (small, large) = (share(1200, 750), share(2400, 1500));
+        assert!((small.width_share - large.width_share).abs() < 1e-4);
+        assert!((small.height_share - large.height_share).abs() < 1e-4);
+        // A very wide poster keeps at least its width's text density.
+        assert_eq!(share(3000, 750).label_px, 11.0 * 1.25 * 2.5);
+    }
+
+    #[test]
+    fn text_density_follows_the_poster_size() {
         let wide = Presentation {
             poster_width: 2400,
             poster_height: 1500,
             ..Default::default()
         };
-        assert_eq!(wide.pixels_per_point(), 2.0);
-        assert_eq!(Presentation::default().pixels_per_point(), 1.0);
+        // 2.5% of 1500 px over 11 pt at the exporter's 1.25 font scale.
+        assert!((wide.pixels_per_point() - 37.5 / 13.75).abs() < 1e-5);
+        assert!((Presentation::default().pixels_per_point() - 18.75 / 13.75).abs() < 1e-5);
         assert_eq!(wide.aspect_ratio(), 1.6);
+    }
+
+    #[test]
+    fn posters_come_in_dark_and_light_by_default() {
+        use runmat_plot::styling::ThemeVariant;
+        let both = &Presentation::default().themes;
+        assert_eq!(both.len(), 2);
+        assert_eq!(
+            (both[0].variant, both[0].suffix),
+            (ThemeVariant::ModernDark, "")
+        );
+        assert_eq!(
+            (both[1].variant, both[1].suffix),
+            (ThemeVariant::ClassicLight, ".light")
+        );
+        let light = parse_theme("light").unwrap();
+        assert_eq!(
+            (light[0].variant, light[0].suffix),
+            (ThemeVariant::ClassicLight, "")
+        );
+        assert!(parse_theme("sepia").is_err());
     }
 
     #[test]
@@ -446,11 +612,15 @@ mod tests {
                     opacity: 0.12,
                     shows: "geometry",
                 },
-                chunks: vec![triangle("context0:a")
+                parts: vec![triangle("context0:a")
                     .into_context([0.7, 0.8, 0.9, 0.12], [0.6, 0.7, 0.9, 0.33])],
             }],
             caption: Some("Steady thermal on the cells".into()),
             ..Default::default()
+        };
+        let presentation = Presentation {
+            merged_context: merge_context(&presentation.context, |_| true).unwrap(),
+            ..presentation
         };
         let mut scene = GeometryScene::new("result", 1, vec![triangle("result")]);
         presentation.dress(&mut scene);
@@ -518,6 +688,55 @@ mod tests {
             text_scale: 1.5,
             ..Default::default()
         };
-        assert_eq!(hero.pixels_per_point(), 3.0);
+        assert!((hero.pixels_per_point() - 1.5 * 37.5 / 13.75).abs() < 1e-5);
+        assert_eq!(parse_frame_width(0.6).unwrap(), 0.6);
+        assert!(parse_frame_width(0.9).is_err());
+        assert!(parse_frame_width(0.0).is_err());
+    }
+
+    /// Cropping keeps the parts whose bounds the frame accepts and merges them; a part the
+    /// frame cuts is left out.
+    #[test]
+    fn cropped_context_keeps_the_parts_inside_the_frame() {
+        let triangle = |id: &str, x: f32| {
+            GeometrySceneChunk::indexed_triangles(
+                id,
+                (0..3)
+                    .map(|i| {
+                        runmat_plot::geometry_scene_vertex(
+                            [x + i as f32, (i * i) as f32, 0.0],
+                            [0.7, 0.8, 0.9, 0.12],
+                            [0.0, 0.0, 1.0],
+                        )
+                    })
+                    .collect(),
+                vec![0, 1, 2],
+                runmat_plot::cad_default_material(),
+            )
+            .into_context([0.7, 0.8, 0.9, 0.12], [0.6, 0.7, 0.9, 0.33])
+        };
+        let presentation = Presentation {
+            context: vec![ContextGeometry {
+                record: ContextRecord {
+                    file: "pack.step".into(),
+                    sha256: "00".into(),
+                    opacity: 0.12,
+                    shows: "geometry",
+                },
+                parts: vec![triangle("near", 0.0), triangle("far", 100.0)],
+            }],
+            crop_context: true,
+            ..Default::default()
+        };
+        assert_eq!(presentation.context_parts().count(), 2);
+        let kept = presentation
+            .cropped_context(|bounds| bounds.max.x < 10.0)
+            .unwrap();
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].bounds.max.x < 10.0);
+        // A cropped context is not drawn into the scenes; the poster pass adds the kept parts.
+        let mut scene = GeometryScene::new("result", 1, vec![triangle("result", 0.0)]);
+        presentation.dress(&mut scene);
+        assert_eq!(scene.chunks.len(), 1);
     }
 }

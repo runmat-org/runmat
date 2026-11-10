@@ -28,7 +28,7 @@ fn revolve_doc() -> PartDocument {
     d.features.push(Feature::new(
         "spin",
         FeatureKind::Revolve(Revolve {
-            profile: ProfileRef::sketch("s_rev"),
+            profile: ProfileRef::sketch("s_rev").into(),
             // Normal to the profile plane: the kernel refuses it.
             axis: AxisRef::origin(OriginAxis::Z),
             angle: ValueExpr::deg(360.0),

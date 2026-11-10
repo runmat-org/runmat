@@ -607,6 +607,13 @@ pub struct ToolOp {
     /// and come back unchanged, after the other outputs.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub references: u32,
+    /// The profile is this planar operand face: a prism, revolve or sweep of its boundary,
+    /// holes included. The kernel reads the face's loops (outer first) into `profile.loops` in
+    /// `profile.frame`, which must lie in the face's plane; the shape's own loops are then
+    /// empty. Each face edge's side face is tagged with the curve `e<k>` (`k` counting the
+    /// loops' edges from 1 in order).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_face: Option<OperandEntity>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -614,11 +621,48 @@ fn is_zero(n: &u32) -> bool {
 }
 
 impl ToolOp {
+    /// This tool with its face profile read: `loops` (outer first, in the profile frame) become
+    /// the profile and `profile_face` is cleared. A tool without a face profile comes back
+    /// as it is; a face profile on a loft or holes is an error.
+    pub fn with_face_loops(
+        &self,
+        read: impl FnOnce(OperandEntity, &Frame) -> Result<Vec<Vec<ProfileSegment>>, KernelError>,
+    ) -> Result<ToolOp, KernelError> {
+        let Some(face) = self.profile_face else {
+            return Ok(self.clone());
+        };
+        let mut out = self.clone();
+        out.profile_face = None;
+        let profile = match &mut out.shape {
+            ToolShape::Prism { profile, .. }
+            | ToolShape::Revolve { profile, .. }
+            | ToolShape::Sweep { profile, .. } => profile,
+            _ => {
+                return Err(KernelError::NotSupported {
+                    what: "a face profile for a loft or holes".into(),
+                })
+            }
+        };
+        profile.loops = read(face, &profile.frame)?;
+        if profile.loops.is_empty() {
+            return Err(KernelError::Failed {
+                message: "the profile face has no boundary".into(),
+            });
+        }
+        Ok(out)
+    }
+
+    /// The curve id a face profile gives its `k`-th edge (from 0, loops in order).
+    pub fn face_edge_curve(k: usize) -> SketchEntityId {
+        SketchEntityId::new(format!("e{}", k + 1))
+    }
+
     pub fn new(shape: ToolShape, combine: Combine) -> Self {
         ToolOp {
             shape,
             combine,
             references: 0,
+            profile_face: None,
         }
     }
 }

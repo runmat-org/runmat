@@ -33,8 +33,7 @@ pub trait ExactMeshingEvaluatorProvider: Send + Sync {
             evaluator,
             control,
             &request.metric,
-            request.quality.curve,
-            request.quality.surface,
+            request.quality,
         )
         .map(std::sync::Arc::new)
     }

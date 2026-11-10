@@ -14,6 +14,11 @@ mod entity;
 mod evaluate;
 mod extrema;
 mod history;
+mod line_parameters;
+pub use line_parameters::{
+    evaluate_line_parameter_observations, line_parameter_plan_identity,
+    line_parameter_topology_digest, validate_line_parameter_observations,
+};
 mod partition;
 mod publication;
 mod publish;
@@ -94,6 +99,7 @@ pub use partition::{
     ObservationPartitionTarget, DEFAULT_MAXIMUM_OBSERVATION_PARTITIONS,
 };
 pub use publish::publish_observation;
+pub(crate) use resolve::bind_request_field;
 pub use resolve::{
     resolve_observation_plan, resolve_structural_observation_plan,
     resolve_structural_observation_plan_with_connectors,

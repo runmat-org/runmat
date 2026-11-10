@@ -120,9 +120,20 @@ pub(super) fn validate_recovered_facets(
                     ),
                 );
                 if exact_coplanarity != PredicateSign::Zero && !coincident_at_resolution {
+                    let coordinates = node.coordinates_m.canonical_value();
+                    let closest = closest_point_on_triangle(coordinates, source_coordinates);
                     return Err(invalid(
                         constraint_index,
-                        "recovered facet node is neither exactly coplanar nor coincident with its source facet at coordinate resolution",
+                        format!(
+                            "recovered facet node is neither exactly coplanar nor coincident with \
+                             its source facet at coordinate resolution: node {coordinates:?} \
+                             ({:?}) is {:.3e} m from source facet {source_coordinates:?}",
+                            node.construction,
+                            (0..3)
+                                .map(|axis| (coordinates[axis] - closest[axis]).powi(2))
+                                .sum::<f64>()
+                                .sqrt(),
+                        ),
                     ));
                 }
             }

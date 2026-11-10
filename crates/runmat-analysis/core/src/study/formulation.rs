@@ -137,6 +137,10 @@ pub enum RecoveryImplementation {
     ConjugateNodalTemperatureInterfaceHeat,
     FluidStructureNodalDisplacementInterfaceEvidence,
     CoupledResampledFields,
+    /// Per-length Maxwell capacitance matrices of a cross-section from the energy form of its
+    /// potential solves (with the dielectrics and in vacuum), and the line parameters that
+    /// follow from them.
+    CrossSectionLineParameterEnergy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -144,6 +148,8 @@ pub enum RecoveryImplementation {
 pub enum TopologyImplementation {
     CanonicalSolverMeshTet4,
     CanonicalSolverMeshTet10,
+    /// Linear triangles of a canonical 2D cross-section mesh.
+    CanonicalSolverMeshTri3,
     ExplicitStructuralConnectivityBeam,
     ExplicitStructuralConnectivityTriangularShell,
     InferredLattice,

@@ -240,6 +240,33 @@ fn lower_expression(
             draft.spec.output_location = FieldLocation::Global;
             Ok(draft)
         }
+        AuthoredOutputExpression::LineParameter {
+            step_id,
+            quantity,
+            conductor,
+            signal_conductors,
+        } => {
+            let mut spec = base_spec(*quantity, FieldLocation::Global, AuthoredFieldDomain::Real);
+            if let Some(shape) = quantity.line_parameter_shape(*signal_conductors) {
+                spec.value_shape = shape;
+            }
+            spec.target = match conductor {
+                Some(conductor) => ObservationTarget::Conductor {
+                    conductor_id: conductor.clone(),
+                },
+                None => ObservationTarget::WholeModel,
+            };
+            spec.reduction = Some(ReductionPolicy {
+                spatial: SpatialReduction::LineParameter,
+                series: SeriesReduction::None,
+                extrema_ties: ExtremaTiePolicy::FirstCanonical,
+            });
+            Ok(ObservationDraft {
+                step_id: step_id.clone(),
+                spec,
+                kind: ObservationKind::Reduction,
+            })
+        }
         AuthoredOutputExpression::SpatialSelection { source, target } => {
             let mut draft = lower_expression(source, steps, outputs)?;
             draft.spec.target =

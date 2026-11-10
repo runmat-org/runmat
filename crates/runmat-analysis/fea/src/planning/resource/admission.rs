@@ -100,7 +100,12 @@ pub fn admit_resource_plan(
     } = *plan.input.partitioning()
     else {
         return ResourceAdmission::Reject {
-            reason: ResourcePlanningError::Inventory("memory or scratch"),
+            reason: ResourcePlanningError::MemoryBudget {
+                required_memory_bytes: plan.request.memory_bytes,
+                available_memory_bytes: memory_capacity,
+                required_scratch_bytes: plan.request.scratch_bytes,
+                available_scratch_bytes: inventory.scratch_bytes,
+            },
         };
     };
     let minimum_partition_count = match minimum_partition_count(

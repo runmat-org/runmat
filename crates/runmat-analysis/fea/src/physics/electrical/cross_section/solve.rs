@@ -28,9 +28,9 @@ pub(super) struct CapacitanceMatrices {
 
 /// Which conductor holds a node: `None` free, `Some(None)` a zero-potential conductor,
 /// `Some(Some(k))` signal conductor k.
-type Holder = Option<Option<usize>>;
+pub(super) type Holder = Option<Option<usize>>;
 
-fn holders(geometry: &Geometry, mesh: &CrossSectionMesh) -> Vec<Holder> {
+pub(super) fn holders(geometry: &Geometry, mesh: &CrossSectionMesh) -> Vec<Holder> {
     let tolerance = 1e-9 * (geometry.y_high - geometry.y_low);
     let mut signal_index = Vec::with_capacity(geometry.traces.len());
     let mut next = 0;

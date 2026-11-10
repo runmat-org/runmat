@@ -19,6 +19,33 @@ pub(super) fn norm(a: V) -> f64 {
     a.into_iter().fold(0.0, f64::hypot)
 }
 
+/// Cells or faces per parallel task of [`indexed`]: large enough that scheduling is a small
+/// part of each task, small enough to balance a 10⁵-cell mesh over every core.
+const INDEXED_CHUNK: usize = 2048;
+
+/// `work(0), …, work(n − 1)` on the admitted CPU pool, in index order. Each index is evaluated
+/// exactly as the serial loop would, so values are bitwise those of the loop, and the error
+/// returned is the loop's first error.
+pub(super) fn indexed<R: Send>(
+    n: usize,
+    work: impl Fn(usize) -> Result<R, Error> + Sync + Send,
+) -> Result<Vec<R>, Error> {
+    if n <= INDEXED_CHUNK || runmat_cpu_execution::current_threads() <= 1 {
+        return (0..n).map(work).collect();
+    }
+    let chunks = (0..n.div_ceil(INDEXED_CHUNK))
+        .map(|k| k * INDEXED_CHUNK..((k + 1) * INDEXED_CHUNK).min(n))
+        .collect::<Vec<_>>();
+    let parts = runmat_cpu_execution::ordered_map(&chunks, |range| {
+        range.clone().map(&work).collect::<Result<Vec<R>, Error>>()
+    });
+    let mut out = Vec::with_capacity(n);
+    for part in parts {
+        out.extend(part?);
+    }
+    Ok(out)
+}
+
 pub(super) fn face_geometry(
     p: &CanonicalFluidProblem<'_>,
     f: &FiniteVolumeFace,
@@ -75,10 +102,15 @@ pub(super) fn pressure_force(
     pressure: &[f64],
     g: &[V],
 ) -> Result<Vec<V>, Error> {
+    // Face terms in parallel; the scatter keeps the serial face order, so sums are unchanged.
+    let fluxes = indexed(p.topology.faces.len(), |i| {
+        Ok(scale(
+            p.topology.faces[i].owner_area_vector_m2,
+            face_pressure_offset(p, i, pressure, g)?,
+        ))
+    })?;
     let mut force = vec![[0.0; 3]; pressure.len()];
-    for (i, f) in p.topology.faces.iter().enumerate() {
-        let pf = face_pressure_offset(p, i, pressure, g)?;
-        let flux = scale(f.owner_area_vector_m2, pf);
+    for (f, flux) in p.topology.faces.iter().zip(fluxes) {
         force[f.owner] = add(force[f.owner], flux);
         if let Some(n) = f.neighbor {
             force[n] = sub(force[n], flux);

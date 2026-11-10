@@ -27,7 +27,9 @@ impl Default for DepthMode {
 pub struct ClipPolicy {
     /// If true, update near/far every frame based on visible scene bounds.
     pub dynamic: bool,
-    /// Minimum allowed near plane distance (prevents precision collapse).
+    /// Smallest near plane distance, in world units. Depth precision is kept by the 1e6 cap on
+    /// far/near; this floor only keeps near above zero, so a millimeter part a few millimeters
+    /// from the camera is drawn rather than clipped.
     pub min_near: f32,
     /// Multiply the computed near by this padding factor (<1 pulls near closer).
     pub near_padding: f32,
@@ -41,7 +43,7 @@ impl Default for ClipPolicy {
     fn default() -> Self {
         Self {
             dynamic: true,
-            min_near: 0.02,
+            min_near: 1.0e-6,
             near_padding: 0.8,
             far_padding: 1.2,
             max_far: 1.0e9,

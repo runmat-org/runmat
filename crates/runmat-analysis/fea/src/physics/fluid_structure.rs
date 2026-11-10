@@ -39,7 +39,7 @@ use crate::{
 };
 use runmat_analysis_core::{
     AnalysisBoundary, AnalysisInterfaceKind, AnalysisModel, CfdDomain, ExcitationAction,
-    FluidConstraint, PhysicalSignal,
+    FluidConstraint, FluidConstraintKind, PhysicalSignal,
 };
 use runmat_meshing_core::{BoundaryFaceRole, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,8 @@ pub enum FluidStructureError {
     Cancelled,
     #[error(transparent)]
     Flow(#[from] CanonicalFluidError),
+    #[error(transparent)]
+    Admission(#[from] crate::admission::AdmissionIssue),
     #[error("fluid–structure linear solve did not converge: iterations={iterations}, relative_residual={relative_residual:?}")]
     LinearNotConverged {
         iterations: u32,
@@ -163,6 +165,8 @@ pub struct FluidStructureProblem<'a> {
     /// (reference projection boundary face) of every fluid–structure interface face.
     interface_faces: Vec<usize>,
     interface_nodes: Vec<usize>,
+    /// Nodes of rigid fluid walls that no coupled face shares: held in place for the fluid.
+    rigid_wall_nodes: Vec<usize>,
     linear: LinearPolicy,
 }
 
@@ -185,14 +189,26 @@ impl<'a> FluidStructureProblem<'a> {
         .map_err(|e| FluidStructureError::InvalidDetail(e.to_string()))?;
         let structure =
             structure::ElasticStructure::assemble(input.model, projection, input.properties)?;
-        let interface_faces =
-            interface_faces(input.model, projection, &reference_fluid, &structure)?;
-        let mut interface_nodes = interface_faces
-            .iter()
-            .flat_map(|&f| projection.boundary_faces[f].node_indices.iter().copied())
+        let FluidSolidFaces {
+            coupled: interface_faces,
+            rigid,
+        } = fluid_solid_faces(input.model, projection, &reference_fluid, &structure)?;
+        let nodes_of = |faces: &[usize]| {
+            let mut nodes = faces
+                .iter()
+                .flat_map(|&f| projection.boundary_faces[f].node_indices.iter().copied())
+                .collect::<Vec<_>>();
+            nodes.sort_unstable();
+            nodes.dedup();
+            nodes
+        };
+        let interface_nodes = nodes_of(&interface_faces);
+        // A rigid wall stays in place for the fluid. A node it shares with a coupled face
+        // follows the structure.
+        let rigid_wall_nodes = nodes_of(&rigid)
+            .into_iter()
+            .filter(|n| interface_nodes.binary_search(n).is_err())
             .collect::<Vec<_>>();
-        interface_nodes.sort_unstable();
-        interface_nodes.dedup();
         // Every node on the fluid's boundary has a prescribed motion: the interface nodes
         // move with the structure and all other fluid boundary nodes stay in place.
         let mut prescribed = vec![false; projection.nodes.len()];
@@ -218,6 +234,7 @@ impl<'a> FluidStructureProblem<'a> {
             reference_fluid,
             interface_faces,
             interface_nodes,
+            rigid_wall_nodes,
             linear,
         })
     }
@@ -384,8 +401,8 @@ impl<'a> FluidStructureProblem<'a> {
             .max(f64::MIN_POSITIVE)
     }
 
-    /// Node displacement for a structural state: the structure's own nodes carry it and the
-    /// fluid interior follows through the mesh motion.
+    /// Node displacement for a structural state: the structure's own nodes carry it, rigid
+    /// fluid walls stay in place and the fluid interior follows through the mesh motion.
     fn configuration(&self, state: &[f64]) -> Result<Vec<[f64; 3]>, FluidStructureError> {
         let p = self.input.projection;
         let mut prescribed = vec![[0.0; 3]; p.nodes.len()];
@@ -395,6 +412,9 @@ impl<'a> FluidStructureProblem<'a> {
                 state[3 * ordinal + 1],
                 state[3 * ordinal + 2],
             ];
+        }
+        for &node in &self.rigid_wall_nodes {
+            prescribed[node] = [0.0; 3];
         }
         self.motion.extend(&prescribed, self.linear)
     }
@@ -581,13 +601,24 @@ impl<'a> FluidStructureProblem<'a> {
     }
 }
 
-/// Every conformal fluid–solid face belongs to exactly one declared fluid–structure interface.
-fn interface_faces(
+/// Conformal fluid–solid faces by role, in reference projection boundary-face order.
+struct FluidSolidFaces {
+    /// Faces of the declared fluid–structure interfaces: coupled.
+    coupled: Vec<usize>,
+    /// Faces with a fluid wall condition and no interface: rigid, uncoupled walls.
+    rigid: Vec<usize>,
+}
+
+/// Classifies every conformal face joining the fluid and the structure with the shared
+/// admission rule ([`crate::admission::classify_fluid_solid_face`]), which `runmat check`
+/// applies to the CAD's shared faces. Each declared interface must select only fluid–solid
+/// faces, and at least one.
+fn fluid_solid_faces(
     model: &AnalysisModel,
     projection: &AnalysisProjection,
     fluid: &FiniteVolumeTopology,
     structure: &structure::ElasticStructure,
-) -> Result<Vec<usize>, FluidStructureError> {
+) -> Result<FluidSolidFaces, FluidStructureError> {
     let mut fluid_element = vec![false; projection.elements.len()];
     for cell in &fluid.cells {
         fluid_element[cell.source_element_index] = true;
@@ -596,7 +627,19 @@ fn interface_faces(
     for &e in &structure.elements {
         solid_element[e] = true;
     }
-    let mut claimed = vec![false; projection.boundary_faces.len()];
+    let selects = |target: &runmat_analysis_core::RegionTarget, index: usize| {
+        projection.boundary_faces[index]
+            .provenance
+            .iter()
+            .any(|entity| target.matches_persistent_entity(entity))
+    };
+    let joins = |index: usize| {
+        let f = &projection.boundary_faces[index];
+        f.role == BoundaryFaceRole::ConformalInterface
+            && f.adjacent_element_indices.iter().any(|&e| fluid_element[e])
+            && f.adjacent_element_indices.iter().any(|&e| solid_element[e])
+    };
+    let mut interfaces = Vec::new();
     for interface in &model.interfaces {
         let AnalysisInterfaceKind::FluidStructure(_) = &interface.kind else {
             return Err(FluidStructureError::Unsupported(
@@ -604,32 +647,16 @@ fn interface_faces(
             ));
         };
         let mut selected = 0;
-        for (index, f) in projection.boundary_faces.iter().enumerate() {
-            if !f.provenance.iter().any(|entity| {
-                interface.primary.matches_persistent_entity(entity)
-                    || interface.secondary.matches_persistent_entity(entity)
-            }) {
+        for index in 0..projection.boundary_faces.len() {
+            if !selects(&interface.primary, index) && !selects(&interface.secondary, index) {
                 continue;
             }
-            let [a, b] = f.adjacent_element_indices[..] else {
+            let f = &projection.boundary_faces[index];
+            if f.adjacent_element_indices.len() != 2 || !joins(index) {
                 return Err(FluidStructureError::InvalidDetail(format!(
                     "interface `{}` selects a face that does not join the fluid and the structure",
                     interface.interface_id
                 )));
-            };
-            if f.role != BoundaryFaceRole::ConformalInterface
-                || !((fluid_element[a] && solid_element[b])
-                    || (fluid_element[b] && solid_element[a]))
-            {
-                return Err(FluidStructureError::InvalidDetail(format!(
-                    "interface `{}` selects a face that does not join the fluid and the structure",
-                    interface.interface_id
-                )));
-            }
-            if std::mem::replace(&mut claimed[index], true) {
-                return Err(FluidStructureError::Invalid(
-                    "overlapping fluid–structure interfaces",
-                ));
             }
             selected += 1;
         }
@@ -639,24 +666,65 @@ fn interface_faces(
                 interface.interface_id
             )));
         }
+        interfaces.push(interface);
     }
-    let mut faces = Vec::new();
-    for (index, f) in projection.boundary_faces.iter().enumerate() {
-        if f.role != BoundaryFaceRole::ConformalInterface {
+    let walls = model
+        .constraints
+        .iter()
+        .filter_map(|c| match c {
+            runmat_analysis_core::AnalysisConstraint::Fluid(c)
+                if crate::admission::is_fluid_wall(&c.kind) =>
+            {
+                fluid_wall_target(&c.kind).map(|target| (c.constraint_id.as_str(), target))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut faces = FluidSolidFaces {
+        coupled: Vec::new(),
+        rigid: Vec::new(),
+    };
+    for index in 0..projection.boundary_faces.len() {
+        if !joins(index) {
             continue;
         }
-        let joins = f.adjacent_element_indices.iter().any(|&e| fluid_element[e])
-            && f.adjacent_element_indices.iter().any(|&e| solid_element[e]);
-        if joins && !claimed[index] {
-            return Err(FluidStructureError::Invalid(
-                "a fluid–solid face has no declared fluid–structure interface",
-            ));
-        }
-        if claimed[index] {
-            faces.push(index);
+        let coupling = interfaces
+            .iter()
+            .filter(|i| selects(&i.primary, index) || selects(&i.secondary, index))
+            .map(|i| i.interface_id.as_str())
+            .collect::<Vec<_>>();
+        let wall = walls
+            .iter()
+            .filter(|(_, target)| selects(target, index))
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        let face = &projection.boundary_faces[index];
+        let label = format!(
+            "{} at ({:.6e}, {:.6e}, {:.6e}) m",
+            face.provenance
+                .iter()
+                .find(|e| e.kind == runmat_meshing_core::PersistentEntityKind::Face)
+                .map(|e| format!("on CAD face `{}`", e.source_topology_id))
+                .unwrap_or_else(|| "on the mesh".into()),
+            face.centroid_m[0],
+            face.centroid_m[1],
+            face.centroid_m[2]
+        );
+        match crate::admission::classify_fluid_solid_face(&label, &coupling, &wall)? {
+            crate::admission::FluidSolidFaceRole::Coupled => faces.coupled.push(index),
+            crate::admission::FluidSolidFaceRole::RigidWall => faces.rigid.push(index),
         }
     }
     Ok(faces)
+}
+
+fn fluid_wall_target(kind: &FluidConstraintKind) -> Option<&runmat_analysis_core::RegionTarget> {
+    match kind {
+        FluidConstraintKind::NoSlipWall { target }
+        | FluidConstraintKind::SlipWall { target }
+        | FluidConstraintKind::MovingWall { target, .. } => Some(target),
+        _ => None,
+    }
 }
 
 /// A symmetric positive definite operator (structure stiffness, Newmark operator, mesh-motion

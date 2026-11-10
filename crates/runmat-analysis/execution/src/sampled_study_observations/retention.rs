@@ -33,9 +33,8 @@ fn task(
 }
 impl SampledStudyObservations {
     pub(crate) fn retained_storage_bytes(&self, ceiling: u64) -> AnalysisBridgeResult<u64> {
-        let limits = CanonicalLimits::new(
+        let limits = CanonicalLimits::content_bounded(
             usize::try_from(ceiling).map_err(|_| invalid("sampled storage ceiling overflow"))?,
-            100_000_000,
             65_536,
             64,
         );

@@ -2,8 +2,20 @@ use super::super::{tests::preparation, AcousticStudyCoordinator, AcousticStudyPh
 use super::*;
 
 fn roundtrip(wire: &PreparationWire) -> PreparationWire {
-    let bytes = encode_contract(PREFIX, "acoustic-preparation-test", wire, LIMITS).unwrap();
-    decode_contract(PREFIX, "acoustic-preparation-test", &bytes, LIMITS).unwrap()
+    let bytes = encode_contract(
+        PREFIX,
+        "acoustic-preparation-test",
+        wire,
+        completion_codec_limits(ObjectInventoryLimits::default()),
+    )
+    .unwrap();
+    decode_contract(
+        PREFIX,
+        "acoustic-preparation-test",
+        &bytes,
+        completion_codec_limits(ObjectInventoryLimits::default()),
+    )
+    .unwrap()
 }
 
 #[test]

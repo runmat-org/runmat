@@ -1,5 +1,6 @@
 use super::{invalid, AnalysisExecutionResult, FluidSteadySolverResult, LIMITS, WORKLOAD_PREFIX};
 use crate::{
+    admission,
     execution::{AnalysisWorkloadIdentity, SequenceIdentity, StepIdentity},
     physics::cfd::canonical::CanonicalFluidPolicy,
     topology::FiniteVolumeProjectionPolicy,
@@ -245,27 +246,21 @@ impl FluidSteadyWorkload {
             .filter(|c| c.applies_to_step(step))
         {
             let InitialCondition::Temperature(value) = condition else {
-                return Err(invalid(
-                    "transient conjugate heat transfer admits only an initial temperature",
-                ));
+                return Err(invalid(admission::CONJUGATE_HEAT_INITIAL_KIND.message));
             };
             let (InitialConditionTarget::WholeModel, InitialValue::Uniform(t)) =
                 (&value.target, &value.value)
             else {
-                return Err(invalid(
-                    "transient conjugate heat transfer needs a uniform whole-model initial temperature",
-                ));
+                return Err(invalid(admission::CONJUGATE_HEAT_INITIAL_UNIFORM.message));
             };
             if found.replace(t.canonical_value()).is_some()
                 || !t.canonical_value().is_finite()
                 || t.canonical_value() <= 0.0
             {
-                return Err(invalid("one finite initial temperature"));
+                return Err(invalid(admission::CONJUGATE_HEAT_INITIAL_UNIFORM.message));
             }
         }
-        found.ok_or_else(|| {
-            invalid("transient conjugate heat transfer needs an authored initial temperature")
-        })
+        found.ok_or_else(|| invalid(admission::CONJUGATE_HEAT_INITIAL_TEMPERATURE.message))
     }
 
     /// Steady conjugate heat transfer: fluid and thermal authority only, with every
@@ -291,8 +286,7 @@ impl FluidSteadyWorkload {
             || step.settings != ProcedureSettings::None
             || step.restart != RestartPolicy::Fresh
             || step.excitation_case_selection != ExcitationCaseSelection::All
-            || !step.activations.is_empty()
-            || !step.state_inputs.is_empty()
+            || !crate::admission::fluid_step_initial_selection_supported(step)
             || step.state_outputs.is_empty()
             || step.state_outputs.iter().any(|output| {
                 !matches!(output.kind, StateKind::CoupledInterface | StateKind::Fluid)
@@ -360,6 +354,20 @@ impl FluidSteadyWorkload {
         use runmat_analysis_core::{
             AnalysisInterfaceKind, BoundaryOperator, StructuralConstraintKind,
         };
+        if self.model.interfaces.is_empty()
+            || self
+                .model
+                .interfaces
+                .iter()
+                .any(|i| !matches!(i.kind, AnalysisInterfaceKind::FluidStructure(_)))
+        {
+            return Err(invalid(admission::FLUID_STRUCTURE_INTERFACE.message));
+        }
+        if !self.model.initial_conditions.is_empty() {
+            return Err(invalid(
+                admission::FLUID_STRUCTURE_INITIAL_CONDITION.message,
+            ));
+        }
         let timing = match (step.procedure, &step.independent_domain) {
             (AnalysisProcedure::Static, IndependentDomain::Static) => true,
             (AnalysisProcedure::TransientResponse, IndependentDomain::TimeSeconds { .. }) => {
@@ -390,7 +398,6 @@ impl FluidSteadyWorkload {
             || self.model.electro_thermal.is_some()
             || self.model.electromagnetic.is_some()
             || !self.model.connectors.is_empty()
-            || !self.model.initial_conditions.is_empty()
             || !self.model.response_spectra.is_empty()
             || !self.model.random_excitations.is_empty()
             || self
@@ -417,12 +424,6 @@ impl FluidSteadyWorkload {
                 .excitations
                 .iter()
                 .any(|a| !crate::physics::cfd::canonical::supports_action(a))
-            || self.model.interfaces.is_empty()
-            || self
-                .model
-                .interfaces
-                .iter()
-                .any(|i| !matches!(i.kind, AnalysisInterfaceKind::FluidStructure(_)))
         {
             return Err(invalid("unsupported fluid–structure interaction authority"));
         }

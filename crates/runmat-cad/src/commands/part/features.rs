@@ -16,12 +16,17 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 ("offset", "Offset"),
             ],
         ),
+        pick("from_face", "Start face", &[K::Face]).shown("from", &["surface"]),
+        pick("from_vertex", "Start vertex", &[K::Vertex, K::Point]).shown("from", &["vertex"]),
+        length("from_offset", "Start offset", 5.0).shown("from", &["offset"]),
     ];
     extrude_inputs.extend(end_fields("", "End"));
     extrude_inputs.push(flag("second_direction", "Second direction", false));
     extrude_inputs.extend(
+        // The second direction is opposite the first by definition: it has no flip of its own.
         end_fields("second_", "Second end")
             .into_iter()
+            .filter(|f| f.id != "second_flip")
             .map(|f| f.if_checked("second_direction")),
     );
     extrude_inputs.extend([

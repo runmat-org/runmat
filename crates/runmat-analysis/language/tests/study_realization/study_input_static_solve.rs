@@ -86,6 +86,7 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
         GeometryInspection {
             preview_extent_m: None,
             unit_evidence: Default::default(),
+            shared_faces: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
             capabilities: vec![

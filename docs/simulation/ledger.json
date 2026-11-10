@@ -554,14 +554,15 @@
         "procedure": "line_parameters",
         "solution_space": "direct"
       },
-      "status": "pending",
+      "status": "release",
       "acceptance": "`runmat check` and `runmat run` admit `electromagnetic line_parameters {}` on a `cross_section` geometry; the solver (two 2D electrostatic solves, with dielectrics and in vacuum) runs on the admitted CPU plan and the trace-impedance example runs to completion with receipts against Hammerstad–Jensen.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001",
@@ -579,14 +580,15 @@
       "title": "Board cross-section geometry from a stackup",
       "kind": "geometry",
       "area": "electromagnetic",
-      "status": "pending",
+      "status": "release",
       "acceptance": "A `geometry { cross_section { … } }` block takes stackup layers inline or from a `.circuit.layout` stackup, traces with width, etch angle and role, and builds the meshed section; `mesh { triangles { … } }` sets the edge size, growth and largest element.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001"
@@ -600,14 +602,15 @@
       "title": "Characteristic impedance Z0 per signal conductor",
       "kind": "output",
       "area": "electromagnetic",
-      "status": "pending",
+      "status": "release",
       "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `impedance`, Ω, one value per signal conductor.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001"
@@ -621,14 +624,15 @@
       "title": "Effective permittivity εeff per signal conductor",
       "kind": "output",
       "area": "electromagnetic",
-      "status": "pending",
+      "status": "release",
       "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `effective_permittivity`.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001"
@@ -642,14 +646,15 @@
       "title": "Propagation delay per length",
       "kind": "output",
       "area": "electromagnetic",
-      "status": "pending",
+      "status": "release",
       "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `delay`, s/m.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001"
@@ -663,14 +668,15 @@
       "title": "Per-length capacitance matrix C (and C0)",
       "kind": "output",
       "area": "electromagnetic",
-      "status": "pending",
+      "status": "release",
       "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `capacitance` and `vacuum_capacitance`, F/m.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001"
@@ -684,14 +690,15 @@
       "title": "Per-length inductance matrix L",
       "kind": "output",
       "area": "electromagnetic",
-      "status": "pending",
+      "status": "release",
       "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `inductance`, H/m.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001"
@@ -705,14 +712,15 @@
       "title": "Pair impedances: Zdiff, Zcommon, odd and even mode",
       "kind": "output",
       "area": "electromagnetic",
-      "status": "pending",
-      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `differential_impedance`, `common_mode_impedance`, `odd_mode_impedance`, `even_mode_impedance` and the modal `effective_permittivity` and `delay`.",
+      "status": "release",
+      "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `differential_impedance`, `common_mode_impedance`, `odd_mode_impedance`, `even_mode_impedance` and the modal `odd_mode_effective_permittivity`, `even_mode_effective_permittivity`, `odd_mode_delay` and `even_mode_delay`.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001"
@@ -726,14 +734,15 @@
       "title": "Near- and far-end coupling coefficients of a pair",
       "kind": "output",
       "area": "electromagnetic",
-      "status": "pending",
+      "status": "release",
       "acceptance": "`runmat run` of a `.fea` `electromagnetic line_parameters` study publishes it as `near_end_coupling` and `far_end_coupling`.",
       "owner": "q-trace-impedance",
       "gaps": [
         "PCB-42"
       ],
       "witness": [
-        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section"
+        "cargo test -p runmat-analysis-fea --lib physics::electrical::cross_section",
+        "check_cli trace_impedance_example_publishes_the_microstrip_and_pair_impedances"
       ],
       "requirements": [
         "FEA-EM-LINE-001"

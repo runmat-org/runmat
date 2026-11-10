@@ -11,6 +11,7 @@ mod compile;
 mod apply;
 mod sketch_status;
 mod profiles;
+pub(crate) use profiles::profile_loops;
 use profiles::*;
 
 use crate::diagnostics::{

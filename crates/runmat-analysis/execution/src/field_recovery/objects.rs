@@ -12,7 +12,7 @@ pub fn recovered_field_transport_reservation_bytes(
         results::field::{RecoveredFieldPartition, RECOVERED_FIELD_PARTITION_ENTITY_COUNT},
     };
     use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
-    let limits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 64);
+    let limits = CanonicalLimits::platform_content(4_000_000, 64);
     let source = profile_serialized(artifact, limits).map_err(invalid)?;
     let manifest = artifact.manifest().map_err(invalid)?;
     let catalog = profile_serialized(&manifest, limits).map_err(invalid)?;

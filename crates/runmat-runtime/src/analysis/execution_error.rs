@@ -79,8 +79,8 @@ pub(super) fn map_fea_run_error(
                     return super::fea_run_admission::FeaRunDenied::Accounting(cause)
                         .into_operation_error(operation.name(), operation.version(), context);
                 }
-                ResourcePlanningError::CanonicalCollectionCapacity { .. }
-                | ResourcePlanningError::CanonicalWireCapacity { .. }
+                ResourcePlanningError::CanonicalWireCapacity { .. }
+                | ResourcePlanningError::MemoryBudget { .. }
                 | ResourcePlanningError::AccuracyCeiling { .. }
                 | ResourcePlanningError::StaticSolveCeiling { .. }
                 | ResourcePlanningError::ThermalSolveCeiling { .. }
@@ -226,9 +226,11 @@ mod tests {
         );
         let context = OperationContext::new(None, None);
         for resource in [
-            ResourcePlanningError::CanonicalCollectionCapacity {
-                required: 2,
-                maximum: 1,
+            ResourcePlanningError::MemoryBudget {
+                required_memory_bytes: 2,
+                available_memory_bytes: 1,
+                required_scratch_bytes: 0,
+                available_scratch_bytes: 0,
             },
             ResourcePlanningError::CanonicalWireCapacity {
                 required: 2,

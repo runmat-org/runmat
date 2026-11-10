@@ -30,7 +30,7 @@ impl PreparedAnalysisObjects {
     pub(crate) fn retained_storage_bytes(&self) -> AnalysisBridgeResult<u64> {
         let metadata = profile_serialized(
             &(&self.manifest, &self.root),
-            CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64),
+            CanonicalLimits::platform_content(65_536, 64),
         )?;
         logical_objects_storage(&self.objects)?
             .checked_add(metadata.materialization_resident_bytes_estimate)
@@ -43,7 +43,7 @@ impl ImportedAnalysisPartition {
     pub(crate) fn retained_storage_bytes(&self) -> AnalysisBridgeResult<u64> {
         let metadata = profile_serialized(
             &(&self.manifest, &self.partition, &self.root),
-            CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64),
+            CanonicalLimits::platform_content(65_536, 64),
         )?;
         logical_objects_storage(&self.objects)?
             .checked_add(metadata.materialization_resident_bytes_estimate)

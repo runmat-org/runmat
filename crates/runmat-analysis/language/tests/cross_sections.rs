@@ -173,3 +173,126 @@ fn cross_section_mistakes_are_named() {
         "{messages}"
     );
 }
+
+const PAIR_STUDY: &str = r#"
+study lines {
+    geometry = geometry.pair
+    mesh = mesh.pair
+    analysis lines { electromagnetic line_parameters {} }
+    output z_p = analysis.lines.impedance.p
+    output z_diff = analysis.lines.differential_impedance
+    output next = analysis.lines.near_end_coupling
+    output c = analysis.lines.capacitance
+    assessment pair_target { value = output.z_diff; minimum = 90 V/A; maximum = 110 V/A; evidence = authored_samples }
+}
+"#;
+
+#[test]
+fn line_parameter_outputs_lower_to_reductions_of_the_section() {
+    use runmat_analysis_core::{
+        AuthoredOutputExpression, ObservationQuantity, ObservationRequest, ObservationTarget,
+        ObservationValueShape, SpatialReduction,
+    };
+    let program = check(&TestHost::default(), &format!("{INLINE}{PAIR_STUDY}"));
+    assert!(errors(&program).is_empty(), "{:?}", errors(&program));
+    let study = program.studies.values().next().expect("study lowers");
+    assert!(study.model.is_none());
+    let expression = |id: &str| {
+        &study
+            .outputs
+            .iter()
+            .find(|output| output.output_id == id)
+            .expect("output")
+            .expression
+    };
+    assert_eq!(
+        expression("z_p"),
+        &AuthoredOutputExpression::LineParameter {
+            step_id: "lines".into(),
+            quantity: ObservationQuantity::LineImpedance,
+            conductor: Some("p".into()),
+            signal_conductors: 2,
+        }
+    );
+    assert!(matches!(
+        expression("z_diff"),
+        AuthoredOutputExpression::LineParameter {
+            quantity: ObservationQuantity::DifferentialImpedance,
+            conductor: None,
+            ..
+        }
+    ));
+    let observations = &study.sequence.steps[0].observations;
+    assert_eq!(observations.len(), 4);
+    for request in observations {
+        let ObservationRequest::Reduction(spec) = request else {
+            panic!("line parameters are reductions: {request:?}");
+        };
+        assert_eq!(spec.spatial_reduction(), SpatialReduction::LineParameter);
+        match spec.observation_id.0.as_str() {
+            "z_p" => assert_eq!(
+                spec.target,
+                ObservationTarget::Conductor {
+                    conductor_id: "p".into()
+                }
+            ),
+            "c" => {
+                assert_eq!(spec.target, ObservationTarget::WholeModel);
+                assert_eq!(
+                    spec.value_shape,
+                    ObservationValueShape::Tensor {
+                        extents: vec![2, 2]
+                    }
+                );
+            }
+            _ => assert_eq!(spec.target, ObservationTarget::WholeModel),
+        }
+    }
+    assert_eq!(study.assessments.len(), 1);
+}
+
+#[test]
+fn line_parameter_mistakes_are_named() {
+    let single = INLINE.replace(
+        "        trace n : signal { layer = \"F.Cu\"; center = 0.2 mm; width = 0.23 mm; etch_angle = 60 deg }\n",
+        "",
+    );
+    for (source, expected) in [
+        (
+            format!(
+                "{INLINE}{}",
+                PAIR_STUDY.replace("impedance.p", "impedance.q")
+            ),
+            "`q` is not a signal trace of the study's cross-section",
+        ),
+        (
+            format!(
+                "{INLINE}{}",
+                PAIR_STUDY.replace("impedance.p", "impedance.g")
+            ),
+            "`g` is not a signal trace",
+        ),
+        (
+            format!(
+                "{single}{}",
+                PAIR_STUDY.replace("output z_p = analysis.lines.impedance.p\n", "")
+            ),
+            "needs exactly two signal traces, and it has 1",
+        ),
+    ] {
+        let messages = errors(&check(&TestHost::default(), &source)).join("\n");
+        assert!(messages.contains(expected), "{expected}: {messages}");
+    }
+    // A per-line value without its trace, and a pair value with one, are not line parameters.
+    for (from, to) in [
+        ("impedance.p", "impedance"),
+        ("differential_impedance", "differential_impedance.p"),
+    ] {
+        let source = format!("{INLINE}{}", PAIR_STUDY.replace(from, to));
+        let messages = errors(&check(&TestHost::default(), &source)).join("\n");
+        assert!(
+            messages.contains("unresolved reference"),
+            "{to}: {messages}"
+        );
+    }
+}

@@ -717,7 +717,7 @@ fn with_cut_and_fillet() -> PartDocument {
     d.features.push(Feature::new(
         "cut",
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch("s_cut"),
+            profile: ProfileRef::sketch("s_cut").into(),
             extent: Extent::ThroughAll,
             reverse: false,
             mode: BodyMode::cut(),
@@ -875,7 +875,7 @@ fn c23_face_consumed_by_later_cut() {
     d.features.push(Feature::new(
         "trim",
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch("s_trim"),
+            profile: ProfileRef::sketch("s_trim").into(),
             extent: Extent::ThroughAll,
             reverse: false,
             mode: BodyMode::cut(),
@@ -910,7 +910,7 @@ fn c24_consumer_moved_before_consumer_of_its_face() {
     d.features.push(Feature::new(
         "trim",
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch("s_trim"),
+            profile: ProfileRef::sketch("s_trim").into(),
             extent: Extent::ThroughAll,
             reverse: false,
             mode: BodyMode::cut(),

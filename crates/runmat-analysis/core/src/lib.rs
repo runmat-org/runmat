@@ -236,13 +236,13 @@ pub use study::accuracy::{
 };
 pub use study::output::{
     sound_pressure_level_db, AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy,
-    DiagnosticKind, DiagnosticObservation, ExtremaTiePolicy, FieldLocation, MonitorCadence,
-    MonitorObservation, MonitorStopCondition, ObservationComponent, ObservationCostEstimate,
-    ObservationCostPolicy, ObservationEvent, ObservationId, ObservationPurpose,
-    ObservationQuantity, ObservationRequest, ObservationResultQuantity, ObservationSpec,
-    ObservationStoragePolicy, ObservationTarget, ObservationThreshold, ObservationValueShape,
-    PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy,
-    SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
+    DiagnosticKind, DiagnosticObservation, ExtremaTiePolicy, FieldLocation, LineParameterScope,
+    MonitorCadence, MonitorObservation, MonitorStopCondition, ObservationComponent,
+    ObservationCostEstimate, ObservationCostPolicy, ObservationEvent, ObservationId,
+    ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationResultQuantity,
+    ObservationSpec, ObservationStoragePolicy, ObservationTarget, ObservationThreshold,
+    ObservationValueShape, PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy,
+    SamplingPolicy, SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
     SolverObservationEvent, SpatialReduction, SOUND_PRESSURE_LEVEL_REFERENCE_PA,
 };
 pub use study::sequence::{

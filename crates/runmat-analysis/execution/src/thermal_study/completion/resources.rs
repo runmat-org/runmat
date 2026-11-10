@@ -5,9 +5,8 @@ use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution_artifact::PublishedObjectCatalog;
 
 fn limits(maximum: u64) -> AnalysisBridgeResult<CanonicalLimits> {
-    Ok(CanonicalLimits::new(
+    Ok(CanonicalLimits::content_bounded(
         usize::try_from(maximum).map_err(|_| capacity("thermal workspace address space"))?,
-        100_000_000,
         65_536,
         64,
     ))

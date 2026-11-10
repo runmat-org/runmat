@@ -1,4 +1,4 @@
-use runmat_meshing_core::{MeshingCancellationSignal, SolverMeshArtifact};
+use runmat_meshing_core::{ElementOrder, MeshingCancellationSignal, SolverMeshArtifact};
 
 use super::{
     boundary::project_boundary_face,
@@ -108,7 +108,7 @@ impl AnalysisProjection {
                 nodes[corners[2]].coordinates_m.canonical_value(),
                 nodes[corners[3]].coordinates_m.canonical_value(),
             ];
-            tetrahedron_geometry(coordinates).ok_or(
+            let (_, vertex_centroid_m, _) = tetrahedron_geometry(coordinates).ok_or(
                 AnalysisProjectionError::InvalidElementGeometry {
                     element_id: element.element_id,
                 },
@@ -117,6 +117,9 @@ impl AnalysisProjection {
             for (slot, index) in element_coordinates.iter_mut().zip(&node_indices) {
                 *slot = nodes[*index].coordinates_m.canonical_value();
             }
+            // The first moment is taken about the first corner, so its rounding scales with the
+            // element size rather than with the distance of the element from the origin.
+            let origin = coordinates[0];
             let mut signed_volume_m3 = 0.0;
             let mut first_moment_m4 = [0.0; 3];
             visit_volume_quadrature(
@@ -124,9 +127,10 @@ impl AnalysisProjection {
                 &element_coordinates[..node_indices.len()],
                 |point| {
                     signed_volume_m3 += point.volume_weight_m3;
-                    for (first_moment, position) in first_moment_m4.iter_mut().zip(point.position_m)
+                    for ((first_moment, position), origin) in
+                        first_moment_m4.iter_mut().zip(point.position_m).zip(origin)
                     {
-                        *first_moment += position * point.volume_weight_m3;
+                        *first_moment += (position - origin) * point.volume_weight_m3;
                     }
                 },
             )
@@ -134,7 +138,14 @@ impl AnalysisProjection {
             .ok_or(AnalysisProjectionError::InvalidElementGeometry {
                 element_id: element.element_id,
             })?;
-            let centroid_m = first_moment_m4.map(|value| value / signed_volume_m3);
+            // A linear tetrahedron's centroid is exactly the mean of its corners: state it in the
+            // one form every consumer (the finite-volume cells among them) evaluates, instead of
+            // a quadrature sum that differs from it by rounding.
+            let centroid_m = if element.order == ElementOrder::Tet4 {
+                vertex_centroid_m
+            } else {
+                std::array::from_fn(|axis| origin[axis] + first_moment_m4[axis] / signed_volume_m3)
+            };
             let characteristic_length_m = (6.0 * signed_volume_m3).cbrt();
             elements.push(ProjectedElement {
                 element_id: element.element_id,

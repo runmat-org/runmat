@@ -213,6 +213,69 @@ pub fn compile_analysis_study(
     Ok(compiled)
 }
 
+/// Compile a line-parameter study on its cross-section after the section is meshed.
+///
+/// A cross-section has no exact-geometry document: its canonical mesh carries the geometry
+/// identity, derived from the section digest (see
+/// [`crate::physics::electrical::cross_section::cross_section_geometry`]), and the study has no
+/// model regions or materials to bind. `section_digest` must be the digest the mesh was built
+/// from.
+pub fn compile_cross_section_study(
+    study: &RealizedStudy,
+    section_digest: runmat_meshing_core::StableDigest,
+    mesh: &SolverMeshArtifact,
+) -> Result<CompiledAnalysisStudy, AnalysisStudyCompilationError> {
+    mesh.validate_canonical()
+        .map_err(|error| AnalysisStudyCompilationError::InvalidMesh(error.to_string()))?;
+    if !matches!(
+        study.geometry.source,
+        GeometryDefinitionSource::CrossSection(_)
+    ) || study
+        .sequence
+        .steps
+        .iter()
+        .any(|step| step.procedure != runmat_analysis_core::AnalysisProcedure::LineParameters)
+    {
+        return Err(AnalysisStudyCompilationError::InvalidGeometry(
+            "a cross-section study is one or more line-parameter steps on a cross_section geometry"
+                .into(),
+        ));
+    }
+    if mesh.geometry
+        != crate::physics::electrical::cross_section::cross_section_geometry(section_digest)
+    {
+        return Err(AnalysisStudyCompilationError::GeometryMeshMismatch);
+    }
+    if study.module_path.trim().is_empty() || study.study_id.trim().is_empty() {
+        return Err(AnalysisStudyCompilationError::InvalidStudyIdentity);
+    }
+    let realized = realize_analysis_model(AnalysisModelRealizationInput {
+        study,
+        geometry_id: &study.geometry.definition.geometry_id,
+        geometry_revision:
+            crate::physics::electrical::cross_section::cross_section_geometry_revision(
+                &section_digest,
+            ),
+        units: runmat_types::physical::CoordinateUnits::canonical(),
+        regions: &ResolvedGeometryRegions::default(),
+        materials: &BTreeMap::new(),
+    })?;
+    let model = realize_formulation_properties(realized, mesh)?;
+    let properties = compile_study_properties(&model, mesh)?;
+    let compiled = CompiledAnalysisStudy {
+        module_path: study.module_path.clone(),
+        study_id: study.study_id.clone(),
+        study_inputs: study.study_inputs.clone(),
+        assessments: study.assessments.clone(),
+        outputs: study.outputs.clone(),
+        model,
+        properties,
+        solver_mesh_digest: mesh.canonical_digest,
+    };
+    compiled.validate_against(mesh)?;
+    Ok(compiled)
+}
+
 fn compile_study_properties(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,

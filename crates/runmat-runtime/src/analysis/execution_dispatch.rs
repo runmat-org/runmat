@@ -21,6 +21,7 @@ pub(super) enum AnalysisOperation {
     Cfd,
     Cht,
     Fsi,
+    LineParameters,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +36,7 @@ struct AnalysisOperationDescriptor {
 
 impl AnalysisOperation {
     #[cfg(test)]
-    const ALL: [Self; 14] = [
+    const ALL: [Self; 15] = [
         Self::LinearStatic,
         Self::StructuralFrequency,
         Self::StructuralResponseSpectrum,
@@ -50,6 +51,7 @@ impl AnalysisOperation {
         Self::Cfd,
         Self::Cht,
         Self::Fsi,
+        Self::LineParameters,
     ];
 
     const fn descriptor(self) -> AnalysisOperationDescriptor {
@@ -173,6 +175,15 @@ impl AnalysisOperation {
                 assembly_error_code: "RM.FEA.RUN_FSI.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_FSI.FORMULATION_NOT_ADMITTED",
             },
+            Self::LineParameters => AnalysisOperationDescriptor {
+                name: "fea.run_line_parameters",
+                version: "fea.run_line_parameters/v1",
+                invalid_model_error_code: "RM.FEA.RUN_LINE_PARAMETERS.SOLVER_MODEL_INVALID",
+                cancelled_error_code: "RM.FEA.RUN_LINE_PARAMETERS.CANCELLED",
+                assembly_error_code: "RM.FEA.RUN_LINE_PARAMETERS.ASSEMBLY_FAILED",
+                formulation_admission_error_code:
+                    "RM.FEA.RUN_LINE_PARAMETERS.FORMULATION_NOT_ADMITTED",
+            },
         }
     }
 
@@ -287,6 +298,9 @@ fn run_operation_for_procedure(
         }
         (Electromagnetic, Static | HarmonicResponse, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Electromagnetic)
+        }
+        (Electromagnetic, AnalysisProcedure::LineParameters, SolutionSpace::Direct) => {
+            Some(AnalysisOperation::LineParameters)
         }
         _ => None,
     }

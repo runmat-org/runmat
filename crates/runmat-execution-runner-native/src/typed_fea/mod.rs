@@ -12,6 +12,8 @@ mod execution;
 mod family_execution;
 mod geometry;
 mod input;
+mod line_parameters;
+pub use line_parameters::CompletedLineParametersStudy;
 mod preparation;
 mod prepared_validation;
 mod duration;
@@ -167,6 +169,7 @@ pub enum CompletedFeaStudyResult {
     Maxwell(Box<CompletedAuthoredMaxwellStudy>),
     Structural(Box<StructuralStudyResult>),
     Thermal(Box<CompletedAuthoredThermalStudy>),
+    LineParameters(Box<CompletedLineParametersStudy>),
 }
 
 impl CompletedFeaStudyResult {
@@ -183,6 +186,7 @@ impl CompletedFeaStudyResult {
             Self::Magnetic(result) => Some(&result.completion.compiled),
             Self::Maxwell(result) => Some(&result.completion.compiled),
             Self::Thermal(result) => Some(&result.completion.compiled),
+            Self::LineParameters(result) => Some(&result.completion.compiled),
             Self::Structural(_) => None,
         }
     }
@@ -207,6 +211,10 @@ impl CompletedFeaStudyResult {
                 serde_json::to_vec(&(&result.completion.terminal_block, &result.completion.states))
             }
             Self::Structural(result) => serde_json::to_vec(result.numerical()),
+            Self::LineParameters(result) => serde_json::to_vec(&(
+                &result.completion.parameters,
+                &result.completion.observation_results,
+            )),
         }
         .map_err(|error| error.to_string())?;
         Ok(runmat_execution::Digest::sha256(bytes))
@@ -223,6 +231,7 @@ impl CompletedFeaStudyResult {
             Self::Maxwell(result) => &result.mesh,
             Self::Structural(result) => result.mesh(),
             Self::Thermal(result) => &result.mesh,
+            Self::LineParameters(result) => &result.mesh,
         }
     }
 }
@@ -619,6 +628,10 @@ async fn execute_case(
     inputs: Vec<AuthoredStudyInputBinding>,
     options: &LocalFeaExecutionOptions,
 ) -> Result<CompletedLocalFeaCase, String> {
+    // A cross-section is meshed and solved in place: no exact geometry or prepared root.
+    if line_parameters::is_cross_section(&study) {
+        return line_parameters::execute_case(source, study, inputs, options).await;
+    }
     let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
     let prepared = prepare_checked_fea_study(source, study, &inputs, &authority, options).await?;
     execute_prepared_with_source(prepared, options, Some(source)).await

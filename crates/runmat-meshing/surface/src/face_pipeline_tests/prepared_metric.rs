@@ -44,6 +44,7 @@ fn one_partition_reuses_one_prepared_producer_field_across_geometry_and_acceptan
     .unwrap();
     let request = MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,

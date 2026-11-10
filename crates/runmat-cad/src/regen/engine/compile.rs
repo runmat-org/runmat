@@ -264,11 +264,11 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             FeatureKind::Extrude(e) => self.extrude(i, id, e),
             FeatureKind::Revolve(r) => {
-                let profile = self.profile(i, id, "profile", &r.profile)?;
+                let (profile, face) = self.profile_source(i, id, "profile", &r.profile)?;
                 let (axis_point, axis_direction) = self.axis(i, id, "axis", &r.axis)?;
                 let angle = self.value(id, "angle", &r.angle, Dimension::ANGLE)?;
-                let (combine, operands) = self.mode_operands(i, id, &r.mode)?;
-                let tool = ToolOp::new(
+                let (combine, mut operands) = self.mode_operands(i, id, &r.mode)?;
+                let mut tool = ToolOp::new(
                     ToolShape::Revolve {
                         profile,
                         axis_point,
@@ -277,20 +277,22 @@ impl<'a, 'b> Run<'a, 'b> {
                     },
                     combine,
                 );
+                profile_face(&mut tool, &mut operands, face);
+                let reusable = tool.profile_face.is_none();
                 Ok(Compiled::Op {
                     op: KernelOp::Tool(tool.clone()),
                     operands,
-                    naming: simple(vec![r.profile.sketch.clone()]),
+                    naming: simple(vec![Self::profile_naming(id, &r.profile)]),
                     import: false,
                     instances: None,
-                    tools: Some(vec![tool]),
+                    tools: reusable.then(|| vec![tool]),
                 })
             }
             FeatureKind::Sweep(s) => {
-                let profile = self.profile(i, id, "profile", &s.profile)?;
+                let (profile, face) = self.profile_source(i, id, "profile", &s.profile)?;
                 let (path, path_curves) = self.path(i, id, "path", &s.path)?;
-                let (combine, operands) = self.mode_operands(i, id, &s.mode)?;
-                let tool = ToolOp::new(
+                let (combine, mut operands) = self.mode_operands(i, id, &s.mode)?;
+                let mut tool = ToolOp::new(
                     ToolShape::Sweep {
                         profile,
                         path,
@@ -298,10 +300,11 @@ impl<'a, 'b> Run<'a, 'b> {
                     },
                     combine,
                 );
+                profile_face(&mut tool, &mut operands, face);
                 Ok(Compiled::Op {
                     op: KernelOp::Tool(tool),
                     operands,
-                    naming: simple(vec![s.profile.sketch.clone()]),
+                    naming: simple(vec![Self::profile_naming(id, &s.profile)]),
                     import: false,
                     instances: None,
                     tools: None,
@@ -468,8 +471,8 @@ impl<'a, 'b> Run<'a, 'b> {
                         ));
                     };
                     let sketch = match self.doc.feature(s).map(|x| &x.kind) {
-                        Some(FeatureKind::Extrude(e)) => vec![e.profile.sketch.clone()],
-                        Some(FeatureKind::Revolve(r)) => vec![r.profile.sketch.clone()],
+                        Some(FeatureKind::Extrude(e)) => vec![Self::profile_naming(s, &e.profile)],
+                        Some(FeatureKind::Revolve(r)) => vec![Self::profile_naming(s, &r.profile)],
                         _ => Vec::new(),
                     };
                     for tool in t {
@@ -512,4 +515,25 @@ impl<'a, 'b> Run<'a, 'b> {
             }
         }
     }
+}
+
+/// A face profile's operand: the face's body, among the combined bodies or else appended as a
+/// reference the tool reads and returns unchanged.
+fn profile_face(tool: &mut ToolOp, operands: &mut Vec<usize>, face: Option<EntityHandle>) {
+    let Some(h) = face else {
+        return;
+    };
+    let body = h.body as usize;
+    let at = match operands.iter().position(|b| *b == body) {
+        Some(k) => k,
+        None => {
+            operands.push(body);
+            tool.references += 1;
+            operands.len() - 1
+        }
+    };
+    tool.profile_face = Some(OperandEntity {
+        operand: at as u32,
+        entity: h.index,
+    });
 }

@@ -206,14 +206,52 @@ fn init(options: OtelOptions, filter: Option<String>) -> Result<Option<OtelGuard
 
 /// Hidden local workers inherit startup environment; remote workers should receive only their
 /// administrator's collector policy, never submitter keychain secrets or personal user settings.
+/// Environment variable naming a file that a local hidden worker appends its log to when no
+/// OpenTelemetry collector is configured. A worker's own stderr is a bounded diagnostic capture,
+/// so solver progress (`runmat_fea::step` lines, for example) reaches a run log only this way.
+/// The filter is `RUST_LOG`, else `RUNMAT_LOG`, else `info`.
+pub const WORKER_LOG_FILE_ENV: &str = "RUNMAT_WORKER_LOG_FILE";
+
 pub fn init_from_env() -> Option<OtelGuard> {
     let result = OtelOptions::default()
         .resolve_environment()
         .and_then(|options| init(options, Some("info".into())));
     match result {
-        Ok(guard) => guard,
+        Ok(Some(guard)) => Some(guard),
+        Ok(None) => init_worker_log_file(),
         Err(error) => {
             eprintln!("RunMat: OpenTelemetry startup failed: {error}");
+            None
+        }
+    }
+}
+
+fn init_worker_log_file() -> Option<OtelGuard> {
+    let path = std::env::var_os(WORKER_LOG_FILE_ENV)?;
+    let file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("RunMat: cannot open the worker log file: {error}");
+            return None;
+        }
+    };
+    let options = runmat_logging::LoggingOptions {
+        enable_otlp: false,
+        enable_traces: false,
+        pid: i64::from(std::process::id()),
+        default_filter: Some("info".into()),
+    };
+    match runmat_logging::init_logging_with_host_logger_and_file(options, file) {
+        Ok(logging) => Some(OtelGuard {
+            _logging: logging,
+            exporting: false,
+        }),
+        Err(error) => {
+            eprintln!("RunMat: worker file logging failed: {error}");
             None
         }
     }

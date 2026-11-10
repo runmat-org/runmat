@@ -40,6 +40,7 @@ use footprint::facet_footprint_crosses_face;
 pub(super) use footprint::segment_hits_triangle_interior;
 pub(super) use in_place::{
     insert_candidate_in_place, try_recover_facet_with_cavity_in_place, InPlaceCandidate,
+    InPlaceCandidateRequest,
 };
 use sides::{side_cavities, SideCavityConstruction};
 use simultaneous::{refill_cavity_sides, CavityRefillRequest};

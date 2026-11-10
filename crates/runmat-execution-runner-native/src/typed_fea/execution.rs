@@ -277,6 +277,21 @@ pub fn prepare_study_publication(
                 )?,
             )
         }
+        CompletedFeaStudyResult::LineParameters(result) => {
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            runmat_runtime::analysis::prepare_line_parameters_study_publication(
+                &result.completion,
+                &result.mesh,
+                &result.meshing_evidence,
+                &result.options,
+                context(),
+                identity(digest, &digest)?,
+            )
+        }
         CompletedFeaStudyResult::Thermal(result) => {
             let digest = result
                 .completion

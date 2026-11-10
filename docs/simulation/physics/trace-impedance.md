@@ -8,19 +8,20 @@ impedances, the odd- and even-mode impedances and the near- and far-end coupling
 coefficients. The cross-section comes from the board stackup: layer thicknesses and Dk, copper
 thickness, trace width and etch angle, solder mask and reference planes.
 
-The study is an `electromagnetic line_parameters` analysis
-[not yet in the current release](pending:electromagnetic.line_parameters) on a `cross_section`
-geometry [not yet in the current release](pending:electromagnetic.cross_section_geometry).
+The study is an `electromagnetic line_parameters` analysis on a `cross_section` geometry. It
+publishes these outputs:
 
-| Output | Symbol | Unit | Status |
-| --- | --- | --- | --- |
-| `impedance` | $Z_0$ per signal conductor | Ω | [not yet in the current release](pending:electromagnetic.line_parameters.impedance) |
-| `effective_permittivity` | $\varepsilon_\text{eff}$ per signal conductor | 1 | [not yet in the current release](pending:electromagnetic.line_parameters.effective_permittivity) |
-| `delay` | $t_d$ per length | s/m | [not yet in the current release](pending:electromagnetic.line_parameters.delay) |
-| `capacitance`, `vacuum_capacitance` | $\mathbf C$, $\mathbf C_0$ | F/m | [not yet in the current release](pending:electromagnetic.line_parameters.capacitance) |
-| `inductance` | $\mathbf L$ | H/m | [not yet in the current release](pending:electromagnetic.line_parameters.inductance) |
-| `differential_impedance`, `common_mode_impedance`, `odd_mode_impedance`, `even_mode_impedance` | $Z_\text{diff}$, $Z_\text{comm}$, $Z_\text{odd}$, $Z_\text{even}$ | Ω | [not yet in the current release](pending:electromagnetic.line_parameters.differential_pair) |
-| `near_end_coupling`, `far_end_coupling` | $K_b$, $K_f$ | 1 | [not yet in the current release](pending:electromagnetic.line_parameters.coupling) |
+| Output | Symbol | Unit |
+| --- | --- | --- |
+| `impedance` | $Z_0$ per signal conductor | Ω |
+| `effective_permittivity` | $\varepsilon_\text{eff}$ per signal conductor | 1 |
+| `delay` | $t_d$ per length | s/m |
+| `capacitance`, `vacuum_capacitance` | $\mathbf C$, $\mathbf C_0$ | F/m |
+| `inductance` | $\mathbf L$ | H/m |
+| `differential_impedance`, `common_mode_impedance`, `odd_mode_impedance`, `even_mode_impedance` | $Z_\text{diff}$, $Z_\text{comm}$, $Z_\text{odd}$, $Z_\text{even}$ | Ω |
+| `odd_mode_effective_permittivity`, `even_mode_effective_permittivity` | modal $\varepsilon_\text{eff}$ of a pair | 1 |
+| `odd_mode_delay`, `even_mode_delay` | modal $t_d$ of a pair | s/m |
+| `near_end_coupling`, `far_end_coupling` | $K_b$, $K_f$ | 1 |
 
 This version is lossless. Conductor loss from skin depth and dielectric loss from the loss
 tangent (resistance and conductance per length, and attenuation) are a separate output
@@ -32,7 +33,7 @@ The study below sizes a single-ended microstrip and an edge-coupled differential
 top layer of a four-layer board. The top copper is 35 µm (1 oz) under 20 µm of solder mask,
 on 0.2 mm of prepreg (Dk 4.1) over the ground plane on `In1.Cu`. The etch leaves 60° sidewalls.
 
-```fea pending=electromagnetic.line_parameters
+```fea
 geometry single_ended {
     cross_section {
         layer "F.Mask" : solder_mask { thickness = 20 um; permittivity = 3.8 }

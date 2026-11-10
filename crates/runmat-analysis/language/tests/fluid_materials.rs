@@ -72,6 +72,7 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; a
         GeometryInspection {
             preview_extent_m: None,
             unit_evidence: Default::default(),
+            shared_faces: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
             capabilities: vec![

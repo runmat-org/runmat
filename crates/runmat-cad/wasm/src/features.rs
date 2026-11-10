@@ -113,6 +113,138 @@ fn profile(values: &Values, field: &str, picks: &Picks) -> Result<Value, EditFai
     Ok(json!({ "sketch": picks.sketch(&pick)? }))
 }
 
+/// A region pick (`sketch.<s>.region(<curves>;<curves>)`) as its sketch and loops: each loop
+/// by its curves, the outer loop first, then the holes inside it.
+pub fn region_pick(pick: &str) -> Option<(String, Vec<Vec<String>>)> {
+    let rest = pick.strip_prefix("sketch.")?;
+    let (sketch, inner) = rest.split_once(".region(")?;
+    let inner = inner.strip_suffix(')')?;
+    let loops: Vec<Vec<String>> = inner
+        .split(';')
+        .map(|l| {
+            l.split(',')
+                .map(|c| c.trim().to_owned())
+                .filter(|c| !c.is_empty())
+                .collect()
+        })
+        .filter(|l: &Vec<String>| !l.is_empty())
+        .collect();
+    (!loops.is_empty()).then(|| (sketch.to_owned(), loops))
+}
+
+/// Every pick of a profile field as the profiles features take, in pick order: a planar face
+/// (its reference), a whole sketch, or a sketch's picked regions together (their loops). Each
+/// profile becomes its own feature.
+fn profiles(values: &Values, field: &str, picks: &Picks) -> Result<Vec<Value>, EditFailure> {
+    enum P {
+        Face(Value),
+        Whole(String),
+        Regions(String, Vec<Vec<String>>),
+    }
+    let all = some(
+        values,
+        field,
+        "the profile: a sketch, a region of one or a flat face",
+    )?;
+    let mut out: Vec<P> = Vec::new();
+    for pick in &all {
+        if let Some((sketch, loops)) = region_pick(pick) {
+            let sketch = picks.sketch(&format!("sketch:{sketch}"))?;
+            let at = out
+                .iter_mut()
+                .find(|p| matches!(p, P::Whole(s) | P::Regions(s, _) if *s == sketch));
+            match at {
+                Some(P::Regions(_, ls)) => {
+                    for l in loops {
+                        if !ls.contains(&l) {
+                            ls.push(l);
+                        }
+                    }
+                }
+                Some(_) => {}
+                None => out.push(P::Regions(sketch, loops)),
+            }
+        } else if let Ok(sketch) = picks.sketch(pick) {
+            match out
+                .iter_mut()
+                .find(|p| matches!(p, P::Whole(s) | P::Regions(s, _) if *s == sketch))
+            {
+                Some(p) => *p = P::Whole(sketch),
+                None => out.push(P::Whole(sketch)),
+            }
+        } else {
+            let face = picks.reference(pick)?;
+            if !out.iter().any(|p| matches!(p, P::Face(f) if *f == face)) {
+                out.push(P::Face(face));
+            }
+        }
+    }
+    Ok(out
+        .into_iter()
+        .map(|p| match p {
+            P::Face(face) => face,
+            P::Whole(sketch) => json!({ "sketch": sketch }),
+            P::Regions(sketch, loops) => json!({ "sketch": sketch, "loops": loops }),
+        })
+        .collect())
+}
+
+/// Extrude, revolve and sweep: one feature per profile picked (see [`profiles`]). `None` for
+/// other commands.
+pub fn profile_features(
+    command: &str,
+    values: &Values,
+    picks: &Picks,
+) -> Result<Option<Vec<(&'static str, Value)>>, EditFailure> {
+    let stem = match command {
+        "part.extrude" => "extrude",
+        "part.revolve" => "revolve",
+        "part.sweep" => "sweep",
+        _ => return Ok(None),
+    };
+    let mut out = Vec::new();
+    for profile in profiles(values, "profile", picks)? {
+        let kind = match command {
+            "part.extrude" => extrude(values, picks, profile)?,
+            "part.revolve" => revolve(values, picks, profile)?,
+            _ => json!({
+                "feature": "sweep",
+                "profile": profile,
+                "path": self::profile(values, "path", picks)?,
+                "mode": mode(values, picks)?,
+            }),
+        };
+        out.push((stem, kind));
+    }
+    Ok(Some(out))
+}
+
+fn revolve(values: &Values, picks: &Picks, profile: Value) -> Result<Value, EditFailure> {
+    match text(values, "type", "one") {
+        "one" => {}
+        other => {
+            return Err(model(format!(
+                "a {} revolve isn't in the part model yet; revolve one way",
+                if other == "mid" {
+                    "mid-plane"
+                } else {
+                    "two-direction"
+                }
+            )))
+        }
+    }
+    if flag(values, "thin") {
+        return Err(model("a thin revolve isn't in the part model yet"));
+    }
+    Ok(json!({
+        "feature": "revolve",
+        "profile": profile,
+        "axis": picks.axis(&one(values, "axis", "the axis to revolve about")?)?,
+        "angle": value(values, "angle", "deg")?,
+        "mode": mode(values, picks)?,
+    }))
+}
+
 /// One extrude direction's end, with the geometry it names.
 fn extent(values: &Values, prefix: &str, picks: &Picks) -> Result<Value, EditFailure> {
     let id = |s: &str| format!("{prefix}{s}");
@@ -125,6 +257,7 @@ fn extent(values: &Values, prefix: &str, picks: &Picks) -> Result<Value, EditFai
         "through_all" => json!({ "extent": "through_all" }),
         "up_to_next" => json!({ "extent": "up_to_next" }),
         "up_to_face" => json!({ "extent": "up_to", "face": picks.reference(&up_to()?)? }),
+        "up_to_plane" => json!({ "extent": "up_to_plane", "plane": picks.plane(&up_to()?)? }),
         "up_to_vertex" => json!({ "extent": "up_to_vertex", "vertex": picks.point(&up_to()?)? }),
         "up_to_body" => json!({ "extent": "up_to_body", "body": picks.reference(&up_to()?)? }),
         "offset_from_face" => json!({
@@ -141,79 +274,10 @@ fn extent(values: &Values, prefix: &str, picks: &Picks) -> Result<Value, EditFai
     })
 }
 
-/// Faces picked as an extrude's profile extrude press-pull style: each face moves along its
-/// normal by the depth (out for Add, in for Remove, the other way with Flip), and the faces
-/// around it follow, so the material joins the face's own body. `None` when the profile is a
-/// sketch or a region. A face profile takes a blind depth from the face itself; the start
-/// offset, end conditions, second direction, draft, thin wall and new or intersected bodies
-/// apply to sketch profiles.
-fn face_pull(values: &Values, picks: &Picks) -> Result<Option<Value>, EditFailure> {
-    let all = picks_of(values, "profile");
-    let faces: Vec<&String> = all
-        .iter()
-        .filter(|p| picks.sketch(p).is_err() && picks.body_of_face(p).is_some())
-        .collect();
-    if faces.is_empty() {
-        return Ok(None);
-    }
-    if faces.len() != all.len() {
-        return Err(model(
-            "extrude faces or sketches: pick only faces, or only sketches and regions",
-        ));
-    }
-    let sign = match text(values, "op", "add") {
-        "add" => 1.0,
-        "remove" => -1.0,
-        _ => {
-            return Err(model(
-                "a face extrudes into its own body: use Add to pull it out or Remove to push it in; for a new or intersected body, extrude a sketch",
-            ))
-        }
-    };
-    let sign = if flag(values, "flip") { -sign } else { sign };
-    if text(values, "from", "sketch_plane") != "sketch_plane" {
-        return Err(model(
-            "a face extrudes from the face itself; start from the sketch plane",
-        ));
-    }
-    if text(values, "end", "blind") != "blind" {
-        return Err(model(
-            "a face extrudes a blind depth; for an end condition, extrude a sketch on the face",
-        ));
-    }
-    for (field, what) in [
-        ("second_direction", "a second direction"),
-        ("draft", "draft"),
-        ("thin", "a thin wall"),
-    ] {
-        if flag(values, field) {
-            return Err(model(format!(
-                "a face extrudes without {what}; extrude a sketch on the face for it"
-            )));
-        }
-    }
-    let mut distance = value(values, "distance", "mm")?;
-    if sign < 0.0 {
-        let n = distance
-            .get("value")
-            .and_then(Value::as_f64)
-            .filter(|_| distance["form"] == "quantity")
-            .ok_or_else(|| model("pushing a face in takes a depth in mm"))?;
-        distance["value"] = json!(-n);
-    }
-    let faces: Vec<String> = faces.into_iter().cloned().collect();
-    Ok(Some(json!({
-        "feature": "direct",
-        "direct": "move_faces",
-        "faces": picks.references(&faces)?,
-        "motion": { "motion": "offset", "distance": distance },
-    })))
-}
-
-fn extrude(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
+fn extrude(values: &Values, picks: &Picks, profile: Value) -> Result<Value, EditFailure> {
     let mut kind = json!({
         "feature": "extrude",
-        "profile": profile(values, "profile", picks)?,
+        "profile": profile,
         "extent": extent(values, "", picks)?,
         "reverse": flag(values, "flip"),
         "mode": mode(values, picks)?,
@@ -468,47 +532,13 @@ pub fn feature_kind(
     picks: &Picks,
 ) -> Result<Option<(&'static str, Value)>, EditFailure> {
     Ok(Some(match command {
-        "part.extrude" => match face_pull(values, picks)? {
-            Some(pull) => ("pull", pull),
-            None => ("extrude", extrude(values, picks)?),
-        },
-        "part.revolve" => {
-            match text(values, "type", "one") {
-                "one" => {}
-                other => {
-                    return Err(model(format!(
-                        "a {} revolve isn't in the part model yet; revolve one way",
-                        if other == "mid" {
-                            "mid-plane"
-                        } else {
-                            "two-direction"
-                        }
-                    )))
-                }
+        "part.extrude" | "part.revolve" | "part.sweep" => {
+            let mut all = profile_features(command, values, picks)?.unwrap_or_default();
+            if all.is_empty() {
+                return Err(model("pick the profile"));
             }
-            if flag(values, "thin") {
-                return Err(model("a thin revolve isn't in the part model yet"));
-            }
-            (
-                "revolve",
-                json!({
-                    "feature": "revolve",
-                    "profile": profile(values, "profile", picks)?,
-                    "axis": picks.axis(&one(values, "axis", "the axis to revolve about")?)?,
-                    "angle": value(values, "angle", "deg")?,
-                    "mode": mode(values, picks)?,
-                }),
-            )
+            all.remove(0)
         }
-        "part.sweep" => (
-            "sweep",
-            json!({
-                "feature": "sweep",
-                "profile": profile(values, "profile", picks)?,
-                "path": profile(values, "path", picks)?,
-                "mode": mode(values, picks)?,
-            }),
-        ),
         "part.loft" | "part.boundary" => {
             let field = if command == "part.loft" {
                 "profiles"
@@ -852,6 +882,11 @@ mod tests {
     /// Runs a command from the canvas and checks the change: one inserted statement that names
     /// the new feature, and a part that still regenerates with a body and no error.
     fn added(command: &str, values: Value) -> String {
+        inserted(command, values, 1)
+    }
+
+    /// As [`added`], for a command that inserts `count` statements (one feature per profile).
+    fn inserted(command: &str, values: Value, count: usize) -> String {
         let request = json!({ "command": command, "values": values });
         let out: Value = serde_json::from_str(&edit_json(
             "/p/plate.part",
@@ -864,11 +899,10 @@ mod tests {
         let file = &out["files"][0];
         assert_eq!(file["reprinted"], false, "{command}");
         let edits = file["edits"].as_array().unwrap();
-        assert_eq!(edits.len(), 1, "{command}: {edits:?}");
-        assert_eq!(
-            edits[0]["start"], edits[0]["end"],
-            "{command}: an insertion"
-        );
+        assert_eq!(edits.len(), count, "{command}: {edits:?}");
+        for edit in edits {
+            assert_eq!(edit["start"], edit["end"], "{command}: an insertion");
+        }
         let text = file["text"].as_str().unwrap().to_owned();
         let compiled: Value =
             serde_json::from_str(&compile_json("/p/plate.part", &text, &Files::new())).unwrap();
@@ -889,14 +923,15 @@ mod tests {
         text
     }
 
-    /// A face picked as the profile extrudes press-pull style into its own body: the plate gets
-    /// thicker by the depth (Add), thinner (Remove).
+    /// A face picked as the profile extrudes as a prism of the face: Add thickens the plate,
+    /// Remove pushes into it, New body makes a second body, and the end conditions apply.
     #[test]
-    fn a_face_profile_extrudes_into_its_own_body() {
+    fn a_face_profile_extrudes_a_prism_of_the_face() {
+        let compiled = |text: &str| -> Value {
+            serde_json::from_str(&compile_json("/p/plate.part", text, &Files::new())).unwrap()
+        };
         let height = |text: &str| -> f64 {
-            let compiled: Value =
-                serde_json::from_str(&compile_json("/p/plate.part", text, &Files::new())).unwrap();
-            let b = &compiled["display"]["data"]["bounds"];
+            let b = &compiled(text)["display"]["data"]["bounds"];
             (b["max"][2].as_f64().unwrap() - b["min"][2].as_f64().unwrap()) * 1e3
         };
         let t = added(
@@ -904,37 +939,74 @@ mod tests {
             json!({ "profile": [END], "op": "add", "from": "sketch_plane", "end": "blind", "distance": 5 }),
         );
         assert!(
-            t.contains("feature pull1 = direct.move_faces(") && t.contains("distance = 5 mm"),
+            t.contains("feature extrude1 = extrude(profile = feature.body.face.end")
+                && t.contains("distance = 5 mm"),
             "{t}"
         );
         assert!((height(&t) - 15.0).abs() < 1e-6, "{t}");
+        // Remove cuts inward: 4 mm off the whole top face leaves the plate 6 mm thick.
         let t = added(
             "part.extrude",
             json!({ "profile": [END], "op": "remove", "distance": 4 }),
         );
-        assert!((height(&t) - 6.0).abs() < 1e-6, "{t}");
-        let refused = |values: Value| -> String {
-            let request = json!({ "command": "part.extrude", "values": values });
-            let out: Value = serde_json::from_str(&edit_json(
-                "/p/plate.part",
-                PLATE,
-                &Files::new(),
-                &request.to_string(),
-            ))
-            .unwrap();
-            assert_eq!(out["ok"], false, "{out}");
-            out.to_string()
-        };
-        assert!(
-            refused(json!({ "profile": [END], "op": "new", "distance": 5 })).contains("own body")
+        assert!((height(&t) - 6.0).abs() < 1e-6, "{}: {t}", height(&t));
+        let t = added(
+            "part.extrude",
+            json!({ "profile": [END], "op": "new", "distance": 5, "draft": false }),
+        );
+        assert_eq!(
+            compiled(&t)["display"]["data"]["bodies"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2,
+            "{t}"
+        );
+        // Every profile picked is written: a face and a sketch make two extrudes.
+        let t = inserted(
+            "part.extrude",
+            json!({ "profile": [END, "sketch:s1"], "op": "new", "distance": 5 }),
+            2,
         );
         assert!(
-            refused(json!({ "profile": [END, "sketch:s1"], "distance": 5 })).contains("only faces")
+            t.contains("extrude1 = extrude(profile = feature.body.face.end")
+                && t.contains("extrude2 = extrude(profile = sketch.s1"),
+            "{t}"
         );
     }
 
-    /// A closed sketch's base flange is a flat plate even though the form sends its depth; an
-    /// edge flange and a flat pattern follow from the canvas.
+    /// A region picked in the view extrudes its own loops; regions of one sketch go together.
+    #[test]
+    fn region_picks_write_their_loops() {
+        let t = added(
+            "part.extrude",
+            json!({ "profile": ["sketch.s1.region(l1,l2,l3,l4)"], "op": "new", "distance": 3 }),
+        );
+        assert!(t.contains("extrude1 = extrude(") && t.contains("l4"), "{t}");
+        assert!(
+            super::region_pick("sketch.s1.region(l1,l2;c1)")
+                == Some((
+                    "s1".into(),
+                    vec![vec!["l1".into(), "l2".into()], vec!["c1".into()]]
+                ))
+        );
+    }
+
+    /// Up to plane, and the start fields for From = surface, vertex and offset.
+    #[test]
+    fn extrude_up_to_a_plane_and_from_the_start_fields() {
+        let t = added(
+            "part.extrude",
+            json!({ "profile": ["sketch:s1"], "op": "new", "end": "up_to_plane", "up_to": ["origin:top"], "from": "offset", "from_offset": -5 }),
+        );
+        assert!(t.contains("up_to_plane"), "{t}");
+        let t = added(
+            "part.extrude",
+            json!({ "profile": ["sketch:s1"], "op": "add", "from": "surface", "from_face": [END], "distance": 2 }),
+        );
+        assert!(t.contains("from = surface("), "{t}");
+    }
+
     #[test]
     fn sheet_metal_plate_flange_and_flat_pattern_from_the_canvas() {
         let sketch_only = PLATE.replace(

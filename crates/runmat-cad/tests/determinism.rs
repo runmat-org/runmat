@@ -24,7 +24,7 @@ fn rich() -> PartDocument {
     d.features.push(Feature::new(
         "cut",
         FeatureKind::Extrude(Extrude {
-            profile: ProfileRef::sketch("s_cut"),
+            profile: ProfileRef::sketch("s_cut").into(),
             extent: Extent::ThroughAll,
             reverse: false,
             mode: BodyMode::cut(),

@@ -98,6 +98,7 @@ async fn write_snapshot(
     output: &Path,
     presentation: &views::Presentation,
     display_units: &std::collections::BTreeMap<String, String>,
+    outputs: &views::OutputNames,
 ) -> Result<()> {
     let (primary, others) = runs
         .split_first()
@@ -129,6 +130,7 @@ async fn write_snapshot(
                 .map(|run| (run.run_id.clone(), run.publication.assessments.clone()))
                 .collect(),
         },
+        outputs,
     )
     .await?;
     std::fs::write(
@@ -261,7 +263,20 @@ pub(super) async fn capture(
             runs: others,
         })?,
     )?;
-    write_snapshot(&runs, selected_views, output, &presentation, &display_units).await?;
+    let outputs = views::OutputNames::authored(
+        &study.study.outputs,
+        runs.iter()
+            .map(|run| (run.run_id.as_str(), run.step.as_str())),
+    );
+    write_snapshot(
+        &runs,
+        selected_views,
+        output,
+        &presentation,
+        &display_units,
+        &outputs,
+    )
+    .await?;
     std::fs::remove_file(accepted_checkpoint)?;
     Ok(())
 }

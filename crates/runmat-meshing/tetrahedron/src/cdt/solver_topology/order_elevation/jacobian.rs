@@ -418,14 +418,16 @@ fn certify_jacobian(
     let mut deepest = 0_u32;
     let result = certify_element_within(
         coordinates,
-        maximum_search_work,
-        maximum_recursion_depth,
+        JacobianSearchLimits {
+            maximum_search_work,
+            maximum_recursion_depth,
+            cancellation_check_interval,
+        },
         cancellation,
         ValidationWork {
             storage,
             counter: &mut element_work,
         },
-        cancellation_check_interval,
         &mut deepest,
     );
     *total_work = total_work.saturating_add(element_work);
@@ -481,15 +483,26 @@ fn shared_element_rule(coordinates: &[[f64; 3]; 10]) -> Result<(), DelaunaySolve
         })
 }
 
-fn certify_element_within(
-    coordinates: [[f64; 3]; 10],
+/// The search bounds of one element's Jacobian certification.
+#[derive(Clone, Copy)]
+struct JacobianSearchLimits {
     maximum_search_work: u64,
     maximum_recursion_depth: u32,
+    cancellation_check_interval: u64,
+}
+
+fn certify_element_within(
+    coordinates: [[f64; 3]; 10],
+    limits: JacobianSearchLimits,
     cancellation: &dyn MeshingCancellationSignal,
     work: ValidationWork<'_, '_>,
-    cancellation_check_interval: u64,
     deepest: &mut u32,
 ) -> Result<(), DelaunaySolverTopologyError> {
+    let JacobianSearchLimits {
+        maximum_search_work,
+        maximum_recursion_depth,
+        cancellation_check_interval,
+    } = limits;
     let ValidationWork {
         storage,
         counter: work,

@@ -29,6 +29,7 @@ const END_CONDITIONS: &[(&str, &str)] = &[
     ("up_to_next", "Up to next"),
     ("up_to_vertex", "Up to vertex"),
     ("up_to_face", "Up to face"),
+    ("up_to_plane", "Up to plane"),
     ("offset_from_face", "Offset from face"),
     ("up_to_body", "Up to body"),
     ("mid_plane", "Mid-plane"),
@@ -58,6 +59,7 @@ fn end_fields(prefix: &str, label: &str) -> Vec<Field> {
             &[
                 "up_to_vertex",
                 "up_to_face",
+                "up_to_plane",
                 "offset_from_face",
                 "up_to_body",
             ],

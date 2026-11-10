@@ -817,9 +817,11 @@ fn first_illegal_inserted_face(
             {
                 edge_flip = edge_link_flip(
                     topology,
-                    [left_index, right_index],
-                    [inserted, right_apex],
-                    face,
+                    EdgeLinkFlipSite {
+                        cells: [left_index, right_index],
+                        ends: [inserted, right_apex],
+                        face,
+                    },
                     protected_faces,
                     kept_edges,
                     facet_flips,
@@ -949,9 +951,11 @@ fn first_illegal_inserted_face(
                 },
             ) = edge_link_flip(
                 topology,
-                [left_index, right_index],
-                [left_apex, right_apex],
-                face,
+                EdgeLinkFlipSite {
+                    cells: [left_index, right_index],
+                    ends: [left_apex, right_apex],
+                    face,
+                },
                 protected_faces,
                 kept_edges,
                 true,
@@ -972,6 +976,15 @@ fn first_illegal_inserted_face(
     Ok(None)
 }
 
+/// Where [`edge_link_flip`] looks: the two cells across the link face, the edge ends `p`, `d`
+/// opposite that face, and the face itself.
+#[derive(Clone, Copy)]
+struct EdgeLinkFlipSite {
+    cells: [u32; 2],
+    ends: [u32; 2],
+    face: [u32; 3],
+}
+
 /// The 2-2, 3-2 or 4-4 flip that removes an edge `xy` of the illegal link face `xyz` between
 /// `cells = [(p,x,y,z), (x,y,z,d)]`, where `ends = [p, d]`:
 /// - 2-2 (facet flips only): `xy` has only the cells `pxyz` and `xyzd`, so `xyp` and `xyd`
@@ -988,17 +1001,15 @@ fn first_illegal_inserted_face(
 /// block the flip, except the protected pair `xyp`, `xyd` of a facet flip. The cells must share
 /// one region, except that the cells `xyde`, `xyep` of a 4-4 facet flip may form a second
 /// region across the facet plane; each created cell keeps the region of its side.
-#[allow(clippy::too_many_arguments)]
 fn edge_link_flip(
     topology: &TopologyMutation,
-    cells: [u32; 2],
-    ends: [u32; 2],
-    face: [u32; 3],
+    site: EdgeLinkFlipSite,
     protected_faces: &Protection<'_>,
     kept_edges: &BTreeSet<[StableDigest; 2]>,
     facet_flips: bool,
     work: &mut InsertionWork<'_>,
 ) -> Result<Option<LinkFlip>, DelaunayInsertionError> {
+    let EdgeLinkFlipSite { cells, ends, face } = site;
     let [p, d] = ends;
     let region = topology
         .tetrahedron(cells[0])
@@ -1100,7 +1111,7 @@ fn edge_link_flip(
             let boundary_protection =
                 [stable([x, y, p]), stable([x, y, d])].map(|face| protected_faces.contains(&face));
             let facet = match boundary_protection {
-                [true, true] if facet_flips => Some(facet_record()),
+                [true, true] if facet_flips => Some(Box::new(facet_record())),
                 [false, false] => None,
                 _ => continue,
             };
@@ -1200,7 +1211,7 @@ fn edge_link_flip(
         } else if facet_flips
             && protected_shared == BTreeSet::from([stable([x, y, p]), stable([x, y, d])])
         {
-            Some(facet_record())
+            Some(Box::new(facet_record()))
         } else {
             continue;
         };

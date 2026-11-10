@@ -630,6 +630,7 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
     let topology = repeated_circle_topology(&base, 2);
     let request = runmat_meshing_core::MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -676,6 +677,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
     let request = runmat_meshing_core::MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.3,
@@ -700,8 +702,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &UnlimitedControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap();
 
@@ -720,8 +721,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &CancelledControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap_err();
     assert_eq!(
@@ -777,8 +777,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &UnlimitedControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap();
     assert_eq!(
@@ -936,6 +935,7 @@ fn resolved_metric_request(
     let unit = runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap();
     runmat_meshing_core::MetricFieldRequest {
         entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: unit,
         maximum_grading_ratio: 1.3,
@@ -1153,4 +1153,20 @@ fn repeated_circle_topology(
         })
         .collect();
     topology
+}
+
+/// Curve and surface targets with the default volume target (radius-edge ratio 10).
+fn quality_targets(
+    curve: runmat_meshing_core::CurveQualityTargets,
+    surface: runmat_meshing_core::SurfaceQualityTargets,
+) -> runmat_meshing_core::MeshingQualityTargets {
+    runmat_meshing_core::MeshingQualityTargets {
+        curve,
+        surface,
+        volume: runmat_meshing_core::VolumeQualityTargets {
+            maximum_radius_edge_ratio: 10.0,
+            minimum_scaled_jacobian: 0.001,
+            maximum_metric_edge_length: 1.0,
+        },
+    }
 }

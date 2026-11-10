@@ -649,7 +649,7 @@ fn revolve() -> Family {
             d.features.push(Feature::new(
                 "spin",
                 FeatureKind::Revolve(Revolve {
-                    profile: ProfileRef::sketch("s_rev"),
+                    profile: ProfileRef::sketch("s_rev").into(),
                     axis: AxisRef::origin(OriginAxis::Z),
                     angle: input("ang"),
                     mode: BodyMode::New,
@@ -746,7 +746,7 @@ fn groove() -> Family {
             d.features.push(Feature::new(
                 "groove",
                 FeatureKind::Revolve(Revolve {
-                    profile: ProfileRef::sketch("s_gr"),
+                    profile: ProfileRef::sketch("s_gr").into(),
                     axis: axis_datum("gaxis"),
                     angle: ValueExpr::deg(360.0),
                     mode: BodyMode::cut(),
@@ -838,7 +838,7 @@ fn sweep_doc(d: &mut PartDocument, third: bool) {
     d.features.push(Feature::new(
         "sw",
         FeatureKind::Sweep(Sweep {
-            profile: ProfileRef::sketch("s_swp"),
+            profile: ProfileRef::sketch("s_swp").into(),
             path: ProfileRef::sketch("s_path"),
             mode: BodyMode::New,
         }),

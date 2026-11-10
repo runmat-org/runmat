@@ -17,7 +17,9 @@ mod admitted;
 mod result;
 pub use result::ElectricalStaticSolverResult;
 pub(in crate::execution) mod fields;
-pub use fields::electrical_native_field_definitions;
+pub use fields::{
+    electrical_native_field_definition_inventory, electrical_native_field_definitions,
+};
 pub(in crate::execution) use fields::{
     native_electrical_entity_counts, native_electrical_field_definition,
     native_electrical_field_plan,

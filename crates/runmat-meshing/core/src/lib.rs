@@ -85,6 +85,11 @@ pub use quality::boundary_face::{
     BoundaryFaceValidity, BOUNDARY_FACE_MINIMUM_NORMAL_JACOBIAN_RATIO, GAUSS_LEGENDRE_EIGHT_UNIT,
     GAUSS_LEGENDRE_SIXTEEN_UNIT, GAUSS_LEGENDRE_TWELVE_UNIT,
 };
+pub use quality::element_rigidity::{
+    assembly_minimum_scaled_jacobian, element_rigidity, tetrahedron_scaled_jacobian,
+    ElementRigidityShortfall, ASSEMBLY_FLOOR_POISSON_RATIO,
+    ELEMENT_RIGIDITY_MARGIN_ROUNDING_FACTOR, RIGID_MODE_RESIDUAL_RATIO,
+};
 pub use quality::tet10_element::{
     is_valid_tetrahedron10_element, tensor_tetrahedron_rule, tetrahedron10_is_affine,
     tetrahedron10_jacobian_margin, tetrahedron10_jacobian_margin_for_category,

@@ -288,6 +288,21 @@ pub struct GeometryInspection {
     /// or more entities than the region expects. Empty when the source carries no exact names.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub authored_names: std::collections::BTreeMap<String, Vec<String>>,
+    /// Faces two solids share (`interfaces = shared`), so a check can classify the faces that
+    /// join a fluid and a solid before meshing. Empty without exact shared topology.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_faces: Vec<SharedFaceInspection>,
+}
+
+/// One face shared by two solids of the exact model, with the authored names of the face and of
+/// the solid on each side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedFaceInspection {
+    /// Source topology ID of the exact face.
+    pub face: String,
+    pub face_names: Vec<String>,
+    pub solid_names: [Vec<String>; 2],
 }
 
 pub trait GeometryInspectionSource {

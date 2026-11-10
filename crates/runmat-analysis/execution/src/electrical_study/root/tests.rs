@@ -2,8 +2,20 @@ use super::super::{tests::preparation, ElectricalStudyCoordinator, ElectricalStu
 use super::*;
 
 fn roundtrip(wire: &PreparationWire) -> PreparationWire {
-    let bytes = encode_contract(PREFIX, "electrical-preparation-test", wire, LIMITS).unwrap();
-    decode_contract(PREFIX, "electrical-preparation-test", &bytes, LIMITS).unwrap()
+    let bytes = encode_contract(
+        PREFIX,
+        "electrical-preparation-test",
+        wire,
+        completion_codec_limits(ObjectInventoryLimits::default()),
+    )
+    .unwrap();
+    decode_contract(
+        PREFIX,
+        "electrical-preparation-test",
+        &bytes,
+        completion_codec_limits(ObjectInventoryLimits::default()),
+    )
+    .unwrap()
 }
 
 #[test]

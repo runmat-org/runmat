@@ -14,6 +14,21 @@ mod import;
 pub(crate) use import::CallerBoundedImport;
 pub(crate) use profiling::profile_import_workspace_phases;
 
+/// Codec limits for a study completion payload. The payload carries the study's mesh and result
+/// closures, so its size grows with admitted content: the encoded-byte ceiling is the run's
+/// output inventory total (`ObjectInventoryLimits::admitted` derives it from the admitted memory
+/// budget), and on import the caller's inventory limits. Collection lengths are bounded by that
+/// byte ceiling; string and nesting bounds still refuse malformed input.
+pub(crate) fn completion_codec_limits(
+    limits: ObjectInventoryLimits,
+) -> runmat_canonical_codec::CanonicalLimits {
+    runmat_canonical_codec::CanonicalLimits::content_bounded(
+        usize::try_from(limits.max_total_bytes).unwrap_or(usize::MAX),
+        65_536,
+        64,
+    )
+}
+
 /// Simultaneous original transport, assembled payloads and hostile codec materialization.
 /// This is import workspace, not a substitute reservation for executing source programs.
 pub(crate) fn import_workspace(references: &[ValueRef]) -> AnalysisBridgeResult<u64> {

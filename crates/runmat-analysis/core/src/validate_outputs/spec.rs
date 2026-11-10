@@ -24,6 +24,7 @@ pub(super) fn validate_spec(
     validate_complex(step, request, spec)?;
     validate_target_location(request, spec)?;
     validate_pairing(request, spec)?;
+    validate_line_parameter(request, spec)?;
     validate_recovery(request, spec)?;
     super::sampling::validate_sampling(step, request, &spec.sampling)?;
     super::sampling::validate_reduction(step, request, spec)?;
@@ -44,10 +45,57 @@ pub(super) fn validate_authored_spec(
     validate_complex(step, request, spec)?;
     validate_target_location(request, spec)?;
     validate_pairing(request, spec)?;
+    validate_line_parameter(request, spec)?;
     validate_recovery(request, spec)?;
     super::sampling::validate_sampling(step, request, &spec.sampling)?;
     super::sampling::validate_reduction(step, request, spec)?;
     super::sampling::validate_storage(request, spec)
+}
+
+/// A line parameter is one global reduction of a `line_parameters` step: a per-line value reads
+/// one conductor, and a pair or matrix value reads the whole section. A conductor target is read
+/// only by a line parameter.
+fn validate_line_parameter(
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    let line = spec.spatial_reduction() == SpatialReduction::LineParameter;
+    let scope = spec.quantity.line_parameter_scope();
+    if line != scope.is_some() {
+        return observation_error(
+            request,
+            "a line parameter is published only by the line-parameter reduction",
+        );
+    }
+    let conductor_target = matches!(spec.target, ObservationTarget::Conductor { .. });
+    let Some(scope) = scope else {
+        return if conductor_target {
+            observation_error(
+                request,
+                "a conductor target is read only by a line parameter",
+            )
+        } else {
+            Ok(())
+        };
+    };
+    let target_matches = match scope {
+        crate::LineParameterScope::Conductor => conductor_target,
+        crate::LineParameterScope::Pair | crate::LineParameterScope::Matrix => {
+            matches!(spec.target, ObservationTarget::WholeModel)
+        }
+    };
+    if !target_matches
+        || !matches!(request, ObservationRequest::Reduction(_))
+        || spec.component != ObservationComponent::All
+        || spec.complex_representation != ComplexRepresentation::Real
+        || spec.output_location != FieldLocation::Global
+    {
+        return observation_error(
+            request,
+            "a line parameter is one real global reduction of one conductor, or of the whole section for a pair or matrix value",
+        );
+    }
+    Ok(())
 }
 
 /// A paired reduction (pressure drop, transmission loss) reads exactly a two-face-region target,
@@ -150,6 +198,13 @@ fn validate_quantity_family(
 }
 
 pub fn quantity_supported(step: &ProcedureStep, quantity: ObservationQuantity) -> bool {
+    // A `line_parameters` step publishes exactly the line parameters of its cross-section.
+    let line = quantity.line_parameter_scope().is_some();
+    if step.procedure == AnalysisProcedure::LineParameters || line {
+        return step.procedure == AnalysisProcedure::LineParameters
+            && step.family == PhysicsFamily::Electromagnetic
+            && line;
+    }
     (match step.family {
         PhysicsFamily::Structural => is_structural(quantity),
         PhysicsFamily::Thermal => is_thermal(quantity),
@@ -285,9 +340,15 @@ fn validate_shape(
             );
         }
     }
-    let valid = spec
-        .value_shape
-        .is_storage_equivalent_to(&spec.quantity.canonical_value_shape());
+    let valid = match (spec.quantity.line_parameter_scope(), &spec.value_shape) {
+        // One row and one column per signal conductor of the section.
+        (Some(crate::LineParameterScope::Matrix), ObservationValueShape::Tensor { extents }) => {
+            matches!(extents.as_slice(), [rows, columns] if rows == columns)
+        }
+        _ => spec
+            .value_shape
+            .is_storage_equivalent_to(&spec.quantity.canonical_value_shape()),
+    };
     if valid {
         Ok(())
     } else {
@@ -324,6 +385,9 @@ fn validate_target(
         ObservationTarget::Path { positions } => {
             positions.len() >= 2 && positions.iter().all(|position| position.is_finite())
         }
+        // A cross-section's conductors are not model entities; the line-parameter solve
+        // resolves the name against its section.
+        ObservationTarget::Conductor { conductor_id } => !conductor_id.trim().is_empty(),
         ObservationTarget::Connector { connector_id } => model
             .connectors
             .iter()

@@ -297,6 +297,36 @@ impl CanonicalFluidBackwardEulerStep<'_, '_, '_> {
             self.numerical_input_identity,
         )
     }
+    /// The interval's solve started from `initial` (fields of the same cell complex, such as
+    /// the previous coupling iterate of a fluid-structure step) instead of the predecessor.
+    /// The time history, equations, acceptance and retained identity are unchanged.
+    pub fn solve_from(
+        &self,
+        initial: CanonicalFluidFields<'_>,
+    ) -> Result<CanonicalFluidResult, Error> {
+        let n = self.problem.topology.cells.len();
+        if initial.velocity_m_per_s.canonical_values().len() != n
+            || initial.pressure_fluctuation_pa.canonical_values().len() != n
+            || initial.face_volume_flux_m3_per_s.canonical_values().len()
+                != self.problem.topology.faces.len()
+            || initial
+                .velocity_m_per_s
+                .canonical_values()
+                .iter()
+                .flatten()
+                .chain(initial.pressure_fluctuation_pa.canonical_values().iter())
+                .chain(initial.face_volume_flux_m3_per_s.canonical_values().iter())
+                .any(|v| !v.is_finite())
+        {
+            return Err(Error::Invalid("interval starting iterate"));
+        }
+        iterate::solve_with_time(
+            self.problem,
+            Some(initial),
+            Some(self.derivative),
+            self.numerical_input_identity,
+        )
+    }
     /// Cold original equations are re-evaluated using the exact borrowed
     /// predecessor, not the encoded residual summary or a steady surrogate.
     pub fn recover(

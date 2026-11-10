@@ -22,6 +22,7 @@ pub(crate) mod wgpu_compat;
 // High-level plot types and figures
 pub mod plots;
 pub mod presentation;
+pub mod scalar_legend;
 pub use presentation::{PlotPresentationError, PresentationFailureKind};
 
 // Export capabilities
