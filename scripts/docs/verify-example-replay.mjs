@@ -33,7 +33,15 @@ export async function verifyExampleReplay(source, captures, graphics, selectedId
       assert(scene.figure.plots.some(plot => plot.vertices?.length > 0 && plot.triangles?.length > 0), `${label}: missing mesh`);
       assert(view.initial_camera.axes.length > 0, `${label}: missing camera`);
       if (view.field) {
-        const colours = scene.figure.plots.flatMap(plot => plot.vertex_colors_rgba ?? []);
+        const colours = scene.figure.plots.flatMap(plot => {
+          for (const [values, geometry] of [[plot.vertex_colors_rgba, plot.vertices],
+            [plot.triangle_colors_rgba, plot.triangles]]) {
+            if (values) assert.equal(values.length, geometry.length, `${label}: field colour cardinality differs`);
+          }
+          return [...(plot.vertex_colors_rgba ?? []), ...(plot.triangle_colors_rgba ?? [])];
+        });
+        assert(colours.every(colour => colour.length === 4 && colour.every(value => Number.isFinite(value)
+          && value >= 0 && value <= 1)), `${label}: invalid field colours`);
         assert(new Set(colours.map(colour => JSON.stringify(colour))).size > 1, `${label}: missing field colours`);
         const legend = scene.figure.geometryOverlay.scalar_legend;
         const displayUnit = view.display_unit ?? view.unit;
