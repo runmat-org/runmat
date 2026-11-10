@@ -238,6 +238,16 @@ study static {
 
     let program = check_fea_source_in_root(temporary.path(), &path, source.as_bytes()).unwrap();
 
+    #[cfg(windows)]
+    {
+        let canonical_root = fs::canonicalize(temporary.path()).unwrap();
+        let canonical =
+            check_fea_source_in_root(&canonical_root, &path, source.as_bytes()).unwrap();
+        assert!(canonical.is_valid(), "{:#?}", canonical.diagnostics);
+        assert_eq!(canonical.materials.len(), program.materials.len());
+        assert_eq!(canonical.studies.len(), program.studies.len());
+    }
+
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     assert_eq!(program.materials.len(), 1);
     assert_eq!(program.studies.len(), 1);

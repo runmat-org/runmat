@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "scope": "Native path and fixture repair acceptance. Final public CI and the full induction-gear disposition remain open.",
+  "accepted_inputs": {
+    "sha256": "c6e93a5cc1971c5172a5bc2c22315db99854f00d68745dae6f6634e6d6efb33b",
+    "files": 26023,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "linux": {
+    "source_base_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
+    "inputs": {
+      "sha256": "f28c151f5d75f52be7677975363ac673edfbefc6d2350db524d1d031e67e4482",
+      "files": 26022,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "target": "linux-x86_64",
+    "profile": "release",
+    "passed": 19,
+    "failed": 0,
+    "ignored": 0,
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat",
+      "-p",
+      "runmat-design-tools",
+      "--test",
+      "check_run_parity",
+      "--test",
+      "fea_snapshot_cli",
+      "--test",
+      "families",
+      "--test",
+      "docs_snippets",
+      "--no-fail-fast"
+    ],
+    "log_sha256": "299dfbb024ddf0d0bbdce4651c7eb182892124a1f315c122c8d570992ca29aab",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-seam-fixtures-r2.log",
+    "source_guard": {
+      "base_files": 27141,
+      "unchanged_files": 27131,
+      "reviewed_changed_files": 10,
+      "post_sha256": "7b0cdf5455c0734473720d665727d182286b4d7389190eca2e885e0c10b9e64b"
+    },
+    "artifacts": [
+      {
+        "name": "check_run_parity",
+        "passed": 7,
+        "original": "/home/nallana/rm1293/targets/x86_64-unknown-linux-gnu/release/deps/check_run_parity-97106b0817aa4ce5",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-seam-fixtures-r2.artifacts/check_run_parity-97106b0817aa4ce5",
+        "sha256": "68476acc8722d2ed65f23e9536145748f9bd773e81daea74b063c988400135a3"
+      },
+      {
+        "name": "fea_snapshot_cli",
+        "passed": 7,
+        "original": "/home/nallana/rm1293/targets/x86_64-unknown-linux-gnu/release/deps/fea_snapshot_cli-b5795088640a7b32",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-seam-fixtures-r2.artifacts/fea_snapshot_cli-b5795088640a7b32",
+        "sha256": "7b4e9f75e63bca8680ea1275d4c6adfe3a67be969ca0350c608c0edf72a4f109"
+      },
+      {
+        "name": "docs_snippets",
+        "passed": 1,
+        "original": "/home/nallana/rm1293/targets/x86_64-unknown-linux-gnu/release/deps/docs_snippets-58a2b62403420d00",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-seam-fixtures-r2.artifacts/docs_snippets-58a2b62403420d00",
+        "sha256": "e799bafbe14acc73b3faddaf03510c4ed8f302841207f3439c82423e646e37d8"
+      },
+      {
+        "name": "families",
+        "passed": 4,
+        "original": "/home/nallana/rm1293/targets/x86_64-unknown-linux-gnu/release/deps/families-0249239775765f04",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-seam-fixtures-r2.artifacts/families-0249239775765f04",
+        "sha256": "b59e2aabc8812c5fc785d5d7831400e03116906fa1f82053c0716c776a94fbb6"
+      },
+      {
+        "name": "runmat",
+        "original": "/home/nallana/rm1293/targets/x86_64-unknown-linux-gnu/release/runmat",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-seam-fixtures-r2.artifacts/runmat",
+        "sha256": "6767feeacda238943f8b4bf808d035ad360814157957f2a45adf8ebdb32c22a4"
+      }
+    ],
+    "conservation": "This run precedes the Windows path repair. The added host module and host-test extension are Windows-only. POSIX workspace key serialization retains its original implementation; qualified export names are relative files accepted by the new publication guard. The three required scientific workloads do not invoke native design export or circuit-check adapters."
+  },
+  "windows": {
+    "source_base_revision": "163e7dc18ee319b4d8021c4e38ca3d55797a625c",
+    "inputs": {
+      "sha256": "e894ff403e1c508abe1a4fb209153110d6e2adb7b38e66be533025d1249c23a0",
+      "files": 26023,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_after_formatting": {
+      "sha256": "c6e93a5cc1971c5172a5bc2c22315db99854f00d68745dae6f6634e6d6efb33b",
+      "files": 26023,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "formatting_difference": [
+      {
+        "path": "crates/runmat-cad/src/display/wire.rs",
+        "before": [
+          "100644",
+          "blob",
+          "41e85b40c27217f87fe4d9e1943440460aadad20"
+        ],
+        "after": [
+          "100644",
+          "blob",
+          "596da3135d315783103661ea827641a6e5f54202"
+        ]
+      }
+    ],
+    "formatting_reason": "Only indentation of map_or in CAD display/wire.rs differs from the accepted source; the f32-to-f64 conversion and tokens are identical.",
+    "target": "windows-x86_64",
+    "toolchain": "Rust 1.90.0",
+    "profile": "test, debug information disabled, development/test LTO off",
+    "passed": 15,
+    "failed": 0,
+    "ignored": 0,
+    "harnesses": [
+      {
+        "name": "check_run_parity",
+        "passed": 7
+      },
+      {
+        "name": "families",
+        "passed": 4
+      },
+      {
+        "name": "m_values",
+        "passed": 4
+      }
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--all-features",
+      "--no-fail-fast",
+      "--package",
+      "runmat",
+      "--package",
+      "runmat-design-tools",
+      "--package",
+      "runmat-design-tools-wasm",
+      "--package",
+      "runmat-config",
+      "--package",
+      "runmat-execution",
+      "--package",
+      "runmat-execution-artifact",
+      "--package",
+      "runmat-execution-runner",
+      "--package",
+      "runmat-execution-runner-native",
+      "--package",
+      "runmat-execution-transport-native",
+      "--package",
+      "runmat-logging",
+      "--package",
+      "runmat-lsp",
+      "--package",
+      "runmat-node-agent",
+      "--package",
+      "runmat-package",
+      "--package",
+      "runmat-package-cache",
+      "--package",
+      "runmat-package-cache-native",
+      "--package",
+      "runmat-process-host",
+      "--package",
+      "runmat-server-client",
+      "--package",
+      "runmat-fea-admission-native",
+      "--package",
+      "runmat-test-runner",
+      "--package",
+      "runmat-test-runner-execution",
+      "--package",
+      "runmat-test-runner-native",
+      "--package",
+      "runmat-wasm",
+      "--test",
+      "check_run_parity",
+      "--test",
+      "families",
+      "--test",
+      "m_values"
+    ],
+    "log_sha256": "168e836a2d1557c26a48ef568ec0204c7be01037b95e794df3bf30e1f0357539",
+    "log_location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r3.log",
+    "source_guard": {
+      "base_files": 27141,
+      "unchanged_files": 27127,
+      "reviewed_changed_files": 14,
+      "added_files": 1,
+      "before_sha256": "cdee98e630640c1fbdeba6c094896db834d52545a7e42741342e9abba1d24f93",
+      "after_sha256": "e38ca45856df9cdd4761df71d5ae4c5f4dfe9aee1a82a758f443a28292e5283e",
+      "added_before_sha256": "f1e87c51c2646bdfb8f18b5cec58fad397b78dff61c960dc536de1c108433279",
+      "added_after_sha256": "f1e87c51c2646bdfb8f18b5cec58fad397b78dff61c960dc536de1c108433279",
+      "reviewed_payload_sha256": "f9288b8139b049d7f9f8b2c05db92f84e0304b419a0518cc86e52733c08762d8"
+    },
+    "prefix_probe": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "13d6b9ebd2687721b250bdf4fe26950495507fd88dd35f2da9fb0f2d381a9f98",
+      "log_location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r3.path-test.log"
+    },
+    "artifacts": [
+      {
+        "sha256": "f43faefd051ccc3f10e7665ab21d9e9a82f9407c9c66421172120e9ec5f8bf08",
+        "location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r3.artifacts\\check_run_parity-eca4861f5c2712ab.exe"
+      },
+      {
+        "sha256": "ab991c0c921664a9d7ef61296091391b68c9f05d271f83956ce27c6599f1be41",
+        "location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r3.artifacts\\families-3e26ca31f02fd822.exe"
+      },
+      {
+        "sha256": "8195d93d647985188d7f55c06b1ea29753c9b653718840f6151de29b601adace",
+        "location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r3.artifacts\\integration-071-seam-fixtures-r3.path-test.exe"
+      },
+      {
+        "sha256": "e142a26e6d5e74a5797877b331984d99178797a8c8168295ac86e6ab9bfb5b5d",
+        "location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r3.artifacts\\m_values-101c04c5a804ffc8.exe"
+      },
+      {
+        "sha256": "d803513f4465ff826b074e36215d0f0811934e876a649f44d0c8f0eddffaf86d",
+        "location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r3.artifacts\\runmat-design.exe"
+      },
+      {
+        "sha256": "ad8cbccb067da7c16e5ae4427addede691c825afec8098b22e402ab327a75fb8",
+        "location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r3.artifacts\\runmat.exe"
+      }
+    ],
+    "conserved_previous_checks": {
+      "source": "163e7dc18e plus the earlier ten-file repair overlay",
+      "snapshot_passed": 7,
+      "docs_passed": 1,
+      "baseline_total_passed": 17,
+      "baseline_total_failed": 2,
+      "log_location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-seam-fixtures-r2.log",
+      "reason": "Snapshots use equal canonical path namespaces; the replacement prefix comparator returns the same relative paths for them. Docs snippets use their unchanged logical in-memory workspaces. Native workspace serialization and design CLI publication are outside these two cohorts. The two failing root/family cases were rerun successfully in r3."
+    }
+  },
+  "compiled_cli": {
+    "acceptance_passed": true,
+    "scope": "Native offline circuit CLI wiring and exit classification; fixture design findings are reported separately",
+    "binary_sha256": "ad8cbccb067da7c16e5ae4427addede691c825afec8098b22e402ab327a75fb8",
+    "exit_code": 0,
+    "signal": null,
+    "error": null,
+    "design_passed": true,
+    "design_errors": 0,
+    "design_warnings": 1,
+    "ran": [
+      "compile",
+      "erc",
+      "review",
+      "drc"
+    ],
+    "compile_errors": 0,
+    "source_path": "\\\\?\\C:\\Users\\nallana\\rm1293-r964-source\\crates\\runmat-cad\\wasm\\tests\\drone\\electrical\\flight_controller\\flight_controller.circuit.layout",
+    "receipt_sha256": "5c76f3287c52295b2b4d244b96ab13171315715654e4667336468079a761dc5a",
+    "receipt_location": "gh-windows-20260330-204014:C:\\Users\\nallana\\rm1293\\logs\\integration-071-native-circuit-wiring\\receipt.json"
+  }
+}

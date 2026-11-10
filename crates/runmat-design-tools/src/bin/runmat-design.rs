@@ -39,6 +39,7 @@
 
 use base64::Engine;
 use runmat_design_tools::call;
+use runmat_design_tools::workspace::{output_path, physical_path, source_path};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -80,9 +81,10 @@ fn check(args: &[String]) -> ExitCode {
             .unwrap_or_else(|| file.parent().unwrap_or(Path::new("/")).to_path_buf());
         let files = runmat_design_tools::workspace::read_workspace(&base);
         match runmat_design_tools::circuit_values::with_native_values(&files, || {
-            runmat_design_tools::ci::check_circuit(&file.to_string_lossy(), &files, simulate)
+            runmat_design_tools::ci::check_circuit(&source_path(&file), &files, simulate)
         }) {
-            Ok(r) => {
+            Ok(mut r) => {
+                r.path = file.to_string_lossy().into_owned();
                 failed |= !r.passed;
                 if !json_out {
                     for line in runmat_design_tools::ci::report_lines(&r, &base.to_string_lossy()) {
@@ -182,7 +184,7 @@ fn main() -> ExitCode {
         .unwrap_or_else(|| file.parent().unwrap_or(Path::new("/")).to_path_buf());
     let files = runmat_design_tools::workspace::read_workspace(&root);
     let mut input = json!({
-        "path": file.to_string_lossy(),
+        "path": source_path(&file),
         "format": format,
         "allConfigurations": all,
         "configuration": configuration,
@@ -258,7 +260,14 @@ fn main() -> ExitCode {
             update["path"].as_str().unwrap_or(""),
             update["text"].as_str().unwrap_or(""),
         );
-        if let Err(e) = std::fs::write(path, text) {
+        let physical = match physical_path(&root, path) {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!("{path}: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        if let Err(e) = std::fs::write(physical, text) {
             eprintln!("{path}: {e}");
             return ExitCode::FAILURE;
         }
@@ -278,7 +287,13 @@ fn main() -> ExitCode {
         } else {
             content.as_bytes().to_vec()
         };
-        let path = out.join(name);
+        let path = match output_path(&out, Path::new(name)) {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!("{name}: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }

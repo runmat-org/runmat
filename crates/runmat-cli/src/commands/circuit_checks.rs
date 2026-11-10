@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use runmat_design_tools::ci::{check_circuit, report_lines, CircuitCheck};
 use runmat_design_tools::inspect::m_values::with_m_values;
-use runmat_design_tools::workspace::{is_circuit_file, read_workspace};
+use runmat_design_tools::workspace::{is_circuit_file, read_workspace, source_path};
 use std::path::{Path, PathBuf};
 
 pub fn is_circuit(path: &Path) -> bool {
@@ -21,10 +21,11 @@ pub fn check_file(file: &Path, simulate: bool) -> Result<(CircuitCheck, PathBuf)
     let base = file.parent().unwrap_or(Path::new("/")).to_path_buf();
     let files = read_workspace(&base);
     // Values computed by `.m` functions run in a RunMat session (PCB-38).
-    let report = with_m_values(&files, || {
-        check_circuit(&file.to_string_lossy(), &files, simulate)
+    let mut report = with_m_values(&files, || {
+        check_circuit(&source_path(&file), &files, simulate)
     })
     .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+    report.path = file.to_string_lossy().into_owned();
     Ok((report, base))
 }
 

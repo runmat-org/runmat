@@ -82,14 +82,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "3ae1253a1f557a8401fbc06a32a94b400c27d70137cd233c7a50c66745621d0e",
-      "files": 26022,
+      "sha256": "c6e93a5cc1971c5172a5bc2c22315db99854f00d68745dae6f6634e6d6efb33b",
+      "files": 26023,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Reviewed native report formatting and lease deadline repairs; numerical workloads and assertions remain unchanged. See the exact input inventory and focused acceptance evidence.",
+    "reason": "Exact source review conserves the original Linux authored/recovery and macOS performance workloads across native lease, report and path adapters and test-only edits. The named numerical implementations and assertions retain their original measurements; focused boundary evidence is linked.",
     "review": {
-      "path": "qualification/scientific/reviews/native-lease-and-circuit-report-20261110.json",
-      "sha256": "5cb0e344ffb7ca10e21b70e55ab1ba9f2298a79aedd7ad03b57f61d5ed410a83"
+      "path": "qualification/scientific/reviews/native-design-paths-20261110.json",
+      "sha256": "03c08c255efa1867e81491968642bde8713fc9d1f03a1addc92c08d777e0e3c1"
     }
   }
 }

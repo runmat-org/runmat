@@ -196,7 +196,18 @@ fn pending_family_procedures_are_refused_by_check_and_run_alike() {
 #[test]
 fn several_runnable_roots_list_the_choices_and_select_alike() {
     let temp = TempDir::new().unwrap();
-    let project = project_with(&temp, "study.fea", &example("bar-cooling-sweep.fea"));
+    // The sweep owns its parameterized study's default entry. Add an independent
+    // study so this fixture still exercises ambiguous default-root selection.
+    let source = format!(
+        "{}\nstudy standalone {{
+    geometry = geometry.bar
+    mesh = mesh.bar
+    model = model.cooled_bar(film = 35 W/m^2/K)
+    analysis heat {{ thermal steady {{}} }}
+}}\n",
+        example("bar-cooling-sweep.fea")
+    );
+    let project = project_with(&temp, "study.fea", &source);
     let checked = runmat(&temp, &project, &["check", "study.fea", "--json"]);
     assert!(checked.status.success(), "{checked:?}");
     let checked = json(&checked);
@@ -205,7 +216,7 @@ fn several_runnable_roots_list_the_choices_and_select_alike() {
     assert!(!run.status.success());
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("--study bar_cooling") && stderr.contains("--sweep cooling"),
+        stderr.contains("--study standalone") && stderr.contains("--sweep cooling"),
         "{stderr}"
     );
     let unknown = runmat(

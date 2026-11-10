@@ -2,7 +2,8 @@
 //! `runmat test`): every design file and model library under a folder.
 
 use crate::Files;
-use std::path::Path;
+use std::io;
+use std::path::{Component, Path, PathBuf};
 
 /// The extensions read: design files, the circuit lock, STEP inputs, the model libraries
 /// (`.lib`, `.cir`, `.sp`) that simulation sections include, the `.m` functions design values
@@ -23,8 +24,8 @@ pub const DESIGN_EXTENSIONS: &[&str] = &[
     ".svg",
 ];
 
-/// Every design file under `dir` (hidden folders, `target` and `node_modules` skipped), keyed by
-/// its path as `dir` spells it.
+/// Every design file under `dir`, keyed by [`source_path`]. Hidden folders,
+/// `target` and `node_modules` are skipped.
 pub fn read_workspace(dir: &Path) -> Files {
     let mut files = Files::new();
     walk(dir, &mut files, 0);
@@ -45,8 +46,87 @@ fn walk(dir: &Path, files: &mut Files, depth: usize) {
             walk(&p, files, depth + 1);
         } else if DESIGN_EXTENSIONS.iter().any(|x| name.ends_with(x)) {
             if let Ok(text) = std::fs::read_to_string(&p) {
-                files.insert(p.to_string_lossy().into_owned(), text);
+                files.insert(source_path(&p), text);
             }
+        }
+    }
+}
+
+/// Serialize a native path into the design compilers' normalized, slash-separated namespace.
+pub fn source_path(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        runmat_cad::modules::normalize(&path.to_string_lossy().replace('\\', "/"))
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_string_lossy().into_owned()
+    }
+}
+
+/// Resolve an existing workspace file's logical path for native settings publication.
+pub fn physical_path(root: &Path, source: &str) -> io::Result<PathBuf> {
+    let root_source = source_path(root);
+    let relative = Path::new(source)
+        .strip_prefix(Path::new(&root_source))
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "design path is outside its workspace",
+            )
+        })?;
+    output_path(root, relative)
+}
+
+/// Keep exported files beneath the caller's output folder.
+pub fn output_path(root: &Path, relative: &Path) -> io::Result<PathBuf> {
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "design path must name a file within its workspace",
+        ));
+    }
+    Ok(root.join(relative))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_workspace_paths_round_trip_and_confine_settings_writes() {
+        #[cfg(windows)]
+        let roots = [r"\\?\C:\project", r"\\?\UNC\server\share\project"];
+        #[cfg(not(windows))]
+        let roots = ["/project"];
+        for root in roots {
+            let root = Path::new(root);
+            let file = root.join("models/board.circuit.layout");
+            let source = source_path(&file);
+            assert_eq!(physical_path(root, &source).unwrap(), file);
+            assert!(physical_path(
+                root,
+                &format!("{}/../escape.circuit.layout", source_path(root))
+            )
+            .is_err());
+            assert_eq!(
+                output_path(root, Path::new("gerber/layer.gbr")).unwrap(),
+                root.join("gerber/layer.gbr")
+            );
+            for path in ["/escape.step", "../escape.step"] {
+                assert!(output_path(root, Path::new(path)).is_err());
+            }
+            #[cfg(windows)]
+            assert!(output_path(root, Path::new(r"C:\escape.step")).is_err());
+            assert!(physical_path(
+                root,
+                &format!("{}-other/board.circuit.layout", source_path(root))
+            )
+            .is_err());
         }
     }
 }

@@ -67,12 +67,38 @@ fn export(input: Value) -> Value {
 }
 
 /// The x extent (mm) of a STEP file's points.
+#[cfg(not(feature = "occt"))]
 fn x_extent(step: &str) -> f64 {
     let xs: Vec<f64> = step
         .match_indices("CARTESIAN_POINT('',(")
         .filter_map(|(i, m)| step[i + m.len()..].split(',').next()?.trim().parse().ok())
         .collect();
     xs.iter().cloned().fold(f64::MIN, f64::max) - xs.iter().cloned().fold(f64::MAX, f64::min)
+}
+
+/// Measure physical topology, excluding STEP placement and surface control points.
+#[cfg(feature = "occt")]
+fn x_extent(step: &str) -> f64 {
+    use runmat_geometry_io::{
+        import_exact_cad, ExactCadImportOptions, GeometryFormat, GeometryImportContext,
+    };
+    let imported = import_exact_cad(
+        "plate.step",
+        step.as_bytes(),
+        GeometryFormat::Step,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .expect("exported STEP imports as exact topology");
+    let xs: Vec<f64> = imported
+        .topology
+        .vertices
+        .iter()
+        .map(|vertex| vertex.point_m.canonical_values()[0] * 1000.0)
+        .collect();
+    assert!(!xs.is_empty(), "exported STEP has physical vertices");
+    xs.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+        - xs.iter().copied().fold(f64::INFINITY, f64::min)
 }
 
 #[test]

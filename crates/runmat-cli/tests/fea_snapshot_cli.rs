@@ -472,7 +472,8 @@ fn structural_modal_snapshot_shows_only_mode_shapes_and_verifies() {
 
     let selected = snapshot_to(&project, "out-selected", &["--view", "mode-2"]);
     assert_eq!(view_ids(&selected), ["mode-2"]);
-    let refused = Command::new(env!("CARGO_BIN_EXE_runmat"))
+    let mut refused = Command::new(env!("CARGO_BIN_EXE_runmat"));
+    refused
         .current_dir(project.path())
         .args([
             "snapshot",
@@ -487,9 +488,9 @@ fn structural_modal_snapshot_shows_only_mode_shapes_and_verifies() {
         .env(
             "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
             project.path().join("study-artifacts"),
-        )
-        .output()
-        .unwrap();
+        );
+    let _admission = fea_admission::AdmissionServer::for_command(&mut refused, project.path());
+    let refused = refused.output().unwrap();
     assert!(!refused.status.success());
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(stderr.contains("no view 'stress'"), "stderr: {stderr}");
