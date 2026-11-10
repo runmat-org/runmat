@@ -16,7 +16,7 @@ pub mod run_set;
 #[cfg(feature = "m-values")]
 pub mod m_values;
 mod frame;
-mod stance;
+pub(crate) mod stance;
 mod surface;
 pub use surface::Ray;
 

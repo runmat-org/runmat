@@ -204,3 +204,85 @@ fn a_later_clamp_levels_with_the_first_on_one_bore_axis() {
     let m = call("design.seat_part", json!({ "path": "/p/rig.assembly", "component": "front", "target": ray(140.0), "levelWith": "front" }), &files).unwrap_err().message;
     assert!(m.contains("can't be levelled with itself"), "{m}");
 }
+
+/// An 8 mm tube 120 mm long along X.
+const TUBE: &str = "runmat 0.7\nstd 1\n\npart tube {\n    sketch s on origin.yz {\n        outer = circle(center = [0 mm, 0 mm], radius = 4 mm)\n    }\n    feature body = extrude(profile = sketch.s, distance = 120 mm)\n}\n";
+
+/// The STEP rig with the clamp and the tube parts.
+fn step_files() -> Files {
+    let mut files = files(STEP);
+    files.insert("/p/mech/skid_clamp.part".into(), CLAMP.into());
+    files.insert("/p/mech/tube.part".into(), TUBE.into());
+    files
+}
+
+fn under(x: f64) -> Value {
+    json!({ "component": if x > 90.0 { "low" } else { "high" }, "from": [x, 25.0, 0.0], "direction": [0.0, 0.0, 1.0] })
+}
+
+/// A tube seated `through` two clamps' bores lies on their common axis with its middle midway
+/// between them, fastened to the first; clamps whose bores differ in height are refused with
+/// the levelWith seating that lines them up.
+#[test]
+fn a_tube_through_two_clamps_lies_on_their_axis_centred_between_them() {
+    let mut files = step_files();
+    for (clamp, x) in [("front", 140.0), ("rear", 40.0)] {
+        let out = seat(json!({ "path": "/p/rig.assembly", "component": clamp, "part": "/p/mech/skid_clamp.part", "target": under(x),
+            "own": { "side": "+z" }, "offset": 0.5, "along": [1.0, 0.0, 0.0] }), &files);
+        files.insert("/p/rig.assembly".into(), staged_text(&out, "/p/rig.assembly"));
+    }
+    // The rear clamp sits under the higher underside: its bore is 4 mm above the front one's.
+    let tube = json!({ "path": "/p/rig.assembly", "component": "skid", "part": "/p/mech/tube.part", "through": ["front", "rear"] });
+    let m = call("design.seat_part", tube.clone(), &files).unwrap_err().message;
+    assert!(m.contains("the bores aren't on one axis") && m.contains("4.00 mm from `front.") && m.contains("seat `rear` again with levelWith `front`"), "{m}");
+    let out = seat(json!({ "path": "/p/rig.assembly", "component": "rear", "target": under(40.0), "own": { "side": "+z" }, "offset": 0.5, "levelWith": "front" }), &files);
+    files.insert("/p/rig.assembly".into(), staged_text(&out, "/p/rig.assembly"));
+    let out = seat(tube, &files);
+    let s = &out["seat"];
+    // Bores at x 140 and 40 (each clamp's middle), 5 mm above the 75.5 mm bases: the tube's
+    // middle (60 mm along it) at x 90.
+    assert!(close(&s["pose"]["translation_mm"], [30.0, 25.0, 80.5]), "{s:#}");
+    assert!(s["pose"]["rotation_deg"].as_f64().unwrap().abs() < 1e-3, "{s:#}");
+    assert_eq!(s["target"], "front", "{s:#}");
+    assert_eq!(s["mate_status"], "satisfied", "{s:#}");
+    let rows = s["through"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{s:#}");
+    for (row, station) in rows.iter().zip([50.0, -50.0]) {
+        assert!(row["off_axis_mm"].as_f64().unwrap() < 1e-3 && (row["station_mm"].as_f64().unwrap() - station).abs() < 1e-3, "{s:#}");
+    }
+    let text = staged_text(&out, "/p/rig.assembly");
+    assert_eq!(text.matches("mate skid_seated =").count(), 1, "{text}");
+    // Through takes no target, and at least two holders.
+    let m = call("design.seat_part", json!({ "path": "/p/rig.assembly", "component": "skid", "through": ["front", "rear"], "target": under(40.0) }), &files).unwrap_err().message;
+    assert!(m.contains("leave out target"), "{m}");
+    let m = call("design.seat_part", json!({ "path": "/p/rig.assembly", "component": "skid", "through": ["front"] }), &files).unwrap_err().message;
+    assert!(m.contains("two or more holders"), "{m}");
+}
+
+/// `mirror` seats a clamp as the mirror image of one already seated, across the plate's middle
+/// plane square to Y: a placement turned half round Z, the same height and station.
+#[test]
+fn a_mirrored_clamp_is_the_first_one_reflected_across_the_target() {
+    let mut files = files(RIG);
+    files.insert("/p/mech/skid_clamp.part".into(), CLAMP.into());
+    let out = seat(json!({ "path": "/p/rig.assembly", "component": "left", "part": "/p/mech/skid_clamp.part",
+        "target": { "component": "plate", "from": [40.0, 40.0, 0.0], "direction": [0.0, 0.0, 1.0] },
+        "own": { "side": "+z" }, "offset": 0.5, "along": [1.0, 0.0, 0.0] }), &files);
+    // Its top centre (6, 0, 20) 0.5 mm under the ray's hit (40, 40, 100).
+    assert!(close(&out["seat"]["pose"]["translation_mm"], [34.0, 40.0, 79.5]), "{:#}", out["seat"]);
+    files.insert("/p/rig.assembly".into(), staged_text(&out, "/p/rig.assembly"));
+    let out = seat(json!({ "path": "/p/rig.assembly", "component": "right", "part": "/p/mech/skid_clamp.part",
+        "target": { "component": "plate" }, "mirror": "left" }), &files);
+    let s = &out["seat"];
+    // The plate's middle plane is y = 25: the reflection spans x 34..46, y 3..17, z 79.5..99.5,
+    // which is the clamp turned 180° about Z with its origin at (46, 10, 79.5).
+    assert!(close(&s["pose"]["translation_mm"], [46.0, 10.0, 79.5]), "{s:#}");
+    assert!((s["pose"]["rotation_deg"].as_f64().unwrap() - 180.0).abs() < 1e-3, "{s:#}");
+    assert!(s["pose"]["rotation_axis"][2].as_f64().unwrap().abs() > 0.999, "{s:#}");
+    assert_eq!(s["mate_status"], "satisfied", "{s:#}");
+    // Only a copy of the same part mirrors, and mirror takes the target component alone.
+    let m = call("design.seat_part", json!({ "path": "/p/rig.assembly", "component": "odd", "part": "/p/mech/block.part", "target": { "component": "plate" }, "mirror": "left" }), &files).unwrap_err().message;
+    assert!(m.contains("isn't the same part as `left`"), "{m}");
+    let m = call("design.seat_part", json!({ "path": "/p/rig.assembly", "component": "right", "part": "/p/mech/skid_clamp.part", "target": { "component": "plate", "face": "x" }, "mirror": "left" }), &files).unwrap_err().message;
+    assert!(m.contains("give target.component only"), "{m}");
+}

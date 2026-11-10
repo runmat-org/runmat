@@ -244,6 +244,50 @@ pub fn round_axis(display: &PartDisplay, normal: V3) -> Option<(V3, V3)> {
         .map(|(p, a, _)| (p, a))
 }
 
+/// A round face of a part, in its coordinates: its name, the point on its axis level with the
+/// face's middle, the axis's unit direction, the face's length along it and its area.
+pub struct Round {
+    pub name: String,
+    pub middle: V3,
+    pub axis: V3,
+    pub length: f64,
+    pub area: f64,
+}
+
+/// A round face as a [`Round`] named `name`; `None` when it isn't a cylinder.
+fn round_of(f: &FaceDisplay, name: String) -> Option<Round> {
+    let Some(SurfaceKind::Cylinder { axis_point, axis_direction, .. }) = f.surface else { return None };
+    let axis = unit(axis_direction)?;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in f.positions.chunks_exact(3) {
+        let t = dot(sub([p[0] as f64, p[1] as f64, p[2] as f64], axis_point), axis);
+        lo = lo.min(t);
+        hi = hi.max(t);
+    }
+    (lo <= hi).then(|| Round { name, middle: add(axis_point, scale(axis, (lo + hi) / 2.0)), axis, length: hi - lo, area: face_area(f) })
+}
+
+/// The part's round faces (bores, bosses, a tube's outside), largest first, each by its region,
+/// name or reference.
+pub fn rounds(display: &PartDisplay) -> Vec<Round> {
+    let mut all: Vec<Round> = faces(display)
+        .filter_map(|f| round_of(f, f.regions.first().or(f.names.first()).cloned().or_else(|| f.reference.clone()).or_else(|| f.label.clone())?))
+        .collect();
+    all.sort_by(|a, b| b.area.total_cmp(&a.area));
+    all
+}
+
+/// The round face `pick` names (as [`find_face`] reads it): `None` when it names no face,
+/// `Some(None)` when the face it names isn't round.
+pub fn named_round(display: &PartDisplay, pick: &str) -> Option<Option<Round>> {
+    find_face(display, pick).map(|f| round_of(f, pick.to_owned()))
+}
+
+/// Every vertex of the part's tessellation, in its coordinates.
+pub fn points(display: &PartDisplay) -> Vec<V3> {
+    faces(display).flat_map(|f| f.positions.chunks_exact(3).map(|p| [p[0] as f64, p[1] as f64, p[2] as f64])).collect()
+}
+
 /// A part's triangles and vertices, placed by `place`.
 pub struct Mesh {
     pub points: Vec<V3>,

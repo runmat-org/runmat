@@ -207,7 +207,7 @@ fn to_segment(c: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     ((c[0] - a[0] - t * d[0]).powi(2) + (c[1] - a[1] - t * d[1]).powi(2)).sqrt()
 }
 
-pub(super) fn stance(path: &str, text: &str, files: &Files, contact: Option<&[String]>, up: Option<&[f64]>) -> Result<Value, ToolError> {
+pub(crate) fn stance(path: &str, text: &str, files: &Files, contact: Option<&[String]>, up: Option<&[f64]>) -> Result<Value, ToolError> {
     let contact = contact.filter(|c| !c.is_empty()).ok_or_else(|| {
         ToolError::invalid("the stance section needs contact: the components that touch the ground (the skid tubes, the feet)")
     })?;

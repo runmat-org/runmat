@@ -25,181 +25,37 @@
 //! from the connector frames in closed form. The other mates leave freedoms, so the component's
 //! starting placement is written at the seated pose. Seating the same component again replaces
 //! its seat.
+//!
+//! Two picks build symmetric, aligned structures (a landing gear) by construction:
+//! - `through` seats a straight member through two or more holders' bores at once, on their
+//!   common axis and centred between them, and refuses when the bores aren't on one axis
+//!   (seat/through.rs);
+//! - `mirror` seats a component as the mirror image of one already seated, across the target's
+//!   plane of symmetry (seat/mirror.rs).
+//!
+//! With `contact` the result also carries `design.inspect`'s stance section for the assembly
+//! after the seating: the ground clearance, the centre of mass's margin and tip-over angle, and
+//! the stance.
 
 #[path = "seat/geometry.rs"]
 mod geometry;
+#[path = "seat/mirror.rs"]
+mod mirror;
 #[path = "seat/text.rs"]
 mod text;
+#[path = "seat/through.rs"]
+mod through;
+#[path = "seat/types.rs"]
+mod types;
 
-use crate::edit::{stage, StagedChange};
+use crate::edit::stage;
 use crate::{text_of, Files, ToolError};
 use geometry::*;
+pub use types::*;
 use runmat_cad::display::PartDisplay;
 use runmat_cad::regen::kernel::Transform;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::rc::Rc;
-
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SeatInput {
-    /// Workspace path of the assembly.
-    pub path: String,
-    /// The occurrence to seat: one the assembly has, or the name of a new one when `part` is
-    /// given.
-    pub component: String,
-    /// A part file to insert as `component` (its workspace path, `/mechanical/skid_clamp.part`).
-    #[serde(default)]
-    pub part: Option<String>,
-    /// The inserted part's input values (`{ "name": "length", "value": "180 mm" }`).
-    #[serde(default)]
-    pub inputs: Option<Vec<InputValue>>,
-    /// Where it goes.
-    pub target: SeatTarget,
-    /// The component's own face, side or frame that meets the target.
-    #[serde(default)]
-    pub own: Option<SeatOwn>,
-    /// Gap left between the two, mm (negative presses in). Along an axis: the shift along it.
-    #[serde(default)]
-    pub offset: Option<f64>,
-    /// Seat it the other way round (its face along the target's normal, or its axis reversed).
-    #[serde(default)]
-    pub flip: Option<bool>,
-    /// Turn about the contact normal (or axis), degrees, after `along`.
-    #[serde(default)]
-    pub rotation: Option<f64>,
-    /// The assembly direction the component's long axis runs along (`[1, 0, 0]`). A part with
-    /// a bore or round face across the contact runs along its axis (a clamp along the tube it
-    /// holds); otherwise its box's longest side across the contact.
-    #[serde(default)]
-    pub along: Option<Vec<f64>>,
-    /// `fasten` (the default), `coincident` (planes) or `concentric` (axes).
-    #[serde(default)]
-    pub mate: Option<String>,
-    /// A component already seated (a clamp, or the tube it holds) whose round face's axis this
-    /// one's bore goes on: the component keeps the station along that axis that the target picks
-    /// and stops short of the target instead of touching it, so a straight member runs through
-    /// a set of clamps under a curved body. Its long axis runs along that axis unless `along`
-    /// says otherwise. Only with a target face or ray.
-    #[serde(default)]
-    pub level_with: Option<String>,
-    /// Neighbours to report the clearance to (occurrence names).
-    #[serde(default)]
-    pub clearance: Option<Vec<String>>,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct InputValue {
-    pub name: String,
-    pub value: String,
-}
-
-/// The target: `component` and one of `face`, `connector`, or `from` with `direction`.
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SeatTarget {
-    pub component: String,
-    /// A face of the target's part: its name for people (`Body side 2`), reference or region.
-    #[serde(default)]
-    pub face: Option<String>,
-    /// One of the assembly's connectors.
-    #[serde(default)]
-    pub connector: Option<String>,
-    /// A point beside the target, mm, assembly coordinates; the ray from it along `direction`
-    /// meets the target's surface where the component goes.
-    #[serde(default)]
-    pub from: Option<Vec<f64>>,
-    /// The way the component approaches the target (`[0, 0, 1]`: up into a belly).
-    #[serde(default)]
-    pub direction: Option<Vec<f64>>,
-}
-
-/// The component's side of the contact: one of `face`, `side` or `connector`.
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SeatOwn {
-    #[serde(default)]
-    pub face: Option<String>,
-    /// A side of the part's box: `+x`, `-x`, `+y`, `-y`, `+z` (its top) or `-z`.
-    #[serde(default)]
-    pub side: Option<String>,
-    /// A frame the part publishes (a `mate_connector` feature).
-    #[serde(default)]
-    pub connector: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
-pub struct SeatOutput {
-    #[serde(flatten)]
-    pub change: StagedChange,
-    pub seat: SeatReport,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
-pub struct SeatReport {
-    /// One line: where it went, the mate, interference and the nearest neighbour.
-    pub summary: String,
-    pub component: String,
-    pub target: String,
-    /// The mate written and its kind (`fasten`, `planar`, `cylindrical`).
-    pub mate: String,
-    pub mate_kind: String,
-    /// The mate after the solve: `satisfied`, `redundant`, `conflicting`, `not_converged`,
-    /// `inactive`, `failed`, or `not solved` when the mate didn't resolve. The mates it clashes
-    /// with, or why it failed, are in `notes`.
-    pub mate_status: String,
-    pub pose: Pose,
-    /// Where the two meet, mm, assembly coordinates, with the target's normal (or axis) there.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub contact: Option<ContactReport>,
-    /// Overlaps with any other component; empty when it overlaps nothing it was measured
-    /// against (a pair the kernel couldn't measure is named in the summary and the notes).
-    pub interference: Vec<OverlapRow>,
-    /// Gaps to the named neighbours (or the nearest few), mm.
-    pub clearance: Vec<GapRow>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub notes: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
-pub struct Pose {
-    pub translation_mm: [f64; 3],
-    pub rotation_axis: [f64; 3],
-    pub rotation_deg: f64,
-    /// `solved`, `floating`, `failed`, …
-    pub status: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dof: Option<u32>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
-pub struct ContactReport {
-    pub point_mm: [f64; 3],
-    pub normal: [f64; 3],
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
-pub struct OverlapRow {
-    pub with: String,
-    pub volume_mm3: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
-pub struct GapRow {
-    pub with: String,
-    /// The gap, when it is within `beyond_mm`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub distance_mm: Option<f64>,
-    /// Farther than this.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub beyond_mm: Option<f64>,
-    /// The kernel couldn't measure this pair (the reason is in `notes`): neither its gap nor
-    /// its overlap is known.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub not_measured: bool,
-}
 
 /// Neighbours within this distance are measured (m).
 const MEASURED: f64 = 0.025;
@@ -299,7 +155,22 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
     }
     let original = text_of(files, path)?;
     let name = input.component.trim();
-    let target_name = input.target.component.trim();
+    let holes = match &input.through {
+        Some(entries) => {
+            if input.target.is_some() || input.mirror.is_some() || input.level_with.is_some() {
+                return Err(ToolError::invalid("through fastens the member to the first holder on the bores' axis; leave out target, mirror and levelWith"));
+            }
+            Some(through::holes(entries, name)?)
+        }
+        None => None,
+    };
+    let target_in = input.target.as_ref();
+    let target_name = match (&holes, target_in) {
+        (Some(h), _) => h[0].holder.as_str(),
+        (None, Some(t)) => t.component.trim(),
+        (None, None) => return Err(ToolError::invalid("give target (the component it goes on and where), or through (the holders whose bores it passes through)")),
+    };
+    let mirror_of = input.mirror.as_deref().map(str::trim).filter(|m| !m.is_empty());
     if !text::is_name(name) {
         return Err(ToolError::invalid(format!("component `{name}` isn't an occurrence name (letters, digits and _); seat a top-level occurrence")));
     }
@@ -340,14 +211,34 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
     };
     let mut wanted = vec![name, target_name];
     wanted.extend(level_with);
+    wanted.extend(mirror_of);
+    wanted.extend(holes.iter().flatten().map(|h| h.holder.as_str()));
     let set = PlacedSet::new(path, &tentative, files, &wanted)?;
     let moving = set.get(name, "component")?;
 
     // The connectors: exact frames when either side names a connector, else from the geometry.
-    let target_connector = input.target.connector.as_deref().map(str::trim).filter(|c| !c.is_empty());
+    let target_connector = target_in.and_then(|t| t.connector.as_deref()).map(str::trim).filter(|c| !c.is_empty());
     let own_connector = own.connector.as_deref().map(str::trim).filter(|c| !c.is_empty());
     let mut notes = Vec::new();
-    let (target_line, own_line, seated, contact) = if target_connector.is_some() || own_connector.is_some() {
+    let mut through_rows = Vec::new();
+    let (target_line, own_line, seated, contact) = if let Some(holes) = &holes {
+        if kind == "planar" {
+            return Err(ToolError::invalid("through puts the member on the bores' axis: mate fasten or concentric"));
+        }
+        let t = through::through(&set, &moving, name, holes, &own, flip, turn_by, along, offset, &mut notes)?;
+        through_rows = t.rows;
+        let contact = ContactReport { point_mm: mm3(t.center), normal: t.axis.map(|v| round(v, 4)) };
+        (text::TargetLine::New(frame_text(&t.target_frame)), text::own_explicit(name, &t.own_frame, false), Some(t.seated), Some(contact))
+    } else if let Some(of) = mirror_of {
+        let t = target_in.filter(|t| t.face.is_none() && t.from.is_none() && t.connector.is_none());
+        if t.is_none() || kind != "fasten" || level_with.is_some() {
+            return Err(ToolError::invalid("mirror fastens the mirror image to target.component; give target.component only, and leave out mate and levelWith"));
+        }
+        let target = set.get(target_name, "target component")?;
+        let normal = vector(&input.mirror_normal, "mirrorNormal")?;
+        let m = mirror::mirror(&set, &moving, &target, name, of, normal, &mut notes)?;
+        (text::TargetLine::New(frame_text(&m.target_frame)), text::own_explicit(name, &m.own_frame, false), Some(m.seated), None)
+    } else if target_connector.is_some() || own_connector.is_some() {
         if kind != "fasten" {
             return Err(ToolError::invalid(format!("a connector pick seats with a fasten; mate `{}` needs a face, side or ray on both", input.mate.as_deref().unwrap_or(""))));
         }
@@ -366,7 +257,7 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
             Some(c) => return Err(ToolError::invalid(format!("target connector `{c}` isn't a connector of {path}"))),
             None => {
                 let target = set.get(target_name, "target component")?;
-                let (contact, _) = target_contact(input, &target)?;
+                let (contact, _) = target_contact(target_in.expect("a target"), &target)?;
                 let (point, z) = match contact {
                     Contact::Plane { origin, normal } => (origin, normal),
                     Contact::Axis { origin, axis } => (add(origin, scale(axis, offset)), axis),
@@ -385,9 +276,10 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
             None => None,
         };
         let picks = Picks { own: &own, flip, turn_by, along, offset, level: level.as_ref().zip(level_with) };
-        let (target_frame, own_frame, seated, is_axis) = seat_frames(input, &target, &moving, &picks, &mut notes)?;
+        let t = target_in.expect("a target");
+        let (target_frame, own_frame, seated, is_axis) = seat_frames(input, t, &target, &moving, &picks, &mut notes)?;
         match (kind, is_axis) {
-            ("planar", true) => return Err(ToolError::invalid(format!("mate coincident joins planes; target face `{}` on `{target_name}` is a cylinder: use concentric", input.target.face.as_deref().unwrap_or_default()))),
+            ("planar", true) => return Err(ToolError::invalid(format!("mate coincident joins planes; target face `{}` on `{target_name}` is a cylinder: use concentric", t.face.as_deref().unwrap_or_default()))),
             ("cylindrical", false) => return Err(ToolError::invalid(format!("mate concentric joins axes; pick cylindrical faces for target.face on `{target_name}` and own.face on `{name}`"))),
             _ => {}
         }
@@ -515,7 +407,16 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
         .find_map(|g| g.distance_mm.map(|d| format!("; {} mm from {}", d, g.with)))
         .unwrap_or_default();
     let [x, y, z] = pose.translation_mm;
-    let summary = format!("Seated {name} on {target_name} ({kind}, {mate_status}) at [{x}, {y}, {z}] mm: {overlap_text}{gap_text}");
+    let stance = match input.contact.as_deref().filter(|c| !c.is_empty()) {
+        Some(contact) => Some(crate::inspect::stance::stance(path, &after, &after_files, Some(contact), None)?),
+        None => None,
+    };
+    let stance_text = match &stance {
+        Some(s) if s["ok"] == true => format!(" Stance ok: {}", s["summary"].as_str().unwrap_or_default()),
+        Some(s) => format!(" Stance NOT ok, fix its findings: {}", s["summary"].as_str().unwrap_or_default()),
+        None => String::new(),
+    };
+    let summary = format!("Seated {name} on {target_name} ({kind}, {mate_status}) at [{x}, {y}, {z}] mm: {overlap_text}{gap_text}.{stance_text}");
     let mut change = stage(summary.clone(), vec![(path.to_owned(), after)], files, path);
     change.notes.extend(notes.iter().cloned());
     Ok(SeatOutput {
@@ -531,6 +432,8 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
             contact,
             interference,
             clearance,
+            through: through_rows,
+            stance,
             notes,
         },
     })
@@ -538,8 +441,7 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
 
 /// The target's contact in assembly coordinates (a named face's plane or axis, or where the ray
 /// meets its surface) and the way the component approaches it (none along an axis).
-fn target_contact(input: &SeatInput, target: &Placed) -> Result<(Contact, Option<V3>), ToolError> {
-    let t = &input.target;
+fn target_contact(t: &SeatTarget, target: &Placed) -> Result<(Contact, Option<V3>), ToolError> {
     let tname = t.component.trim();
     let world = &target.world;
     match (&t.face, vector(&t.from, "target.from")?, vector(&t.direction, "target.direction")?) {
@@ -609,12 +511,12 @@ fn world_round_axis(placed: &Placed, normal: V3) -> Option<(V3, V3)> {
 
 /// The target's connector frame, the component's, the seated pose, and whether they meet on an
 /// axis.
-fn seat_frames(input: &SeatInput, target: &Placed, moving: &Placed, picks: &Picks, notes: &mut Vec<String>) -> Result<(Frame, Frame, Seated, bool), ToolError> {
+fn seat_frames(input: &SeatInput, t: &SeatTarget, target: &Placed, moving: &Placed, picks: &Picks, notes: &mut Vec<String>) -> Result<(Frame, Frame, Seated, bool), ToolError> {
     let Picks { own, flip, turn_by, along, offset, level } = *picks;
-    let tname = input.target.component.trim();
+    let tname = t.component.trim();
     let name = input.component.trim();
     let world = &target.world;
-    let (contact, approach) = target_contact(input, target)?;
+    let (contact, approach) = target_contact(t, target)?;
     if let (Contact::Axis { .. }, Some((_, l))) = (contact, level) {
         return Err(ToolError::invalid(format!("levelWith `{l}` lines the component up from a flat target face or a ray; on a cylinder it already shares the target's axis")));
     }
@@ -718,7 +620,7 @@ fn seat_frames(input: &SeatInput, target: &Placed, moving: &Placed, picks: &Pick
         }
         (Contact::Axis { .. }, Contact::Plane { .. }) => Err(ToolError::invalid(format!(
             "target face `{}` on `{tname}` is an axis (a cylinder); pick a cylindrical own.face on `{name}` to seat on it",
-            input.target.face.as_deref().unwrap_or_default()
+            t.face.as_deref().unwrap_or_default()
         ))),
         (Contact::Plane { .. }, Contact::Axis { .. }) => Err(ToolError::invalid(format!(
             "own face `{}` on `{name}` is a cylinder; pick a cylindrical target.face on `{tname}`, or a flat own.face or own.side",
