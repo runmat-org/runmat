@@ -23,7 +23,9 @@ export async function verifyExampleReplay(source, captures, graphics, selectedId
     const root = join(captures, example.id, "project/.snapshot");
     const snapshot = JSON.parse(readFileSync(inputFile(root, "snapshot.json"), "utf8"));
     requireCompleteSnapshot(snapshot);
-    assert.equal(snapshot.views.length, 3, `${example.id}: incomplete guide views`);
+    assert(snapshot.views.length >= 3, `${example.id}: incomplete guide views`);
+    assert.equal(new Set(snapshot.views.map(view => view.id)).size, snapshot.views.length,
+      `${example.id}: duplicate saved view identities`);
     for (const view of snapshot.views) {
       const label = `${example.id}/${view.id}`;
       const bytes = new Uint8Array(readFileSync(inputFile(root, view.scene)));
