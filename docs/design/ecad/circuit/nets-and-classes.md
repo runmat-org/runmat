@@ -30,10 +30,12 @@ interface usb2 = { members = [DP, DN], diff_pairs = [[DP, DN]] }
 
 The board reads each class's track width and clearance, and DRC checks them.
 
-A `blanket` gives several nets on a sheet one class and set of parameters:
+A `blanket` inside a sheet gives several nets one class and set of parameters:
 
 ```circuit fragment
-blanket rails = { nets = [VIN, GND, "+3V3"], class = power, max_length = 50 mm }
+sheet power {
+    blanket rails = { nets = [VIN, GND, "+3V3"], class = power, max_length = 50 mm }
+}
 ```
 
 Each listed net takes the class unless its own `net` statement names one; ERC notes each net that keeps a class of its own (`blanket-class-kept`) and warns about a listed net with no pins (`blanket-net-empty`). A name that isn't a net on the sheet is an error. The schematic draws a dashed box round the listed nets' wires, labels and pins, captioned with the blanket's class and parameters.
