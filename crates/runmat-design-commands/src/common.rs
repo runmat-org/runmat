@@ -42,7 +42,7 @@ pub fn common() -> Catalog {
             "view.grid",
             "Grid",
             "grid",
-            &[Part, Assembly, Drawing, Circuit, CircuitLayout, Fea],
+            &[Part, Assembly, Circuit, CircuitLayout, Fea],
         )
         .desc("Show the grid and set its spacing.")
         .inputs(vec![
