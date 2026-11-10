@@ -68,7 +68,8 @@ pub struct InspectInput {
     /// tubes, feet; names or paths, `*` globs). The section reports every other component's
     /// clearance above the ground under them, whether the centre of mass lies inside their
     /// support with its margin and tip-over angle to each edge, and the stance against the
-    /// overall size.
+    /// overall size. `ok` needs every component clear of the ground and a tip-over angle of
+    /// at least 30° on every edge.
     #[serde(default)]
     pub contact: Option<Vec<String>>,
     /// With `stance`: the assembly's up direction (default `[0, 0, 1]`); the ground is square to it.

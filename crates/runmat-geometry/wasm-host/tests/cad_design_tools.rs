@@ -379,7 +379,7 @@ fn a_block_seated_under_a_plate_stops_its_offset_short_and_pressed_in_reports_th
 }
 
 /// A landing-gear leg, sketched square to the tube and extruded 8 mm along it: a 16 × 4 mm pad
-/// on top, a web down and 25 mm out toward -y, and a foot 50 mm down holding the tube's 8.4 mm
+/// on top, a web down and 25 mm out toward -y, and a foot 38 mm down holding the tube's 8.4 mm
 /// bore (the `bore` region). Its box's top is centred 12.5 mm out from the pad.
 const LEG: &str = r#"runmat 0.7
 std 1
@@ -387,13 +387,13 @@ std 1
 part skid_leg {
     sketch s on origin.yz {
         l1 = line(start = [8 mm, 0 mm], end = [-8 mm, 0 mm])
-        l2 = line(start = l1.end, end = [-33 mm, -42 mm])
-        l3 = line(start = l2.end, end = [-33 mm, -58 mm])
-        l4 = line(start = l3.end, end = [-17 mm, -58 mm])
-        l5 = line(start = l4.end, end = [-17 mm, -42 mm])
+        l2 = line(start = l1.end, end = [-33 mm, -30 mm])
+        l3 = line(start = l2.end, end = [-33 mm, -46 mm])
+        l4 = line(start = l3.end, end = [-17 mm, -46 mm])
+        l5 = line(start = l4.end, end = [-17 mm, -30 mm])
         l6 = line(start = l5.end, end = [8 mm, -4 mm])
         l7 = line(start = l6.end, end = l1.start)
-        bore = circle(center = [-25 mm, -50 mm], radius = 4.2 mm)
+        bore = circle(center = [-25 mm, -38 mm], radius = 4.2 mm)
     }
     feature body = extrude(profile = sketch.s, distance = 8 mm)
     output leg = { body = feature.body.body, material = "material.aluminum_6061" }
@@ -438,6 +438,9 @@ fn on_the_drone_mirrored_legs_and_tubes_through_both_bores_are_symmetric_and_cen
     };
     let before = run(&all, "design.inspect", json!({ "path": assembly, "sections": ["stance"], "contact": ["body_bottom"] }));
     let com_x = before["sections"]["stance"]["center_of_mass"]["point_mm"][0].as_f64().unwrap_or_else(|| panic!("{before:#}"));
+    // The feet hold the tubes and reach 4 mm below them, so the feet carry the craft over a
+    // 76 mm support along x. The legs drop 38 mm, which keeps the camera over 20 mm clear and
+    // the centre of mass low enough to tip past 30° over the support's ends.
     let (fore, aft) = (com_x + 34.0, com_x - 34.0);
     let leg = "/p/drone/mechanical/ground/skid_leg.part";
     // The pads (16 mm wide) at y = 38 mm clear the heatsink's belly plate, whose edge is at
@@ -487,6 +490,7 @@ fn on_the_drone_mirrored_legs_and_tubes_through_both_bores_are_symmetric_and_cen
     assert!((at(l, 0) - com_x).abs() < 2.0 && (at(l, 0) - com_after).abs() < 2.0, "tube middle x {} mm, centre of mass {com_x} mm before, {com_after} mm after", at(l, 0));
     // Standing on its feet and tubes, the camera clear, tipping past 30° on every edge.
     assert_eq!(stance["ok"], true, "{stance:#}");
+    assert!(stance["support"]["min_tip_angle_deg"].as_f64().unwrap() >= 30.0, "{stance:#}");
     assert!(right["summary"].as_str().unwrap().contains("Stance"), "{right:#}");
     let files: Vec<(&str, &str)> = all.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
     let changed = ["leg_fore_left", "leg_aft_left", "leg_fore_right", "leg_aft_right", "tube_left", "tube_right"];

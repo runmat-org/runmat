@@ -12,6 +12,10 @@
 //! - stance: the support's length and width along the ground axes against the assembly's
 //!   overall size.
 //!
+//! `ok` is true when no component reaches the ground before the contact set, the centre of mass
+//! lies inside the support, and the tip-over angle is at least [`MIN_TIP_DEG`] on every edge.
+//! Each failure is an error finding; a clearance under [`MIN_CLEARANCE_MM`] is a warning.
+//!
 //! The lowest points are exact on the tessellated bodies: each component's box (the one the
 //! interference check keeps, else its display's) screens it, and the lowest few are measured on
 //! their tessellation, lowest box first, until no unmeasured box reaches below the lowest point
@@ -26,7 +30,8 @@ use serde_json::{json, Value};
 pub const TOUCH_MM: f64 = 0.5;
 /// The clearance below which a component is flagged, mm.
 pub const MIN_CLEARANCE_MM: f64 = 10.0;
-/// The tip-over angle below which an edge is flagged, degrees.
+/// The least tip-over angle the stance needs on every edge, degrees: a smaller angle is an error
+/// finding, so `ok` is false until the support is widened or lengthened there.
 pub const MIN_TIP_DEG: f64 = 30.0;
 /// The components measured on their tessellation per round (the display cache holds four).
 const BATCH: usize = 4;
@@ -359,8 +364,8 @@ pub(crate) fn stance(path: &str, text: &str, files: &Files, contact: Option<&[St
         } else {
             format!("the centre of mass falls {} mm outside the support{side}, so the assembly tips over", mm(-margin))
         } }));
-    } else if let Some(t) = tip.filter(|t| t.to_degrees() < MIN_TIP_DEG) {
-        findings.push(json!({ "severity": "warning", "message": format!("it tips over its {} edge after leaning {}° (at least {MIN_TIP_DEG}°): widen or lengthen the support there", least_side.clone().unwrap_or_default(), deg(t)) }));
+    } else if let Some(t) = tip.filter(|t| deg(*t) < MIN_TIP_DEG) {
+        findings.push(json!({ "severity": "error", "message": format!("it tips over its {} edge after leaning {}° (needs at least {MIN_TIP_DEG}°): widen or lengthen the support there", least_side.clone().unwrap_or_default(), deg(t)) }));
     }
     let ok = findings.iter().all(|f| f["severity"] != "error");
 

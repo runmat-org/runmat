@@ -92,6 +92,22 @@ fn bars_on_legs_carry_the_camera_clear_with_the_centre_of_mass_inside() {
 }
 
 #[test]
+fn bars_drawn_in_tip_under_thirty_degrees_and_the_stance_is_not_ok() {
+    // The bars 10 mm closer together: 40 mm from the centre of mass to the side edges,
+    // atan(40 / 73.8) = 28.5°, under the 30° the stance needs on every edge.
+    let mut files = rig(30.0, 0.0);
+    let assembly = files.get_mut("/p/craft.assembly").unwrap();
+    *assembly = assembly.replace("35 mm, 30 mm", "30 mm, 30 mm").replace("-45 mm, 30 mm", "-40 mm, 30 mm");
+    let s = stance(&files);
+    assert!(near(&s["support"]["min_margin_mm"], 40.0), "{s:#}");
+    assert!(near(&s["support"]["min_tip_angle_deg"], 28.5), "{s:#}");
+    assert_eq!(s["ok"], false, "{s:#}");
+    assert_eq!(s["findings"][0]["severity"], "error", "{s:#}");
+    let message = s["findings"][0]["message"].as_str().unwrap();
+    assert!(message.contains("after leaning 28.5° (needs at least 30°)"), "{message}");
+}
+
+#[test]
 fn bars_moved_aft_leave_the_centre_of_mass_outside() {
     // The bars span x 20..180 mm; their own mass pulls the centre to x = 32000·100 / 440000.
     let s = stance(&rig(30.0, 100.0));
