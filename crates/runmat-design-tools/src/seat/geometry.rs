@@ -38,6 +38,17 @@ pub fn square_to(v: V3, z: V3) -> Option<V3> {
     unit(sub(v, scale(z, dot(v, z))))
 }
 
+/// `v` with the sign that makes its largest component positive (the first, on a tie): a round
+/// face's axis has no sign of its own, and the kernel may report either, so every axis the
+/// seating turns by is read this way and the same picks always give the same pose.
+pub fn canonical(v: V3) -> V3 {
+    let big = v.iter().fold(0.0_f64, |m, c| m.max(c.abs()));
+    match v.iter().find(|c| c.abs() >= big - 1e-9) {
+        Some(c) if *c < 0.0 => scale(v, -1.0),
+        _ => v,
+    }
+}
+
 /// A unit vector square to `z`, along the world axis that leans least on it.
 pub fn perpendicular(z: V3) -> V3 {
     let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
@@ -159,7 +170,7 @@ pub fn face_contact(face: &FaceDisplay) -> Option<Contact> {
     }
     let centroid = scale(centroid, 1.0 / area);
     if let Some(SurfaceKind::Cylinder { axis_point, axis_direction, .. }) = face.surface {
-        let axis = unit(axis_direction)?;
+        let axis = canonical(unit(axis_direction)?);
         let origin = add(axis_point, scale(axis, dot(sub(centroid, axis_point), axis)));
         return Some(Contact::Axis { origin, axis });
     }
@@ -186,8 +197,10 @@ pub fn bounds(display: &PartDisplay) -> Option<(V3, V3)> {
     (lo[0] <= hi[0]).then_some((lo, hi))
 }
 
-/// A side of the part's box (`+x`, `-x`, `+y`, `-y`, `+z`, `-z`): the middle of that side and
-/// the side's outward normal.
+/// A side of the part's box (`+x`, `-x`, `+y`, `-y`, `+z`, `-z`): a point on the part's material
+/// at that side and the side's outward normal. The point is the area centroid of the triangles
+/// lying in the side's plane (a leg's pad, not the middle of its box); when no face lies there
+/// (a round side touches it along a line), the middle of the vertices on it.
 pub fn side_contact(display: &PartDisplay, side: &str) -> Option<Contact> {
     let (lo, hi) = bounds(display)?;
     let s = side.trim().to_ascii_lowercase();
@@ -202,8 +215,35 @@ pub fn side_contact(display: &PartDisplay, side: &str) -> Option<Contact> {
         b'z' => 2,
         _ => return None,
     };
-    let mut origin = scale(add(lo, hi), 0.5);
-    origin[k] = if sign > 0.0 { hi[k] } else { lo[k] };
+    let level = if sign > 0.0 { hi[k] } else { lo[k] };
+    let tol = (norm(sub(hi, lo)) * 1e-5).max(1e-7);
+    let on = |p: V3| (p[k] - level).abs() <= tol;
+    let (mut sum, mut area, mut touch, mut count) = ([0.0; 3], 0.0, [0.0; 3], 0.0);
+    for face in faces(display) {
+        for t in face.triangles.chunks_exact(3) {
+            let (a, b, c) = (position(face, t[0]), position(face, t[1]), position(face, t[2]));
+            if on(a) && on(b) && on(c) {
+                let w = norm(cross(sub(b, a), sub(c, a))) / 2.0;
+                sum = add(sum, scale(add(add(a, b), c), w / 3.0));
+                area += w;
+            }
+        }
+        for p in face.positions.chunks_exact(3) {
+            let p = [p[0] as f64, p[1] as f64, p[2] as f64];
+            if on(p) {
+                touch = add(touch, p);
+                count += 1.0;
+            }
+        }
+    }
+    let mut origin = if area > 0.0 {
+        scale(sum, 1.0 / area)
+    } else if count > 0.0 {
+        scale(touch, 1.0 / count)
+    } else {
+        scale(add(lo, hi), 0.5)
+    };
+    origin[k] = level;
     let mut normal = [0.0; 3];
     normal[k] = sign;
     Some(Contact::Plane { origin, normal })
@@ -237,7 +277,7 @@ pub fn long_axis(display: &PartDisplay, normal: V3) -> V3 {
 pub fn round_axis(display: &PartDisplay, normal: V3) -> Option<(V3, V3)> {
     faces(display)
         .filter_map(|f| match f.surface {
-            Some(SurfaceKind::Cylinder { axis_point, axis_direction, .. }) => unit(axis_direction).filter(|a| dot(*a, normal).abs() < 0.3).map(|a| (axis_point, a, face_area(f))),
+            Some(SurfaceKind::Cylinder { axis_point, axis_direction, .. }) => unit(axis_direction).map(canonical).filter(|a| dot(*a, normal).abs() < 0.3).map(|a| (axis_point, a, face_area(f))),
             _ => None,
         })
         .max_by(|a, b| a.2.total_cmp(&b.2))
@@ -257,7 +297,7 @@ pub struct Round {
 /// A round face as a [`Round`] named `name`; `None` when it isn't a cylinder.
 fn round_of(f: &FaceDisplay, name: String) -> Option<Round> {
     let Some(SurfaceKind::Cylinder { axis_point, axis_direction, .. }) = f.surface else { return None };
-    let axis = unit(axis_direction)?;
+    let axis = canonical(unit(axis_direction)?);
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for p in f.positions.chunks_exact(3) {
         let t = dot(sub([p[0] as f64, p[1] as f64, p[2] as f64], axis_point), axis);
@@ -402,6 +442,15 @@ mod tests {
         let q = frame_rotation([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
         let (axis, angle) = axis_angle(&q);
         assert!((angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9 && norm(sub(axis, [0.0, 0.0, 1.0])) < 1e-9);
+    }
+
+    #[test]
+    fn an_axis_reads_the_same_whichever_sign_it_comes_with() {
+        for v in [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]] {
+            assert_eq!(canonical(v), [1.0, 0.0, 0.0]);
+        }
+        assert_eq!(canonical([0.3, -0.9, 0.1]), [-0.3, 0.9, -0.1]);
+        assert_eq!(canonical([-0.6, 0.6, 0.0]), [0.6, -0.6, 0.0]);
     }
 
     fn square(z: f64, half: f64) -> Mesh {

@@ -286,3 +286,51 @@ fn a_mirrored_clamp_is_the_first_one_reflected_across_the_target() {
     let m = call("design.seat_part", json!({ "path": "/p/rig.assembly", "component": "right", "part": "/p/mech/skid_clamp.part", "target": { "component": "plate", "face": "x" }, "mirror": "left" }), &files).unwrap_err().message;
     assert!(m.contains("give target.component only"), "{m}");
 }
+
+/// A leg, sketched square to X and extruded 8 mm along it: a 16 mm pad on top (y -8..8), a web
+/// down and out to +y, and a foot 50 mm down holding a bore along X 25 mm out. Its box's top
+/// is centred 12.5 mm out from the pad.
+const LEG: &str = "runmat 0.7\nstd 1\n\npart leg {\n    sketch s on origin.yz {\n        l1 = line(start = [-8 mm, 0 mm], end = [8 mm, 0 mm])\n        l2 = line(start = l1.end, end = [33 mm, -42 mm])\n        l3 = line(start = l2.end, end = [33 mm, -58 mm])\n        l4 = line(start = l3.end, end = [17 mm, -58 mm])\n        l5 = line(start = l4.end, end = [17 mm, -42 mm])\n        l6 = line(start = l5.end, end = [-8 mm, -4 mm])\n        l7 = line(start = l6.end, end = l1.start)\n        bore = circle(center = [25 mm, -50 mm], radius = 4.2 mm)\n    }\n    feature body = extrude(profile = sketch.s, distance = 8 mm)\n}\n";
+
+fn leg_under_plate(rotation: f64, along: [f64; 3]) -> Value {
+    let mut files = files(RIG);
+    files.insert("/p/mech/leg.part".into(), LEG.into());
+    let out = seat(
+        json!({ "path": "/p/rig.assembly", "component": "leg", "part": "/p/mech/leg.part",
+            "target": { "component": "plate", "from": [40.0, 25.0, 0.0], "direction": [0.0, 0.0, 1.0] },
+            "own": { "side": "+z" }, "offset": 0.5, "along": along, "rotation": rotation }),
+        &files,
+    );
+    out["seat"].clone()
+}
+
+/// `own.side` meets the target on the part's material at that side: the leg's pad, not the
+/// middle of its box's top, which lies 12.5 mm out over the web.
+#[test]
+fn a_side_contact_is_on_the_material_at_that_side() {
+    let s = leg_under_plate(0.0, [1.0, 0.0, 0.0]);
+    // The pad's middle (4, 0, 0) 0.5 mm under the ray's hit (40, 25, 100).
+    assert!(close(&s["contact"]["point_mm"], [40.0, 25.0, 99.5]), "{s:#}");
+    assert!(close(&s["pose"]["translation_mm"], [36.0, 25.0, 99.5]), "{s:#}");
+    assert_eq!(s["mate_status"], "satisfied", "{s:#}");
+}
+
+/// `rotation` turns from `along`: at 0 the leg's long axis (its bore's) points its own +X along
+/// `along` whatever sign the kernel gives the bore's axis, at 180 the other way, so the web
+/// swings from +y to -y about the pad. The same picks give the same pose, and along -X at 0 is
+/// along +X at 180.
+#[test]
+fn rotation_turns_from_along_whatever_the_bore_axis_sign() {
+    let straight = leg_under_plate(0.0, [1.0, 0.0, 0.0]);
+    assert!(straight["pose"]["rotation_deg"].as_f64().unwrap().abs() < 1e-3, "{straight:#}");
+    let turned = leg_under_plate(180.0, [1.0, 0.0, 0.0]);
+    assert!((turned["pose"]["rotation_deg"].as_f64().unwrap() - 180.0).abs() < 1e-3, "{turned:#}");
+    assert!(turned["pose"]["rotation_axis"][2].as_f64().unwrap().abs() > 0.999, "{turned:#}");
+    // Turned about the pad's middle: (4, 0, 0) still lands under the hit.
+    assert!(close(&turned["pose"]["translation_mm"], [44.0, 25.0, 99.5]), "{turned:#}");
+    assert!(close(&turned["contact"]["point_mm"], [40.0, 25.0, 99.5]), "{turned:#}");
+    assert_eq!(leg_under_plate(180.0, [1.0, 0.0, 0.0])["pose"], turned["pose"]);
+    let back = leg_under_plate(0.0, [-1.0, 0.0, 0.0]);
+    assert_eq!(back["pose"]["translation_mm"], turned["pose"]["translation_mm"], "{back:#}");
+    assert!((back["pose"]["rotation_deg"].as_f64().unwrap() - 180.0).abs() < 1e-3, "{back:#}");
+}

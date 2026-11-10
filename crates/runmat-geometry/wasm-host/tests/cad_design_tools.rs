@@ -377,3 +377,122 @@ fn a_block_seated_under_a_plate_stops_its_offset_short_and_pressed_in_reports_th
     assert!((overlap["volume_mm3"].as_f64().unwrap() - 400.0).abs() < 1.0, "{pressed:#}");
     assert!(pressed["summary"].as_str().unwrap().contains("overlaps plate by"), "{pressed:#}");
 }
+
+/// A landing-gear leg, sketched square to the tube and extruded 8 mm along it: a 16 × 4 mm pad
+/// on top, a web down and 25 mm out toward -y, and a foot 50 mm down holding the tube's 8.4 mm
+/// bore (the `bore` region). Its box's top is centred 12.5 mm out from the pad.
+const LEG: &str = r#"runmat 0.7
+std 1
+
+part skid_leg {
+    sketch s on origin.yz {
+        l1 = line(start = [8 mm, 0 mm], end = [-8 mm, 0 mm])
+        l2 = line(start = l1.end, end = [-33 mm, -42 mm])
+        l3 = line(start = l2.end, end = [-33 mm, -58 mm])
+        l4 = line(start = l3.end, end = [-17 mm, -58 mm])
+        l5 = line(start = l4.end, end = [-17 mm, -42 mm])
+        l6 = line(start = l5.end, end = [8 mm, -4 mm])
+        l7 = line(start = l6.end, end = l1.start)
+        bore = circle(center = [-25 mm, -50 mm], radius = 4.2 mm)
+    }
+    feature body = extrude(profile = sketch.s, distance = 8 mm)
+    output leg = { body = feature.body.body, material = "material.aluminum_6061" }
+    region bore : face = { select = [feature.body.face.side(s.bore)], expect = at_least_one }
+}
+"#;
+
+/// A 160 mm carbon skid tube, 8 mm outside.
+const SKID_160: &str = r#"runmat 0.7
+std 1
+
+part skid_tube_160 {
+    sketch s on origin.yz {
+        outer = circle(center = [0 mm, 0 mm], radius = 4 mm)
+        inner = circle(center = [0 mm, 0 mm], radius = 3.4 mm)
+    }
+    feature body = extrude(profile = sketch.s, distance = 160 mm)
+    output tube_160 = { body = feature.body.body, material = "material.aluminum_6061" }
+}
+"#;
+
+/// The landing gear from symmetric pieces: a left leg at two stations equally fore and aft of
+/// the centre of mass (the aft one levelled with the fore one), each right leg the mirror image
+/// of its left leg, and each tube through its side's two bores in one call. The six parts
+/// overlap nothing, every bore is on its tube's axis, the sides mirror each other across the
+/// body's middle plane, the tubes are centred on the centre of mass, and the last seating
+/// carries the stance check.
+#[test]
+fn on_the_drone_mirrored_legs_and_tubes_through_both_bores_are_symmetric_and_centred_on_the_centre_of_mass() {
+    let mut all = skidless_drone();
+    all.push(("/p/drone/mechanical/ground/skid_leg.part".into(), LEG.into()));
+    all.push(("/p/drone/mechanical/ground/skid_tube_160.part".into(), SKID_160.into()));
+    let assembly = "/p/drone/drone.assembly";
+    let run = |all: &Vec<(String, String)>, name: &str, input: Value| -> Value {
+        let files: Vec<(&str, &str)> = all.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        let out = tool(name, input, &files);
+        out.get("data").cloned().unwrap_or_else(|| panic!("{name}: {out:#}"))
+    };
+    let keep = |all: &mut Vec<(String, String)>, out: &Value| {
+        let text = out["files"].as_array().unwrap().iter().find(|f| f["path"] == assembly).unwrap()["text"].as_str().unwrap().to_owned();
+        all.iter_mut().find(|(p, _)| p == assembly).unwrap().1 = text;
+    };
+    let before = run(&all, "design.inspect", json!({ "path": assembly, "sections": ["stance"], "contact": ["body_bottom"] }));
+    let com_x = before["sections"]["stance"]["center_of_mass"]["point_mm"][0].as_f64().unwrap_or_else(|| panic!("{before:#}"));
+    let (fore, aft) = (com_x + 34.0, com_x - 34.0);
+    let leg = "/p/drone/mechanical/ground/skid_leg.part";
+    // The pads (16 mm wide) at y = 38 mm clear the heatsink's belly plate, whose edge is at
+    // y = 28 mm, by 2 mm.
+    let under = |x: f64| json!({ "component": "body_bottom", "from": [x, 38.0, -100.0], "direction": [0.0, 0.0, 1.0] });
+    let seat = |all: &mut Vec<(String, String)>, input: Value| -> Value {
+        let out = run(all, "design.seat_part", input);
+        assert_eq!(out["seat"]["interference"], json!([]), "{:#}", out["seat"]);
+        assert_eq!(out["seat"]["mate_status"], "satisfied", "{:#}", out["seat"]);
+        keep(all, &out);
+        out["seat"].clone()
+    };
+    // Turned half round from along +x so the web runs outboard (+y): the bore 25 mm outside the
+    // pad's middle, which meets the belly.
+    seat(&mut all, json!({ "path": assembly, "component": "leg_fore_left", "part": leg, "target": under(fore),
+        "own": { "side": "+z" }, "offset": 0.5, "along": [1.0, 0.0, 0.0], "rotation": 180.0 }));
+    let aft_seat = seat(&mut all, json!({ "path": assembly, "component": "leg_aft_left", "part": leg, "target": under(aft),
+        "own": { "side": "+z" }, "offset": 0.5, "along": [1.0, 0.0, 0.0], "rotation": 180.0, "levelWith": "leg_fore_left" }));
+    if aft_seat["notes"].to_string().contains("would press") {
+        seat(&mut all, json!({ "path": assembly, "component": "leg_fore_left", "target": under(fore),
+            "own": { "side": "+z" }, "offset": 0.5, "along": [1.0, 0.0, 0.0], "rotation": 180.0, "levelWith": "leg_aft_left" }));
+    }
+    for station in ["fore", "aft"] {
+        let s = seat(&mut all, json!({ "path": assembly, "component": format!("leg_{station}_right"), "part": leg,
+            "target": { "component": "body_bottom" }, "mirror": format!("leg_{station}_left") }));
+        assert!(s["notes"].to_string().contains("the mirror image of"), "{s:#}");
+    }
+    let tube = "/p/drone/mechanical/ground/skid_tube_160.part";
+    let left = seat(&mut all, json!({ "path": assembly, "component": "tube_left", "part": tube, "through": ["leg_fore_left.bore", "leg_aft_left"] }));
+    let right = seat(&mut all, json!({ "path": assembly, "component": "tube_right", "part": tube, "through": ["leg_fore_right", "leg_aft_right"],
+        "contact": ["tube_*", "leg_*"] }));
+    for s in [&left, &right] {
+        let rows = s["through"].as_array().unwrap_or_else(|| panic!("{s:#}"));
+        assert_eq!(rows.len(), 2, "{s:#}");
+        for row in rows {
+            assert!(row["off_axis_mm"].as_f64().unwrap() < 0.01, "{s:#}");
+            assert!((row["station_mm"].as_f64().unwrap().abs() - 34.0).abs() < 0.01, "{s:#}");
+        }
+    }
+    // Symmetric about the body's middle plane (y = 0) and centred on the centre of mass.
+    let (l, r) = (&left["contact"]["point_mm"], &right["contact"]["point_mm"]);
+    let at = |v: &Value, k: usize| v[k].as_f64().unwrap();
+    assert!((at(l, 1) - 63.0).abs() < 0.5, "the left tube 63 mm out, 25 mm outboard of the pads: {l}");
+    assert!((at(l, 0) - at(r, 0)).abs() < 0.01 && (at(l, 1) + at(r, 1)).abs() < 0.05 && (at(l, 2) - at(r, 2)).abs() < 0.01, "left {l}, right {r}");
+    let stance = &right["stance"];
+    let com_after = at(&stance["center_of_mass"]["point_mm"], 0);
+    assert!((at(l, 0) - com_x).abs() < 2.0 && (at(l, 0) - com_after).abs() < 2.0, "tube middle x {} mm, centre of mass {com_x} mm before, {com_after} mm after", at(l, 0));
+    // Standing on its feet and tubes, the camera clear, tipping past 30° on every edge.
+    assert_eq!(stance["ok"], true, "{stance:#}");
+    assert!(right["summary"].as_str().unwrap().contains("Stance"), "{right:#}");
+    let files: Vec<(&str, &str)> = all.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+    let changed = ["leg_fore_left", "leg_aft_left", "leg_fore_right", "leg_aft_right", "tube_left", "tube_right"];
+    let out = tool("design.inspect", json!({ "path": assembly, "sections": ["interference"], "changed": changed }), &files);
+    assert_eq!(out["data"]["sections"]["interference"]["result"]["overlaps"], json!([]), "{out:#}");
+    let check = tool("design.check", json!({ "path": assembly }), &files);
+    assert_eq!(check["data"]["errors"], 0, "{check:#}");
+    eprintln!("left {l}, right {r}; aft leg notes {}; stance {}", aft_seat["notes"], stance["summary"]);
+}

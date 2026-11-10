@@ -49,7 +49,9 @@ pub struct SeatInput {
     /// Seat it the other way round (its face along the target's normal, or its axis reversed).
     #[serde(default)]
     pub flip: Option<bool>,
-    /// Turn about the contact normal (or axis), degrees, after `along`.
+    /// Turn about the contact normal (or axis), degrees, after `along`. At 0 the long axis's
+    /// positive direction in the part's coordinates points along `along`, so the same picks
+    /// always give the same pose.
     #[serde(default)]
     pub rotation: Option<f64>,
     /// The assembly direction the component's long axis runs along (`[1, 0, 0]`). A part with
@@ -105,7 +107,8 @@ pub struct SeatTarget {
 pub struct SeatOwn {
     #[serde(default)]
     pub face: Option<String>,
-    /// A side of the part's box: `+x`, `-x`, `+y`, `-y`, `+z` (its top) or `-z`.
+    /// A side of the part's box: `+x`, `-x`, `+y`, `-y`, `+z` (its top) or `-z`. The contact is
+    /// on the material at that side: the middle of the faces lying in the side's plane.
     #[serde(default)]
     pub side: Option<String>,
     /// A frame the part publishes (a `mate_connector` feature).

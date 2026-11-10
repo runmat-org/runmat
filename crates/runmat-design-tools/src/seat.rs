@@ -8,12 +8,15 @@
 //! - On the target: a named face (a plane, or a cylinder's axis), a point and a direction (the
 //!   ray from the point meets the target's surface; a curved shell is seated on this way), or
 //!   one of the assembly's connectors.
-//! - On the component: a named face, a side of its box (`+z` is its top), or a frame its part
-//!   publishes. Without one, the box side that faces the target is used.
+//! - On the component: a named face, a side of its box (`+z` is its top; the contact is the
+//!   middle of the material lying on that side), or a frame its part publishes. Without one,
+//!   the box side that faces the target is used.
 //!
 //! On a plane or a ray's surface the component turns face to face with the target (`flip`
 //! seats it the other way round), its long axis lies along `along` (or where it points now),
-//! turned by `rotation` about the contact normal. It then travels toward the target until it
+//! turned by `rotation` about the contact normal. The long axis's positive direction is read in
+//! the part's coordinates, whatever sign the kernel gives a bore's axis, so rotation 0 points it
+//! along `along` and 180 points it the other way. It then travels toward the target until it
 //! first touches it, by rays both ways between the two parts' tessellations, and stops
 //! `offset` short of it. On an axis it lines up with the target's axis, `offset` along it.
 //! With `levelWith` it then moves square to that component's round axis onto the axis, so a
