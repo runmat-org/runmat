@@ -100,7 +100,7 @@ pub fn sketch_regions(sketch: &Sketch, solved: &SolvedSketch) -> Vec<SketchRegio
         .map(|i| (0..polys.len()).filter(|o| contains(*o, i)).count())
         .collect();
     let mut out = Vec::new();
-    for o in (0..polys.len()).filter(|i| depth[*i] % 2 == 0) {
+    for o in (0..polys.len()).filter(|i| depth[*i].is_multiple_of(2)) {
         let holes: Vec<usize> = (0..polys.len())
             .filter(|h| depth[*h] == depth[o] + 1 && contains(o, *h))
             .collect();

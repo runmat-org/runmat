@@ -201,7 +201,13 @@ fn validate(
     if options.precision_mode != PrecisionMode::Fp64 {
         return Err("line parameters are solved in f64".into());
     }
-    if !(completed.parameters.relative_residual <= options.residual_target) {
+    if !matches!(
+        completed
+            .parameters
+            .relative_residual
+            .partial_cmp(&options.residual_target),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    ) {
         return Err(format!(
             "the section's potential solves reached a relative residual of {:.3e}, above the target {:.3e}",
             completed.parameters.relative_residual, options.residual_target
