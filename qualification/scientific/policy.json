@@ -66,6 +66,16 @@
       "description": "Full public coupled FSI and CHT model solves, publication and authored assessments. Preserve assertions and report actual manual outcomes; ordinary CI retains bounded coupling regressions."
     },
     {
+      "id": "induction-gear-full-model",
+      "group": "tooling-distributed",
+      "required": false,
+      "exception": "Owner-approved manual scientific routing, 2026-11-10. The current full gear model refuses a predicted 628552420949-byte numerical allocation after meshing; this is an outstanding beta resource limitation, not a successful solve.",
+      "expected_passed": 1,
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat", "--test", "check_cli", "induction_gear_example_runs_its_three_frequency_harmonic_study", "--", "--test-threads=1"],
+      "ordinary_skip": ["induction_gear_example_runs_its_three_frequency_harmonic_study"],
+      "description": "Full CAD meshing and three-frequency harmonic Maxwell study. Run explicitly on suitable hardware; retain numerical assertions and bounded Maxwell regressions in ordinary CI."
+    },
+    {
       "id": "meshing-release",
       "required_target": "linux-x86_64",
       "expected_passed": 12,

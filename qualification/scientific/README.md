@@ -19,6 +19,13 @@ owner's November 4 approval. Its 12 commands have no qualifying run or passing
 receipt for this release. Shorter meshing tests remain in ordinary CI. Authored
 CLI physics and driver recovery still require their scientific receipts.
 
+The full induction-gear harmonic witness runs manually. Its current model
+meshes for about 65 minutes before refusing a predicted 628,552,420,949-byte
+numerical allocation. The three-frequency solve remains unqualified. Bounded
+Maxwell regressions run in ordinary CI. This routing addition leaves the
+commands, input identities and measured results of the three required cohorts
+unchanged; their receipts retain that evidence under the revised policy hash.
+
 ## Run a cohort
 
 Print the command for a test group:

@@ -172,6 +172,17 @@ class ScientificRoutingTests(unittest.TestCase):
                     suffix = ["--", *(item for pattern in expected for item in ("--skip", pattern))] if expected else []
                     self.assertEqual(command, complete + suffix)
 
+    def test_full_gear_witness_routes_to_manual_scientific_qualification(self):
+        name = "induction_gear_example_runs_its_three_frequency_harmonic_study"
+        self.assertIn(name, runner.scientific_filters("tooling-distributed"))
+        self.assertNotIn(name, runner.scientific_filters("geometry-analysis"))
+        policy_path = Path(__file__).resolve().parents[2] / "qualification/scientific/policy.json"
+        cohort = next(c for c in json.loads(policy_path.read_text())["cohorts"]
+                      if c["id"] == "induction-gear-full-model")
+        self.assertIn(name, cohort["command"])
+        self.assertFalse(cohort["required"])
+        self.assertIn("outstanding beta resource limitation", cohort["exception"])
+
     def test_extended_commands_do_not_depend_on_skip_policy(self):
         with patch.object(runner, "scientific_filters", side_effect=AssertionError("read skip policy")):
             for group in runner.GROUPS:

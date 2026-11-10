@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cohort": "driver-recovery-physics",
-  "policy_sha256": "7655c83b375ab5ac409efede7be38438c27e5e02ba5e93156586e44f096ddac1",
+  "policy_sha256": "112bb1817646b2737523f89955666792f6e56011c4d44c7b2c9c5caf486e305f",
   "measured": {
     "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
     "target": "linux-x86_64",
