@@ -48,12 +48,34 @@ part "BUCK-60V-3A" = {
 | Field | Meaning |
 |---|---|
 | `manufacturer`, `description`, `category`, `datasheet` | what the part is |
-| `package` | a footprint generator string (`"SOT23-6"`), or a `.kicad_mod` file read in place |
+| `package` | a footprint generator string (`"QFN32_5mm_P0.5_EP3.3"`; see [Footprints from generator strings](#footprints-from-generator-strings)), or a `.kicad_mod` file read in place for interop |
 | `params` | parameters for selection and checks |
 | `pins` | each pin's name, pad and electrical type (`passive`, `power_in`, `power_out`, `input`, `output`, `bidirectional`, `no_connect`, …); pins sharing a name become one pin on several pads |
 | `spice` | the SPICE model: `model` (a subcircuit or model name), `library`, and `nodes` in model-pin order |
 
 A declared part replaces a built-in part of the same MPN. A part with a `spice` model simulates with no `model` statement in the simulation section; a section's own `model` wins, so one section can run a switching model and another an averaged one of the same part.
+
+## Footprints from generator strings
+
+A part's `package` string names a standard package. RunMat generates its land pattern from the IPC-7351B equations, with pads, courtyard, silkscreen with a pin-1 mark, fab outline and a 3D body, so a standard part needs no footprint file. Letters are not case-sensitive. Dimensions are in mm, and the `mm` after a body size is optional.
+
+| Package family | String | Example |
+|---|---|---|
+| Chip resistor, capacitor, inductor, diode, fuse, LED (imperial size code) | `R`, `C`, `L`, `D`, `F` or `LED`, then the size | `R0402`, `C0603`, `LED0805` |
+| SOIC (3.9 mm body; add `W` for the 7.5 mm wide body) | `SOIC<pins>` / `SOIC<pins>W` | `SOIC8`, `SOIC16W` |
+| TSSOP | `TSSOP<pins>` | `TSSOP20` |
+| QFP (square body) | `QFP<pins>_<body>mm_P<pitch>` | `QFP48_7mm_P0.5` |
+| QFN (square body, optional exposed pad) | `QFN<pins>_<body>mm_P<pitch>[_EP<pad>]` | `QFN32_5mm_P0.5_EP3.3`, `QFN16_3mm_P0.5` |
+| BGA (full array) | `BGA<balls>_<rows>x<cols>_P<pitch>[_BALL<diameter>]` | `BGA256_16x16_P1.0_BALL0.5` |
+| SOT-23 (3, 5 or 6 pins) | `SOT23-<pins>` | `SOT23-3`, `SOT23-6` |
+| SOT-223 | `SOT223` | `SOT223` |
+| Pin header | `PinHeader<cols>x<rows>[_P<pitch>]` (pitch defaults to 2.54) | `PinHeader1x04`, `PinHeader2x05_P2.54` |
+
+Add `@A` for the most-material density (hand soldering, rework) or `@C` for the least-material density (dense boards). The default is nominal: `C0402@A`, `QFN32_5mm_P0.5_EP3.3@C`.
+
+Pads number in the package's standard order: pin 1 at the top left, counter-clockwise for QFN and QFP, rows A, B, C… and columns 1, 2, 3… for BGA. The exposed pad is the last pad, so a QFN32 with an exposed pad has pads 1–33. A part maps its pins to these pad numbers.
+
+Use a generator string whenever a family above fits; most parts need nothing else. A package no string covers (a module, an odd connector) needs a custom footprint: today that is a `.kicad_mod` file read in place, and native footprint declarations in a library `.circuit` replace it.
 
 ## Part data from vendors
 
