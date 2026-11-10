@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cohort": "circuit-large-board-performance",
-  "policy_sha256": "112bb1817646b2737523f89955666792f6e56011c4d44c7b2c9c5caf486e305f",
+  "policy_sha256": "71379c3bce11f6f26e0e017aa44b64cf12688b11dfac22f26fa55ae2969271f8",
   "measured": {
     "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
     "target": "macos-aarch64",
@@ -82,14 +82,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "4e95d7ee61d67e7c93bf1f0d87a1d63326875a36978302c08d08cd0d573259d4",
-      "files": 26023,
+      "sha256": "191a0d69177f984ae19be5f12918ff0bf37b4b16cdceb4c9442ba41bca8904a5",
+      "files": 26026,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Exact source review conserves the original Linux authored/recovery and macOS performance workloads across native lease, report and path adapters and test-only edits. The named numerical implementations and assertions retain their original measurements; focused boundary evidence is linked.",
+    "reason": "The follow-up delta from 2012f077cf is confined to standalone Design/meshing integration tests, their XSD validator and optional corpus routing. Earlier conserved production-adapter and test changes remain individually declared below with their existing qualification evidence. This follow-up changes no numerical library, production execution code, dependency lockfile, authored study, required scientific command or performance threshold. The long boolean STEP corpus is explicitly manual under the existing release disposition, with its failure retained; required cohorts keep their original commands and measured outcomes.",
     "review": {
-      "path": "qualification/scientific/reviews/native-design-module-order-20261110.json",
-      "sha256": "4c1500f325f3ae2473897cac95337e2acb3d4680055e05ca017797272e62d13d"
+      "path": "qualification/scientific/reviews/design-ci-tests-20261110-circuit-large-board-performance.json",
+      "sha256": "2272985b1dac48cab0afefb7d31f119d8051764ae6b762db3f18549c61888ec2"
     }
   }
 }

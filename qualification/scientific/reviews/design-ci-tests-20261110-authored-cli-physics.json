@@ -1,0 +1,329 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
+    "files": 26022,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "191a0d69177f984ae19be5f12918ff0bf37b4b16cdceb4c9442ba41bca8904a5",
+    "files": 26026,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "authored-cli-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-cli/src/commands/circuit_checks.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3cb90df8ea6dc7719fdf0c56dd2225d89347e0fd"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e60be571102c83c9494f9236b500e1bb42e3355f"
+      ],
+      "reason": "Keeps the earlier Windows report-path fixture and routes native circuit inputs through the workspace serializer. POSIX serialization retains the original implementation; the report retains the physical file path. The required authored FEA and recovery cohorts use .fea adapters, and the performance cohort calls the circuit library directly. The actual offline Windows CLI check passed compilation, ERC, review and DRC."
+    },
+    {
+      "path": "crates/runmat-cli/tests/check_run_parity.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8f57d6ef07ecb2d56e6151a1afe4d6047424b724"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "38156d7ccd264f62a3eb83ce1801e2f583a4e4e9"
+      ],
+      "reason": "Adds an independent study to the ambiguous-root fixture because a sweep owns its parameterized study's default entry. The two-root and explicit-selection assertions remain. Required scientific fixtures and numerical code are unchanged."
+    },
+    {
+      "path": "crates/runmat-cli/tests/fea_snapshot_cli.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f02c9ceea3ed5321c65ceeed7b6f46e65933c667"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "13ab0a179a1f7620f15dbd4805ca880c1ff25106"
+      ],
+      "reason": "Installs the same hermetic lease provider on the unknown-view refusal command as on successful fresh-snapshot commands. The missing-view assertion remains. The authored scientific cohort and its numerical expectations are unchanged."
+    },
+    {
+      "path": "crates/runmat-design-tools/src/bin/runmat-design.rs",
+      "before": [
+        "100644",
+        "blob",
+        "15eb48b7b1698965ca8791c7c8f1867d28ccc84b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "7998e279165f0f0a98c6032e82fc25742d19a4f9"
+      ],
+      "reason": "Uses the native workspace serializer, maps remembered settings back to native paths and validates export filenames before joining the output folder. This standalone design CLI is outside all three required scientific call graphs. Actual Windows family exports and computed-value checks qualify its changed boundary."
+    },
+    {
+      "path": "crates/runmat-design-tools/src/ci.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ea77ac2824f666e73df4f56a94973b28824c2872"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "43d61b10bc5d2e3c99b610b94c283fa1c974e119"
+      ],
+      "reason": "Normalizes separators when rendering circuit report paths. Circuit compilation and simulation are unchanged; scientific performance tests call the circuit library directly."
+    },
+    {
+      "path": "crates/runmat-design-tools/src/workspace.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b3b4fe1b857f2a07308618f3a5fdd69996b28d36"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8baf05626d23639a7e7afe5d08b9517f044eee7e"
+      ],
+      "reason": "Normalizes Windows workspace keys with the existing CAD module-path authority; POSIX keys retain their original implementation. Native publication rejects rooted filenames and parent traversal. The three native callers are the two runmat-design paths and runmat circuit checking, outside the required scientific workloads. Qualified family outputs use relative filenames accepted by the guard; solver, mesher and circuit algorithms are unchanged. The unchanged circuit-file predicate is placed before the test module to satisfy Clippy; its declaration and all other module tokens are conserved."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/families.rs",
+      "before": [
+        "100644",
+        "blob",
+        "19d5922b491bf4dbc22dac5c7787843450e72f40"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "dc1654a9a7ef9e40591a6a97f23290f30330acaa"
+      ],
+      "reason": "Measures STEP physical topology under OCCT instead of auxiliary placement/control points. Expected widths and tolerances remain unchanged. The required scientific cohorts do not execute this fixture."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/fixtures/3mf/LICENSE",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "2559226f9767949431b434e5176fd36b53dd5c9b"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/fixtures/3mf/README.md",
+      "before": [
+        "100644",
+        "blob",
+        "19af8e227c4c196f223da746fed60efc5ce11819"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2818ae8d5c50468bd86ca8b7296f16ef0d6d47b9"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/fixtures/3mf/core-schema.xsd",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "3b83fb44df5d47f3e7881caea9ceb35956eebd7f"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/fixtures/3mf/schema.xsd",
+      "before": [
+        "100644",
+        "blob",
+        "948d9694309f97239366d12d402b33a6fd66c485"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2c906a041e57688eec105c2fc48ac46fb9236bb2"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/fixtures/3mf/validate_xsd.py",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "4a6309460b740c43d9df8839587379bc92af3168"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/three_mf.rs",
+      "before": [
+        "100644",
+        "blob",
+        "021fa0b5463d79daec525730c33f2e85bf7d7bd9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e239ad9dd3d8d9591c9d25ac69b99853c0401704"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/tools.rs",
+      "before": [
+        "100644",
+        "blob",
+        "49baf4bd2d7d6761ace7ae807b97c94afdc7661d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "254c3cf631d0991a8fefb610ce3b4c12be104cd0"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/occt_exact_meshing.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1b17792a752579071c40699f2016eac35081b7f3"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b62cd518abcdc973c9d55065d5ed6e288eff7534"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/occt_exact_meshing/differential.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ff9b5da37f86c972567244c052fb840bac497ea4"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e936c216536a17e00c278bab564bad523515bdd0"
+      ],
+      "reason": "Integration test or vendored schema/validator only; excluded from this required numerical workload."
+    },
+    {
+      "path": "crates/runmat-fea-admission-native/src/lib.rs",
+      "before": [
+        "100644",
+        "blob",
+        "03755082e313cee2ce743eb5647d5eb830adc37b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "777f71a5d49c185de80776ee923970da4eb7d9e6"
+      ],
+      "reason": "Bounds usage/settlement transport and token-refresh attempts by the existing outage window, retains the original transient denial, and preserves the initial settlement request after expiry. Successful request payloads, grants and absolute operation totals are unchanged. Authored science uses the unchanged healthy fixture server with 24-hour leases; solver, checkpoint, worker-retirement and publication algorithms are unchanged. Focused outage, expiry and settlement tests qualify the changed boundary."
+    },
+    {
+      "path": "crates/runmat-fea-admission-native/src/outage_tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9ef0afa1809c92cfec74a8d3f0fba66bc42f8389"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5af9cdbcf80e21c30a21f750c69718629261c593"
+      ],
+      "reason": "Extends the existing receipt-validity case to settle completed work after expiry. Scientific workload assertions and case inventories are unchanged."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/source/host.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6472c175e2958aab68b7667d4808a4d1ace287a0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3ec7f8835ab334ac891aad9946dd6f2d9ef766f7"
+      ],
+      "reason": "Adds a Windows-only typed prefix comparator. Linux and macOS retain the original strip_prefix operation and error mapping. Required authored/recovery measurements target Linux and the performance measurement targets macOS. Numerical algorithms, source bytes and admission rules are unchanged."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/source/host/windows_path.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "281b4470a35fce66e56a8f2486e8af6b590f4096"
+      ],
+      "reason": "Adds the Windows-only disk/UNC namespace comparator and one boundary test. It returns borrowed relative paths, preserves original I/O paths, and refuses different volumes, shares and directory prefixes. The module is compiled out on the three required scientific measurements' targets."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/source/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1e7a621e942e771ae23ce9d3e02ce5dbeb15578e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "2bb5e4ac490f4ace3b664392bc5e4a9ab8b47706"
+      ],
+      "reason": "Extends the existing unsaved-source test with Windows canonical-root coverage. The extension is compiled out on the Linux and macOS measurement targets."
+    },
+    {
+      "path": "crates/runmat-server-client/src/lease_retry.rs",
+      "before": [
+        "100644",
+        "blob",
+        "4f508ee6f628b1fca28e8dc209e0eef28364c415"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6f47ad9a4c0f8077c15e6b621c630a884f7edab7"
+      ],
+      "reason": "Exposes the saturating remaining duration of the existing monotonic outage clock and checks live/expired durations in the existing backoff test. Backoff, window derivation, request encoding and numerical execution are unchanged."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/native-lease-and-circuit-report-20261110.json",
+      "sha256": "3493228d2b79f77d35010bcce3710e0070e4ad2e08ecadfaa369170ddb29a8fe"
+    },
+    {
+      "path": "qualification/scientific/evidence/native-design-paths-20261110.json",
+      "sha256": "b0a0ac96da3ad883763ccc2f4aa3b28ea7af843ec4c4a2fba0541761458f9b7e"
+    },
+    {
+      "path": "qualification/scientific/evidence/native-design-module-order-20261110.json",
+      "sha256": "593885458737b1557343f7f692e185eae5bd869dee8183f341ec5b4230ff2b77"
+    },
+    {
+      "path": "qualification/scientific/evidence/design-ci-tests-20261110.json",
+      "sha256": "1c1a75a8174a636eaff5fedc168e52e69f5ce6256b1d6c8b65860a84c129607d"
+    }
+  ],
+  "reason": "The follow-up delta from 2012f077cf is confined to standalone Design/meshing integration tests, their XSD validator and optional corpus routing. Earlier conserved production-adapter and test changes remain individually declared below with their existing qualification evidence. This follow-up changes no numerical library, production execution code, dependency lockfile, authored study, required scientific command or performance threshold. The long boolean STEP corpus is explicitly manual under the existing release disposition, with its failure retained; required cohorts keep their original commands and measured outcomes."
+}
