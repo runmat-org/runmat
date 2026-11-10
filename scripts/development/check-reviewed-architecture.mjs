@@ -23,7 +23,7 @@ export function gitBlobDigest(text) {
 
 // Counts matter: duplicate diagnostics from independent rules remain visible.
 export function matchesReviewedDebt(actual, expected) {
-  if (!Array.isArray(expected) || expected.length !== 107 || !actual.length) return false;
+  if (!Array.isArray(expected) || !expected.length || !actual.length) return false;
   const counts = new Map();
   for (const line of expected) {
     if (typeof line !== "string" || !line.startsWith(prefix)) return false;
@@ -70,6 +70,9 @@ function main() {
   const rustc = run("rustc", ["--version"]);
   const lines = raw.stderr.trimEnd().split("\n");
   const pinsMatch = reviewed.schema_version === 1 && reviewed.issue === "RM-1287"
+    && Number.isSafeInteger(reviewed.diagnostic_count)
+    && reviewed.diagnostic_count > 0
+    && reviewed.diagnostic_count === reviewed.diagnostics.length
     && validCommit && ancestor?.status === 0
     && /^[0-9a-f]{40}$/.test(reviewed.architecture_inputs ?? "")
     && reviewedDigest === reviewed.architecture_inputs
@@ -79,7 +82,7 @@ function main() {
     console.error("Reviewed FEA architecture exception refused: review anchor, toolchain or diagnostic multiset differs.");
     return 1;
   }
-  console.error("Reviewed RM-1287 FEA architecture debt: 107 findings retained above; all other architecture and language-ledger checks passed.");
+  console.error(`Reviewed RM-1287 FEA architecture debt: ${reviewed.diagnostic_count} findings retained above; all other architecture and language-ledger checks passed.`);
   return 0;
 }
 

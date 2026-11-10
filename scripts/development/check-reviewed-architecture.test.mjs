@@ -17,4 +17,8 @@ test("reviewed architecture matching preserves exact multiplicity and scope", ()
   assert(!matchesReviewedDebt(unapproved, expected));
   assert(!matchesReviewedDebt(unapproved, unapproved));
   assert(!matchesReviewedDebt(expected, null));
+  const refreshed = [...expected, ...Array(4).fill(b)];
+  assert(matchesReviewedDebt(refreshed, refreshed));
+  assert(!matchesReviewedDebt(refreshed.slice(1), refreshed));
+  assert(!matchesReviewedDebt([], []));
 });
