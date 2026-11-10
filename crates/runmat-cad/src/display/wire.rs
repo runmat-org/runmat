@@ -178,7 +178,7 @@ pub fn inlined(value: &serde_json::Value) -> Option<serde_json::Value> {
                                             serde_json::Number::from_f64(f64::from(
                                                 f32::from_le_bytes(w),
                                             ))
-                                                .map_or(Value::Null, Value::Number)
+                                            .map_or(Value::Null, Value::Number)
                                         })
                                         .collect(),
                                 )
