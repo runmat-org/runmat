@@ -11,8 +11,12 @@
 //!
 //!
 //! ```text
-//! runmat-design check <file>... [--json] [--no-simulate] [--root <dir>]
+//! runmat-design check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]
 //! ```
+//!
+//! On a `.part`, `.assembly` or `.drawing`, `check` runs `design.check` (regenerate, resolve
+//! occurrences and mates, compile views) and prints each diagnostic; `--interference` also
+//! checks an assembly's parts for overlapping material and fails on any overlap.
 //!
 //! `check` runs the circuit checks on each `.circuit` or `.circuit.layout` (compile, ERC, the
 //! design-review suites; with a board DRC, unrouted connections and pending schematic changes;
@@ -44,18 +48,20 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: runmat-design check <file>... [--json] [--no-simulate] [--root <dir>]");
+    eprintln!("usage: runmat-design check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]");
     eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember]");
     ExitCode::from(2)
 }
 
 fn check(args: &[String]) -> ExitCode {
     let (mut json_out, mut simulate, mut root, mut paths) = (false, true, None, Vec::new());
+    let mut interference = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--json" => json_out = true,
             "--no-simulate" => simulate = false,
+            "--interference" => interference = true,
             "--root" => root = it.next().map(PathBuf::from),
             p if !p.starts_with("--") => paths.push(PathBuf::from(p)),
             _ => return usage(),
@@ -76,6 +82,20 @@ fn check(args: &[String]) -> ExitCode {
         };
         let base = root.clone().and_then(|r| std::fs::canonicalize(r).ok()).unwrap_or_else(|| file.parent().unwrap_or(Path::new("/")).to_path_buf());
         let files = runmat_design_tools::workspace::read_workspace(&base);
+        let path = file.to_string_lossy().to_string();
+        if matches!(runmat_design_tools::DesignKind::of(&path), Some(k) if !k.is_circuit()) {
+            match check_mechanical(&path, &files, interference, &base, json_out) {
+                Ok((passed, report)) => {
+                    failed |= !passed;
+                    reports.push(report);
+                }
+                Err(e) => {
+                    eprintln!("{}: {e}", p.display());
+                    return ExitCode::FAILURE;
+                }
+            }
+            continue;
+        }
         match runmat_design_tools::circuit_values::with_native_values(&files, || runmat_design_tools::ci::check_circuit(&file.to_string_lossy(), &files, simulate)) {
             Ok(r) => {
                 failed |= !r.passed;
@@ -84,7 +104,7 @@ fn check(args: &[String]) -> ExitCode {
                         println!("{line}");
                     }
                 }
-                reports.push(r);
+                reports.push(serde_json::to_value(&r).unwrap_or_default());
             }
             Err(e) => {
                 eprintln!("{}: {e}", p.display());
@@ -100,6 +120,47 @@ fn check(args: &[String]) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// `design.check` on a part, assembly or drawing: every diagnostic, one line each. With
+/// `--interference`, an assembly also runs the Evaluate tab's interference check (exact bodies
+/// that share material; parts that only touch don't count) and fails on any overlap.
+fn check_mechanical(path: &str, files: &runmat_design_tools::Files, interference: bool, base: &Path, json_out: bool) -> Result<(bool, Value), String> {
+    let shown = |p: &str| p.strip_prefix(&*base.to_string_lossy()).map(|r| r.trim_start_matches('/').to_owned()).unwrap_or_else(|| p.to_owned());
+    let mut report: Value = call("design.check", json!({ "path": path }), files).map_err(|e| e.to_string())?;
+    let mut passed = report["ok"].as_bool().unwrap_or(false);
+    if !json_out {
+        println!("{}", shown(report["summary"].as_str().unwrap_or(path)));
+        for d in report["diagnostics"].as_array().into_iter().flatten() {
+            let at = d["range"]["start"]["line"].as_u64().map(|l| format!(":{}", l + 1)).unwrap_or_default();
+            let subject = d["subject"].as_str().map(|s| format!(" {s}:")).unwrap_or_default();
+            println!("  {}{at}{subject} {}", d["severity"].as_str().unwrap_or("info"), d["message"].as_str().unwrap_or(""));
+        }
+    }
+    if interference && runmat_design_tools::DesignKind::of(path) == Some(runmat_design_tools::DesignKind::Assembly) {
+        let inspected: Value = call("design.inspect", json!({ "path": path, "sections": ["interference"] }), files).map_err(|e| e.to_string())?;
+        let value = inspected["sections"]["interference"].clone();
+        let overlaps = value.pointer("/result/overlaps").or_else(|| value.pointer("/overlaps")).and_then(Value::as_array).cloned();
+        match &overlaps {
+            Some(rows) => {
+                passed &= rows.is_empty();
+                if !json_out {
+                    println!("  interference: {} overlap(s)", rows.len());
+                    for r in rows {
+                        println!("    {} x {}: {} mm3", r["a"].as_str().unwrap_or("?"), r["b"].as_str().unwrap_or("?"), r["volume_mm3"]);
+                    }
+                }
+            }
+            None => {
+                passed = false;
+                if !json_out {
+                    println!("  interference: not run ({})", inspected["notes"]);
+                }
+            }
+        }
+        report["interference"] = value;
+    }
+    Ok((passed, report))
 }
 
 fn main() -> ExitCode {

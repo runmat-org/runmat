@@ -105,13 +105,13 @@ A toleranced value carries its nominal and its bounds. Geometry and solvers use 
 
 | Kind (as written after `:`) | Units |
 |---|---|
-| `length`, `distance` | `m`, `cm`, `mm`, `um` (also `µm`), `in` |
+| `length`, `distance` | `m`, `cm`, `mm`, `um` (also `µm`), `in`, `ft` |
 | `area` | `m^2`, `mm^2` |
 | `angle` | `deg`, `rad` |
 | `mass` | `kg`, `gram` |
 | `real`, `dimensionless`, `count`, `integer` | a bare number |
 
-A bare number where a length is expected is an error: write `5 mm`, not `5`. Board coordinates in a `.circuit.layout` are the exception: a bare number there is millimetres.
+A bare number where a length is expected is an error: write `5 mm`, not `5`. Imperial lengths read as written: `40 ft`, `5.5 in`, and a feet-and-inches length is a sum, `8 ft + 1.125 in`. Board coordinates in a `.circuit.layout` are the exception: a bare number there is millimetres.
 
 ### Electrical files
 

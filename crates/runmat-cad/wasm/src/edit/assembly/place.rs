@@ -38,6 +38,7 @@ fn literal_mm(value: &ValueExpr) -> Option<f64> {
             "cm" => value * 10.0,
             "m" => value * 1000.0,
             "in" => value * 25.4,
+            "ft" => value * 304.8,
             _ => return None,
         }),
         ValueExpr::Number { value } if *value == 0.0 => Some(0.0),

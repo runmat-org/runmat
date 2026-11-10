@@ -64,10 +64,6 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 ## Tools
 
-### design.tools.cli-check-mcad
-
-**runmat-design check on parts, assemblies and drawings.** runmat-design check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error.
-
 ### design.tools.runmat-check-design
 
 **runmat check and runmat test on parts, assemblies and drawings.** runmat check and runmat test delegate .part, .assembly and .drawing files to the design checks, as they do .circuit and .circuit.layout files, beside .m and .fea files.

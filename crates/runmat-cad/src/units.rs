@@ -184,6 +184,7 @@ impl UnitAuthority for StubUnits {
             "um" | "µm" => (Dimension::LENGTH, 1e-6),
             "cm" => (Dimension::LENGTH, 1e-2),
             "in" => (Dimension::LENGTH, 0.0254),
+            "ft" => (Dimension::LENGTH, 0.3048),
             "m^2" => (Dimension::AREA, 1.0),
             "mm^2" => (Dimension::AREA, 1e-6),
             "rad" => (Dimension::ANGLE, 1.0),
@@ -201,6 +202,6 @@ impl UnitAuthority for StubUnits {
     }
 
     fn fingerprint(&self) -> String {
-        "runmat-cad/stub-units/2".to_owned()
+        "runmat-cad/stub-units/3".to_owned()
     }
 }

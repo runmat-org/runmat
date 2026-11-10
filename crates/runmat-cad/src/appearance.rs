@@ -19,13 +19,22 @@ const FAMILIES: &[(&str, &[&str], [f32; 4])] = &[
     ("titanium", &["titanium", "ti_6al_4v", "ti6al4v"], [0.6, 0.6, 0.62, 1.0]),
     ("steel", &["steel", "stainless", "inconel", "iron", "nickel"], [0.62, 0.64, 0.67, 1.0]),
     ("aluminum", &["aluminum", "aluminium", "al_6061", "al_7075", "al_2024"], [0.78, 0.8, 0.83, 1.0]),
+    // Building materials, before the composites and plastics their names overlap with
+    // (a fibreglass batt, polyethylene sheet stays plastic).
+    ("insulation", &["batt", "mineral_wool", "glass_wool", "rock_wool"], [0.93, 0.8, 0.5, 1.0]),
+    ("foam", &["xps", "eps", "polystyrene", "extruded_polystyrene", "expanded_polystyrene", "foam_board"], [0.58, 0.76, 0.88, 1.0]),
+    ("concrete", &["concrete", "grout", "mortar"], [0.66, 0.66, 0.64, 1.0]),
+    ("gravel", &["gravel", "crushed_stone", "aggregate"], [0.52, 0.5, 0.47, 1.0]),
+    ("plaster", &["stucco", "cement_plaster", "gypsum", "drywall"], [0.9, 0.88, 0.82, 1.0]),
+    ("asphalt", &["asphalt", "shingle"], [0.3, 0.3, 0.32, 1.0]),
+    ("osb", &["osb", "oriented_strand"], [0.8, 0.66, 0.42, 1.0]),
     ("carbon", &["carbon_fiber", "carbon_fibre", "cfrp"], [0.22, 0.23, 0.25, 1.0]),
     ("composite", &["composite", "gfrp", "fiberglass", "fibreglass", "laminate"], [0.88, 0.89, 0.9, 1.0]),
     // Moulded package bodies (ICs, regulators): near-black epoxy.
     ("epoxy", &["epoxy", "mold_compound", "mould_compound"], [0.16, 0.16, 0.17, 1.0]),
     ("fr4", &["fr4", "fr_4"], [0.3, 0.42, 0.24, 1.0]),
     ("plastic", &["plastic", "abs", "nylon", "pom", "acetal", "delrin", "pla", "petg", "polypropylene", "polyethylene", "hdpe", "peek", "pvc", "polycarbonate"], [0.9, 0.9, 0.88, 1.0]),
-    ("wood", &["wood", "oak", "pine", "plywood", "birch"], [0.72, 0.56, 0.38, 1.0]),
+    ("wood", &["wood", "oak", "pine", "plywood", "birch", "lumber", "douglas_fir", "hem_fir", "spf", "lvl", "lsl", "glulam"], [0.72, 0.56, 0.38, 1.0]),
 ];
 
 /// A material's family (`default` when none matches) and its color.
@@ -148,6 +157,10 @@ mod tests {
         assert_eq!(material_appearance(Some("glass_filled_nylon")).0, "plastic");
         assert_eq!(material_appearance(Some("PA66-GF30")).0, "plastic");
         assert_eq!(material_appearance(Some("glass_filled_nylon")).1[3], 1.0);
+        assert_eq!(material_appearance(Some("material.fiberglass_batt")).0, "insulation");
+        assert_eq!(material_appearance(Some("material.concrete")).0, "concrete");
+        assert_eq!(material_appearance(Some("material.douglas_fir_lumber")).0, "wood");
+        assert_eq!(material_appearance(Some("material.polyethylene_sheet")).0, "plastic");
         assert_eq!(srgb_hex([1.0, 0.0, 0.0, 1.0]), "#FF0000FF");
     }
 

@@ -33,8 +33,9 @@
       "title": "runmat-design check on parts, assemblies and drawings",
       "kind": "tooling",
       "area": "tooling",
-      "status": "pending",
-      "acceptance": "runmat-design check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error."
+      "status": "release",
+      "acceptance": "runmat-design check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error.",
+      "landed_in": "0.7.1"
     },
     {
       "id": "design.tools.runmat-check-design",
