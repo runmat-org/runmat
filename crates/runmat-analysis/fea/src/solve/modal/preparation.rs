@@ -16,5 +16,6 @@ pub fn solve_modal_system(
         backend,
         &mut crate::algebra::LinearPreparationReuse::default(),
         SubspaceSolvePath::ShiftInvertFactorization,
+        None,
     )
 }

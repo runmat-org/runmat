@@ -117,6 +117,7 @@ pub(crate) fn solve_modal_system_reusing(
     backend: ComputeBackend,
     reuse: &mut crate::algebra::LinearPreparationReuse,
     path: SubspaceSolvePath,
+    node_coordinates_m: Option<&[[f64; 3]]>,
 ) -> ModalSolveResult {
     let (solver_method, path_preconditioner) = match path {
         SubspaceSolvePath::ShiftInvertFactorization => (
@@ -295,12 +296,26 @@ pub(crate) fn solve_modal_system_reusing(
     if path == SubspaceSolvePath::PreconditionedLobpcg {
         // A translational solid space is node-major with three DOFs per node. When the
         // constraint reduction keeps whole nodes, multigrid aggregates the nodal 3×3 blocks, as
-        // the static solve does and as the plan's multigrid estimate assumes.
-        let block_size = if keeps_whole_translational_nodes(summary, prepared_modal.free_dofs()) {
+        // the plan's multigrid estimate (operator complexity of a rigid-body hierarchy) assumes.
+        let free_dofs = prepared_modal.free_dofs();
+        let block_size = if keeps_whole_translational_nodes(summary, free_dofs) {
             3
         } else {
             1
         };
+        // With the node positions, the nodal blocks aggregate the six rigid-body modes of the
+        // free nodes, which bending-dominated solids need for multigrid to converge quickly.
+        let near_nullspace = node_coordinates_m
+            .filter(|coordinates| {
+                block_size == 3 && coordinates.len() == summary.structural_node_count
+            })
+            .map(|coordinates| {
+                let free_coordinates = free_dofs
+                    .chunks_exact(3)
+                    .flat_map(|triple| coordinates[triple[0] / 3])
+                    .collect::<Vec<f64>>();
+                runmat_sparse_solvers::precond::rigid_body_modes(&free_coordinates, 3)
+            });
         match crate::solve::shared_sparse::with_plan(LocalExecutionPlan::serial(), || {
             runmat_sparse_solvers::precond::Amg::new(
                 crate::solve::shared_sparse::CsrArrays::of(
@@ -309,6 +324,7 @@ pub(crate) fn solve_modal_system_reusing(
                 .view(),
                 runmat_sparse_solvers::precond::AmgOptions {
                     block_size,
+                    near_nullspace,
                     strength_threshold: if block_size > 1 { 0.02 } else { 0.0 },
                     ..Default::default()
                 },

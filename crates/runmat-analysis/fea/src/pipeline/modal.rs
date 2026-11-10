@@ -276,6 +276,17 @@ fn execute_modal_core(
         Some(2),
         Some(5),
     );
+    // The LOBPCG multigrid takes the solid's rigid-body modes as its near-nullspace.
+    let node_coordinates_m = match (path, options.solver_mesh.as_ref()) {
+        (SubspaceSolvePath::PreconditionedLobpcg, Some(mesh)) => Some(
+            mesh.topology
+                .nodes
+                .iter()
+                .map(|node| node.coordinates_m.canonical_value())
+                .collect::<Vec<[f64; 3]>>(),
+        ),
+        _ => None,
+    };
     let modal = solve_modal_system_reusing(
         &summary,
         options.truncation.requested_mode_count(),
@@ -284,7 +295,9 @@ fn execute_modal_core(
         backend,
         &mut solid_energy.into_reuse(),
         path,
+        node_coordinates_m.as_deref(),
     );
+    drop(node_coordinates_m);
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::Solve,
