@@ -51,10 +51,9 @@ the native numerical acceptance and Desktop saved-result replay checks. Inspect
 the native posters separately for framing and visual interpretation.
 
 Then run the source artifact producer with the exported requirements and builtin
-metadata. Builtin reference pages come from the builtin documentation producer,
-which merges catalog-owned documentation with the remaining legacy sidecars in
-`docs/builtins/reference`; the export writes one `builtins/reference/<name>.json`
-per documented builtin. Optional `--evidence-manifest` supplies actual assessment
+metadata. Builtin reference pages come from the complete canonical documentation
+export, with one `builtins/reference/<name>.json` per documented builtin.
+Optional `--evidence-manifest` supplies actual assessment
 records; without it, linked requirements are not described as passed.
 
 Builtin references are packed from the complete canonical documentation export,
