@@ -82,14 +82,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "c6e93a5cc1971c5172a5bc2c22315db99854f00d68745dae6f6634e6d6efb33b",
+      "sha256": "4e95d7ee61d67e7c93bf1f0d87a1d63326875a36978302c08d08cd0d573259d4",
       "files": 26023,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "reason": "Exact source review conserves the original Linux authored/recovery and macOS performance workloads across native lease, report and path adapters and test-only edits. The named numerical implementations and assertions retain their original measurements; focused boundary evidence is linked.",
     "review": {
-      "path": "qualification/scientific/reviews/native-design-paths-20261110.json",
-      "sha256": "03c08c255efa1867e81491968642bde8713fc9d1f03a1addc92c08d777e0e3c1"
+      "path": "qualification/scientific/reviews/native-design-module-order-20261110.json",
+      "sha256": "4c1500f325f3ae2473897cac95337e2acb3d4680055e05ca017797272e62d13d"
     }
   }
 }
