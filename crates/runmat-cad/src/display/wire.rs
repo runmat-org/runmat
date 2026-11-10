@@ -171,15 +171,13 @@ pub fn inlined(value: &serde_json::Value) -> Option<serde_json::Value> {
                                 .chunks_exact(4)
                                 .map(|c| [c[0], c[1], c[2], c[3]]);
                             if tag == "$f32" {
-                                // As an inline array reads: the f32's shortest text, read as a number.
+                                // Match serde_json::to_value's inline f32 promotion exactly.
                                 Value::Array(
                                     words
                                         .map(|w| {
-                                            f32::from_le_bytes(w)
-                                                .to_string()
-                                                .parse::<f64>()
-                                                .ok()
-                                                .and_then(serde_json::Number::from_f64)
+                                            serde_json::Number::from_f64(f64::from(
+                                                f32::from_le_bytes(w),
+                                            ))
                                                 .map_or(Value::Null, Value::Number)
                                         })
                                         .collect(),
@@ -207,8 +205,8 @@ pub fn inlined(value: &serde_json::Value) -> Option<serde_json::Value> {
 }
 
 /// A display's number array as numbers, read in place: an inline array as it is, or a mesh
-/// reference read from the active buffer while [`collect`] runs (each `f32` read as its
-/// shortest text reads, so the numbers equal those [`inlined`] gives). Readers of a display
+/// reference read from the active buffer while [`collect`] runs (each `f32` promoted exactly
+/// to `f64`, matching an inline `serde_json::to_value` array). Readers of a display
 /// that [`collect`] serialized use this instead of an [`inlined`] copy of the whole display.
 /// Anything else reads as no numbers.
 pub fn numbers(value: &serde_json::Value) -> Vec<f64> {
@@ -239,9 +237,7 @@ pub fn numbers(value: &serde_json::Value) -> Vec<f64> {
                     .chunks_exact(4)
                     .map(|c| [c[0], c[1], c[2], c[3]]);
                 match tag.as_str() {
-                    "$f32" => words
-                        .filter_map(|w| f32::from_le_bytes(w).to_string().parse::<f64>().ok())
-                        .collect(),
+                    "$f32" => words.map(|w| f64::from(f32::from_le_bytes(w))).collect(),
                     "$u32" => words.map(|w| u32::from_le_bytes(w) as f64).collect(),
                     _ => Vec::new(),
                 }
@@ -315,7 +311,8 @@ mod tests {
     use serde_json::{json, Value};
 
     fn part() -> PartDisplay {
-        let positions: Vec<f32> = (0..30).map(|i| i as f32 * 0.25).collect();
+        // Decimal values such as 0.08 expose text-rounding changes to endpoint keys.
+        let positions: Vec<f32> = (0..30).map(|i| i as f32 * 0.08).collect();
         let triangles: Vec<u32> = (0..18).collect();
         PartDisplay {
             bodies: vec![BodyDisplay {
@@ -349,7 +346,15 @@ mod tests {
             30
         );
 
-        let (framed, bytes) = collect(|| serde_json::to_value(&display).unwrap());
+        let (framed, bytes) = collect(|| {
+            let framed = serde_json::to_value(&display).unwrap();
+            assert_eq!(super::inlined(&framed).unwrap(), plain);
+            assert_eq!(
+                super::numbers(&framed["bodies"][0]["faces"][0]["positions"]),
+                super::numbers(&plain["bodies"][0]["faces"][0]["positions"])
+            );
+            framed
+        });
         let face = &framed["bodies"][0]["faces"][0];
         assert_eq!(face["positions"], json!({ "$f32": [0, 30] }));
         assert_eq!(face["triangles"], json!({ "$u32": [120, 18] }));
