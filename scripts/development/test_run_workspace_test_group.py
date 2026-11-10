@@ -34,6 +34,10 @@ class ScientificRoutingTests(unittest.TestCase):
                 self.assertEqual(os.environ["XDG_RUNTIME_DIR"], "/stale-runtime")
             self.assertFalse(directory.exists())
 
+    def test_windows_archive_compression_converts_existing_ntfs_archives(self):
+        self.assertEqual(runner.WINDOWS_ARCHIVE_COMPRESSION_FLAGS,
+                         ("/C", "/F", "/EXE:LZX", "/I", "/Q"))
+
     def test_cached_workspace_roots_are_reclaimed_without_libraries_or_build_scripts(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)

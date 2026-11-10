@@ -298,6 +298,8 @@ def shard_commands(commands: list[list[str]], index: int, count: int) -> list[li
 # before that working set can exhaust the volume, while keeping runner logs.
 WINDOWS_ARCHIVE_FREE_SPACE = 64 * 1024 ** 3
 WINDOWS_ARCHIVE_MIN_BYTES = 16 * 1024 ** 2
+WINDOWS_ARCHIVE_COMPRESSION_FLAGS = ("/C", "/F", "/EXE:LZX", "/I", "/Q")
+_lzx_archive_states: dict[str, tuple[int, int]] = {}
 
 
 def reclaim_cached_root_binaries(target_directory: Path, metadata: dict) -> int:
@@ -353,8 +355,8 @@ def compact_windows_archives(target_directory: Path) -> int:
                 continue
             info = entry.stat(follow_symlinks=False)
             if (not stat.S_ISREG(info.st_mode) or info.st_size < WINDOWS_ARCHIVE_MIN_BYTES
-                    or info.st_file_attributes & (stat.FILE_ATTRIBUTE_COMPRESSED
-                                                   | stat.FILE_ATTRIBUTE_REPARSE_POINT)):
+                    or info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                    or _lzx_archive_states.get(entry.path) == (info.st_mtime_ns, info.st_size)):
                 continue
             candidates.append((info.st_size, entry.path))
     before = shutil.disk_usage(target_directory).free
@@ -363,13 +365,16 @@ def compact_windows_archives(target_directory: Path) -> int:
     for _, archive in sorted(candidates, reverse=True):
         if shutil.disk_usage(target_directory).free >= WINDOWS_ARCHIVE_FREE_SPACE:
             break
-        result = subprocess.run([compact, "/C", "/I", "/Q", archive],
+        # LZX preserves normal compiler access and is denser than inherited
+        # NTFS compression. /F also converts already NTFS-compressed archives.
+        result = subprocess.run([compact, *WINDOWS_ARCHIVE_COMPRESSION_FLAGS, archive],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 encoding="utf-8", errors="replace", check=False)
-        if (result.returncode or not Path(archive).stat().st_file_attributes
-                & stat.FILE_ATTRIBUTE_COMPRESSED):
+        if result.returncode:
             print(f"Dependency archive compression failed for {archive}: {result.stdout}", flush=True)
         else:
+            info = Path(archive).stat()
+            _lzx_archive_states[archive] = (info.st_mtime_ns, info.st_size)
             compressed += 1
     after = shutil.disk_usage(target_directory).free
     print(f"Windows dependency archive compression: {compressed} files; "
@@ -470,7 +475,8 @@ def main() -> int:
         print(f"{sum(map(len, GROUPS.values()))} workspace packages assigned across {len(GROUPS)} groups")
         return 0
 
-    if args.reclaim_completed_test_binaries and os.name == "nt":
+    if (args.reclaim_completed_test_binaries and os.name == "nt"
+            and shutil.disk_usage(repo_root).free < WINDOWS_ARCHIVE_FREE_SPACE):
         reclaim_cached_root_binaries(Path(metadata["target_directory"]), metadata)
 
     failure = 0
