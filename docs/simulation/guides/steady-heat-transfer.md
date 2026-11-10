@@ -2,8 +2,6 @@
 
 Hold one end of a steel bar at **300 K** and the other at **350 K**. RunMat solves for temperature inside the solid and recovers heat flux from its temperature gradient. The remaining surfaces have no applied heat flux.
 
-<!-- fea:example:steady-conduction:setup -->
-
 ### Inspect the bar
 
 <!-- fea:example:steady-conduction:geometry -->
