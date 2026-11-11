@@ -15,6 +15,8 @@ repository = "https://github.com/runmat-org/runmat"
 runmat-design-syntax = { workspace = true }
 runmat-types = { workspace = true }
 runmat-rules = { path = "../runmat-rules", version = "=0.7.1" }
+# The orderable part record, shared with the server's part search.
+runmat-part-record = { path = "../runmat-part-record", version = "=0.7.1" }
 # Design-command descriptor types (one schema for CAD and PCB commands) and the JSON writer.
 runmat-design-commands = { path = "../runmat-design-commands", version = "=0.7.1" }
 serde = { workspace = true }

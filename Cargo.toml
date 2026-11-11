@@ -10,6 +10,7 @@ members = [
     "crates/runmat-cad/wasm",
     "crates/runmat-design-commands",
     "crates/runmat-rules",
+    "crates/runmat-part-record",
     "crates/runmat-circuit",
     "crates/runmat-circuit/wasm",
     "crates/runmat-circuit-spice",

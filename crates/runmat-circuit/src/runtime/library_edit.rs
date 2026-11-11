@@ -9,7 +9,7 @@
 
 use super::edit::{EditError, EditOutput, EditRequest};
 use super::{file_change, Project};
-use crate::library::catalog::{prefix_for, CatalogPart};
+use crate::library::catalog::{prefix_for, PartRecord};
 use crate::syntax::board_edit::SourceChange;
 use crate::syntax::{parse_circuit, part_decl, words};
 use runmat_design_syntax::ast::{Headed, Item, Statement};
@@ -120,13 +120,13 @@ fn next_designator(project: &Project, prefix: &str) -> String {
 
 pub(super) fn place(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
     let v = &request.values;
-    let part: CatalogPart = serde_json::from_value(
+    let part: PartRecord = serde_json::from_value(
         v.get("part")
             .cloned()
             .ok_or_else(|| EditError::new("choose a part to place"))?,
     )
     .map_err(|e| EditError::new(format!("the part record doesn't read: {e}")))?;
-    part.check().map_err(EditError::new)?;
+    crate::library::catalog::check(&part).map_err(EditError::new)?;
     let text = &project.circuit_text;
     let at = circuit_at(text).ok_or_else(|| {
         EditError::new(format!("{} has no `circuit` block", project.circuit_path))

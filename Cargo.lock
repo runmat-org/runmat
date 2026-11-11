@@ -8038,6 +8038,7 @@ dependencies = [
  "gerber_parser",
  "runmat-design-commands",
  "runmat-design-syntax",
+ "runmat-part-record",
  "runmat-rules",
  "runmat-types",
  "serde",
@@ -9085,6 +9086,15 @@ dependencies = [
  "runmat-lexer",
  "runmat-types",
  "serde",
+]
+
+[[package]]
+name = "runmat-part-record"
+version = "0.7.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "utoipa",
 ]
 
 [[package]]

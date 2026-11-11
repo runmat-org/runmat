@@ -4,7 +4,7 @@
 
 use crate::import::{file_safe, Report};
 use crate::ir::{Design, PartRef};
-use crate::library::catalog::{CatalogPart, CatalogPin};
+use crate::library::catalog::{PartRecord, PartPin};
 use crate::library::{Package, Pool};
 use std::collections::BTreeMap;
 
@@ -54,7 +54,7 @@ pub(crate) fn declare_parts(
     report: &mut Report,
 ) -> BTreeMap<String, String> {
     let mut files = BTreeMap::new();
-    let mut parts: BTreeMap<String, CatalogPart> = BTreeMap::new();
+    let mut parts: BTreeMap<String, PartRecord> = BTreeMap::new();
     for sheet in design.sheets.values_mut() {
         for c in &mut sheet.components {
             let PartRef::Entity { entity, package } = &c.part else {
@@ -73,8 +73,8 @@ pub(crate) fn declare_parts(
                     continue;
                 };
                 for p in &unit.pins {
-                    if !pins.iter().any(|q: &CatalogPin| q.name == p.name) {
-                        pins.push(CatalogPin {
+                    if !pins.iter().any(|q: &PartPin| q.name == p.name) {
+                        pins.push(PartPin {
                             name: p.name.clone(),
                             pads: vec![p.name.clone()],
                             kind: p.kind.name().into(),
@@ -151,7 +151,7 @@ pub(crate) fn declare_parts(
             let datasheet = property(&c.properties, &["Datasheet"])
                 .filter(|d| *d != "~")
                 .map(str::to_owned);
-            parts.entry(name.clone()).or_insert_with(|| CatalogPart {
+            parts.entry(name.clone()).or_insert_with(|| PartRecord {
                 mpn: name.clone(),
                 manufacturer: property(&c.properties, MAKER_KEYS)
                     .unwrap_or_default()

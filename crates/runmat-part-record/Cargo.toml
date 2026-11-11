@@ -1,0 +1,21 @@
+[package]
+name = "runmat-part-record"
+version = "0.7.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "The orderable part record shared by the RunMat circuit runtime and the server's part search: the part a catalog describes, its pins and SPICE model, and a search hit with its offers"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+# One record for the circuit runtime (`part` declarations, `library.place`) and the server's
+# part search. Serde only; the `openapi` feature adds the server's schema derives.
+[dependencies]
+serde = { workspace = true }
+utoipa = { version = "4", optional = true }
+
+[features]
+openapi = ["dep:utoipa"]
+
+[dev-dependencies]
+serde_json = { workspace = true }
