@@ -97,6 +97,7 @@ impl FeaSourceSnapshotBuilder {
             graph,
             modules: self.modules,
             geometry: BTreeMap::new(),
+            geometry_failures: BTreeMap::new(),
         })
     }
 
@@ -119,6 +120,9 @@ pub struct PreparedFeaSourceSnapshot {
     graph: FeaModuleGraph,
     modules: BTreeMap<LogicalSourcePath, SourceModule>,
     geometry: BTreeMap<LogicalSourcePath, Vec<u8>>,
+    /// Geometry sources the host could not produce (a part that does not regenerate), with
+    /// the host's reason, reported by the check at the geometry's `file =`.
+    geometry_failures: BTreeMap<LogicalSourcePath, String>,
 }
 
 impl PreparedFeaSourceSnapshot {
@@ -185,6 +189,11 @@ impl PreparedFeaSourceSnapshot {
         Ok(())
     }
 
+    /// Records why the host could not produce the geometry at `logical_path`.
+    pub fn add_geometry_failure(&mut self, logical_path: LogicalSourcePath, message: String) {
+        self.geometry_failures.insert(logical_path, message);
+    }
+
     pub fn check(
         self,
         functions: impl IntoIterator<Item = FunctionFacts>,
@@ -192,8 +201,9 @@ impl PreparedFeaSourceSnapshot {
     ) -> Result<CheckedFeaSource, String> {
         let mut profiles = profiles.into_iter().collect::<Vec<_>>();
         profiles.sort_by(|left, right| left.profile.cmp(&right.profile));
-        let host =
+        let mut host =
             SnapshotFeaHost::new(&self.modules, &self.geometry, functions, profiles.clone())?;
+        host.failures = &self.geometry_failures;
         if self.graph.catalog_fingerprint != host.fingerprint() {
             return Err(
                 "FEA operation catalog changed between source preparation and checking".into(),
@@ -222,6 +232,7 @@ struct SnapshotRequestLog {
 struct SnapshotFeaHost<'a> {
     modules: &'a BTreeMap<LogicalSourcePath, SourceModule>,
     geometry: &'a BTreeMap<LogicalSourcePath, Vec<u8>>,
+    failures: &'a BTreeMap<LogicalSourcePath, String>,
     functions: BTreeMap<(LogicalSourcePath, SourceSymbol), FunctionFacts>,
     profiles: BTreeMap<ExecutionProfileIdentity, ExecutionProfileFacts>,
     catalog: ComposedOperationCatalog,
@@ -250,9 +261,11 @@ impl<'a> SnapshotFeaHost<'a> {
                 );
             }
         }
+        static NO_FAILURES: BTreeMap<LogicalSourcePath, String> = BTreeMap::new();
         Ok(Self {
             modules,
             geometry,
+            failures: &NO_FAILURES,
             functions: function_facts,
             profiles: profile_facts,
             catalog: fea_operation_catalog()?,
@@ -310,6 +323,13 @@ impl GeometryInspectionSource for SnapshotFeaHost<'_> {
         &self,
         request: &GeometryInspectionRequest,
     ) -> Result<GeometryInspection, SourceDiagnostic> {
+        if let Some(message) = self.failures.get(&request.logical_path) {
+            return Err(diagnostic(
+                "fea.host.design_geometry_failed",
+                message.clone(),
+                SourceAvailability::Available,
+            ));
+        }
         let Some(bytes) = self.geometry.get(&request.logical_path) else {
             push_unique(&mut self.requests.borrow_mut().geometry, request.clone());
             return Err(diagnostic(

@@ -710,7 +710,7 @@ fn imported_file(statements: &[CheckedFeaStatement]) -> Option<&CheckedExpressio
 fn source_format(path: &str) -> Option<GeometrySourceFormat> {
     let extension = path.rsplit_once('.')?.1.to_ascii_lowercase();
     Some(match extension.as_str() {
-        "step" | "stp" => GeometrySourceFormat::Step,
+        "step" | "stp" | "part" | "assembly" => GeometrySourceFormat::Step,
         "iges" | "igs" => GeometrySourceFormat::Iges,
         "brep" => GeometrySourceFormat::Brep,
         _ => return None,

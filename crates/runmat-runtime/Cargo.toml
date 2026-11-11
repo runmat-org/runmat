@@ -38,6 +38,8 @@ runmat-filesystem = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-geometry-io = { workspace = true }
 runmat-geometry-ops = { workspace = true }
+# RunMat MCAD parts and assemblies as geometry sources (geometry::design_source).
+runmat-cad-wasm = { path = "../runmat-cad/wasm", version = "=0.7.1", default-features = false }
 runmat-analysis-core = { workspace = true }
 runmat-canonical-codec = { workspace = true }
 runmat-analysis-fea = { workspace = true }
@@ -182,8 +184,9 @@ wgpu = []
 interaction-test-hooks = []
 
 # Optional CAD topology import through OpenCascade. The native feature links OCCT
-# through runmat-geometry-io; the wasm feature expects a host-provided sidecar.
-occt-native = ["runmat-geometry-io/occt-native"]
+# through runmat-geometry-io; the wasm feature expects a host-provided sidecar. The native
+# feature also regenerates .part and .assembly geometry sources on the OCCT design kernel.
+occt-native = ["runmat-geometry-io/occt-native", "runmat-geometry-io/occt-kernel"]
 occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
 
 [dev-dependencies]

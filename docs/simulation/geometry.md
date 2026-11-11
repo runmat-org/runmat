@@ -37,6 +37,7 @@ Accepted authored coordinate units are meters, millimeters, and inches. The sour
 
 | Format | Analysis use |
 | --- | --- |
+| RunMat MCAD `.part`, `.assembly` | Exact CAD topology regenerated from the design, with its face regions and output bodies as authored names ([Parts and assemblies](#parts-and-assemblies)) |
 | STEP | Exact CAD topology plus AP242/XCAF product, assembly, label, layer, color, parameter, material, and property evidence when authored by the source tool |
 | IGES | Exact CAD topology and available XCAF names/layers/colors |
 | BREP | Exact native OCCT topology; normally little exchange metadata |
@@ -81,6 +82,46 @@ available for deliberate engineering reuse.
 Replacing a CAD file invalidates its recorded source digest. Reattach selections through
 the existing admitted revision map, or review unresolved selections. Never infer identity
 from a display label, face ordinal, or geometric proximity.
+
+## Parts and assemblies
+
+A study reads a RunMat MCAD part or assembly directly. Name the design file with `file =`:
+
+```fea pending=geometry.source.mcad
+geometry arm {
+    file = "./arm_study.assembly"
+    interfaces = shared
+    region arm : solid { select name "arm"; expect exactly_one }
+    region pod : solid { select name "motor_pod"; expect exactly_one }
+    region root : face { select name "root"; expect one_or_more }
+    region motor_seat : face { select name "motor_seat"; expect one_or_more }
+}
+```
+
+When the study is checked, RunMat regenerates the design on the same OCCT kernel the MCAD editor
+uses and reads the exact B-rep of that regeneration. No STEP file is written to the project. The
+regions come from the same regeneration:
+
+- each face of a part's face `region` carries the region's name, or its `label` when it has one;
+- each output body carries its output's name or `label`, so a `solid` region selects it by that name;
+- an assembly carries the names of every part it places, under the same rules.
+
+A `select name` that the design does not carry is a check error. The error names the design file,
+the region and the names the design does carry. A design that does not regenerate (a syntax error,
+an unresolved `use`, a kernel failure) is reported at the geometry's `file =` with the CAD
+diagnostic.
+
+The geometry identity covers the design and every file it reads: the parts and sub-assemblies an
+assembly places and the STEP files a part imports. Editing a dimension in any of them changes the
+identity, so the next run re-meshes. A run of an unchanged design reuses its mesh.
+
+The design files keep their own length unit (the regenerated geometry is in millimetres), so
+`units =` is optional. Materials stay authored in the `.fea` file and assigned to the design's
+regions.
+
+A study reads each design in its default configuration with its full representation. A face
+carries one name, so a face in two face regions carries the first region's name. Edge and vertex
+regions, and region paths through an assembly's occurrences, are not carried yet.
 
 ## Regions And Selectors
 

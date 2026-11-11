@@ -29,6 +29,7 @@ pub mod export;
 pub mod flat;
 pub mod meshes;
 pub mod pmi;
+pub mod study;
 
 fn stem(path: &str) -> String {
     let name = path.rsplit('/').next().unwrap_or(path);

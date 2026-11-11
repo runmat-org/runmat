@@ -121,6 +121,23 @@ pub fn call(request: &str) -> String {
                 Err(message) => runtime::error_json(path, &message),
             }
         }
+        // A part or an assembly as a study's geometry: the exact STEP AP242 text of one
+        // regeneration, with its regions as entity names (`exchange::study`).
+        "studyGeometry" => {
+            let path = arg(a, 0);
+            match runtime::parse_files(arg(a, 2)) {
+                Ok(mut files) => {
+                    files.insert(path.to_owned(), arg(a, 1).to_owned());
+                    set_imports(&files);
+                    match runmat_cad_wasm::exchange::study::study_geometry(path, &files, None) {
+                        Ok(step) => serde_json::json!({ "step": String::from_utf8_lossy(&step) })
+                            .to_string(),
+                        Err(message) => error(&message),
+                    }
+                }
+                Err(message) => runtime::error_json(path, &message),
+            }
+        }
         "cacheMisses" => serde_json::to_string(&*MISSES.lock().unwrap_or_else(|e| e.into_inner()))
             .unwrap_or_else(|_| "[]".into()),
         "edit" => {

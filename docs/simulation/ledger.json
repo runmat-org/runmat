@@ -2466,6 +2466,25 @@
       ]
     },
     {
+      "id": "geometry.source.mcad",
+      "title": "RunMat MCAD parts and assemblies as study geometry (`file = \"x.part\"` / `\"x.assembly\"`)",
+      "kind": "geometry",
+      "area": "geometry",
+      "status": "pending",
+      "acceptance": "A study naming a .part or .assembly checks, meshes and solves from one regeneration of the design on OCCT, with the design's face regions and output bodies as names; results match the exported-STEP route; a dependency edit changes the geometry identity and an unchanged design reuses its mesh.",
+      "owner": "q-mcad-source",
+      "gaps": [
+        "G36"
+      ],
+      "witness": [
+        "runmat fea check runmat-examples/aerospace/camera-drone/simulation/arm_landing.fea"
+      ],
+      "requirements": [],
+      "docs": [
+        "geometry.md"
+      ]
+    },
+    {
       "id": "language.include.parameterized",
       "title": "Including a parameterized model with its inputs bound by name",
       "kind": "language",
