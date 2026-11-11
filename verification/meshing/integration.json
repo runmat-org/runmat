@@ -550,6 +550,12 @@
       "source_units": "millimeter",
       "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 2 } }],
       "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "drone-esc-thermal",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 3 } }],
+      "mesh_scenarios": []
     }
   ],
   "metamorphic_relations": [
