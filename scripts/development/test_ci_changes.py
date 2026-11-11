@@ -10,15 +10,27 @@ spec.loader.exec_module(module)
 
 class ChangeRoutingTests(unittest.TestCase):
     def test_prose_and_images(self):
-        self.assertTrue(module.documentation_only(["docs/runtime/remote.md", "docs/figure.svg", "CHANGELOG.md"]))
+        self.assertTrue(module.non_native_changes_only(["docs/runtime/remote.md", "docs/figure.svg", "CHANGELOG.md"]))
+
+    def test_scientific_receipt_data_uses_its_required_verifier(self):
+        self.assertTrue(module.non_native_changes_only([
+            "qualification/scientific/receipts/authored-cli-physics.json",
+            "qualification/scientific/reviews/doc-reference.json",
+            "qualification/scientific/evidence/command-reference.json",
+        ]))
+        for path in ["qualification/scientific/policy.json",
+                     "qualification/scientific/evidence/check.py",
+                     "qualification/scientific/evidence/nested/source.rs",
+                     "qualification/quality/fea-lint-debt-0.7.json"]:
+            self.assertFalse(module.non_native_changes_only([path]), path)
 
     def test_executable_docs_and_unknown_inputs_retain_native(self):
         for path in ["docs/example.m", "docs/example.fea", "LICENSE.md", "Cargo.lock",
                      "crates/a/src/lib.rs", ".github/workflows/ci.yml", "scripts/tool.py"]:
-            self.assertFalse(module.documentation_only(["docs/index.md", path]), path)
+            self.assertFalse(module.non_native_changes_only(["docs/index.md", path]), path)
 
     def test_empty_inventory_retains_native(self):
-        self.assertFalse(module.documentation_only([]))
+        self.assertFalse(module.non_native_changes_only([]))
 
     def test_new_branch_and_explicit_validation_retain_native(self):
         self.assertTrue(module.native_required({"before": "0" * 40, "after": "a" * 40}, "push"))

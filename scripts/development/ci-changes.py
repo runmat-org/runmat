@@ -1,4 +1,4 @@
-"""Keep documentation-only pushes out of native compilation; unknown inputs run it."""
+"""Run native CI for code inputs; verify prose and scientific evidence separately."""
 
 import json
 import os
@@ -7,12 +7,20 @@ import re
 import subprocess
 
 
-def documentation_only(paths):
+def non_native_changes_only(paths):
     paths = list(paths)
     return bool(paths) and all(
         path in {"README.md", "CHANGELOG.md"}
         or (path.startswith("docs/") and PurePosixPath(path).suffix.lower()
             in {".md", ".mdx", ".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"})
+        # These JSON records bind measured results to source inputs. The
+        # scientific-receipts job verifies them on every push. Policy, routing
+        # scripts, quality exceptions and executable tests retain native CI.
+        or (PurePosixPath(path).parent.as_posix() in {
+                "qualification/scientific/receipts",
+                "qualification/scientific/reviews",
+                "qualification/scientific/evidence",
+            } and PurePosixPath(path).suffix == ".json")
         for path in paths
     )
 
@@ -36,7 +44,7 @@ def native_required(event, event_name):
         changed = subprocess.check_output(
             ["git", "diff", "--name-only", "--no-renames", "-z", base, head]
         ).decode("utf-8").split("\0")
-        return not documentation_only(path for path in changed if path)
+        return not non_native_changes_only(path for path in changed if path)
     except (subprocess.CalledProcessError, UnicodeError):
         # Missing history or unrecognized paths must retain full coverage.
         return True
