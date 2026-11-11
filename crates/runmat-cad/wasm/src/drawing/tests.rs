@@ -344,13 +344,17 @@ fn a_section_cuts_through_an_origin_plane() {
             &format!("\n    view a_a = section(from = top, plane = {plane}, label = A, sheet = \"1\", model = {{ part = bracket }}, at = [250, 200], display = visible_lines)\n}}\n"),
             1,
         );
-        let out: Value = serde_json::from_str(&compile_json("/p/bracket.drawing", &text, &files)).unwrap();
+        let out: Value =
+            serde_json::from_str(&compile_json("/p/bracket.drawing", &text, &files)).unwrap();
         out
     };
     // The compile's own problems, and the drawing check's (in the projection's data).
     let findings = |out: &Value| {
         let mut all: Vec<Value> = Vec::new();
-        for list in [&out["diagnostics"], &out["projection"]["data"]["diagnostics"]] {
+        for list in [
+            &out["diagnostics"],
+            &out["projection"]["data"]["diagnostics"],
+        ] {
             all.extend(list.as_array().into_iter().flatten().cloned());
         }
         all
@@ -359,8 +363,14 @@ fn a_section_cuts_through_an_origin_plane() {
     assert_eq!(findings(&out), Vec::<Value>::new());
     let cut = &out["projection"]["data"]["hlr"]["a_a"]["cut"];
     assert_eq!(cut["view"], "top", "{cut}");
-    assert!(cut["at"].as_f64().is_some_and(|at| at.abs() < 1e-6), "{cut}");
+    assert!(
+        cut["at"].as_f64().is_some_and(|at| at.abs() < 1e-6),
+        "{cut}"
+    );
     let out = with("plane.nowhere");
     let messages = Value::Array(findings(&out)).to_string();
-    assert!(messages.contains("a section cuts through a face or an origin plane"), "{messages}");
+    assert!(
+        messages.contains("a section cuts through a face or an origin plane"),
+        "{messages}"
+    );
 }
