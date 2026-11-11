@@ -122,6 +122,8 @@ artifact exports the registry as `fea/pending-features.json` for the website bad
 node scripts/docs/docs-lint.mjs              # registry ids, landed flags, front matter, links
 node scripts/docs/generate-pages.mjs         # validation/<family>.md, validation/status.md, the procedure table
 node scripts/docs/generate-pages.mjs --check # CI: generated pages are current
+# Status also counts automated tests per family from the source (test-counts.mjs); --check ignores
+# those counts and the docs export refreshes them at publish time.
 node scripts/docs/check-snippets.mjs --runmat target/release/runmat   # `runmat check` every ```fea block
 ```
 
