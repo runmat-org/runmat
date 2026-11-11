@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "7b44e064576eeea41334aab4253f5ea1546f3e6a00c03187e7aba806101b18aa",
+    "files": 26104,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+    "files": 26104,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "circuit-large-board-performance"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-analysis/core/src/lib.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6ab90d460f70fc3805a1a7165d58477ce84a2d94"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b3d71997850fef393cac03adcd0b80dd809abbfa"
+      ],
+      "reason": "Rustfmt reorders and wraps existing modal-accuracy exports. No exported symbol or implementation changes; this FEA module is outside the circuit library benchmark call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "25ffb37cf15124f3c0fddd3910c9862d2775babc"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6477df53653ad5faac683d2ea561a4659e584b34"
+      ],
+      "reason": "Rustfmt wraps an existing modal-result assertion. This FEA test module is not linked into the circuit benchmark."
+    },
+    {
+      "path": "crates/runmat-analysis/language/src/semantic/procedure/lower.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e72e487b2b6525aa534c0a71121695c66686161b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8759afc9e0ac3830ed9b8aaaefe2afa9466a7b4c"
+      ],
+      "reason": "Rustfmt joins existing modal-extraction calls without changing arguments or control flow. The circuit library benchmark does not parse FEA procedures."
+    },
+    {
+      "path": "crates/runmat-design-tools/src/commands.rs",
+      "before": [
+        "100644",
+        "blob",
+        "39234dab3694bc4f09d38480396902f24bc8b135"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0fb62787ed634e777e2433729d5a375005897ab9"
+      ],
+      "reason": "Routes part.sketch EnterMode commands to the existing edit handler. The benchmark calls the circuit library Session API directly and does not depend on runmat-design-tools."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/command_registry.rs",
+      "before": [
+        "100644",
+        "blob",
+        "0e747e3c3fd1915570069741ed62903695c05349"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8c0b234316501abbcf433c485d863f7ba8439ee8"
+      ],
+      "reason": "Adds and formats the sketch edit-handler regression. This integration test is not linked into the circuit library benchmark."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9ba071a33f0f18350a143590c2fdaa1a28c8d21b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0cf4c19e9dea5268b18b918faa06af53a1156e49"
+      ],
+      "reason": "Rustfmt joins an existing accuracy assertion. Runtime FEA tests are not linked into the circuit benchmark."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/circuit-air-m4-20261111.json",
+      "sha256": "362f6ec02cff94e5c7747cc401233716fcd925632fd70932736131be924237d1"
+    }
+  ]
+}

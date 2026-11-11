@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "cohort": "circuit-large-board-performance",
-  "policy_sha256": "71379c3bce11f6f26e0e017aa44b64cf12688b11dfac22f26fa55ae2969271f8",
+  "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "d8e06ca2ca8e68847e01c19268715c53a07a5cd5",
+    "source_revision": "df1e2068ed02cd490c1a9ca307c98ab080f09c3a",
     "target": "macos-aarch64",
-    "hardware": "Apple M5 Max, 48 GiB RAM",
+    "hardware": "Apple M4, 24 GiB RAM",
     "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "command": [
       "cargo",
@@ -27,8 +27,8 @@
       "cargo_build_jobs": 1,
       "incremental": false
     },
-    "log_sha256": "45a5ad3b911963d897b55b3ac5954155d446e1cf8cf7da453e2c34a0eca9c1f4",
-    "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-d8e06-main-circuit-scale.log",
+    "log_sha256": "e8396a7e425c84cd14ffe41caa907c063d0551495efe8e470a489e14990a5ac9",
+    "log_location": "runmat-air:/Users/runmat-air/logs/intake-df1e2068ed-circuit-receipt.tests.log",
     "passed": 1,
     "failed": 0,
     "ignored": 0,
@@ -39,58 +39,37 @@
     ],
     "selected_filter": null,
     "inputs": {
-      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
-      "files": 26096,
+      "sha256": "7b44e064576eeea41334aab4253f5ea1546f3e6a00c03187e7aba806101b18aa",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "artifacts": [
       {
-        "sha256": "7d4d728f92e1e66c433fd17c8a8225bb7c36e89556a8e280fabf8d90382db0c8",
-        "location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/runtime_scale-d8e06-macos-aarch64"
+        "sha256": "f652728ad5ac036166cb00464a32b60806d2ce8f1e3ebe912db04593bf2f165a",
+        "location": "runmat-air:/Users/runmat-air/logs/runtime-scale-df1e2068ed-qualified"
       }
     ],
-    "log_note": "Raw output retains permission diagnostics from a separate task-owned gate waiter that initially shared this log. That waiter was stopped. The admitted Cargo invocation returned exit 0; the named benchmark passed. The executed artifact is retained separately."
-  },
-  "scope": "The unchanged 500 ms edit budget passed on the recorded reference Mac. This receipt does not establish that budget on other processors.",
-  "comparison_runs": [
-    {
-      "source_revision": "a5ba07c1321391449e961bc3401300067672692b",
-      "target": "linux-x86_64",
-      "hardware": "GCP N1 highmem-16, Intel Xeon 2.00 GHz",
-      "passed": 0,
-      "failed": 1,
-      "move_and_compile_seconds": 1.187979635,
-      "log_sha256": "fccf508a24b68fe28b4435c7c36de6b2507abea2ae6f34028f2904555250d1a7",
-      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-a5ba07c132-scientific.circuit-large-board-performance.log",
-      "disposition": "Retained failed measurement on the slower host; no threshold or numerical assertion changed."
-    },
-    {
-      "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
-      "target": "linux-x86_64",
-      "hardware": "GCP N1 highmem-16, Intel Xeon 2.00 GHz",
-      "passed": 0,
-      "failed": 1,
-      "move_and_compile_seconds": 1.222104462,
-      "log_sha256": "4d2cec0f59c4f433c0946cc96e543dcf738d375cb067c7a05bbc5fc5c56ce58a",
-      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.circuit-large-board-performance.log",
-      "disposition": "Renewed failed N1 comparison; the reference-Mac receipt retains the unchanged 500 ms budget."
+    "source_verification": {
+      "before_and_after": true,
+      "files": 27246,
+      "sha256": "4b64cf4deef5c33bf8a8c14332b108e3681d24d029533cc9dfd832bdd72dee5a"
     }
-  ],
+  },
   "conservation": {
     "measured_inputs": {
-      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
-      "files": 26096,
+      "sha256": "7b44e064576eeea41334aab4253f5ea1546f3e6a00c03187e7aba806101b18aa",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "22322d2db88a4ad8623cb1ffcc2741cb82ffb92a9826e10ba431c35f7094f238",
-      "files": 26096,
+      "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts.",
+    "reason": "The circuit benchmark source, its dependency implementations and threshold are unchanged since the measured snapshot. The complete intervening inventory contains four FEA formatting-only files and the separate design-tool sketch handler/regression. These edits do not execute through the circuit Session benchmark.",
     "review": {
-      "path": "qualification/scientific/reviews/d8e06-final-integration.json",
-      "sha256": "7013249d738dfb4cb3a8788fdb7d6c52514e268d482c4b5f0b2568d8ebb098f4"
+      "path": "qualification/scientific/reviews/circuit-air-df1e2068ed-to-2822ea6807.json",
+      "sha256": "a06e22bf569739bf2404a2687dcc164070e9fefc7a9a04f28639f825a59d2e5b"
     }
   }
 }
