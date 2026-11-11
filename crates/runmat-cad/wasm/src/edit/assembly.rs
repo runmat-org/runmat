@@ -254,7 +254,7 @@ fn repair(
                 others.extend(changes);
                 Ok(summary)
             }
-            None => Err(model(format!("`{other:?}` applies from the source editor in this build"))),
+            None => Err(model(format!("`{other:?}` is applied in the source editor: edit the line it names"))),
         },
     }
 }
@@ -353,9 +353,7 @@ pub(super) fn edit(
         }
         "explode.lines" => explode::lines(&mut document, &request.values, &request.selection)?,
         other => {
-            return Err(model(format!(
-                "`{other}` edits assemblies through the source editor in this build"
-            )))
+            return Err(super::unhandled(other))
         }
     };
     // The minimal diff can't yet place every occurrence statement (one with a body block):

@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 pub mod check;
 pub mod ci;
 pub mod circuit_values;
+pub mod commands;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod workspace;
 pub mod edit;

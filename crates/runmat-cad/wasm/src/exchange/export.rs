@@ -43,7 +43,7 @@ pub fn export_json(path: &str, text: &str, files: &Files, request: &str) -> Stri
         };
     }
     if !matches!(format, "step_ap242" | "step") {
-        return failed(format!("export as `{format}` isn't in this build; STEP AP242 and IGES are"));
+        return failed(format!("this export writes STEP AP242 and IGES, not `{format}`"));
     }
     let step = if path.ends_with(".part") {
         super::part_step_in(path, text, configuration)

@@ -92,6 +92,23 @@ pub(crate) fn model(message: impl Into<String>) -> EditFailure {
     EditFailure::Model(message.into())
 }
 
+thread_local! {
+    static UNHANDLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The answer of a dispatcher that has no handler for `command`. It also marks the call, so the
+/// command registry (`runmat_design_tools::commands`) and its build check can tell a missing
+/// handler from a refused edit ([`take_unhandled`]).
+pub(crate) fn unhandled(command: &str) -> EditFailure {
+    UNHANDLED.with(|u| u.set(true));
+    model(format!("`{command}` has no handler for this file"))
+}
+
+/// Whether a dispatcher answered [`unhandled`] since the last call, clearing the mark.
+pub fn take_unhandled() -> bool {
+    UNHANDLED.with(|u| u.replace(false))
+}
+
 /// The feature an Outline ID names (`feature:body`, `sketch:s1`).
 fn feature_of(id: &str) -> Option<&str> {
     id.strip_prefix("feature:")
@@ -193,6 +210,33 @@ fn part_edit(
             let change = reorder_feature(text, path, id, after)?;
             Ok((change, format!("Moved {id}")))
         }
+        "part.reorder" => {
+            // The selected feature moves before or after the picked one (`values.anchor`).
+            need_one()?;
+            let id = &selected[0];
+            let anchor = match request.values.get("anchor") {
+                Some(Value::Array(a)) => a.first().and_then(Value::as_str),
+                Some(v) => v.as_str(),
+                None => None,
+            }
+            .map(|a| feature_of(a).unwrap_or(a).to_owned())
+            .ok_or_else(|| model("pick the feature to place it beside"))?;
+            if anchor == *id {
+                return Err(model(format!("`{id}` can't move beside itself")));
+            }
+            let parsed = parse_part(path, text);
+            let document = parsed.document.ok_or(EditFailure::Invalid(parsed.diagnostics))?;
+            let names: Vec<&str> = document.features.iter().map(|f| f.id.0.as_str()).filter(|n| n != id).collect();
+            let at = names
+                .iter()
+                .position(|n| *n == anchor)
+                .ok_or_else(|| model(format!("the part has no feature `{anchor}`")))?;
+            let before = request.values.get("position").and_then(Value::as_str) != Some("after");
+            let after = if before { at.checked_sub(1).map(|k| names[k]) } else { Some(names[at]) };
+            let change = reorder_feature(text, path, id, after)?;
+            let place = if before { "before" } else { "after" };
+            Ok((change, format!("Moved {id} {place} {anchor}")))
+        }
         "repair.repair" => crate::repairs::repair_part(path, text, &request.values),
         "simulate.publish" => {
             let parsed = parse_part(path, text);
@@ -251,9 +295,7 @@ fn part_edit(
                 },
             };
             let Some((stem, kind)) = lowered else {
-                return Err(model(format!(
-                    "`{command}` edits parts through the source editor in this build"
-                )));
+                return Err(unhandled(command));
             };
             let kind: runmat_cad::model::FeatureKind =
                 serde_json::from_value(kind).map_err(|e| model(format!("the {stem}: {e}")))?;
@@ -312,9 +354,7 @@ pub fn edit(
                         });
                     }
                     None => {
-                        return Err(model(format!(
-                            "`{other}` edits drawings through the source editor in this build"
-                        )))
+                        return Err(unhandled(other))
                     }
                 },
             },

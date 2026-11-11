@@ -360,7 +360,7 @@ pub(super) fn pattern(
         },
         _ => {
             return Err(model(
-                "a pattern that follows a part's feature pattern is written in the source editor in this build",
+                "a pattern that follows a part's feature pattern is written in the source",
             ))
         }
     };

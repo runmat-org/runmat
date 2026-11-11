@@ -427,7 +427,7 @@ fn draw(
                     },
                     _ => {
                         return Err(model(format!(
-                            "offsetting `{rest}` isn't in this build: offset lines and circles"
+                            "Offset takes lines and circles, not `{rest}`"
                         )))
                     }
                 };
@@ -443,15 +443,7 @@ fn draw(
             }
             Ok((out, Vec::new()))
         }
-        "sketch.spline" | "sketch.ellipse" | "sketch.text" | "sketch.polygon" => {
-            Err(model(format!(
-                "{} isn't in the sketch model yet: sketches hold points, lines, arcs and circles",
-                &command["sketch.".len()..]
-            )))
-        }
-        other => Err(model(format!(
-            "`{other}` draws through the source editor in this build"
-        ))),
+        other => Err(super::unhandled(other)),
     }
 }
 

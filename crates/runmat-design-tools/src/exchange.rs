@@ -33,6 +33,7 @@ pub mod schematic_pdf;
 pub mod sheet;
 mod step;
 mod three_mf;
+mod usd;
 
 use dxf::{drawing_dxf, flat_pattern_dxf};
 use mesh::floats;
@@ -48,9 +49,13 @@ pub enum ExportFormat {
     #[serde(rename = "3mf")]
     ThreeMf,
     Gltf,
+    /// A part or assembly as a USD layer (`.usda`), world coordinates, Z-up in metres.
+    Usd,
     Dxf,
     /// DWG (R2018 format) of a drawing sheet or a part's flat pattern.
     Dwg,
+    /// A drawing sheet as SVG at true size.
+    Svg,
     /// A drawing sheet as a one-page vector PDF at true size, or a circuit's schematic as a
     /// PDF set: every page, with its title block, in one file.
     Pdf,
@@ -357,10 +362,27 @@ pub(crate) fn model_export(
             vec![binary_file(format!("{file_stem}.3mf"), "model/3mf", &three_mf(&scene, &seed, &name))]
         }
         ExportFormat::Gltf => vec![binary_file(format!("{file_stem}.glb"), "model/gltf-binary", &glb(&meshes))],
+        ExportFormat::Usd => vec![text_file(format!("{file_stem}.usda"), "model/vnd.usda", usd::usda(&meshes, &name))],
         other => {
             return Err(ToolError::new("unsupported", format!("{other:?} is not a 3D model format")));
         }
     })
+}
+
+/// The drawing `path`'s sheets `sheets`, each one page of one vector PDF at true size.
+pub fn drawing_sheets_pdf(
+    path: &str,
+    text: &str,
+    files: &Files,
+    sheets: &[String],
+    configuration: Option<&str>,
+) -> Result<ExportedFile, ToolError> {
+    let mut pages = Vec::new();
+    for name in sheets {
+        let (_, page, _) = sheet::drawing_sheet(path, text, files, Some(name), configuration)?;
+        pages.push(page);
+    }
+    Ok(binary_file(format!("{}.pdf", stem(path)), "application/pdf", &crate::formats::pdf::write_pages(&pages)))
 }
 
 pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolError> {
@@ -378,7 +400,7 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
     let mut fab_summary = None;
     let config = input.configuration.as_deref();
     let files_out = match input.format {
-        ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf
+        ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf | ExportFormat::Usd
             if input.all_configurations =>
         {
             family::model_family(&input.path, files, input.format, &mut notes)?
@@ -387,7 +409,7 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
             family::drawing_family(&input.path, files, input.format == ExportFormat::Dwg, &mut notes)?
         }
         ExportFormat::Bom => vec![family::bom_csv(&input.path, files)?],
-        ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf => {
+        ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf | ExportFormat::Usd => {
             model_export(&input.path, files, input.format, config, &name, &mut notes, &Default::default())?
         }
         ExportFormat::Dxf => match kind {
@@ -431,6 +453,19 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
                 return Err(ToolError::new(
                     "unsupported",
                     format!("DWG exports drawings and part flat patterns; {} is a {other:?} file", input.path),
+                ))
+            }
+        },
+        ExportFormat::Svg => match kind {
+            DesignKind::Drawing => {
+                let (sheet_name, sheet, n) = sheet::drawing_sheet(&input.path, text, files, input.sheet.as_deref(), config)?;
+                notes.extend(n);
+                vec![text_file(format!("{name}-{sheet_name}.svg"), "image/svg+xml", crate::formats::svg::write(&sheet))]
+            }
+            other => {
+                return Err(ToolError::new(
+                    "unsupported",
+                    format!("SVG exports drawing sheets; {} is a {other:?} file", input.path),
                 ))
             }
         },

@@ -160,9 +160,7 @@ fn set_property(
         .map(|f| serde_json::to_value(&f.kind).unwrap_or(Value::Null))
         .ok_or_else(|| model(format!("the part has no feature `{feature}`")))?;
     let at = field_path(&kind, field).ok_or_else(|| {
-        model(format!(
-            "`{field}` is set in the source editor in this build"
-        ))
+        model(format!("`{field}` is edited in the source, not in Properties"))
     })?;
     let (json, scope) = field_value(field, value)?;
     let change = set_feature_value(text, path, feature, &at, json, &scope)?;
@@ -189,7 +187,7 @@ fn set_input_property(
         .find(|(k, _)| k.as_str() != "configuration")
         .ok_or_else(|| model("no property to set"))?;
     if field != "value" {
-        return Err(model(format!("`{field}` is set in the source editor in this build")));
+        return Err(model(format!("`{field}` is edited in the source, not in Properties")));
     }
     let edit = match value {
         Value::String(typed) => ValueEdit { value: typed_value(input, typed)?, text: typed.trim().to_owned(), scope: ConfigurationScope::All },

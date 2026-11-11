@@ -1,13 +1,20 @@
 //! `runmat-design`: the design tools from the command line, for scripts and batch jobs.
 //!
 //! ```text
-//! runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|bom|kicad|fabrication>
+//! runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication>
 //!     [--all-configurations] [--configuration <name>] [--sheet <name>] [--out <dir>]
 //!     [--preset <fab_house|assembly|full|custom>]
 //!     [--outputs <gerber,drill,drill-map,drawing,ipc356,pick-place,bom,assembly-drawing,ipc2581,odb>]
 //!     [--layers <F.Cu,B.Cu,…>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip]
 //!     [--remember]
+//! runmat-design run <file> <command> [--values <json>] [--select <outline id>]... [--root <dir>]
+//!     [--out <dir>] [--dry-run] [--json]
 //! ```
+//!
+//! `run` runs one catalog command (`assembly.bom`, `part.fillet`, `drawing.export`) through the
+//! command registry, the dispatcher the Desktop and the agent use: an edit is written to its
+//! files (`--dry-run` prints the change instead), a results table prints as columns, and an
+//! export writes its files beside the source (or into `--out`). `--json` prints the answer.
 //!
 //!
 //! ```text
@@ -49,7 +56,8 @@ use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!("usage: runmat-design check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]");
-    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember]");
+    eprintln!("usage: runmat-design run <file> <command> [--values <json>] [--select <outline id>]... [--root <dir>] [--out <dir>] [--dry-run] [--json]");
+    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember]");
     ExitCode::from(2)
 }
 
@@ -163,10 +171,114 @@ fn check_mechanical(path: &str, files: &runmat_design_tools::Files, interference
     Ok((passed, report))
 }
 
+/// `runmat-design run`: one catalog command through `runmat_design_tools::commands::run`.
+fn run(args: &[String]) -> ExitCode {
+    let (Some(file), Some(command)) = (args.first(), args.get(1)) else { return usage() };
+    let (mut values, mut selection, mut root, mut out, mut dry, mut json_out) = (json!({}), Vec::new(), None, None, false, false);
+    let mut it = args[2..].iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--values" => match it.next().map(|v| serde_json::from_str::<Value>(v)) {
+                Some(Ok(v @ Value::Object(_))) => values = v,
+                _ => {
+                    eprintln!("--values takes a JSON object");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--select" => selection.extend(it.next().cloned()),
+            "--root" => root = it.next().map(PathBuf::from),
+            "--out" => out = it.next().map(PathBuf::from),
+            "--dry-run" => dry = true,
+            "--json" => json_out = true,
+            _ => return usage(),
+        }
+    }
+    let file = match std::fs::canonicalize(file) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("{file}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let base = root.and_then(|r| std::fs::canonicalize(r).ok()).unwrap_or_else(|| file.parent().unwrap_or(Path::new("/")).to_path_buf());
+    let files = runmat_design_tools::workspace::read_workspace(&base);
+    let path = file.to_string_lossy().to_string();
+    let Some(text) = files.get(&path).cloned().or_else(|| std::fs::read_to_string(&file).ok()) else {
+        eprintln!("{path}: can't read it");
+        return ExitCode::FAILURE;
+    };
+    runmat_design_tools::kernel::install();
+    let request = runmat_design_tools::commands::RunRequest {
+        command: command.clone(),
+        values: values.as_object().cloned().unwrap_or_default(),
+        selection,
+    };
+    let answer = runmat_design_tools::commands::run(&path, &text, &files, &request);
+    if json_out {
+        println!("{}", serde_json::to_string_pretty(&answer).unwrap_or_default());
+    }
+    if answer["ok"] != true {
+        eprintln!("{command}: {}", answer["message"].as_str().unwrap_or("failed"));
+        return ExitCode::FAILURE;
+    }
+    if json_out && dry {
+        return ExitCode::SUCCESS;
+    }
+    match answer["kind"].as_str() {
+        Some("edit") => {
+            for change in answer["files"].as_array().into_iter().flatten() {
+                let (Some(p), Some(t)) = (change["path"].as_str(), change["text"].as_str()) else { continue };
+                if dry {
+                    println!("--- {p}\n{t}");
+                } else if let Err(e) = std::fs::write(p, t) {
+                    eprintln!("{p}: {e}");
+                    return ExitCode::FAILURE;
+                } else if !json_out {
+                    println!("wrote {p}");
+                }
+            }
+            if !json_out {
+                println!("{}", answer["summary"].as_str().unwrap_or(""));
+            }
+        }
+        Some("table") if !json_out => {
+            let cells = |row: &Value| -> Vec<String> { row.as_array().into_iter().flatten().map(|c| c.as_str().map(str::to_owned).unwrap_or_else(|| c.to_string())).collect() };
+            println!("{}: {}", answer["title"].as_str().unwrap_or(""), answer["summary"].as_str().unwrap_or(""));
+            println!("{}", cells(&answer["columns"]).join("\t"));
+            for row in answer["rows"].as_array().into_iter().flatten() {
+                println!("{}", cells(&row["cells"]).join("\t"));
+            }
+        }
+        Some("file") if !dry => {
+            let dir = out.unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf());
+            for f in answer["files"].as_array().into_iter().flatten() {
+                let bytes = match (f["base64"].as_str(), f["text"].as_str()) {
+                    (Some(b), _) => base64::engine::general_purpose::STANDARD.decode(b).unwrap_or_default(),
+                    (None, Some(t)) => t.as_bytes().to_vec(),
+                    _ => continue,
+                };
+                let target = dir.join(f["name"].as_str().unwrap_or("export"));
+                if let Err(e) = std::fs::write(&target, bytes) {
+                    eprintln!("{}: {e}", target.display());
+                    return ExitCode::FAILURE;
+                }
+                if !json_out {
+                    println!("{}", target.display());
+                }
+            }
+        }
+        _ => {}
+    }
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("check") {
         return check(&args[1..]);
+    }
+    if args.first().map(String::as_str) == Some("run") {
+        return run(&args[1..]);
     }
     if args.first().map(String::as_str) != Some("export") || args.len() < 2 {
         return usage();

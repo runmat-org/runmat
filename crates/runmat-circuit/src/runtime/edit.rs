@@ -8,6 +8,16 @@ use super::*;
  * Edits
  * --------------------------------------------------------------------------------------------- */
 
+thread_local! {
+    static UNHANDLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether [`edit`] reached a command it has no code for since the last call, clearing the
+/// mark: the design command registry's build check reads it.
+pub fn take_unhandled() -> bool {
+    UNHANDLED.with(|u| u.replace(false))
+}
+
 /// A catalog command's run, as the Desktop sends it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EditRequest {
@@ -609,8 +619,9 @@ pub(super) fn board_edit(
             crate::drawn::drawn_edit(board, command, values, &request.selection)
                 .map_err(EditError::new)
         }
-        other => Err(EditError::new(format!(
-            "{other} isn't a model edit the circuit runtime runs"
-        ))),
+        other => {
+            UNHANDLED.with(|u| u.set(true));
+            Err(EditError::new(format!("`{other}` has no handler for this file")))
+        }
     }
 }

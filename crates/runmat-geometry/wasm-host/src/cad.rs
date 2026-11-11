@@ -3,7 +3,7 @@
 //! [`OcctKernel`], the kernel the K1 corpus checks.
 //!
 //! The browser and Desktop worker call [`runmat_cad_call`] with one JSON request,
-//! `{ "fn": "dependencies" | "compile" | "edit" | "analyze" | "export", "args": [..strings] }`, whose arguments are
+//! `{ "fn": "dependencies" | "compile" | "edit" | "analyze" | "export" | "run", "args": [..strings] }`, whose arguments are
 //! the ones `runmat-cad-wasm`'s wasm-bindgen entry points take, and get back the same JSON text
 //! those entry points return. `designTool` runs one call of the design tool layer
 //! (`runmat_design_tools::call_json`) here, for the agent's tools on parts, assemblies and drawings. Native callers use [`call`] (the same function, for host-parity
@@ -15,7 +15,8 @@
 //! [`call_framed`]'s `cacheFresh` returns the entries regenerated since the last take, and
 //! [`runmat_cad_seed`] reads stored entries back in.
 
-use runmat_cad_wasm::{analyze, edit, kernel, runtime};
+use runmat_cad_wasm::{kernel, runtime};
+use runmat_design_tools::commands;
 use runmat_geometry_io::ImportSource;
 use runmat_geometry_io::OcctKernel;
 use std::collections::BTreeMap;
@@ -119,7 +120,7 @@ pub fn call(request: &str) -> String {
             match runtime::parse_files(arg(a, 2)) {
                 Ok(files) => {
                     set_imports(&files);
-                    edit::edit_json(path, text, &files, request)
+                    commands::run_json_or(path, text, &files, request, commands::Handler::Edit)
                 }
                 Err(message) => {
                     serde_json::json!({ "ok": false, "message": message, "diagnostics": [] })
@@ -132,19 +133,22 @@ pub fn call(request: &str) -> String {
             match runtime::parse_files(arg(a, 2)) {
                 Ok(files) => {
                     set_imports(&files);
-                    analyze::analyze_json(path, text, &files, request)
+                    commands::run_json_or(path, text, &files, request, commands::Handler::Analyze)
                 }
                 Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
             }
         }
-        "export" => {
-            // A part or assembly as STEP AP242 or IGES (`runmat_cad_wasm::exchange::export`), or as
-            // STL, 3MF, glTF or a face's DXF (`runmat_design_tools::exchange::host`).
+        "export" | "run" => {
+            // Every catalog command goes through the command registry
+            // (`runmat_design_tools::commands`), the dispatcher the agent's tools and the CLI use:
+            // `run` takes any command; `edit`, `analyze` and `export` are the same call with their
+            // own fallback for a command the catalog doesn't list.
+            let fallback = if request.function == "export" { commands::Handler::Export } else { commands::Handler::Edit };
             let (path, text, request) = (arg(a, 0), arg(a, 1), arg(a, 3));
             match runtime::parse_files(arg(a, 2)) {
                 Ok(files) => {
                     set_imports(&files);
-                    runmat_design_tools::exchange::host::export_json(path, text, &files, request)
+                    commands::run_json_or(path, text, &files, request, fallback)
                 }
                 Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
             }

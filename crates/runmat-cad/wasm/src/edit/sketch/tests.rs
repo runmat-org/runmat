@@ -144,16 +144,13 @@ fn drawing_tools_write_entities_into_the_open_sketch() {
         4,
         "{new:?}"
     );
-    // What the sketch model lacks says so.
+    // A tool the sketch dispatcher has no code for says so and marks the call, so the command
+    // registry's build check finds it.
+    crate::edit::take_unhandled();
     let spline = run(PLATE, "sketch.spline", json!({ "sketch": "s1" }));
     assert_eq!(spline["ok"], false);
-    assert!(
-        spline["message"]
-            .as_str()
-            .unwrap()
-            .contains("isn't in the sketch model"),
-        "{spline}"
-    );
+    assert!(spline["message"].as_str().unwrap().contains("has no handler"), "{spline}");
+    assert!(crate::edit::take_unhandled());
 }
 
 #[test]
