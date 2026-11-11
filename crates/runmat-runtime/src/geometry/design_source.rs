@@ -324,22 +324,34 @@ mod tests {
         ]);
         let path = Path::new("/p/sim/stack.assembly");
         let bytes = design_geometry(path, None, &CapturedDesignFiles(&view)).unwrap();
-        let imported = runmat_geometry_io::import_exact_cad(
-            "stack.assembly",
-            &bytes,
-            runmat_geometry_io::GeometryFormat::Step,
-            &runmat_geometry_io::ExactCadImportOptions::default(),
-            &runmat_geometry_io::GeometryImportContext::new(),
-        )
-        .unwrap();
-        let face = runmat_geometry_core::GeometryRegionRole::Face;
-        let both = imported.entities_named(face, "top").unwrap();
-        let lower = imported.entities_named(face, "lower/top").unwrap();
-        let upper = imported.entities_named(face, "upper/top").unwrap();
-        assert_eq!(both.len(), 2, "both occurrences publish `top`");
-        assert_eq!((lower.len(), upper.len()), (1, 1));
-        assert_ne!(lower, upper);
-        assert_ne!(lower[0].assembly_path, upper[0].assembly_path);
+        // Both import routes qualify names: occurrence by occurrence, and joined into one shape
+        // for `interfaces = shared`.
+        for shared in [false, true] {
+            let mut options = runmat_geometry_io::ExactCadImportOptions::default();
+            options.analysis.healing.shared_interfaces = shared;
+            let imported = runmat_geometry_io::import_exact_cad(
+                "stack.assembly",
+                &bytes,
+                runmat_geometry_io::GeometryFormat::Step,
+                &options,
+                &runmat_geometry_io::GeometryImportContext::new(),
+            )
+            .unwrap();
+            let face = runmat_geometry_core::GeometryRegionRole::Face;
+            let both = imported.entities_named(face, "top").unwrap();
+            let lower = imported.entities_named(face, "lower/top").unwrap();
+            let upper = imported.entities_named(face, "upper/top").unwrap();
+            assert_eq!(both.len(), 2, "both occurrences publish `top` (shared {shared})");
+            assert_eq!((lower.len(), upper.len()), (1, 1), "shared {shared}");
+            assert_ne!(lower, upper);
+            assert!(
+                imported.entities_named(face, "stack/lower/top").is_err()
+                    || imported.entities_named(face, "stack/lower/top").unwrap().is_empty(),
+                "the top-level assembly is not part of the path"
+            );
+            // The authored name stays first, so displays keep showing it.
+            assert_eq!(imported.entity_names[&lower[0]][0], "top");
+        }
     }
 
     #[test]
