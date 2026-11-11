@@ -94,7 +94,7 @@ impl Stage {
 }
 
 thread_local! {
-    static STAGE: RefCell<Stage> = RefCell::new(Stage::Full);
+    static STAGE: RefCell<Stage> = const { RefCell::new(Stage::Full) };
     static PARTS: RefCell<Vec<(String, Rc<RegeneratedPart>)>> = const { RefCell::new(Vec::new()) };
 }
 

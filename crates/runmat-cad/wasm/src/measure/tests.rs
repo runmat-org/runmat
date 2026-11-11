@@ -238,19 +238,28 @@ fn every_pair_of_vertex_edge_and_face_measures_its_minimum_distance() {
 fn one_item_gives_its_own_size() {
     let b = block();
     close(
-        value(&part("distance", &[b.bottom_front.clone()]), "Length"),
+        value(
+            &part("distance", std::slice::from_ref(&b.bottom_front)),
+            "Length",
+        ),
         100.0,
     );
     close(
-        value(&part("distance", &[b.left_up.clone()]), "Length"),
+        value(
+            &part("distance", std::slice::from_ref(&b.left_up)),
+            "Length",
+        ),
         10.0,
     );
     close(
-        value(&part("distance", &[b.bottom.clone()]), "Area"),
+        value(&part("distance", std::slice::from_ref(&b.bottom)), "Area"),
         1000.0,
     );
-    close(value(&part("distance", &[b.left.clone()]), "Area"), 100.0);
-    let v = part("distance", &[b.far.clone()]);
+    close(
+        value(&part("distance", std::slice::from_ref(&b.left)), "Area"),
+        100.0,
+    );
+    let v = part("distance", std::slice::from_ref(&b.far));
     close(value(&v, "X"), 100.0);
     close(value(&v, "Z"), 10.0);
     let body = part("distance", &["body:0".to_owned()]);
@@ -332,9 +341,14 @@ fn path_length_adds_edges() {
         ),
         210.0,
     );
-    assert!(run("/p/block.part", BLOCK, "path", &[b.left.clone()])
-        .unwrap_err()
-        .contains("isn't an edge"));
+    assert!(run(
+        "/p/block.part",
+        BLOCK,
+        "path",
+        std::slice::from_ref(&b.left)
+    )
+    .unwrap_err()
+    .contains("isn't an edge"));
 }
 
 #[test]
@@ -343,7 +357,7 @@ fn radius_and_diameter_of_a_circular_edge_and_a_cylindrical_face() {
     let side = curved_face(&d);
     let rim = circle_edge(&d, 8.0 * MM);
     for pick in [&side, &rim] {
-        let a = run("/p/boss.part", BOSS, "radius", &[pick.clone()]).unwrap();
+        let a = run("/p/boss.part", BOSS, "radius", std::slice::from_ref(pick)).unwrap();
         close(value(&a, "Radius"), 10.0);
         close(value(&a, "Diameter"), 20.0);
         assert_eq!(a.dimensions[0].label, "R 10.000 mm");
@@ -353,7 +367,7 @@ fn radius_and_diameter_of_a_circular_edge_and_a_cylindrical_face() {
         );
     }
     // One circular edge: its arc length is the circle's, not its chords'.
-    let one = run("/p/boss.part", BOSS, "distance", &[rim.clone()]).unwrap();
+    let one = run("/p/boss.part", BOSS, "distance", std::slice::from_ref(&rim)).unwrap();
     close(value(&one, "Length"), 20.0 * std::f64::consts::PI);
     close(value(&one, "Radius"), 10.0);
     // Top to bottom: parallel planes 8 mm apart.
@@ -430,7 +444,7 @@ fn entities_across_components_follow_their_placement() {
     let a = rig("distance", &[block_top.clone(), boss_bottom.clone()]);
     close(value(&a, "Normal distance"), 20.0);
     let rim = format!("occurrence:{boss}/{}", circle_edge(&sd, 8.0 * MM));
-    let r = rig("radius", &[rim.clone()]);
+    let r = rig("radius", std::slice::from_ref(&rim));
     close(value(&r, "Radius"), 10.0);
     // The rim's centre sits at the boss's placement.
     assert!(

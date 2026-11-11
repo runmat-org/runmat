@@ -213,9 +213,9 @@ pub fn assembly_clearance_of(
                     let mut bbox = Aabb::EMPTY;
                     for f in &d.faces {
                         for p in f.positions.chunks_exact(3) {
-                            for i in 0..3 {
-                                bbox.min[i] = bbox.min[i].min(f64::from(p[i]));
-                                bbox.max[i] = bbox.max[i].max(f64::from(p[i]));
+                            for (i, coordinate) in p.iter().enumerate() {
+                                bbox.min[i] = bbox.min[i].min(f64::from(*coordinate));
+                                bbox.max[i] = bbox.max[i].max(f64::from(*coordinate));
                             }
                         }
                     }

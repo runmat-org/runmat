@@ -28,7 +28,7 @@ fn files() -> Files {
 thread_local! {
     /// Part files the test's edits changed (a mate publishes the faces it anchors to), read
     /// back by [`files`] so later compiles see them.
-    static EDITED: std::cell::RefCell<Files> = std::cell::RefCell::new(Files::new());
+    static EDITED: std::cell::RefCell<Files> = const { std::cell::RefCell::new(Files::new()) };
 }
 
 fn remember(path: &str, text: &str) {
