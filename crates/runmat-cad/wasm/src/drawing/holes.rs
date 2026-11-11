@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 struct Geometry<'a> {
-    parts: &'a BTreeMap<String, RegeneratedPart>,
+    parts: &'a BTreeMap<String, std::rc::Rc<RegeneratedPart>>,
     displays: &'a Map<String, Value>,
     views: &'a Value,
 }
@@ -51,7 +51,7 @@ impl HoleGeometry for Geometry<'_> {
 }
 
 /// Table name → its rows, for each hole table of the drawing.
-pub fn hole_tables(document: &DrawingDocument, parts: &BTreeMap<String, RegeneratedPart>, displays: &Map<String, Value>) -> Value {
+pub fn hole_tables(document: &DrawingDocument, parts: &BTreeMap<String, std::rc::Rc<RegeneratedPart>>, displays: &Map<String, Value>) -> Value {
     let views = serde_json::to_value(&document.views).unwrap_or(Value::Null);
     let geometry = Geometry { parts, displays, views: &views };
     let mut out = Map::new();

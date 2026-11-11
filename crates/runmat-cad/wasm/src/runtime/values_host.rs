@@ -110,7 +110,9 @@ pub fn compile_json_with_values(path: &str, text: &str, files: &super::Files, op
     let host = ValueHost { files: all, runner: Box::new(runner) };
     // Part displays the caller holds, by digest: an assembly sends those prototypes `reused`.
     let known = super::prototype_reuse::known_from_options(options);
-    let out = with_value_host(host, || super::compile_json_known(path, text, files, configuration.as_deref(), &known));
+    // A drawing compiles in the stage the options ask for (drawing/progress.rs).
+    let stage = crate::drawing::progress::Stage::from_options(options);
+    let out = with_value_host(host, || crate::drawing::progress::with_stage(stage, || super::compile_json_known(path, text, files, configuration.as_deref(), &known)));
     let pending = pending.borrow();
     if pending.is_empty() {
         return out;

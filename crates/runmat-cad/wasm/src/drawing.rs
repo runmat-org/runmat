@@ -19,12 +19,13 @@
 pub mod auto;
 mod holes;
 pub mod layout;
+pub mod progress;
 pub(crate) mod props;
 pub mod title;
 pub(crate) mod values;
 mod view_picks;
 
-use crate::runtime::{compile_assembly, regenerate_part_in, resolve_path, Diagnostic, Files, RegeneratedPart};
+use crate::runtime::{compile_assembly, resolve_path, Diagnostic, Files, RegeneratedPart};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
@@ -37,6 +38,7 @@ use runmat_cad::refs::reference::Reference;
 use runmat_cad::syntax::parse_drawing_in;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 /// A part's PMI names: tolerances, sizes and locations (what a dimension's `pmi` may name), and datums.
 type PmiNames = (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
@@ -223,7 +225,10 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     let mut displays = serde_json::Map::new();
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     // Each drawn part as regenerated, its bodies on the kernel that made them.
-    let mut exact: BTreeMap<String, RegeneratedPart> = BTreeMap::new();
+    let mut exact: BTreeMap<String, Rc<RegeneratedPart>> = BTreeMap::new();
+    // Each drawn model's input, which its views' projections are kept by (progress.rs).
+    let mut model_keys: BTreeMap<String, String> = BTreeMap::new();
+    let stage = progress::stage();
     let mut problems: Vec<Diagnostic> = Vec::new();
     let warn = |message: String| Diagnostic {
         path: path.to_owned(),
@@ -232,7 +237,9 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         severity: "warning".into(),
         message,
     };
-    for file in model_files(path, text, files) {
+    // The sheet stage paints the sheets before any model is regenerated.
+    let drawn = if stage == progress::Stage::Sheet { Vec::new() } else { model_files(path, text, files) };
+    for file in drawn {
         let at = resolve_path(path, &file, files);
         let Some(source) = files.get(&at) else {
             problems.push(warn(format!(
@@ -241,6 +248,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             continue;
         };
         if at.ends_with(".assembly") {
+            model_keys.insert(file.clone(), progress::model_key(&at, source, None, Some(files)));
             match compile_assembly(&at, source, files) {
                 Ok((index, display, _)) => {
                     let occ = index["occurrences"]
@@ -267,7 +275,8 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             }
             continue;
         }
-        match regenerate_part_in(&at, source, configuration, &Default::default()) {
+        model_keys.insert(file.clone(), progress::model_key(&at, source, configuration, None));
+        match progress::regenerated_part(&at, source, configuration) {
             Ok(part) => {
                 let mut names = BTreeSet::new();
                 for body in &part.index.bodies {
@@ -363,141 +372,162 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             continue;
         };
         if let Some(full) = displays.get(file) {
-            // The occurrences the view leaves out (`exclude`), and everything under them.
-            let excluded: Vec<String> = document
-                .views
-                .iter()
-                .find(|v| v.name == name)
-                .map(|v| v.exclude.iter().map(|x| x.to_string()).collect())
-                .unwrap_or_default();
-            let shown = without_occurrences(full, &excluded);
-            let display = shown.as_ref().unwrap_or(full);
-            let kind = &view["kind"];
-            let parent = kind["from"].as_str().unwrap_or("");
-            let parent_axes = crate::hlr::axes(crate::hlr::orientation(&views, parent, 0));
-            // The projection each view's lines are drawn in, so the sheet places dimensions and
-            // callouts in the same frame (a section's and an auxiliary view's differ from their
-            // parent's orientation).
-            let mut drawn_in: Option<crate::hlr::Axes> = Some(parent_axes);
-            let entry = match kind["view"].as_str() {
-                // A section through the plane the view names, seen across the parent's cutting
-                // line: the parent's right stays right and its depth becomes up.
-                Some("section") => {
-                    drawn_in = Some(section_axes(&parent_axes));
-                    section_entry(display, &document, name, &parent_axes, &views, parent)
-                }
-                // A detail: the parent's lines, clipped by the sheet to the circle around the
-                // centre the view names.
-                // A detail of a section shows the cut (its hatch and the faces beyond it), seen
-                // as the section sees it.
-                Some("detail") => {
-                    let parent_kind = views.as_array().and_then(|vs| vs.iter().find(|v| v["name"] == parent)).map(|v| &v["kind"]);
-                    let (axes, mut lines) = match parent_kind {
-                        Some(pk) if pk["view"] == "section" => {
-                            let from = pk["from"].as_str().unwrap_or("");
-                            let from_axes = crate::hlr::axes(crate::hlr::orientation(&views, from, 0));
-                            let mut cut = section_entry(display, &document, parent, &from_axes, &views, from);
-                            if let Value::Object(o) = &mut cut {
-                                o.remove("cut");
-                            }
-                            (section_axes(&from_axes), cut)
-                        }
-                        _ => (parent_axes, serde_json::to_value(lines_of(file, display, &parent_axes)).unwrap_or(Value::Null)),
-                    };
-                    let center = document
-                        .views
-                        .iter()
-                        .find(|v| v.name == name)
-                        .and_then(|v| match &v.kind {
-                            runmat_cad::drawing::ViewKind::Detail { center, radius, .. } => {
-                                Some((center, radius))
-                            }
-                            _ => None,
-                        })
-                        .and_then(|(center, radius)| {
-                            Some((point_of(display, center)?, radius_mm(radius)?))
-                        });
-                    drawn_in = Some(axes);
-                    if let (Some((c, r)), Value::Object(o)) = (center, &mut lines) {
-                        o.insert(
-                            "detail".into(),
-                            json!({ "center": [dot(c, axes.u), dot(c, axes.v)], "radius": r }),
-                        );
-                        o.insert("picks".into(), view_picks::picks(display, &axes));
-                    }
-                    lines
-                }
-                // A flat pattern: the developed sheet (outline as cut, bend lines and notes,
-                // the bend table), in the layout's millimetres.
-                Some("flat_pattern") => {
-                    let sheet = document.views.iter().find(|v| v.name == name).and_then(|v| {
-                        let runmat_cad::drawing::ViewKind::FlatPattern { feature, .. } = &v.kind else {
-                            return None;
-                        };
-                        let layout = models.flat_layout(&v.model, feature)?;
-                        runmat_cad::drawing::flat_pattern::view_sheet(&v.kind, &layout)
-                    });
-                    drawn_in = None;
-                    json!({ "visible": [], "hidden": [], "flat": sheet })
-                }
-                // An auxiliary view: square to the face its edge shows edge-on in the parent.
-                Some("auxiliary") => {
-                    let axes = document
-                        .views
-                        .iter()
-                        .find(|v| v.name == name)
-                        .and_then(|v| match &v.kind {
-                            runmat_cad::drawing::ViewKind::Auxiliary { edge, .. } => runmat_cad::syntax::refs::print_reference(edge),
-                            _ => None,
-                        })
-                        .and_then(|r| view_picks::auxiliary_axes(display, &parent_axes, &r))
-                        .unwrap_or(parent_axes);
-                    drawn_in = Some(axes);
-                    let mut lines = serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null);
-                    if let Value::Object(o) = &mut lines {
-                        o.insert("picks".into(), view_picks::picks(display, &axes));
-                    }
-                    lines
-                }
-                // A broken-out section: the parent's lines with the cut inside its boundary.
-                Some("broken_out") => {
-                    let parent_lines = lines_of(file, display, &parent_axes);
-                    let cut = document.views.iter().find(|v| v.name == name).and_then(|v| match &v.kind {
-                        runmat_cad::drawing::ViewKind::BrokenOut { boundary, depth, .. } => Some((boundary.clone(), radius_mm(depth)?)),
-                        _ => None,
-                    });
-                    let lines = match cut {
-                        Some((boundary, depth)) => view_picks::broken_out(display, &parent_axes, &parent_lines, &boundary, depth),
-                        None => parent_lines,
-                    };
-                    let mut lines = serde_json::to_value(lines).unwrap_or(Value::Null);
-                    if let Value::Object(o) = &mut lines {
-                        o.insert("picks".into(), view_picks::picks(display, &parent_axes));
-                    }
-                    lines
-                }
-                _ => {
-                    let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
-                    drawn_in = Some(axes);
-                    let mut lines = serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null);
-                    // What a click on each line means (the face it shows edge-on, or the edge).
-                    if let Value::Object(o) = &mut lines {
-                        o.insert("picks".into(), view_picks::picks(display, &axes));
-                    }
-                    lines
-                }
-            };
-            let mut entry = entry;
-            if let (Some(a), Value::Object(o)) = (drawn_in, &mut entry) {
-                o.insert("axes".into(), json!({ "u": a.u, "v": a.v, "depth": a.depth }));
-            }
-            // As few points as the sheet needs at the view's scale; hidden lines only where
-            // the view draws them.
-            let ratio = |v: &Value| v.as_array().filter(|a| a.len() == 2).and_then(|a| Some(a[0].as_f64()? / a[1].as_f64().filter(|d| *d != 0.0)?));
+            // A view's projection is kept by its model's input and its definition (progress.rs).
+            // A view this stage leaves pending comes anyway when the cache holds it; otherwise
+            // it is only asked for, so a probe fetches it with the others.
             let sheet_scale = document.sheets.iter().find(|s| view["sheet"] == s.name.as_str()).map(|s| s.scale).filter(|s| s.1 != 0).map(|s| s.0 as f64 / s.1 as f64);
-            let scale = ratio(&view["scale"]).or(sheet_scale).unwrap_or(1.0);
-            let shows_hidden = !matches!(view["display"].as_str(), Some("visible_lines" | "shaded"));
-            crate::hlr::thin::thin(&mut entry, scale, shows_hidden);
+            let key = model_keys.get(file).map(|model| progress::view_key(model, &views, name, sheet_scale.unwrap_or(1.0)));
+            if !stage.projects(name) && !key.as_deref().is_some_and(crate::runtime::part_cache::holds) {
+                if let Some(key) = &key {
+                    crate::runtime::part_cache::want(key);
+                }
+                continue;
+            }
+            let project = || -> Value {
+                // The occurrences the view leaves out (`exclude`), and everything under them.
+                let excluded: Vec<String> = document
+                    .views
+                    .iter()
+                    .find(|v| v.name == name)
+                    .map(|v| v.exclude.iter().map(|x| x.to_string()).collect())
+                    .unwrap_or_default();
+                let shown = without_occurrences(full, &excluded);
+                let display = shown.as_ref().unwrap_or(full);
+                let kind = &view["kind"];
+                let parent = kind["from"].as_str().unwrap_or("");
+                let parent_axes = crate::hlr::axes(crate::hlr::orientation(&views, parent, 0));
+                // The projection each view's lines are drawn in, so the sheet places dimensions and
+                // callouts in the same frame (a section's and an auxiliary view's differ from their
+                // parent's orientation).
+                let mut drawn_in: Option<crate::hlr::Axes> = Some(parent_axes);
+                let entry = match kind["view"].as_str() {
+                    // A section through the plane the view names, seen across the parent's cutting
+                    // line: the parent's right stays right and its depth becomes up.
+                    Some("section") => {
+                        drawn_in = Some(section_axes(&parent_axes));
+                        section_entry(display, &document, name, &parent_axes, &views, parent)
+                    }
+                    // A detail: the parent's lines, clipped by the sheet to the circle around the
+                    // centre the view names.
+                    // A detail of a section shows the cut (its hatch and the faces beyond it), seen
+                    // as the section sees it.
+                    Some("detail") => {
+                        let parent_kind = views.as_array().and_then(|vs| vs.iter().find(|v| v["name"] == parent)).map(|v| &v["kind"]);
+                        let (axes, mut lines) = match parent_kind {
+                            Some(pk) if pk["view"] == "section" => {
+                                let from = pk["from"].as_str().unwrap_or("");
+                                let from_axes = crate::hlr::axes(crate::hlr::orientation(&views, from, 0));
+                                let mut cut = section_entry(display, &document, parent, &from_axes, &views, from);
+                                if let Value::Object(o) = &mut cut {
+                                    o.remove("cut");
+                                }
+                                (section_axes(&from_axes), cut)
+                            }
+                            _ => (parent_axes, serde_json::to_value(lines_of(file, display, &parent_axes)).unwrap_or(Value::Null)),
+                        };
+                        let center = document
+                            .views
+                            .iter()
+                            .find(|v| v.name == name)
+                            .and_then(|v| match &v.kind {
+                                runmat_cad::drawing::ViewKind::Detail { center, radius, .. } => {
+                                    Some((center, radius))
+                                }
+                                _ => None,
+                            })
+                            .and_then(|(center, radius)| {
+                                Some((point_of(display, center)?, radius_mm(radius)?))
+                            });
+                        drawn_in = Some(axes);
+                        if let (Some((c, r)), Value::Object(o)) = (center, &mut lines) {
+                            o.insert(
+                                "detail".into(),
+                                json!({ "center": [dot(c, axes.u), dot(c, axes.v)], "radius": r }),
+                            );
+                            o.insert("picks".into(), view_picks::picks(display, &axes));
+                        }
+                        lines
+                    }
+                    // A flat pattern: the developed sheet (outline as cut, bend lines and notes,
+                    // the bend table), in the layout's millimetres.
+                    Some("flat_pattern") => {
+                        let sheet = document.views.iter().find(|v| v.name == name).and_then(|v| {
+                            let runmat_cad::drawing::ViewKind::FlatPattern { feature, .. } = &v.kind else {
+                                return None;
+                            };
+                            let layout = models.flat_layout(&v.model, feature)?;
+                            runmat_cad::drawing::flat_pattern::view_sheet(&v.kind, &layout)
+                        });
+                        drawn_in = None;
+                        json!({ "visible": [], "hidden": [], "flat": sheet })
+                    }
+                    // An auxiliary view: square to the face its edge shows edge-on in the parent.
+                    Some("auxiliary") => {
+                        let axes = document
+                            .views
+                            .iter()
+                            .find(|v| v.name == name)
+                            .and_then(|v| match &v.kind {
+                                runmat_cad::drawing::ViewKind::Auxiliary { edge, .. } => runmat_cad::syntax::refs::print_reference(edge),
+                                _ => None,
+                            })
+                            .and_then(|r| view_picks::auxiliary_axes(display, &parent_axes, &r))
+                            .unwrap_or(parent_axes);
+                        drawn_in = Some(axes);
+                        let mut lines = serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null);
+                        if let Value::Object(o) = &mut lines {
+                            o.insert("picks".into(), view_picks::picks(display, &axes));
+                        }
+                        lines
+                    }
+                    // A broken-out section: the parent's lines with the cut inside its boundary.
+                    Some("broken_out") => {
+                        let parent_lines = lines_of(file, display, &parent_axes);
+                        let cut = document.views.iter().find(|v| v.name == name).and_then(|v| match &v.kind {
+                            runmat_cad::drawing::ViewKind::BrokenOut { boundary, depth, .. } => Some((boundary.clone(), radius_mm(depth)?)),
+                            _ => None,
+                        });
+                        let lines = match cut {
+                            Some((boundary, depth)) => view_picks::broken_out(display, &parent_axes, &parent_lines, &boundary, depth),
+                            None => parent_lines,
+                        };
+                        let mut lines = serde_json::to_value(lines).unwrap_or(Value::Null);
+                        if let Value::Object(o) = &mut lines {
+                            o.insert("picks".into(), view_picks::picks(display, &parent_axes));
+                        }
+                        lines
+                    }
+                    _ => {
+                        let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
+                        drawn_in = Some(axes);
+                        let mut lines = serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null);
+                        // What a click on each line means (the face it shows edge-on, or the edge).
+                        if let Value::Object(o) = &mut lines {
+                            o.insert("picks".into(), view_picks::picks(display, &axes));
+                        }
+                        lines
+                    }
+                };
+                let mut entry = entry;
+                if let (Some(a), Value::Object(o)) = (drawn_in, &mut entry) {
+                    o.insert("axes".into(), json!({ "u": a.u, "v": a.v, "depth": a.depth }));
+                }
+                // As few points as the sheet needs at the view's scale; hidden lines only where
+                // the view draws them.
+                let ratio = |v: &Value| v.as_array().filter(|a| a.len() == 2).and_then(|a| Some(a[0].as_f64()? / a[1].as_f64().filter(|d| *d != 0.0)?));
+                let scale = ratio(&view["scale"]).or(sheet_scale).unwrap_or(1.0);
+                let shows_hidden = !matches!(view["display"].as_str(), Some("visible_lines" | "shaded"));
+                crate::hlr::thin::thin(&mut entry, scale, shows_hidden);
+                entry
+            };
+            let entry = match key {
+                Some(key) => match crate::runtime::part_cache::view_lines(key, project) {
+                    Some(entry) => entry,
+                    // A probe left it out: the page fetches it, then compiles again.
+                    None => continue,
+                },
+                None => project(),
+            };
             hlr.insert(name.to_owned(), entry);
         }
     }
@@ -575,6 +605,10 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         o.insert("title_layouts".into(), titles);
         o.insert("styles".into(), Value::Object(styles));
         o.insert("hlr".into(), Value::Object(hlr));
+        // Views still to come (a staged compile, progress.rs): the sheet draws them as pending.
+        if stage.partial() {
+            o.insert("pending".into(), Value::Bool(true));
+        }
         o.insert("anchors".into(), Value::Object(anchors));
         o.insert("extents".into(), Value::Object(extents));
         o.insert("radii".into(), Value::Object(radii));
@@ -593,7 +627,10 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     drop(documents);
     let mut answer = serde_json::Map::new();
     answer.insert("projection".into(), tagged("drawing", data));
-    answer.insert("models".into(), Value::Object(models_out));
+    // A staged compile's sheet draws from its layout alone; the models come with the last stage.
+    if !stage.partial() {
+        answer.insert("models".into(), Value::Object(models_out));
+    }
     answer.insert("diagnostics".into(), serde_json::to_value(&problems).unwrap_or(Value::Null));
     json_text(&Value::Object(answer))
 }
