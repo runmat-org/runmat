@@ -2800,6 +2800,18 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
           t = build_sweep(x.profile(I[0]), path, lab(I[1]), lab(I[2]));
           break;
         }
+        case 48: {
+          // [n, copy slots × n, start label, end label, curve ends × n]; reals: the path.
+          const std::size_t n = static_cast<std::size_t>(I[0]);
+          std::vector<const Profile*> copies;
+          for (std::size_t k = 0; k < n; ++k) copies.push_back(&x.profile(I[1 + k]));
+          std::vector<std::size_t> ends;
+          for (std::size_t k = 0; k < n; ++k) ends.push_back(static_cast<std::size_t>(I[3 + n + k]));
+          std::vector<gp_Pnt> path;
+          for (std::size_t k = 0; k + 2 < R.size(); k += 3) path.emplace_back(R[k], R[k + 1], R[k + 2]);
+          t = build_sweep_follow(copies, path, ends, lab(I[1 + n]), lab(I[2 + n]));
+          break;
+        }
         case 6: {
           std::vector<const Profile*> secs;
           for (std::int64_t k = 0; k < I[2]; ++k) secs.push_back(&x.profile(I[3 + k]));

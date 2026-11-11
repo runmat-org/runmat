@@ -401,11 +401,18 @@ pub enum ToolShape {
     /// (from `path[i]` to `path[i + 1]`) belongs to, so a curved path curve sampled into
     /// several segments still makes one face per profile curve; side faces are numbered by
     /// path curve when the path has several. Empty: each segment is its own curve.
+    ///
+    /// Without `follow_path` the profile is translated along the path and stays parallel to
+    /// itself. With it the profile keeps its angle to the path: it turns through each path
+    /// curve and is mitred at the corners between straight segments, so a path segment may
+    /// lie in the profile's plane.
     Sweep {
         profile: CanonicalProfile,
         path: Vec<[f64; 3]>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         path_curves: Vec<u32>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        follow_path: bool,
     },
     Loft {
         profiles: Vec<CanonicalProfile>,

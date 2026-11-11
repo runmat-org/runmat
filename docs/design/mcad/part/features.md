@@ -12,7 +12,7 @@ A part's geometry is its feature history: `feature <name> = <operation>(…)` st
 |---|---|---|
 | `extrude` | a prism from a closed profile | `profile`; an extent: `distance`, `through_all`, `up_to_next`, `up_to`, `extent = offset_from_face(face, offset)`; `symmetric`, `reverse`, `second = blind(distance)`; `thin = { thickness }`; `mode` |
 | `revolve` | a solid of revolution | `profile`, `axis`, `angle`, `mode` |
-| `sweep` | a profile along a path | `profile`, `path`, `mode` |
+| `sweep` | a profile along a path | `profile`, `path`, `follow_path`, `mode` |
 | `loft` | a solid through profiles in order | `profiles`, `mode` |
 | `rib` | a rib from an open sketch | `profile`, `thickness`, `depth`, `reverse` |
 | `emboss` | raised or recessed text or shapes on a face | `profile`, `face`, `height` |
@@ -57,6 +57,14 @@ feature logo = emboss(profile = sketch.s_logo, face = feature.body.face.end, hei
 In the Desktop, Revolve takes the sketch as its profile, and the axis can be a straight edge picked on the model. The preview turns the profile through the angle, here a full turn that makes two hinge knuckles on a leaf's edge:
 
 <!-- design:clip:mcad/revolve -->
+
+A sweep keeps the profile parallel to itself by default: the profile is translated along the path, so every path segment must leave the profile's plane. With `follow_path`, the profile keeps its angle to the path instead. It turns through each arc of the path and is mitred where two straight segments meet, so the path can bend into the profile's own plane. Pipe, duct and cable runs use it:
+
+```part fragment
+feature run = sweep(profile = sketch.pipe_s, path = sketch.run_s, follow_path)
+```
+
+A `follow_path` sweep needs a closed profile and the exact geometry engine; the grid test kernel builds it only along a straight path.
 
 ## Holes and threads
 
