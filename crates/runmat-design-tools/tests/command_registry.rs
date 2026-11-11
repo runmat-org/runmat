@@ -91,12 +91,20 @@ fn every_design_command_has_a_handler_on_its_surfaces() {
             route.id
         );
         // A sketch tool runs in the open sketch.
-        let base = if route.id.starts_with("sketch.") && route.editor == EditorKind::Part {
+        let base = if route.id == "board.autoroute" {
+            // Check this dispatcher on one authored net. Routing every open connection of
+            // the full I/O board belongs to routing qualification, not handler inventory.
+            // The circuit autoroute_power tests retain routing and clearance assertions.
+            json!({ "nets": ["net:/ch[0]/FBK"] })
+        } else if route.id.starts_with("sketch.") && route.editor == EditorKind::Part {
             json!({ "sketch": "s" })
         } else {
             json!({})
         };
-        let (_, unhandled) = run(path, &request(&route.id, base.clone(), &[]));
+        let (out, unhandled) = run(path, &request(&route.id, base.clone(), &[]));
+        if route.id == "board.autoroute" {
+            assert_eq!(out["ok"], true, "{}: {out}", route.editor.as_str());
+        }
         if unhandled {
             missing.push(format!("{} {}", route.id, route.editor.as_str()));
         }
