@@ -1043,15 +1043,25 @@ pub fn geometry_preview_scene(
                 chunk_end_triangle += 1;
             }
             let triangles = &surface_mesh.triangles[chunk_start_triangle..chunk_end_triangle];
+            // A vertex shared by two CAD faces gets one copy per face, so each face's normals
+            // average only its own triangles and a crease stays sharp, as in a CAD design scene.
+            let face_groups = presentation
+                .as_ref()
+                .and_then(|item| item.feature_edge_groups.as_deref());
             let mut remap =
-                std::collections::HashMap::<u32, u32>::with_capacity(triangles.len() * 3);
+                std::collections::HashMap::<(u32, u64), u32>::with_capacity(triangles.len() * 3);
             let mut local_positions = Vec::<[f32; 3]>::new();
             let mut local_colors = Vec::<[f32; 4]>::new();
             let mut indices = Vec::<u32>::with_capacity(triangles.len() * 3);
 
-            for triangle in triangles {
+            for (offset, triangle) in triangles.iter().enumerate() {
+                let group = face_groups
+                    .and_then(|groups| groups.get(chunk_start_triangle + offset))
+                    .copied()
+                    .unwrap_or(0);
                 for source_index in triangle {
-                    let local_index = if let Some(local_index) = remap.get(source_index) {
+                    let key = (*source_index, group);
+                    let local_index = if let Some(local_index) = remap.get(&key) {
                         *local_index
                     } else {
                         let source_index_usize = usize::try_from(*source_index).map_err(|_| {
@@ -1082,7 +1092,7 @@ pub fn geometry_preview_scene(
                             .copied()
                             .unwrap_or(base_color);
                         local_colors.push([vertex_color.x, vertex_color.y, vertex_color.z, alpha]);
-                        remap.insert(*source_index, local_index);
+                        remap.insert(key, local_index);
                         local_index
                     };
                     indices.push(local_index);
@@ -1120,8 +1130,9 @@ pub fn geometry_preview_scene(
             .with_owner_node_ids(owner_node_ids);
             // The CAD import contains surface triangles but no line topology.
             // Keep explicit edges resident so wireframe and X-ray can draw the
-            // solid even after the shaded triangles are suppressed.
-            let edges = chunk.wireframe_edges([0.58, 0.72, 0.88, 0.95]);
+            // solid even after the shaded triangles are suppressed. Feature edges draw in the CAD
+            // design scenes' near-black, which reads over the shading in both themes.
+            let edges = chunk.wireframe_edges(preview_feature_edge_color(options.xray));
             chunks.push(chunk);
             if let Some(edges) = edges {
                 chunks.push(edges);
@@ -1710,15 +1721,34 @@ fn local_vertex_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]
     normals.into_iter().map(normalize_or_default).collect()
 }
 
+/// A preview scene's feature-edge color: the CAD design scenes' edge color, or the X-ray edge
+/// color when the faces are see-through.
+#[cfg(feature = "plot-core")]
+pub(crate) fn preview_feature_edge_color(xray: bool) -> [f32; 4] {
+    if xray {
+        CAD_XRAY_FEATURE_EDGE_COLOR.to_array()
+    } else {
+        CAD_FEATURE_EDGE_COLOR.to_array()
+    }
+}
+
+/// A triangle's unit normal, independent of its size: a part in metres has triangles whose
+/// cross product is far below f32 epsilon, and those still get their true direction. Only a
+/// degenerate triangle falls back to +Z.
 #[cfg(feature = "plot-core")]
 fn face_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
-    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-    normalize_or_default([
+    let ab = [0, 1, 2].map(|k| f64::from(b[k]) - f64::from(a[k]));
+    let ac = [0, 1, 2].map(|k| f64::from(c[k]) - f64::from(a[k]));
+    let cross = [
         ab[1] * ac[2] - ab[2] * ac[1],
         ab[2] * ac[0] - ab[0] * ac[2],
         ab[0] * ac[1] - ab[1] * ac[0],
-    ])
+    ];
+    let length = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+    if !length.is_finite() || length <= f64::MIN_POSITIVE {
+        return [0.0, 0.0, 1.0];
+    }
+    cross.map(|value| (value / length) as f32)
 }
 
 #[cfg(feature = "plot-core")]
@@ -1890,3 +1920,6 @@ fn map_geometry_query_error(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "plot-core"))]
+mod preview_scene_tests;
