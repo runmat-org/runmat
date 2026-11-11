@@ -21,7 +21,7 @@ use crate::geom::{Coord, Point};
 use crate::layout::{Board, ItemId, NetId, TrackGeom};
 
 use crate::router::{obstacles, walkaround, Geometry, WalkMode};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A routed pair: the tracks added for each net and their lengths (mm).
 #[derive(Clone, Debug, PartialEq)]
@@ -49,25 +49,33 @@ fn item_net(board: &Board, item: &BItem) -> Option<NetId> {
     }
 }
 
-/// The two pads of `net` that copper on `layer` can reach: centre and half their larger side.
+/// The two ends of `net` that copper on `layer` can reach: a pad's centre and half its larger
+/// side. An end is one component: a part that carries the net on several pads (a USB-C
+/// receptacle's two D+ pads, tied under the part) is one end, entered at its pad nearest the
+/// other end.
 fn ends(board: &Board, net: NetId, layer: CopperIndex) -> Result<[(Point, Coord); 2], String> {
-    let pads: Vec<(Point, Coord)> = board
-        .all_pads()
-        .into_iter()
-        .filter(|p| p.net == Some(net) && p.layers.contains(&layer))
-        .map(|p| {
-            let bb = p.prim.bbox();
-            (p.center, bb.width().max(bb.height()) / 2)
-        })
-        .collect();
-    match pads[..] {
-        [a, b] => Ok([a, b]),
-        _ => Err(format!(
-            "{} has {} pad(s) on the layer; a pair routes point to point, two pads per net",
-            board.nets[net.0 as usize].name,
-            pads.len()
-        )),
+    let mut parts: BTreeMap<ItemId, Vec<(Point, Coord)>> = BTreeMap::new();
+    let mut count = 0;
+    for p in board.all_pads().into_iter().filter(|p| p.net == Some(net) && p.layers.contains(&layer)) {
+        let bb = p.prim.bbox();
+        parts.entry(p.footprint).or_default().push((p.center, bb.width().max(bb.height()) / 2));
+        count += 1;
     }
+    let groups: Vec<&Vec<(Point, Coord)>> = parts.values().collect();
+    let [a, b] = groups[..] else {
+        return Err(format!(
+            "{} has {count} pad(s) on {} part(s) on the layer; a pair routes point to point, between two parts",
+            board.nets[net.0 as usize].name,
+            groups.len()
+        ));
+    };
+    let centroid = |pads: &[(Point, Coord)]| {
+        let n = pads.len() as i128;
+        let (x, y) = pads.iter().fold((0i128, 0i128), |(x, y), (c, _)| (x + c.x as i128, y + c.y as i128));
+        Point::new((x / n) as Coord, (y / n) as Coord)
+    };
+    let nearest = |pads: &[(Point, Coord)], to: Point| *pads.iter().min_by(|x, y| x.0.dist(to).total_cmp(&y.0.dist(to))).expect("a group holds a pad");
+    Ok([nearest(a, centroid(b)), nearest(b, centroid(a))])
 }
 
 /// Where the pair leaves the pads `(p, n)` heading `toward`: each pad's track runs straight
