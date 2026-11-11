@@ -61,6 +61,12 @@ runmat_thread_local! {
 }
 
 runmat_thread_local! {
+    /// Per design document (by URI), the folders and files its dependencies name that the host
+    /// is still loading, as supplied with `setDesignPending`.
+    static DESIGN_PENDING: RefCell<BTreeMap<String, Vec<String>>> = RefCell::new(BTreeMap::new());
+}
+
+runmat_thread_local! {
     /// `.m` call results by call key, as the host ran them in the RunMat runtime and supplied
     /// them with `setDesignValues`.
     static DESIGN_VALUES: RefCell<DesignValues> = RefCell::new(DesignValues::new());
@@ -278,7 +284,8 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
             &entry.text,
             &files,
             &values,
-        );
+        )
+        .with_pending(&DESIGN_PENDING.with(|p| p.borrow().get(&uri).cloned().unwrap_or_default()));
         let tokens = analysis.semantic_tokens();
         let committed = DOCS.with(|d| {
             let mut docs = d.borrow_mut();
@@ -404,6 +411,26 @@ pub fn set_design_files(files: JsValue) -> Result<JsValue, JsValue> {
                     stored.remove(&path);
                 }
             }
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
+}
+
+/// Names the folders (`/p/cabin/`) and files design document `uri` reads that the host is still
+/// loading; an empty list clears them. While any are pending, the document's compile problems
+/// wait and the `use` lines naming them say they aren't loaded yet; the host supplies the files
+/// with `setDesignFiles` and clears the list once they arrive.
+#[wasm_bindgen(js_name = "setDesignPending")]
+pub fn set_design_pending(uri: String, paths: JsValue) -> Result<JsValue, JsValue> {
+    let paths: Vec<String> = serde_wasm_bindgen::from_value(paths)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_PENDING.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        if paths.is_empty() {
+            stored.remove(&uri);
+        } else {
+            stored.insert(uri, paths);
         }
     });
     WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));

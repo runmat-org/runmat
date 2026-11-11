@@ -31,6 +31,7 @@ use super::position::{offset_to_position, position_to_offset};
 mod circuit_values;
 mod compile;
 mod modules;
+mod pending;
 pub mod symbols;
 use compile::compile;
 #[cfg(test)]

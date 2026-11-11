@@ -704,7 +704,6 @@ pub fn unbound_tree(key: &str, value: &Json, doc: &str) -> Json {
 pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     let mut out: BTreeSet<String> = BTreeSet::new();
     let folder = folder_of(path).to_string();
-    let listing = |f: &str| if f.ends_with('/') { f.to_string() } else { format!("{f}/") };
     let header = scan(path, text);
     let Some(dialect) = Dialect::for_path(path) else { return Vec::new() };
     let syntax = parse_source(dialect, text);
@@ -745,24 +744,31 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         same_folder = text.contains("part =") || text.contains("assembly =") || text.contains("circuit =");
     }
     if same_folder {
-        out.insert(listing(&folder));
+        out.insert(if folder.ends_with('/') { folder.clone() } else { format!("{folder}/") });
     }
     for from in froms {
-        if is_file_path(&from) {
-            continue;
-        }
-        if from.starts_with('.') || from.contains('/') {
-            if !from.starts_with("//") {
-                out.insert(listing(&join(&folder, &from)));
-            }
-        } else {
-            // A package (or an alias, which the file's own `use` already lists).
-            for at in ancestors(&folder) {
-                out.insert(listing(&join(&at, &package_path(&from))));
-            }
-        }
+        out.extend(from_listings(path, &from));
     }
     out.into_iter().collect()
+}
+
+/// The folder listings (`<folder>/`) a `from` names, seen from the file `doc`: the folder of a
+/// path (`./cabin`, `../wing`), or each `+package` folder a package can be in, from `doc`'s
+/// folder up to the workspace root. An alias names a folder the file's own `use` line lists; a
+/// file path and a root path (`//lib`) name none.
+pub fn from_listings(doc: &str, from: &str) -> Vec<String> {
+    let folder = folder_of(doc);
+    let listing = |f: String| if f.ends_with('/') { f } else { format!("{f}/") };
+    if is_file_path(from) || from.starts_with("//") {
+        return Vec::new();
+    }
+    if from.starts_with('.') || from.contains('/') {
+        return vec![listing(join(folder, from))];
+    }
+    ancestors(folder)
+        .iter()
+        .map(|at| listing(join(at, &package_path(from))))
+        .collect()
 }
 
 #[cfg(test)]
