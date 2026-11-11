@@ -1,5 +1,6 @@
 //! The CAD document runtime behind the wasm entry points, in plain Rust so it tests natively.
 
+pub mod assembly_stages;
 pub mod part_cache;
 mod prototype_reuse;
 mod published_frames;
