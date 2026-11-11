@@ -103,7 +103,7 @@
     "architecture boundary check failed: crates/runmat-analysis/language/src/semantic/mesh.rs has 855 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-analysis/language/src/semantic/model/properties.rs has 629 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-analysis/language/src/semantic/model/signals.rs has 656 lines and adds untracked module-size debt",
-    "architecture boundary check failed: crates/runmat-analysis/language/src/semantic/procedure/lower.rs has 779 lines and adds untracked module-size debt",
+    "architecture boundary check failed: crates/runmat-analysis/language/src/semantic/procedure/lower.rs has 769 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-analysis/language/src/semantic/procedure/output.rs has 677 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-analysis/language/src/semantic/program.rs has 615 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/contracts.rs grew from its 2623-line debt ceiling to 2628 lines",
@@ -117,6 +117,15 @@
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/storage/frequency_sample.rs has 631 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/storage/publication.rs has 746 lines and adds untracked module-size debt"
   ],
-  "conservation": "Owner-approved integration review, 2026-11-09: incoming FEA/CAD source has 108 architecture diagnostics versus 89 previously accepted (58 exact retained; 50 added or changed; 31 removed or replaced). Lowering contracts.rs from its stale 2828-line ceiling to its actual 2623 lines removes one diagnostic, leaving these 107 exact identities. This exception covers structural/style debt under RM-1287 only. Numerical failures and findings outside the listed FEA roots remain blocking. CI reruns the architecture checker and language ledger and rejects additions, removals and changed diagnostic identities.",
+  "conservation": "The current reviewed intake retains the 111 diagnostic identities listed here under RM-1287. The original 2026-11-09 integration review retained 107 findings after correcting the contracts.rs ceiling; later intake records added the other listed findings. Formatting commit 61159b5063 reduces procedure/lower.rs from 779 to 769 lines by joining two existing calls, without changing their arguments or control flow. This register updates that one diagnostic's line count; its other 110 identities and multiplicities remain unchanged. The exception covers structural/style debt in the listed FEA roots. Numerical failures and other architecture findings remain blocking. CI executes both original checkers and requires the exact diagnostic multiset and language ledger.",
+  "conservation_updates": [
+    {
+      "source_revision": "61159b5063",
+      "path": "crates/runmat-analysis/language/src/semantic/procedure/lower.rs",
+      "previous_lines": 779,
+      "current_lines": 769,
+      "reason": "Rustfmt joins existing modal_reduction::extraction calls; expressions, arguments and control flow are unchanged. Diagnostic count remains 111."
+    }
+  ],
   "diagnostic_count": 111
 }
