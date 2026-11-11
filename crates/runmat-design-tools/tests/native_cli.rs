@@ -25,7 +25,10 @@ const PAIR: &str = "runmat 0.7\nstd 1\nassembly pair {\n    use part plate as lo
 const SHEET: &str = r#"runmat 0.7
 std 1
 drawing sheet {
-    format a3 = { size = { size = iso, name = A3 } }
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [{ label = Sheet, source = { source = sheet_number } }]
+    }
     sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
     view front = standard(
         orientation = front,
