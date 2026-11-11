@@ -231,6 +231,7 @@ pub use problem::target::{
 };
 pub use study::accuracy::{
     AccuracyCriterion, AccuracyLimitAction, AccuracyPlan, AccuracyPlanId, AccuracyResourceCeiling,
+    AlgebraicAccuracyMeasure,
     AccuracyTarget, AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy,
     RequiredAccuracyEvidence, UnavailableEvidencePolicy,
 };
@@ -247,11 +248,11 @@ pub use study::output::{
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,
-    InitialStateConflictPolicy, ModalStaticCorrection, ProcedureSettings, ProcedureStep,
-    ProcedureStepId, ReferenceStatePolicy, RestartPolicy, SequenceBranch, SequenceBranchId,
-    SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId, StateInput,
-    StateKind, StateOutput, StatePersistence, StateSource, StateTransition, StateTransitionMethod,
-    StateUse, StepObjectActivation, StepObjectRef, StructuralKinematics,
+    InitialStateConflictPolicy, ModalSolverMethod, ModalStaticCorrection, ProcedureSettings,
+    ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RestartPolicy, SequenceBranch,
+    SequenceBranchId, SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId,
+    StateInput, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,
+    StateTransitionMethod, StateUse, StepObjectActivation, StepObjectRef, StructuralKinematics,
     StructuralModalBasisSettings, StructuralModalFrequencySettings, StructuralNonlinearSettings,
     StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
     ValidatedAnalysisSequence,

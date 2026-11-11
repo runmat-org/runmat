@@ -313,6 +313,14 @@ impl FeaModalRunResult {
             .map(|mode| mode.residual_norm())
             .collect()
     }
+
+    pub fn backward_errors(&self) -> Vec<f64> {
+        self.basis
+            .modes()
+            .iter()
+            .map(|mode| mode.backward_error())
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

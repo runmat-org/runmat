@@ -1225,12 +1225,12 @@ fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
             < high_accuracy.truncation.requested_mode_count()
     );
     assert!(
-        coarse.convergence.relative_residual_tolerance()
-            > balanced.convergence.relative_residual_tolerance()
+        coarse.convergence.algebraic_tolerance()
+            > balanced.convergence.algebraic_tolerance()
     );
     assert!(
-        balanced.convergence.relative_residual_tolerance()
-            > high_accuracy.convergence.relative_residual_tolerance()
+        balanced.convergence.algebraic_tolerance()
+            > high_accuracy.convergence.algebraic_tolerance()
     );
     assert!(
         coarse.convergence.maximum_subspace_iterations()

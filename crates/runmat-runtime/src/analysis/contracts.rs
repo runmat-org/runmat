@@ -483,7 +483,7 @@ impl AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Strict,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(8),
             convergence: runmat_analysis_fea::ModalConvergencePolicy::production()
-                .with_relative_residual_tolerance(1.0e-10)
+                .with_algebraic_tolerance(1.0e-13)
                 .with_maximum_subspace_iterations(512),
             residual_vector_directions: Vec::new(),
             solver_mesh_artifact_path: None,
@@ -2158,6 +2158,13 @@ impl ModalResultsData {
         self.mode_indices()
             .filter_map(|index| self.basis.modes().get(index))
             .map(|mode| mode.residual_norm())
+            .collect()
+    }
+
+    pub fn backward_errors(&self) -> Vec<f64> {
+        self.mode_indices()
+            .filter_map(|index| self.basis.modes().get(index))
+            .map(|mode| mode.backward_error())
             .collect()
     }
 }

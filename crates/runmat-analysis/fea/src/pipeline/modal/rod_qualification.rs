@@ -511,3 +511,71 @@ fn solid_rod_modal_paths_agree_and_each_proves_completeness() {
         );
     }
 }
+
+/// The modes qualify on the normwise backward error and publish it beside the relative
+/// residual; a policy that requires the relative residual at a level double precision cannot
+/// reach refuses the same pairs.
+#[test]
+fn solid_rod_modes_qualify_on_the_backward_error_and_publish_both_measures() {
+    use crate::planning::resource::SubspaceSolvePath;
+    use runmat_analysis_core::AlgebraicAccuracyMeasure;
+    let mesh = rod_mesh(4, true);
+    let model = modal_model(&rod_model(&mesh, &[1.0]));
+    let solve = |convergence| {
+        super::execute_modal_core(
+            &model,
+            ComputeBackend::Cpu,
+            ModalSolveOptions {
+                solver_mesh: Some(mesh.clone()),
+                truncation: ModalTruncationPolicy::requested(4),
+                convergence,
+                ..ModalSolveOptions::default()
+            },
+            runmat_analysis_core::AnalysisProcedure::ModalExtraction,
+            None,
+            SubspaceSolvePath::ShiftInvertFactorization,
+        )
+    };
+    let production = crate::ModalConvergencePolicy::production();
+    assert_eq!(
+        production.algebraic_measure(),
+        AlgebraicAccuracyMeasure::BackwardError
+    );
+    let core = solve(production).unwrap();
+    let field = |id: &str| -> Vec<f64> {
+        core.run
+            .fields
+            .iter()
+            .find(|field| field.field_id == id)
+            .unwrap_or_else(|| panic!("missing field {id}"))
+            .as_host_f64()
+            .expect("modal accuracy fields are host-backed")
+            .to_vec()
+    };
+    let backward = field(crate::contracts::FEA_FIELD_MODAL_BACKWARD_ERROR);
+    let relative = field(crate::contracts::FEA_FIELD_MODAL_RESIDUAL_NORM);
+    assert_eq!(backward.len(), core.basis.modes().len());
+    assert_eq!(relative.len(), backward.len());
+    for (eta, residual) in backward.iter().zip(&relative) {
+        assert!(*eta <= production.algebraic_tolerance(), "η = {eta}");
+        assert!(*eta <= *residual, "η = {eta} above the relative residual {residual}");
+    }
+    let accuracy = core
+        .run
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "FEA_MODAL_ACCURACY")
+        .expect("the per-mode accuracy is published");
+    assert!(accuracy.message.contains("measure=backward_error"));
+    assert!(accuracy.message.contains("relative_residual="));
+    let strict =
+        production.with_algebraic_accuracy(AlgebraicAccuracyMeasure::RelativeResidual, 1.0e-16);
+    let Err(refused) = solve(strict) else {
+        panic!("a relative residual of 1e-16 is below double precision and must be refused");
+    };
+    let refused = refused.to_string();
+    assert!(
+        refused.contains("did not qualify"),
+        "a relative residual of 1e-16 is below double precision: {refused}"
+    );
+}

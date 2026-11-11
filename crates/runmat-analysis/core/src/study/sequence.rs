@@ -127,6 +127,36 @@ pub enum ProcedureSettings {
 #[serde(deny_unknown_fields)]
 pub struct StructuralModalBasisSettings {
     pub residual_vector_directions: Vec<crate::SpectrumDirection>,
+    /// The eigensolver the step requires; `Auto` lets the resource plan choose.
+    #[serde(default)]
+    pub solver_method: ModalSolverMethod,
+}
+
+/// The eigensolver of a structural modal extraction.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModalSolverMethod {
+    /// The resource plan chooses: the shift-invert factorization when its plan fits the
+    /// admitted memory, otherwise preconditioned LOBPCG when that plan fits.
+    #[default]
+    Auto,
+    /// Shift-invert block Lanczos on a sparse Cholesky factor. Refused when its plan does not
+    /// fit the admitted memory.
+    Factorization,
+    /// Block LOBPCG preconditioned by multigrid, with no factor. Refused when its plan does not
+    /// fit the admitted memory.
+    Iterative,
+}
+
+impl ModalSolverMethod {
+    /// The `.fea` spelling.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Factorization => "factorization",
+            Self::Iterative => "iterative",
+        }
+    }
 }
 
 /// Static correction of a modal-reduced frequency sweep.
@@ -178,6 +208,14 @@ impl ProcedureStep {
                 &settings.residual_vector_directions
             }
             _ => &[],
+        }
+    }
+
+    /// The eigensolver an extraction step requires; every other step is `Auto`.
+    pub fn modal_solver_method(&self) -> ModalSolverMethod {
+        match &self.settings {
+            ProcedureSettings::StructuralModalBasis(settings) => settings.solver_method,
+            _ => ModalSolverMethod::Auto,
         }
     }
 
@@ -428,8 +466,12 @@ impl ProcedureStep {
         state_outputs: Vec<StateOutput>,
     ) -> Self {
         let step_id = step_id.into();
+        let mut accuracy = AccuracyPlan::baseline(format!("{step_id}.accuracy"));
+        if Self::qualifies_on_backward_error(family, procedure) {
+            accuracy.set_algebraic_measure(crate::AlgebraicAccuracyMeasure::BackwardError);
+        }
         Self {
-            accuracy: AccuracyPlan::baseline(format!("{step_id}.accuracy")),
+            accuracy,
             step_id: ProcedureStepId(step_id),
             family,
             procedure,
@@ -443,6 +485,20 @@ impl ProcedureStep {
             observations: Vec::new(),
             restart: RestartPolicy::Fresh,
         }
+    }
+
+    /// Whether the step's producer publishes the normwise backward error, so its default
+    /// algebraic criterion is the backward error. Structural modal extraction publishes it per
+    /// mode; the other producers still publish the relative residual their receipts document.
+    pub const fn qualifies_on_backward_error(
+        family: PhysicsFamily,
+        procedure: AnalysisProcedure,
+    ) -> bool {
+        matches!(family, PhysicsFamily::Structural)
+            && matches!(
+                procedure,
+                AnalysisProcedure::ModalExtraction | AnalysisProcedure::PrestressedModalExtraction
+            )
     }
 
     pub fn structural_static(step_id: impl Into<String>) -> Self {

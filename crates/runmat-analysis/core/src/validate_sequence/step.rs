@@ -57,11 +57,20 @@ fn validate_settings(step: &ProcedureStep) -> Result<(), AnalysisValidationError
             ProcedureSettings::StructuralModalBasis(settings),
             AnalysisProcedure::ModalExtraction | AnalysisProcedure::PrestressedModalExtraction,
         ) if step.family == PhysicsFamily::Structural => {
+            if settings.residual_vector_directions.is_empty() {
+                if settings.solver_method == crate::ModalSolverMethod::Auto {
+                    return Err(step_error(
+                        step,
+                        "modal basis settings name residual vectors or a solver method",
+                    ));
+                }
+                return Ok(());
+            }
             validate_residual_vector_directions(step, &settings.residual_vector_directions)
         }
         (ProcedureSettings::StructuralModalBasis(_), _) => Err(step_error(
             step,
-            "residual vectors require a structural modal extraction step",
+            "residual vectors and a modal solver method require a structural modal extraction step",
         )),
         (
             ProcedureSettings::StructuralModalFrequency(_),

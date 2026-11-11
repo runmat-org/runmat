@@ -11,18 +11,24 @@ pub(super) fn push_modal_quality_diagnostics(
     frequencies_hz: &[f64],
     mode_shapes: &[Vec<f64>],
     residual_norms: &[f64],
-    residual_tolerance: f64,
+    backward_errors: &[f64],
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
 ) {
     if !residual_norms.is_empty() {
         let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+        let max_backward_error = backward_errors.iter().copied().fold(0.0_f64, f64::max);
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MODAL_RESIDUAL".to_string(),
-            severity: if max_residual <= residual_tolerance {
+            severity: if convergence.gated_residual(max_residual, max_backward_error)
+                <= convergence.algebraic_tolerance()
+            {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
-            message: format!("max_modal_residual_norm={max_residual}"),
+            message: format!(
+                "max_modal_backward_error={max_backward_error} max_modal_residual_norm={max_residual}"
+            ),
         });
     }
 

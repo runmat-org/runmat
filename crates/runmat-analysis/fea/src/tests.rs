@@ -3797,9 +3797,10 @@ fn modal_beam_recovers_the_closed_form_lumped_mass_axial_frequency() {
         .expect("beam should have modes");
     assert!((axial_hz - expected_hz).abs() / expected_hz <= 1.0e-10);
     assert!(result
-        .residual_norms()
+        .backward_errors()
         .iter()
-        .all(|residual| *residual <= policy.relative_residual_tolerance()));
+        .all(|backward_error| *backward_error <= policy.algebraic_tolerance()));
+    assert_eq!(result.backward_errors().len(), result.residual_norms().len());
 }
 
 #[test]

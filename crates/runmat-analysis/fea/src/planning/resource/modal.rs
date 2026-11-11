@@ -118,7 +118,10 @@ pub fn recorded_modal_solve_path(plan: &FeaResourcePlan) -> Option<SubspaceSolve
 
 /// Plans a modal workload on the path `selection` names.
 ///
-/// Path-selection law: with the effective ceiling min(authored resident budget, machine
+/// An authored `solver = factorization | iterative` plans that path only and is refused with
+/// [`ResourcePlanningError::MemoryBudget`] when its plan does not fit the effective ceiling.
+///
+/// Path-selection law for `auto`: with the effective ceiling min(authored resident budget, machine
 /// memory when known), the shift-invert factorization is chosen when its whole plan (memory
 /// and scratch) fits the ceiling; otherwise preconditioned LOBPCG when its plan fits;
 /// otherwise [`ResourcePlanningError::ModalSolveCeiling`] names both requirements. The plan
@@ -152,16 +155,37 @@ pub fn build_structural_modal_resource_plan_selecting(
             machine_memory_bytes,
         } => machine_memory_bytes,
     };
-    let authored = workload
+    let step = workload
         .procedure_step()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
-        .accuracy
-        .resources
-        .resident_byte_budget();
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let authored = step.accuracy.resources.resident_byte_budget();
     let ceiling = machine_memory_bytes.map_or(authored, |machine| machine.min(authored));
     let fits = |plan: &FeaResourcePlan| {
         plan.request.memory_bytes <= ceiling && plan.request.scratch_bytes <= ceiling
     };
+    // An authored method is planned on its path alone; when that plan does not fit, the study
+    // is refused with the bytes it needs and the bytes the budget offers. No other path is tried.
+    let forced = match step.modal_solver_method() {
+        runmat_analysis_core::ModalSolverMethod::Auto => None,
+        runmat_analysis_core::ModalSolverMethod::Factorization => {
+            Some(SubspaceSolvePath::ShiftInvertFactorization)
+        }
+        runmat_analysis_core::ModalSolverMethod::Iterative => {
+            Some(SubspaceSolvePath::PreconditionedLobpcg)
+        }
+    };
+    if let Some(path) = forced {
+        let plan = plan_path(path)?;
+        if fits(&plan) {
+            return Ok(plan);
+        }
+        return Err(ResourcePlanningError::MemoryBudget {
+            required_memory_bytes: plan.request.memory_bytes,
+            available_memory_bytes: ceiling,
+            required_scratch_bytes: plan.request.scratch_bytes,
+            available_scratch_bytes: ceiling,
+        });
+    }
     let required = |planned: Result<FeaResourcePlan, ResourcePlanningError>| match planned {
         Ok(plan) if fits(&plan) => Ok(Ok(plan)),
         Ok(plan) => Ok(Err(plan

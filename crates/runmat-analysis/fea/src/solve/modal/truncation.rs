@@ -48,7 +48,7 @@ mod tests {
     use super::*;
 
     fn candidate(frequency_hz: f64) -> ModalCandidate {
-        (frequency_hz, vec![frequency_hz], 0.0)
+        (frequency_hz, vec![frequency_hz], 0.0, 0.0)
     }
 
     #[test]

@@ -2535,6 +2535,10 @@ export type ModalCombination = "srss"
   | "ten_percent"
   | "absolute_sum";
 
+export type ModalSolverMethod = "auto"
+  | "factorization"
+  | "iterative";
+
 export type ModalStaticCorrection = "none"
   | "applied_loads";
 
@@ -3183,6 +3187,7 @@ export type RequiredAccuracyEvidence = "aposteriori_estimator"
   | "convergence_study"
   | "conservation_balance"
   | "residual_bound"
+  | "backward_error_bound"
   | "reference_comparison"
   | "statistical_confidence"
   | "transfer_bound";
@@ -3717,6 +3722,7 @@ export type StructuralKinematics = "small_strain"
 
 export interface StructuralModalBasisSettings {
   residual_vector_directions: SpectrumDirection[];
+  solver_method: ModalSolverMethod;
 }
 
 export interface StructuralModalFrequencySettings {

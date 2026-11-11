@@ -38,17 +38,27 @@ pub(crate) fn modal_eigen_options(
         count: subspace_dimension,
         shift: Some(0.0),
         block_size: MODAL_LANCZOS_BLOCK_SIZE,
-        tolerance: (0.1 * convergence.relative_residual_tolerance()).min(1.0e-10),
+        tolerance: modal_lanczos_tolerance(convergence),
         max_restarts: convergence.maximum_subspace_iterations().max(1),
         sturm_check: true,
         ..Default::default()
     }
 }
+/// Ritz-estimate tolerance of the shift-invert Lanczos: a tenth of the policy's tolerance,
+/// capped at 1e-10. The Lanczos stops on its Ritz estimates, and the published gate is measured
+/// on the returned pairs afterwards; a Ritz estimate converged to 1e-10 leaves backward errors
+/// near 1e-12 on small models, so the stopping rule follows the gate's tolerance.
+fn modal_lanczos_tolerance(
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+) -> f64 {
+    (0.1 * convergence.algebraic_tolerance()).min(1.0e-10)
+}
+
 /// LOBPCG options for one modal search of `subspace_dimension` vectors on the factor-free
 /// path. The resource planner sizes the path's working set from these same options.
 ///
-/// The iteration stops at half the policy's relative residual tolerance so the true residuals
-/// it reports pass the policy; it may take up to four LOBPCG steps per admitted Lanczos restart
+/// The iteration stops at half the policy's tolerance, in the policy's measure, so the true
+/// residuals it reports pass the policy; it may take up to four LOBPCG steps per admitted Lanczos restart
 /// because each step applies the preconditioner once per unconverged vector instead of a
 /// factor solve.
 pub(crate) fn modal_lobpcg_options(
@@ -59,7 +69,8 @@ pub(crate) fn modal_lobpcg_options(
         lobpcg: runmat_sparse_solvers::eigen::LobpcgOptions {
             count: subspace_dimension,
             guard: MODAL_LANCZOS_BLOCK_SIZE,
-            tolerance: 0.5 * convergence.relative_residual_tolerance(),
+            tolerance: 0.5 * convergence.algebraic_tolerance(),
+            measure: convergence.solver_measure(),
             max_iterations: convergence
                 .maximum_subspace_iterations()
                 .max(1)
@@ -84,14 +95,21 @@ fn keeps_whole_translational_nodes(summary: &AssemblySummary, free_dofs: &[usize
 }
 
 pub(crate) const MODAL_MASS_ORTHOGONALIZATION_PASSES: usize = 2;
-type ModalCandidate = (f64, Vec<f64>, f64);
+/// (frequency in Hz, expanded shape, relative residual, backward error).
+type ModalCandidate = (f64, Vec<f64>, f64, f64);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModalSolveResult {
     pub converged: bool,
     pub frequencies_hz: Vec<f64>,
     pub mode_shapes: Vec<Vec<f64>>,
+    /// Relative residual `‖K x − λ M x‖₂ / (‖K x‖₂ + λ ‖M x‖₂)` of each mode on the reduced
+    /// pencil.
     pub residual_norms: Vec<f64>,
+    /// Normwise backward error `‖K x − λ M x‖_∞ / ((‖K‖_∞ + λ ‖M‖_∞) ‖x‖_∞)` of each mode on the
+    /// reduced pencil.
+    #[serde(default)]
+    pub backward_errors: Vec<f64>,
     pub diagnostics: Vec<FeaDiagnostic>,
     pub solver_method: SolverMethod,
     pub solver_backend: LinearAlgebraBackendKind,
@@ -135,6 +153,7 @@ pub(crate) fn solve_modal_system_reusing(
             frequencies_hz: Vec::new(),
             mode_shapes: Vec::new(),
             residual_norms: Vec::new(),
+            backward_errors: Vec::new(),
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_MODAL_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
@@ -187,6 +206,7 @@ pub(crate) fn solve_modal_system_reusing(
                 frequencies_hz: Vec::new(),
                 mode_shapes: Vec::new(),
                 residual_norms: Vec::new(),
+                backward_errors: Vec::new(),
                 diagnostics: vec![FeaDiagnostic {
                     code: "FEA_MODAL_PREPARATION_FAILED".to_string(),
                     severity: FeaDiagnosticSeverity::Error,
@@ -214,6 +234,7 @@ pub(crate) fn solve_modal_system_reusing(
                 frequencies_hz: Vec::new(),
                 mode_shapes: Vec::new(),
                 residual_norms: Vec::new(),
+                backward_errors: Vec::new(),
                 diagnostics: vec![FeaDiagnostic {
                     code: "FEA_MODAL_PREPARATION_FAILED".to_string(),
                     severity: FeaDiagnosticSeverity::Error,
@@ -245,6 +266,7 @@ pub(crate) fn solve_modal_system_reusing(
                         frequencies_hz: Vec::new(),
                         mode_shapes: Vec::new(),
                         residual_norms: Vec::new(),
+                        backward_errors: Vec::new(),
                         diagnostics: vec![FeaDiagnostic {
                             code: "FEA_MODAL_SOLVER_ADMISSION_FAILED".into(),
                             severity: FeaDiagnosticSeverity::Error,
@@ -355,9 +377,11 @@ pub(crate) fn solve_modal_system_reusing(
         .min(maximum_subspace_dimension);
     let mut subspace_iteration_count = 0usize;
     let mut subspace_maximum_residual = f64::INFINITY;
+    let mut subspace_maximum_relative_residual = f64::INFINITY;
+    let mut subspace_maximum_backward_error = f64::INFINITY;
     let mut subspace_converged = false;
     let mut sturm = None;
-    let tolerance = convergence.relative_residual_tolerance();
+    let tolerance = convergence.algebraic_tolerance();
     let admitted = path == SubspaceSolvePath::ShiftInvertFactorization || multigrid.is_some();
     while admitted && subspace_dimension > 0 && !crate::is_fea_cancelled() {
         let options = modal_eigen_options(subspace_dimension, convergence);
@@ -400,7 +424,21 @@ pub(crate) fn solve_modal_system_reusing(
             }
         };
         subspace_iteration_count = subspace_iteration_count.saturating_add(result.restarts.max(1));
-        subspace_maximum_residual = result.residuals.iter().copied().fold(0.0, f64::max);
+        if result.backward_errors.len() != result.residuals.len() {
+            linear_diagnostics.push(FeaDiagnostic {
+                code: "FEA_MODAL_EIGENSOLVER_FAILED".into(),
+                severity: FeaDiagnosticSeverity::Error,
+                message: "eigensolver returned no backward error for its pairs".into(),
+            });
+            break;
+        }
+        subspace_maximum_relative_residual = result.residuals.iter().copied().fold(0.0, f64::max);
+        subspace_maximum_backward_error =
+            result.backward_errors.iter().copied().fold(0.0, f64::max);
+        subspace_maximum_residual = convergence.gated_residual(
+            subspace_maximum_relative_residual,
+            subspace_maximum_backward_error,
+        );
         subspace_converged = result.converged && subspace_maximum_residual <= tolerance;
         last_values.clone_from(&result.values);
         let n = unconstrained_count;
@@ -415,6 +453,7 @@ pub(crate) fn solve_modal_system_reusing(
                 eigenvalue.max(0.0).sqrt() / (2.0 * std::f64::consts::PI),
                 expanded,
                 result.residuals[index],
+                result.backward_errors[index],
             ));
         }
         let exhausted = subspace_dimension == unconstrained_count;
@@ -508,10 +547,12 @@ pub(crate) fn solve_modal_system_reusing(
     let mut frequencies_hz = Vec::with_capacity(modes.len());
     let mut mode_shapes = Vec::with_capacity(modes.len());
     let mut residual_norms = Vec::with_capacity(modes.len());
-    for (freq_hz, shape, residual) in modes {
+    let mut backward_errors = Vec::with_capacity(modes.len());
+    for (freq_hz, shape, residual, backward_error) in modes {
         frequencies_hz.push(freq_hz);
         mode_shapes.push(shape);
         residual_norms.push(residual);
+        backward_errors.push(backward_error);
     }
 
     let converged = subspace_converged
@@ -540,15 +581,41 @@ pub(crate) fn solve_modal_system_reusing(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "mode_count_requested={} mode_count_solved={} subspace_dimension={} iteration_count={} maximum_generalized_residual={} converged={}",
+            "mode_count_requested={} mode_count_solved={} subspace_dimension={} iteration_count={} measure={} tolerance={} maximum_gated_residual={} maximum_backward_error={} maximum_relative_residual={} converged={}",
             requested_mode_count,
             frequencies_hz.len(),
             subspace_dimension,
             subspace_iteration_count,
+            convergence.algebraic_measure().label(),
+            tolerance,
             subspace_maximum_residual,
+            subspace_maximum_backward_error,
+            subspace_maximum_relative_residual,
             converged
         ),
     });
+    if !frequencies_hz.is_empty() {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_MODAL_ACCURACY".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "measure={} tolerance={} modes=[{}]",
+                convergence.algebraic_measure().label(),
+                tolerance,
+                frequencies_hz
+                    .iter()
+                    .zip(&backward_errors)
+                    .zip(&residual_norms)
+                    .enumerate()
+                    .map(|(index, ((frequency, backward), relative))| format!(
+                        "{{mode={} frequency_hz={frequency} backward_error={backward:e} relative_residual={relative:e}}}",
+                        index + 1
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        });
+    }
 
     if !complete_boundary_eigenspace
         && subspace_dimension == maximum_subspace_dimension
@@ -569,7 +636,8 @@ pub(crate) fn solve_modal_system_reusing(
         &frequencies_hz,
         &mode_shapes,
         &residual_norms,
-        convergence.relative_residual_tolerance(),
+        &backward_errors,
+        convergence,
     );
     diagnostics.push(FeaDiagnostic {
         code: "FEA_MODAL_COST".to_string(),
@@ -589,6 +657,7 @@ pub(crate) fn solve_modal_system_reusing(
         frequencies_hz,
         mode_shapes,
         residual_norms,
+        backward_errors,
         diagnostics,
         solver_method,
         solver_backend,

@@ -71,7 +71,11 @@ impl ModalDirectionalMetric {
 pub struct ModalBasisMode {
     frequency_hz: f64,
     eigenvalue_rad2_per_s2: f64,
+    /// Relative residual of the reduced eigenpair, `‖K x − λ M x‖₂ / (‖K x‖₂ + λ ‖M x‖₂)`.
     residual_norm: f64,
+    /// Normwise backward error of the reduced eigenpair,
+    /// `‖K x − λ M x‖_∞ / ((‖K‖_∞ + λ ‖M‖_∞) ‖x‖_∞)`.
+    backward_error: f64,
     modal_mass: f64,
     modal_stiffness: f64,
     relative_frequency_separation: f64,
@@ -88,6 +92,9 @@ impl ModalBasisMode {
     }
     pub const fn residual_norm(&self) -> f64 {
         self.residual_norm
+    }
+    pub const fn backward_error(&self) -> f64 {
+        self.backward_error
     }
     pub const fn modal_mass(&self) -> f64 {
         self.modal_mass
@@ -151,6 +158,7 @@ pub(crate) struct ModalBasisInputs<'a> {
     pub frequencies_hz: &'a [f64],
     pub dof_shapes: &'a [Vec<f64>],
     pub residual_norms: &'a [f64],
+    pub backward_errors: &'a [f64],
     pub truncation_policy: ModalTruncationPolicy,
     pub available_mode_count: usize,
     pub boundary_probe_count: usize,
@@ -201,13 +209,18 @@ impl ModalBasisArtifact {
             frequencies_hz,
             dof_shapes,
             residual_norms,
+            backward_errors,
             truncation_policy,
             available_mode_count,
             boundary_probe_count,
             boundary_probe_frequency_hz,
         } = inputs;
         let count = frequencies_hz.len();
-        if count == 0 || dof_shapes.len() != count || residual_norms.len() != count {
+        if count == 0
+            || dof_shapes.len() != count
+            || residual_norms.len() != count
+            || backward_errors.len() != count
+        {
             return Err(FeaRunError::Assembly(
                 "modal basis inputs must be non-empty and have identical mode counts".into(),
             ));
@@ -265,6 +278,7 @@ impl ModalBasisArtifact {
                 eigenvalue_rad2_per_s2: (2.0 * std::f64::consts::PI * frequencies_hz[index])
                     .powi(2),
                 residual_norm: residual_norms[index],
+                backward_error: backward_errors[index],
                 modal_mass,
                 modal_stiffness,
                 relative_frequency_separation: separation[index],
@@ -407,6 +421,11 @@ impl ModalBasisArtifact {
             .iter()
             .map(|mode| mode.residual_norm)
             .collect::<Vec<_>>();
+        let backward_errors = self
+            .modes
+            .iter()
+            .map(|mode| mode.backward_error)
+            .collect::<Vec<_>>();
         let regenerated = Self::new(
             self.source_run.clone(),
             summary,
@@ -414,6 +433,7 @@ impl ModalBasisArtifact {
                 frequencies_hz: &frequencies,
                 dof_shapes: &dof_shapes,
                 residual_norms: &residuals,
+                backward_errors: &backward_errors,
                 truncation_policy: self.truncation.policy(),
                 available_mode_count: self.truncation.available_mode_count(),
                 boundary_probe_count: self.truncation.boundary_probe_count(),
@@ -500,6 +520,8 @@ impl ModalBasisArtifact {
                     || mode.eigenvalue_rad2_per_s2 < 0.0
                     || !valid_scalar(mode.residual_norm)
                     || mode.residual_norm < 0.0
+                    || !valid_scalar(mode.backward_error)
+                    || mode.backward_error < 0.0
                     || !valid_scalar(mode.modal_mass)
                     || mode.modal_mass <= 0.0
                     || !valid_scalar(mode.modal_stiffness)
