@@ -132,8 +132,12 @@ fn circuit_fixture() {
     let dir = std::env::var("RUNMAT_DESKTOP_FIXTURES")
         .map(PathBuf::from)
         .ok();
-    let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../runmat-private-cad/desktop/src/app/components/circuit/fixtures");
+    let sibling = std::env::var_os("RUNMAT_PRIVATE_CAD_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../runmat-private-cad")
+        })
+        .join("desktop/src/app/components/circuit/fixtures");
     if let Some(dir) = dir {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("io.circuit.json"), &json).unwrap();
