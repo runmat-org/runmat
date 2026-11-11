@@ -539,13 +539,9 @@ This file is generated from the command catalog.
   - Required: `direction` (pick: plane or face or axis); `angle` (number in deg, default 1)
 - `mold.parting-line`: Find the parting line for a pull direction.
   - Required: `direction` (pick: plane or face or axis or edge); `draft` (number in deg, default 1)
-- `mold.parting-surface`: Extend the parting line outward into a surface.
-  - Required: `parting_line` (pick: feature or edge); `distance` (number in mm, default 50); `type` (one of `normal`, `tangent`, `perpendicular`, default `normal`)
 - `mold.scale`: Scale the part for the material's shrinkage.
   - Required: `factor` (number, default 1.005); `fx` (number, default 1.005) when `uniform` is false; `fy` (number, default 1.005) when `uniform` is false; `fz` (number, default 1.005) when `uniform` is false
   - Optional: `uniform` (true or false, default true)
-- `mold.shut-off`: Close through-holes so core and cavity separate.
-  - Required: `loops` (picks: edge); `type` (one of `contact`, `tangent`, `none`, default `contact`)
 - `mold.undercut`: Find faces that can't release in the pull direction.
   - Required: `direction` (pick: plane or face or axis)
 
@@ -585,9 +581,8 @@ This file is generated from the command catalog.
 - `part.body-promote`: Make a body its own part in this file, with its own number and material.
   - Required: `body` (pick: body); `name` (text)
   - Runs on the `selection`: `body`
-- `part.body-scale`: Scale bodies about a point.
-  - Required: `bodies` (picks: body); `about` (one of `centroid`, `origin`, `point`, default `centroid`); `point` (pick: point or vertex) when `about` is point; `factor` (number, default 1)
-  - Optional: `uniform` (true or false, default true)
+- `part.body-scale`: Scale bodies about the origin by one factor.
+  - Required: `bodies` (picks: body); `factor` (number, default 1)
 - `part.boolean`: Combine bodies by union, subtract or intersect.
   - Required: `kind` (one of `union`, `subtract`, `intersect`, default `union`); `target` (pick: body); `tools` (picks: body)
   - Optional: `keep_tools` (true or false, default false)
