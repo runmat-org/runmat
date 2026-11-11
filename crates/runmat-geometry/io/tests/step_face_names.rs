@@ -72,11 +72,13 @@ fn assembly_step_preview_keeps_face_and_product_names() {
     };
     assert_eq!(faces("root"), 1, "regions: {:?}", names());
     assert_eq!(faces("motor_seat"), 1, "regions: {:?}", names());
-    let bodies: Vec<_> = regions
+    let mut bodies: Vec<_> = regions
         .iter()
         .filter(|r| r.tag.as_deref() == Some("cad_body"))
         .map(|r| r.name.as_str())
         .collect();
+    // Imported topology determines enumeration order; this checks the exact named bodies.
+    bodies.sort();
     assert_eq!(bodies, ["arm", "motor_pod"], "regions: {:?}", names());
 }
 
