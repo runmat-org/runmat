@@ -3,6 +3,8 @@ use runmat_meshing_size::metric::{MetricFieldRequest, MetricTensor3};
 
 use super::*;
 
+#[path = "tests/captured_arm_wall.rs"]
+mod captured_arm_wall;
 #[path = "tests/captured_fork.rs"]
 mod captured_fork;
 #[path = "tests/captured_heat.rs"]
