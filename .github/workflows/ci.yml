@@ -26,6 +26,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      native: ${{ steps.classify.outputs.native }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+      - name: Classify native build inputs
+        id: classify
+        run: python3 scripts/development/ci-changes.py
+
   scientific-receipts:
     name: Verify committed scientific qualification
     runs-on: ubuntu-latest
@@ -61,7 +73,9 @@ jobs:
           infra/scripts/native-build-cache-key.test.mjs
 
       - name: Verify ordinary test routing and shard coverage
-        run: python3 -m unittest discover -s scripts/development -p 'test_run_workspace_test_group.py'
+        run: |
+          python3 -m unittest discover -s scripts/development -p 'test_run_workspace_test_group.py'
+          python3 -m unittest discover -s scripts/development -p 'test_ci_changes.py'
 
   docs-lint:
     # FEA docs: capability ledger (ledger↔code↔docs), pending flags, fea highlighting, front matter, links, and generated pages.
@@ -83,9 +97,10 @@ jobs:
         run: node --test scripts/docs/docs-lint.test.mjs scripts/docs/generate-pages.test.mjs scripts/docs/check-snippets.test.mjs scripts/docs/registry-coverage.test.mjs scripts/docs/fea-grammar.test.mjs
 
   build-and-test:
+    needs: changes
     name: ${{ matrix.name }}
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
-    if: inputs.release_validation || github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    if: inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))
     strategy:
       fail-fast: false
       max-parallel: 15
@@ -444,10 +459,11 @@ jobs:
           if-no-files-found: warn
 
 
-      - name: Check
+      - name: Check additional Clarabel feature profiles
         if: matrix.task == 'quality'
         run: |
-          cargo check --workspace --exclude runmat-clarabel --all-targets --all-features --keep-going
+          # Clippy above checks the first-party all-target/all-feature graph.
+          # Clarabel's supported feature profiles are checked separately.
           cargo check -p runmat-clarabel --all-targets --no-default-features --keep-going
           cargo check -p runmat-clarabel --all-targets --no-default-features --features serde --keep-going
       - name: Test (Linux)
@@ -580,8 +596,9 @@ jobs:
 
 
   cross-build:
+    needs: changes
     # Build all release targets so failures are caught before tagging
-    if: ${{ !inputs.release_validation && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)) }}
+    if: ${{ !inputs.release_validation && needs.changes.outputs.native == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) }}
     name: Cross build ${{ matrix.platform.release_for }}
     # The Windows cold build used nearly eight hours, leaving no time to
     # retain its checkpoint after acceptance. Other native lanes retain 8h.
