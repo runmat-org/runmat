@@ -34,7 +34,6 @@ use options::keeps_whole_translational_nodes;
 pub(crate) use options::{modal_eigen_options, modal_lobpcg_options};
 
 pub(crate) const MODAL_MASS_ORTHOGONALIZATION_PASSES: usize = 2;
-/// (frequency in Hz, expanded shape, relative residual, backward error).
 type ModalCandidate = (f64, Vec<f64>, f64, f64);
 
 pub(crate) fn solve_modal_system_reusing(
@@ -294,7 +293,6 @@ pub(crate) fn solve_modal_system_reusing(
     let mut subspace_maximum_backward_error = f64::INFINITY;
     let mut subspace_converged = false;
     let mut sturm = None;
-    let tolerance = convergence.algebraic_tolerance();
     let admitted = path == SubspaceSolvePath::ShiftInvertFactorization || multigrid.is_some();
     while admitted && subspace_dimension > 0 && !crate::is_fea_cancelled() {
         let options = modal_eigen_options(subspace_dimension, convergence);
@@ -337,22 +335,17 @@ pub(crate) fn solve_modal_system_reusing(
             }
         };
         subspace_iteration_count = subspace_iteration_count.saturating_add(result.restarts.max(1));
-        if result.backward_errors.len() != result.residuals.len() {
-            linear_diagnostics.push(FeaDiagnostic {
-                code: "FEA_MODAL_EIGENSOLVER_FAILED".into(),
-                severity: FeaDiagnosticSeverity::Error,
-                message: "eigensolver returned no backward error for its pairs".into(),
-            });
-            break;
-        }
         subspace_maximum_relative_residual = result.residuals.iter().copied().fold(0.0, f64::max);
-        subspace_maximum_backward_error =
-            result.backward_errors.iter().copied().fold(0.0, f64::max);
+        // A pair without a backward error cannot qualify: it reads as infinite.
+        let mut backward_errors = result.backward_errors.clone();
+        backward_errors.resize(result.residuals.len(), f64::INFINITY);
+        subspace_maximum_backward_error = backward_errors.iter().copied().fold(0.0, f64::max);
         subspace_maximum_residual = convergence.gated_residual(
             subspace_maximum_relative_residual,
             subspace_maximum_backward_error,
         );
-        subspace_converged = result.converged && subspace_maximum_residual <= tolerance;
+        subspace_converged =
+            result.converged && subspace_maximum_residual <= convergence.algebraic_tolerance();
         last_values.clone_from(&result.values);
         let n = unconstrained_count;
         let mut candidates = Vec::with_capacity(result.values.len());
@@ -366,7 +359,7 @@ pub(crate) fn solve_modal_system_reusing(
                 eigenvalue.max(0.0).sqrt() / (2.0 * std::f64::consts::PI),
                 expanded,
                 result.residuals[index],
-                result.backward_errors[index],
+                backward_errors[index],
             ));
         }
         let exhausted = subspace_dimension == unconstrained_count;
@@ -486,49 +479,25 @@ pub(crate) fn solve_modal_system_reusing(
         .to_string(),
     }];
     diagnostics.extend(linear_diagnostics);
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_MODAL_CONVERGENCE".to_string(),
-        severity: if converged {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "mode_count_requested={} mode_count_solved={} subspace_dimension={} iteration_count={} measure={} tolerance={} maximum_gated_residual={} maximum_backward_error={} maximum_relative_residual={} converged={}",
+    diagnostics.push(diagnostics::modal_convergence_diagnostic(
+        convergence,
+        diagnostics::ModalConvergenceFigures {
             requested_mode_count,
-            frequencies_hz.len(),
+            solved_mode_count: frequencies_hz.len(),
             subspace_dimension,
-            subspace_iteration_count,
-            convergence.algebraic_measure().label(),
-            tolerance,
-            subspace_maximum_residual,
-            subspace_maximum_backward_error,
-            subspace_maximum_relative_residual,
-            converged
-        ),
-    });
-    if !frequencies_hz.is_empty() {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_MODAL_ACCURACY".into(),
-            severity: FeaDiagnosticSeverity::Info,
-            message: format!(
-                "measure={} tolerance={} modes=[{}]",
-                convergence.algebraic_measure().label(),
-                tolerance,
-                frequencies_hz
-                    .iter()
-                    .zip(&backward_errors)
-                    .zip(&residual_norms)
-                    .enumerate()
-                    .map(|(index, ((frequency, backward), relative))| format!(
-                        "{{mode={} frequency_hz={frequency} backward_error={backward:e} relative_residual={relative:e}}}",
-                        index + 1
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        });
-    }
+            iteration_count: subspace_iteration_count,
+            maximum_gated_residual: subspace_maximum_residual,
+            maximum_backward_error: subspace_maximum_backward_error,
+            maximum_relative_residual: subspace_maximum_relative_residual,
+            converged,
+        },
+    ));
+    diagnostics.extend(diagnostics::modal_accuracy_diagnostic(
+        convergence,
+        &frequencies_hz,
+        &backward_errors,
+        &residual_norms,
+    ));
 
     if !complete_boundary_eigenspace
         && subspace_dimension == maximum_subspace_dimension

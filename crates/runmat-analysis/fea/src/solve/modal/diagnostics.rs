@@ -181,3 +181,76 @@ mod tests {
         assert!(metrics.min_relative_frequency_separation <= 1.0e-6);
     }
 }
+
+/// Each mode's frequency, backward error and relative residual under the gate's measure.
+pub(super) fn modal_accuracy_diagnostic(
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    frequencies_hz: &[f64],
+    backward_errors: &[f64],
+    residual_norms: &[f64],
+) -> Option<FeaDiagnostic> {
+    if frequencies_hz.is_empty() {
+        return None;
+    }
+    let modes = frequencies_hz
+        .iter()
+        .zip(backward_errors)
+        .zip(residual_norms)
+        .enumerate()
+        .map(|(index, ((frequency, backward), relative))| {
+            format!(
+                "{{mode={} frequency_hz={frequency} backward_error={backward:e} relative_residual={relative:e}}}",
+                index + 1
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(FeaDiagnostic {
+        code: "FEA_MODAL_ACCURACY".into(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "measure={} tolerance={} modes=[{modes}]",
+            convergence.algebraic_measure().label(),
+            convergence.algebraic_tolerance(),
+        ),
+    })
+}
+
+/// The figures `FEA_MODAL_CONVERGENCE` reports for one modal search.
+pub(super) struct ModalConvergenceFigures {
+    pub requested_mode_count: usize,
+    pub solved_mode_count: usize,
+    pub subspace_dimension: usize,
+    pub iteration_count: usize,
+    pub maximum_gated_residual: f64,
+    pub maximum_backward_error: f64,
+    pub maximum_relative_residual: f64,
+    pub converged: bool,
+}
+
+pub(super) fn modal_convergence_diagnostic(
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    figures: ModalConvergenceFigures,
+) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_MODAL_CONVERGENCE".to_string(),
+        severity: if figures.converged {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "mode_count_requested={} mode_count_solved={} subspace_dimension={} iteration_count={} measure={} tolerance={} maximum_gated_residual={} maximum_backward_error={} maximum_relative_residual={} converged={}",
+            figures.requested_mode_count,
+            figures.solved_mode_count,
+            figures.subspace_dimension,
+            figures.iteration_count,
+            convergence.algebraic_measure().label(),
+            convergence.algebraic_tolerance(),
+            figures.maximum_gated_residual,
+            figures.maximum_backward_error,
+            figures.maximum_relative_residual,
+            figures.converged
+        ),
+    }
+}
