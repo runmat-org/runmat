@@ -245,9 +245,10 @@ pub use study::output::{
     SamplingPolicy, SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
     SolverObservationEvent, SpatialReduction, SOUND_PRESSURE_LEVEL_REFERENCE_PA,
 };
+pub use study::modal_solver::ModalSolverMethod;
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,
-    InitialStateConflictPolicy, ModalSolverMethod, ModalStaticCorrection, ProcedureSettings,
+    InitialStateConflictPolicy, ModalStaticCorrection, ProcedureSettings,
     ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RestartPolicy, SequenceBranch,
     SequenceBranchId, SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId,
     StateInput, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,

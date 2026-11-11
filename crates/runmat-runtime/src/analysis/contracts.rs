@@ -2160,13 +2160,6 @@ impl ModalResultsData {
             .map(|mode| mode.residual_norm())
             .collect()
     }
-
-    pub fn backward_errors(&self) -> Vec<f64> {
-        self.mode_indices()
-            .filter_map(|index| self.basis.modes().get(index))
-            .map(|mode| mode.backward_error())
-            .collect()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
