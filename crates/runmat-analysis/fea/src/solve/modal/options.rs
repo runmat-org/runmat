@@ -52,7 +52,7 @@ pub(super) fn keeps_whole_translational_nodes(
         && summary.structural_translational_dof_count == summary.dof_count
         && summary.dof_count == 3 * summary.structural_node_count
         && !free_dofs.is_empty()
-        && free_dofs.len() % 3 == 0
+        && free_dofs.len().is_multiple_of(3)
         && free_dofs.chunks_exact(3).all(|triple| {
             triple[0] % 3 == 0 && triple[1] == triple[0] + 1 && triple[2] == triple[0] + 2
         })

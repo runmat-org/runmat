@@ -21,7 +21,7 @@ use crate::{
     pipeline::observation_history::required_mode_history_indices,
     planning::resource::SubspaceSolvePath,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    solve::modal::solve_modal_system_reusing,
+    solve::modal::{solve_modal_system_reusing, ModalSolveInput},
 };
 
 mod assembly;
@@ -288,14 +288,16 @@ fn execute_modal_core(
         _ => None,
     };
     let modal = solve_modal_system_reusing(
-        &summary,
-        options.truncation.requested_mode_count(),
-        options.truncation.eigenspace_relative_tolerance(),
-        options.convergence,
-        backend,
+        ModalSolveInput {
+            summary: &summary,
+            requested_mode_count: options.truncation.requested_mode_count(),
+            eigenspace_relative_tolerance: options.truncation.eigenspace_relative_tolerance(),
+            convergence: options.convergence,
+            backend,
+            path,
+            node_coordinates_m: node_coordinates_m.as_deref(),
+        },
         &mut solid_energy.into_reuse(),
-        path,
-        node_coordinates_m.as_deref(),
     );
     drop(node_coordinates_m);
     emit_phase(

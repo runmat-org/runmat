@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -18,6 +16,9 @@ mod truncation;
 use diagnostics::push_modal_quality_diagnostics;
 mod preparation;
 pub use preparation::solve_modal_system;
+pub(crate) use preparation::ModalSolveInput;
+mod result;
+pub use result::ModalSolveResult;
 use truncation::resolve_truncation_boundary;
 
 pub(crate) const MODAL_BOUNDARY_PROBE_WIDTH: usize = 4;
@@ -35,39 +36,19 @@ pub(crate) use options::{modal_eigen_options, modal_lobpcg_options};
 pub(crate) const MODAL_MASS_ORTHOGONALIZATION_PASSES: usize = 2;
 type ModalCandidate = (f64, Vec<f64>, f64);
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ModalSolveResult {
-    pub converged: bool,
-    pub frequencies_hz: Vec<f64>,
-    pub mode_shapes: Vec<Vec<f64>>,
-    pub residual_norms: Vec<f64>,
-    pub diagnostics: Vec<FeaDiagnostic>,
-    pub solver_method: SolverMethod,
-    pub solver_backend: LinearAlgebraBackendKind,
-    pub preconditioner: SolverPreconditioner,
-    pub solver_host_sync_count: u32,
-    pub device_apply_k_count: u32,
-    pub device_apply_k_attempt_count: u32,
-    pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
-    pub available_mode_count: usize,
-    pub boundary_probe_count: usize,
-    pub boundary_probe_frequency_hz: Option<f64>,
-    /// The admitted subspace dimension when the search reached it with the truncation boundary
-    /// still unresolved: the boundary cluster needs more vectors than the plan reserved.
-    #[serde(default)]
-    pub boundary_unresolved_at_capacity: Option<usize>,
-}
-
 pub(crate) fn solve_modal_system_reusing(
-    summary: &AssemblySummary,
-    requested_mode_count: usize,
-    eigenspace_relative_tolerance: f64,
-    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
-    backend: ComputeBackend,
+    input: ModalSolveInput<'_>,
     reuse: &mut crate::algebra::LinearPreparationReuse,
-    path: SubspaceSolvePath,
-    node_coordinates_m: Option<&[[f64; 3]]>,
 ) -> ModalSolveResult {
+    let ModalSolveInput {
+        summary,
+        requested_mode_count,
+        eigenspace_relative_tolerance,
+        convergence,
+        backend,
+        path,
+        node_coordinates_m,
+    } = input;
     let (solver_method, path_preconditioner) = match path {
         SubspaceSolvePath::ShiftInvertFactorization => (
             SolverMethod::ShiftInvertBlockLanczos,
