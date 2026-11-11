@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "source_revision": "5ef68c868382f7db3534b8e902bbae25ffe42215",
+  "checks": [
+    {
+      "name": "documentation tooling",
+      "passed": 55,
+      "failed": 0,
+      "log_sha256": "57a09df0af9fa636baa234d806fa62beb5db1a2bfdaa002b64511a4ab24ff5c9"
+    },
+    {
+      "name": "canonical command reference",
+      "passed": 1,
+      "failed": 0,
+      "filtered_out": 4,
+      "log_sha256": "a823cd5e0ab4d06d2c0e1e6bf1bb6e0322d0cf894e6aae2f17f43b4e65be6e9f"
+    }
+  ],
+  "scope": "The scientific input delta adds front matter to the generated design command reference. Dispatch, numerical implementations, required scientific tests and the 500 ms threshold are unchanged. The documentation suite and exact Rust generator comparison pass."
+}
