@@ -13,10 +13,18 @@ fn snake<T: serde::Serialize>(value: &T) -> String {
 
 fn describe(kind: &FieldKind) -> String {
     match kind {
-        FieldKind::Quantity { unit, default, .. } => match default {
-            Some(d) => format!("number in {unit}, default {d}"),
-            None => format!("number in {unit}"),
-        },
+        // A unitless quantity (a ratio) is a plain number.
+        FieldKind::Quantity { unit, default, .. } => {
+            let number = if unit.is_empty() {
+                "number".to_owned()
+            } else {
+                format!("number in {unit}")
+            };
+            match default {
+                Some(d) => format!("{number}, default {d}"),
+                None => number,
+            }
+        }
         FieldKind::Count { default, .. } => match default {
             Some(d) => format!("whole number, default {d}"),
             None => "whole number".to_owned(),

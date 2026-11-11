@@ -65,7 +65,7 @@ This file is generated from the command catalog.
 - `assembly.edit-in-context`: Edit a component's part inside the assembly.
   - Runs on the `selection`: `occurrence`
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
-  - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number in , default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
+  - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or component) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or component) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or component) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
   - Runs on the `selection`: `mate`
 - `assembly.envelope`: Reserve space with an envelope body others must stay out of.
@@ -96,7 +96,7 @@ This file is generated from the command catalog.
 - `assembly.mass-properties`: Mass, center of mass and inertia of the assembly.
   - Optional: `components` (picks: component)
 - `assembly.mate`: Constrain two components: standard, advanced and mechanical mates, with limits.
-  - Required: `type` (one of `coincident`, `concentric`, `distance`, `angle`, `parallel`, `perpendicular`, `tangent`, `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `coincident`); `first` (pick: mate connector or face or edge or vertex or component); `second` (pick: mate connector or face or edge or vertex or component); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number in , default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `first2` (pick: mate connector or face or edge or vertex or component) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or component) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or component) when `type` is symmetric; `profile` (text) when `type` is cam; `path` (picks: edge) when `type` is path
+  - Required: `type` (one of `coincident`, `concentric`, `distance`, `angle`, `parallel`, `perpendicular`, `tangent`, `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `coincident`); `first` (pick: mate connector or face or edge or vertex or component); `second` (pick: mate connector or face or edge or vertex or component); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `first2` (pick: mate connector or face or edge or vertex or component) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or component) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or component) when `type` is symmetric; `profile` (text) when `type` is cam; `path` (picks: edge) when `type` is path
   - Optional: `flip` (true or false, default false); `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `joint_point` (true or false, default true) when `type` is universal_joint
   - Runs on the `selection`: `occurrence`
 - `assembly.mate-connector`: Add a frame on a component to mate to.
@@ -235,6 +235,8 @@ This file is generated from the command catalog.
 
 ## `circuit.` commands (`.circuit`, `.circuit.layout`)
 
+- `circuit.active-layer`: Make a layer the one new tracks and pours go on; it draws over the others.
+  - Required: `layer` (text)
 - `circuit.change-part`: Replace the component's part with another from the pool; pins map by name.
   - Required: `part` (text)
   - Runs on the `selection`: `component`
@@ -255,6 +257,13 @@ This file is generated from the command catalog.
 - `circuit.footprint`: Use another of the part's footprints.
   - Required: `footprint` (text)
   - Runs on the `selection`: `component`
+- `circuit.layer-color`: Draw a layer in another color on this board.
+  - Required: `layer` (text); `color` (text)
+- `circuit.layer-opacity`: Draw a layer more or less see-through on this board.
+  - Required: `layer` (text); `opacity` (number, default 1)
+- `circuit.layer-visibility`: Show or hide board layers: one layer, only one, all, copper only, or one side.
+  - Required: `action` (one of `toggle`, `show`, `hide`, `only`, `all`, `hide_others`, `copper`, `top`, `bottom`, default `toggle`)
+  - Optional: `layer` (text)
 - `circuit.locate`: Jump to the item in the other view and frame it.
   - Runs on the `selection`: `component`
 - `circuit.net-class`: Put the nets in a net class; its rules apply on the board.
@@ -262,11 +271,14 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `net`
 - `circuit.net-length`: Report the net's routed and unrouted length.
   - Runs on the `selection`: `net`
+- `circuit.next-layer`: Make the next copper layer down the stack active.
+- `circuit.previous-layer`: Make the previous copper layer up the stack active.
 - `circuit.rename-net`: Rename the net; labels and ports follow.
   - Required: `name` (text)
   - Runs on the `selection`: `net`
 - `circuit.select-filter`: Choose what clicks select.
   - Required: `filter` (one of `any`, `component`, `wire`, `net`, `track`, `via`, `pad`, `zone`, default `any`)
+- `circuit.single-layer`: Dim every layer but the active one; run again to draw them all.
 - `circuit.swap-pins`: Swap equivalent pins or gates to shorten routes; the schematic follows.
   - Required: `swap` (one of `pins`, `gates`, default `pins`)
   - Runs on the `selection`: `component`
@@ -526,7 +538,7 @@ This file is generated from the command catalog.
 - `mold.parting-surface`: Extend the parting line outward into a surface.
   - Required: `parting_line` (pick: feature or edge); `distance` (number in mm, default 50); `type` (one of `normal`, `tangent`, `perpendicular`, default `normal`)
 - `mold.scale`: Scale the part for the material's shrinkage.
-  - Required: `factor` (number in , default 1.005); `fx` (number in , default 1.005) when `uniform` is false; `fy` (number in , default 1.005) when `uniform` is false; `fz` (number in , default 1.005) when `uniform` is false
+  - Required: `factor` (number, default 1.005); `fx` (number, default 1.005) when `uniform` is false; `fy` (number, default 1.005) when `uniform` is false; `fz` (number, default 1.005) when `uniform` is false
   - Optional: `uniform` (true or false, default true)
 - `mold.shut-off`: Close through-holes so core and cavity separate.
   - Required: `loops` (picks: edge); `type` (one of `contact`, `tangent`, `none`, default `contact`)
@@ -570,7 +582,7 @@ This file is generated from the command catalog.
   - Required: `body` (pick: body); `name` (text)
   - Runs on the `selection`: `body`
 - `part.body-scale`: Scale bodies about a point.
-  - Required: `bodies` (picks: body); `about` (one of `centroid`, `origin`, `point`, default `centroid`); `point` (pick: point or vertex) when `about` is point; `factor` (number in , default 1)
+  - Required: `bodies` (picks: body); `about` (one of `centroid`, `origin`, `point`, default `centroid`); `point` (pick: point or vertex) when `about` is point; `factor` (number, default 1)
   - Optional: `uniform` (true or false, default true)
 - `part.boolean`: Combine bodies by union, subtract or intersect.
   - Required: `kind` (one of `union`, `subtract`, `intersect`, default `union`); `target` (pick: body); `tools` (picks: body)
@@ -587,7 +599,7 @@ This file is generated from the command catalog.
 - `part.curve-composite`: Join edges end to end into one curve.
   - Required: `curves` (picks: edge)
 - `part.curve-equation`: Draw a curve from x(t), y(t), z(t).
-  - Required: `x` (text); `y` (text); `z` (text); `t0` (number in , default 0); `t1` (number in , default 6.283185307179586)
+  - Required: `x` (text); `y` (text); `z` (text); `t0` (number, default 0); `t1` (number, default 6.283185307179586)
 - `part.curve-helix`: Add a helix or spiral by pitch, turns and height.
   - Required: `type` (one of `helix`, `spiral`, default `helix`); `axis` (pick: axis or edge) when `type` is helix; `start` (pick: vertex or point or sketch point) when `type` is helix; `plane` (pick: plane or face) when `type` is spiral; `start_radius` (number in mm, default 5) when `type` is spiral; `pitch` (number in mm, default 2); `revolutions` (whole number, default 5); `taper_step` (number in mm, default 0.5) when `taper` is true
   - Optional: `clockwise` (true or false, default false) when `type` is helix; `taper` (true or false, default false) when `type` is helix
@@ -650,7 +662,7 @@ This file is generated from the command catalog.
   - Required: `type` (one of `offset`, `angle`, `three_point`, `mid`, `normal_to_curve`, `tangent_to_face`, default `offset`); `base` (pick: plane or face) when `type` is offset or angle or mid; `distance` (number in mm, default 10) when `type` is offset; `count` (whole number, default 1) when `type` is offset; `axis` (pick: axis or edge) when `type` is angle; `angle` (number in deg, default 45) when `type` is angle; `points` (picks: vertex or point or sketch point) when `type` is three_point; `other` (pick: plane or face) when `type` is mid; `curve` (pick: curve or edge) when `type` is normal_to_curve; `at` (pick: vertex or point) when `type` is normal_to_curve; `face` (pick: face) when `type` is tangent_to_face
   - Optional: `flip` (true or false, default false)
 - `part.point`: Add a reference point.
-  - Required: `type` (one of `coordinates`, `center`, `face_center`, `intersection`, `along_curve`, default `coordinates`); `references` (picks: edge or face or vertex or curve) when `type` is center or face_center or intersection or along_curve; `x` (number in mm, default 0) when `type` is coordinates; `y` (number in mm, default 0) when `type` is coordinates; `z` (number in mm, default 0) when `type` is coordinates; `parameter` (number in , default 0.5) when `type` is along_curve
+  - Required: `type` (one of `coordinates`, `center`, `face_center`, `intersection`, `along_curve`, default `coordinates`); `references` (picks: edge or face or vertex or curve) when `type` is center or face_center or intersection or along_curve; `x` (number in mm, default 0) when `type` is coordinates; `y` (number in mm, default 0) when `type` is coordinates; `z` (number in mm, default 0) when `type` is coordinates; `parameter` (number, default 0.5) when `type` is along_curve
 - `part.rename`: Rename the item; references follow.
   - Required: `name` (text)
   - Runs on the `selection`: `feature`, `sketch`, `body`, `region`, `input`, `plane`, `mate_connector`
@@ -763,10 +775,10 @@ This file is generated from the command catalog.
 ## `sheet-metal.` commands (`.part`)
 
 - `sheet-metal.base-flange`: Start a sheet metal part from a sketch.
-  - Required: `profile` (pick: sketch); `thickness` (number in mm, default 1.5); `radius` (number in mm, default 1); `depth` (number in mm, default 20); `bend_rule` (one of `k_factor`, `table`, `allowance`, `deduction`, default `k_factor`); `k` (number in , default 0.44) when `bend_rule` is k_factor
+  - Required: `profile` (pick: sketch); `thickness` (number in mm, default 1.5); `radius` (number in mm, default 1); `depth` (number in mm, default 20); `bend_rule` (one of `k_factor`, `table`, `allowance`, `deduction`, default `k_factor`); `k` (number, default 0.44) when `bend_rule` is k_factor
   - Optional: `gauge` (text)
 - `sheet-metal.bend-table`: Choose the bend table or rule for this part.
-  - Required: `table` (text); `k` (number in , default 0.44)
+  - Required: `table` (text); `k` (number, default 0.44)
 - `sheet-metal.break-corner`: Chamfer or round a flat corner.
   - Required: `edges` (picks: edge); `break` (one of `chamfer`, `fillet`, default `chamfer`); `distance` (number in mm, default 2)
 - `sheet-metal.closed-corner`: Close the gap between flanges at a corner.
@@ -837,7 +849,7 @@ This file is generated from the command catalog.
   - Required: `kind` (one of `full`, `envelope`, `defeatured`, `mid_surface`, `beam`, default `full`); `name` (text)
 - `simulate.run`: Run the design's simulation section: plot its probes and list its measurements.
 - `simulate.set-tolerance`: Set the tolerance a Monte Carlo varies parts by (it replaces the parts' own bands).
-  - Required: `match` (text); `percent` (number in , default 1)
+  - Required: `match` (text); `percent` (number, default 1)
   - Optional: `name` (text)
 - `simulate.studies`: Open a study that uses this part.
   - Required: `study` (text)
@@ -873,7 +885,7 @@ This file is generated from the command catalog.
   - Optional: `value` (number in mm); `driven` (true or false, default false)
 - `sketch.discard`: Leave the sketch without keeping the changes.
 - `sketch.ellipse`: Draw an ellipse, a partial ellipse, a parabola or a conic.
-  - Required: `type` (one of `full`, `partial`, `parabola`, `conic`, default `full`); `center` (pick: sketch point or vertex or point); `major` (number in mm, default 20); `minor` (number in mm, default 10); `rho` (number in , default 0.5) when `type` is conic
+  - Required: `type` (one of `full`, `partial`, `parabola`, `conic`, default `full`); `center` (pick: sketch point or vertex or point); `major` (number in mm, default 20); `minor` (number in mm, default 10); `rho` (number, default 0.5) when `type` is conic
 - `sketch.exit`: Keep the sketch changes and leave the sketch.
 - `sketch.extend`: Extend an entity to the next one it meets.
   - Required: `entities` (picks: sketch entity)
@@ -912,7 +924,7 @@ This file is generated from the command catalog.
   - Required: `text` (text); `font` (text); `height` (number in mm, default 5)
   - Optional: `along` (pick: sketch entity)
 - `sketch.transform`: Move, copy, rotate or scale entities.
-  - Required: `type` (one of `move`, `copy`, `rotate`, `scale`, default `move`); `entities` (picks: sketch entity or sketch point); `base` (pick: sketch point or vertex or point); `dx` (number in mm, default 0) when `type` is move or copy; `dy` (number in mm, default 0) when `type` is move or copy; `angle` (number in deg, default 0) when `type` is rotate; `factor` (number in , default 1) when `type` is scale
+  - Required: `type` (one of `move`, `copy`, `rotate`, `scale`, default `move`); `entities` (picks: sketch entity or sketch point); `base` (pick: sketch point or vertex or point); `dx` (number in mm, default 0) when `type` is move or copy; `dy` (number in mm, default 0) when `type` is move or copy; `angle` (number in deg, default 0) when `type` is rotate; `factor` (number, default 1) when `type` is scale
 - `sketch.trim`: Trim entities by power trim, to a corner, inside or outside.
   - Required: `type` (one of `power`, `corner`, `inside`, `outside`, default `power`); `entities` (picks: sketch entity); `boundaries` (picks: sketch entity) when `type` is inside or outside
 
