@@ -120,7 +120,7 @@
   "conservation": "The current reviewed intake retains the 111 diagnostic identities listed here under RM-1287. The original 2026-11-09 integration review retained 107 findings after correcting the contracts.rs ceiling; later intake records added the other listed findings. Formatting commit 61159b5063 reduces procedure/lower.rs from 779 to 769 lines by joining two existing calls, without changing their arguments or control flow. This register updates that one diagnostic's line count; its other 110 identities and multiplicities remain unchanged. The exception covers structural/style debt in the listed FEA roots. Numerical failures and other architecture findings remain blocking. CI executes both original checkers and requires the exact diagnostic multiset and language ledger.",
   "conservation_updates": [
     {
-      "source_revision": "61159b5063",
+      "source_revision": "61159b5063003153525e707b5c06fd2403f51f6f",
       "path": "crates/runmat-analysis/language/src/semantic/procedure/lower.rs",
       "previous_lines": 779,
       "current_lines": 769,
