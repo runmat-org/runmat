@@ -15,6 +15,8 @@
 //!   `values.angle`, degrees), banded ([`crate::draft_analysis`]).
 //! - `evaluate.undercut`: faces the part blocks along every way they can release from a
 //!   two-part mould along the pull (`values.direction`), by rays along it ([`crate::undercut`]).
+//! - `view.measure`: distances, angles, radii, lengths and areas between picks, with dimensions
+//!   to draw on the model ([`crate::measure`]).
 //! - `simulate.check`: the fit and mass checks a study runs before it meshes
 //!   ([`crate::study_checks`]; `values.gap`, mm, for open contacts).
 //!
@@ -72,6 +74,18 @@ pub struct Analysis {
     /// A direction to draw on the model while the results are open (the pull).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arrow: Option<ModelArrow>,
+    /// Dimensions to draw on the model while the results are open, and to keep there when the
+    /// result is pinned (Measure's distances, radii and angles).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<ModelDimension>,
+}
+
+/// A dimension on the model: a line between two points (model units, metres) with its value.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ModelDimension {
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+    pub label: String,
 }
 
 /// An arrow on the model: from `origin` along the unit `direction`, `length` long (model
@@ -239,6 +253,7 @@ fn mass_analysis(report: &MassReport) -> Analysis {
         colors: None,
         settings: Vec::new(),
         arrow: None,
+        dimensions: Vec::new(),
     }
 }
 
@@ -345,6 +360,7 @@ pub fn analyze(
                 colors: None,
                 settings: Vec::new(),
                 arrow: None,
+                dimensions: Vec::new(),
             })
         }
         "evaluate.interference" | "evaluate.clearance" | "assembly.interference" | "assembly.clearance" => {
@@ -397,6 +413,7 @@ pub fn analyze(
                 colors: None,
                 settings: Vec::new(),
                 arrow: None,
+                dimensions: Vec::new(),
             })
         }
         "evaluate.draft" if !assembly => {
@@ -457,6 +474,7 @@ pub fn analyze(
                 colors: Some(draft_colors(&faces)),
                 settings: vec![format!("Pull: {pull_text}"), format!("Draft angle: {angle}°")],
                 arrow,
+                dimensions: Vec::new(),
             })
         }
         "evaluate.undercut" if !assembly => {
@@ -510,6 +528,7 @@ pub fn analyze(
                 }),
                 settings: vec![format!("Pull: {}", pull_label(&pick, pull, picked))],
                 arrow: pull_arrow(&part.display, pull),
+                dimensions: Vec::new(),
             })
         }
         "simulate.check" => {
@@ -546,11 +565,11 @@ pub fn analyze(
                 colors: None,
                 settings: Vec::new(),
                 arrow: None,
+                dimensions: Vec::new(),
             })
         }
-        other => Err(format!(
-            "`{other}` runs from the agent or the CLI in this build"
-        )),
+        "view.measure" => crate::measure::measure(path, text, files, &request.values),
+        other => Err(format!("`{other}` isn't an Evaluate command for parts and assemblies")),
     }
 }
 

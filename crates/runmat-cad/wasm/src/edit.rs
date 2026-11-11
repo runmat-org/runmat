@@ -17,7 +17,7 @@
 //! other part command that adds a feature is built by [`crate::features`] from
 //! its values and picks ([`crate::picks`]); a command or option the model lacks says so.
 
-mod assembly;
+pub(crate) mod assembly;
 mod configuration;
 mod manage;
 mod publish;

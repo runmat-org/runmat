@@ -20,7 +20,7 @@
 
 mod configure;
 mod explode;
-mod frames;
+pub(crate) mod frames;
 mod mate;
 mod mate_edits;
 mod mirror;
