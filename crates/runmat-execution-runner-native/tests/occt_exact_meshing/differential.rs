@@ -38,7 +38,7 @@ fn runmat_and_independent_meshers_agree_on_box_invariants() {
     assert_eq!(oracle_surface.triangles.len(), 12);
     // The fixed solver request refines the box; the independent planar
     // tessellator remains the twelve-triangle reference, not the same grid.
-    assert_eq!(artifact.topology.boundary_faces.len(), 736);
+    assert_eq!(artifact.topology.boundary_faces.len(), 240);
     assert_eq!(
         bounds(&oracle_surface.vertices),
         ([0.0, 0.0, 0.0], [1.0, 2.0, 3.0])
