@@ -841,6 +841,7 @@ fn sweep_doc(d: &mut PartDocument, third: bool) {
             profile: ProfileRef::sketch("s_swp").into(),
             path: ProfileRef::sketch("s_path"),
             mode: BodyMode::New,
+            follow_path: false,
         }),
     ));
 }

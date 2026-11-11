@@ -4,7 +4,9 @@
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
+use super::picks;
 use crate::geom::mm;
+use crate::item_ref::ItemRef;
 use crate::layer_set::CopperIndex;
 use crate::layout::NetId;
 
@@ -31,17 +33,9 @@ fn pairs(project: &Project, board: &Board) -> Vec<(String, NetId, NetId)> {
         .collect()
 }
 
-/// The net a `net:` pick (or the selection) names.
-fn picked(request: &EditRequest, field: &str) -> Option<String> {
-    let v = request.values.get(field);
-    let s = match v {
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(Value::Array(a)) => a.first().and_then(Value::as_str).map(str::to_owned),
-        _ => None,
-    }
-    .filter(|s| !s.is_empty())
-    .or_else(|| request.selection.first().cloned())?;
-    Some(s.strip_prefix("net:").unwrap_or(&s).to_owned())
+/// The pick in `field` (or the selection): a net by name, or a pad, track or via on one.
+fn picked(request: &EditRequest, field: &str) -> Option<ItemRef> {
+    picks::first(&request.values, &request.selection, field, ItemRef::Net)
 }
 
 /// A copper layer by its stackup name, its file name (`F.Cu`, `In1.Cu`, `B.Cu`), or `Top` /
@@ -65,11 +59,12 @@ fn layer_of(board: &Board, name: Option<&str>) -> Result<CopperIndex, String> {
 pub(super) fn diff_pair(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
     let layout = project.layout_or_err()?;
     let values = &request.values;
-    let net = picked(request, "pair").ok_or_else(|| EditError::new("pick a net of the pair"))?;
+    let pick = picked(request, "pair").ok_or_else(|| EditError::new("pick a net of the pair"))?;
     let width = values.get("width").and_then(Value::as_f64).map(mm);
     let gap = values.get("gap").and_then(Value::as_f64).map(mm);
     let mut summary = String::new();
     let (change, ()) = board_edit::edit_board(&layout.path, &layout.text, |board| {
+        let net = picks::net_name_on(board, &pick)?;
         let (name, p, n) = pairs(project, board)
             .into_iter()
             .find(|(name, p, n)| *name == net || [p, n].iter().any(|id| board.nets[id.0 as usize].name == net))
@@ -140,7 +135,7 @@ pub(super) fn tune_length(
     use crate::high_speed::tuning::{tune_net, Target};
     let layout = project.layout_or_err()?;
     let values = &request.values;
-    let net = picked(request, "net").ok_or_else(|| EditError::new("pick the net to tune"))?;
+    let pick = picked(request, "net").ok_or_else(|| EditError::new("pick the net to tune"))?;
     let pattern = pattern_of(values)?;
     let delay = values.get("basis").and_then(Value::as_str) == Some("delay");
     let (target, tolerance) = if delay {
@@ -169,9 +164,7 @@ pub(super) fn tune_length(
     };
     let mut summary = String::new();
     let (change, ()) = board_edit::edit_board(&layout.path, &layout.text, |board| {
-        let id = board
-            .net(&net)
-            .ok_or_else(|| format!("`{net}` is not a net on the board"))?;
+        let id = picks::net_on(board, &pick)?;
         let pairs = pair_nets(project, board);
         let t = tune_net(board, id, target, tolerance, pattern, &pairs)?;
         summary = tuned_text(&t, pattern);

@@ -31,8 +31,12 @@ const DAQ_LOCK: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq
 const CIRCUIT_GUIDE_SECTIONS: &[&str] = &["erc_power", "unplaced", "eco", "rooms", "nets", "bom"];
 
 fn scenes_dir() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../runmat-private-cad/desktop/scripts/site-captures/agent-scenes")
+    std::env::var_os("RUNMAT_PRIVATE_CAD_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../runmat-private-cad")
+        })
+        .join("desktop/scripts/site-captures/agent-scenes")
 }
 
 /// The scene workspace: every scene file at the root, as the capture creates them (with the

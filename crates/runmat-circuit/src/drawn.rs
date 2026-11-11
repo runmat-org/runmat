@@ -7,6 +7,7 @@
 
 use crate::geom::poly::{area2, Polygon};
 use crate::geom::{mm, Coord, Point};
+use crate::item_ref::ItemRef;
 use crate::layer_set::CopperIndex;
 use crate::layout::{copper_name, Board, KeepoutRules, Layer, PadConnect};
 use crate::syntax::board_edit::BoardEdit;
@@ -14,25 +15,13 @@ use serde_json::{Map, Value};
 
 /// `point:12.5,-3` → the point in board nanometres.
 pub fn parse_point(id: &str) -> Option<Point> {
-    let rest = id.strip_prefix("point:")?;
-    let (x, y) = rest.split_once(',')?;
-    let (x, y): (f64, f64) = (x.trim().parse().ok()?, y.trim().parse().ok()?);
-    (x.is_finite() && y.is_finite()).then(|| Point::mm(x, y))
+    let (x, y) = ItemRef::parse(id)?.xy_mm()?;
+    Some(Point::mm(x, y))
 }
 
 /// The id a canvas pick of `p` (mm) carries.
 pub fn point_id(x_mm: f64, y_mm: f64) -> String {
-    format!("point:{},{}", trim(x_mm), trim(y_mm))
-}
-
-fn trim(v: f64) -> String {
-    let s = format!("{:.6}", (v * 1.0e6).round() / 1.0e6);
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s == "-0" {
-        "0".to_owned()
-    } else {
-        s.to_owned()
-    }
+    ItemRef::point(x_mm, y_mm).to_string()
 }
 
 fn ids(values: &Map<String, Value>, field: &str) -> Vec<String> {
@@ -117,26 +106,11 @@ fn net(board: &Board, values: &Map<String, Value>, selection: &[String]) -> Opti
 }
 
 fn net_of_pick(board: &Board, id: &str) -> Option<String> {
-    let (kind, rest) = id.split_once(':').unwrap_or(("net", id));
-    match kind {
-        "net" => board.net(rest).map(|_| rest.to_owned()),
-        "pad" => {
-            let (reference, pad) = rest.rsplit_once('.')?;
-            let f = board.footprint_by_ref(reference)?;
-            f.pad_nets.get(pad).map(|n| board.net_name(*n).to_owned())
-        }
-        "track" => {
-            let n: u64 = rest.parse().ok()?;
-            let t = board.tracks.get(&crate::layout::ItemId(n))?;
-            t.net.map(|n| board.net_name(n).to_owned())
-        }
-        "via" => {
-            let n: u64 = rest.parse().ok()?;
-            let v = board.vias.get(&crate::layout::ItemId(n))?;
-            v.net.map(|n| board.net_name(n).to_owned())
-        }
-        _ => None,
+    let r = ItemRef::read(id, ItemRef::Net)?;
+    if matches!(r, ItemRef::Zone(_)) {
+        return None;
     }
+    r.net_on(board).map(|n| board.net_name(n).to_owned())
 }
 
 /// `0.3/0.6` → (drill, diameter).
@@ -317,10 +291,11 @@ pub fn drawn_edit(
                 .chain(
                     selection
                         .iter()
-                        .filter(|s| s.starts_with("component:"))
+                        .filter(|s| ItemRef::parse(s).is_some_and(|r| r.component().is_some()))
                         .cloned(),
                 )
-                .map(|s| s.strip_prefix("component:").unwrap_or(&s).to_owned())
+                .filter_map(|s| ItemRef::read(&s, ItemRef::Component))
+                .filter_map(|r| r.component().map(str::to_owned))
                 .fold(Vec::new(), |mut v, s| {
                     if !v.contains(&s) {
                         v.push(s);
@@ -411,28 +386,7 @@ pub fn drawn_edit(
 
 /// Where a picked item sits, for dimensions between items.
 fn centre(board: &Board, id: &str) -> Option<Point> {
-    if let Some(p) = parse_point(id) {
-        return Some(p);
-    }
-    let (kind, rest) = id.split_once(':')?;
-    match kind {
-        "component" => board.footprint_by_ref(rest).map(|f| f.at),
-        "pad" => {
-            let (reference, pad) = rest.rsplit_once('.')?;
-            let f = board.footprint_by_ref(reference)?;
-            let i = f.package.pads.iter().position(|p| p.name == pad)?;
-            f.pad(i, board.copper_count()).map(|p| p.center)
-        }
-        "via" => board
-            .vias
-            .get(&crate::layout::ItemId(rest.parse().ok()?))
-            .map(|v| v.at),
-        "track" => board
-            .tracks
-            .get(&crate::layout::ItemId(rest.parse().ok()?))
-            .map(|t| t.endpoints().0),
-        _ => None,
-    }
+    ItemRef::parse(id)?.centre_on(board)
 }
 
 #[cfg(test)]

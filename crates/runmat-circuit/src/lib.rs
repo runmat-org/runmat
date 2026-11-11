@@ -44,6 +44,8 @@
 //!   dimensions, ratsnest) for the projection.
 //! - [`drawn`]: board commands drawn in the board view (route, via, pour, keepout, room,
 //!   outline, dimension) from canvas point picks.
+//! - [`item_ref`]: how views, the selection and edit requests name one item (`net:GND`,
+//!   `pad:U1.3`, `track:12`).
 //! - [`runtime`]: the document runtime the Desktop and browser call: compile, review and edit
 //!   a circuit's files, with minimal text edits.
 //! - [`fixture`]: a standard pool and a large-board generator for tests and benchmarks.
@@ -72,6 +74,7 @@ pub mod high_speed;
 pub mod ids;
 pub mod impedance;
 pub mod index;
+pub mod item_ref;
 pub mod ipc2581;
 pub mod import;
 pub mod ir;

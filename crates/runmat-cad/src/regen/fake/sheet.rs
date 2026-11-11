@@ -54,6 +54,17 @@ fn unit(a: P3) -> P3 {
     }
 }
 
+/// Whether a polyline path changes direction anywhere.
+pub(super) fn turns(path: &[P3]) -> bool {
+    let dirs: Vec<P3> = path
+        .windows(2)
+        .map(|w| sub(w[1], w[0]))
+        .filter(|d| norm(*d) > EPS)
+        .map(unit)
+        .collect();
+    dirs.windows(2).any(|w| dot(w[0], w[1]) < 1.0 - 1e-9)
+}
+
 /// A planar polygon with holes. `labels[l][i]` labels the boundary segment from point `i` of
 /// loop `l` to the next, when it is (or becomes) a boundary edge.
 #[derive(Clone, Debug)]
@@ -584,7 +595,13 @@ pub(super) fn swept(tool: &LabeledTool) -> Result<SheetBuild, KernelError> {
             profile,
             path,
             path_curves,
+            follow_path,
         } => {
+            if *follow_path && turns(path) {
+                return Err(KernelError::NotSupported {
+                    what: "a swept sheet that follows a turning path".into(),
+                });
+            }
             if path.len() < 2 {
                 return Err(KernelError::Failed {
                     message: "a sweep path needs at least two points".into(),

@@ -330,6 +330,21 @@ fn diff_pair_routes_the_usb_pair_at_its_gap_and_tune_length_meanders_it() {
     }
 }
 
+/// Tune length's Net field takes a track picked in the view (`track:<id>`), as the view's pick
+/// gives it, and tunes that track's net.
+#[test]
+fn tune_length_takes_a_picked_track_as_its_net() {
+    let mut files = checked_in();
+    run(&mut files, LAYOUT, "board.diff-pair", json!({ "pair": "net:USB_DP", "width": 0.12, "gap": 0.15 }), &[]);
+    let b = board(&files);
+    let dn = b.net("USB_DN").unwrap();
+    let track = b.tracks.values().find(|t| t.net == Some(dn)).expect("a USB_DN track").id.0;
+    let summary = run(&mut files, LAYOUT, "board.tune-length", json!({ "net": [format!("track:{track}")], "target": 16.0, "tolerance": 0.05 }), &[]);
+    assert!(summary.starts_with("Tuned USB_DN"), "{summary}");
+    let b = board(&files);
+    assert!((runmat_circuit::pair::net_track_length(&b, b.net("USB_DN").unwrap()) - 16.0).abs() < 0.05);
+}
+
 /// The Desktop runs board commands through a session, which keeps the board between edits; the
 /// pair and the board tools need the circuit too, so the session hands them to the project.
 #[test]

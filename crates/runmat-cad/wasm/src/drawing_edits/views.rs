@@ -404,7 +404,7 @@ pub fn edit(
                 let at = placed(values)?.unwrap_or_else(|| beside(&d, &parent, own, [1.0, 0.0]));
                 let kind = ViewKind::Section {
                     from: parent.name.clone(),
-                    plane,
+                    plane: runmat_cad::model::PlaneRef::Face { face: plane },
                     label: letter.clone(),
                     aligned: flag(values, "aligned", false),
                 };

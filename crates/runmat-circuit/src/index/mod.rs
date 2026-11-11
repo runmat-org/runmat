@@ -6,6 +6,7 @@
 
 use crate::elab::{FitState, Netlist, Severity};
 use crate::ir::{Design, Param, ParamValue, Tolerance};
+use crate::item_ref::ItemRef;
 use crate::library::Pool;
 use crate::review::ReviewFinding;
 use serde::{Deserialize, Serialize};
@@ -579,11 +580,13 @@ pub fn to_json(index: &CircuitIndex) -> String {
 fn erc_region(item: &str) -> String {
     let item = item.split(" (").next().unwrap_or(item);
     match item.split_once('.') {
-        Some((component, pin)) if !component.is_empty() && !pin.is_empty() => {
-            format!("pin:{component}.{pin}")
-        }
-        _ => format!("net:{item}"),
+        Some((component, pin)) if !component.is_empty() && !pin.is_empty() => ItemRef::Pin {
+            component: component.to_owned(),
+            pin: pin.to_owned(),
+        },
+        _ => ItemRef::Net(item.to_owned()),
     }
+    .to_string()
 }
 
 #[cfg(test)]

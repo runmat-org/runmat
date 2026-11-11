@@ -1056,13 +1056,12 @@ impl<'a> Lower<'a> {
                 profile,
                 path,
                 path_curves,
-            } => Ok(vec![self.sweep(
-                profile,
-                path,
-                path_curves,
-                labels,
-                true,
-            )?]),
+                follow_path,
+            } => Ok(vec![if *follow_path {
+                self.follow_sweep(profile, path, path_curves, labels)?
+            } else {
+                self.sweep(profile, path, path_curves, labels, true)?
+            }]),
             ToolShape::Loft { profiles } => Ok(vec![self.loft(profiles, labels, true)?]),
             ToolShape::Holes { .. } => self.holes(shape, labels),
         }
@@ -1494,6 +1493,51 @@ impl<'a> Lower<'a> {
         let mut ints = vec![0, 1, pieces[0], (pieces.len() - 1) as i64];
         ints.extend_from_slice(&pieces[1..]);
         Ok(self.push(7, ints, vec![]))
+    }
+
+    /// A sweep whose profile keeps its angle to the path: one pipe along the whole path,
+    /// one spine edge per path curve (a line, a circular arc, or a smooth curve through the
+    /// samples), mitred at corners. The side faces along path curve `c` take the profile's
+    /// labels with ordinal `c` when the path has several curves.
+    fn follow_sweep(
+        &mut self,
+        profile: &CanonicalProfile,
+        path: &[[f64; 3]],
+        path_curves: &[u32],
+        labels: &ToolLabels<'_>,
+    ) -> Result<i64, KernelError> {
+        if path.len() < 2 {
+            return Err(failed("a sweep path needs two points"));
+        }
+        let mut groups: Vec<(u32, usize, usize)> = Vec::new();
+        for i in 0..path.len() - 1 {
+            let c = if path_curves.is_empty() {
+                i as u32
+            } else {
+                path_curves.get(i).copied().unwrap_or(i as u32)
+            };
+            match groups.last_mut() {
+                Some(g) if g.0 == c => g.2 = i + 1,
+                _ => groups.push((c, i, i + 1)),
+            }
+        }
+        let several = groups.len() > 1;
+        // One labelled copy of the profile per path curve, all in the profile's own place.
+        let mut slots = Vec::with_capacity(groups.len());
+        for (c, _, _) in &groups {
+            slots.push(self.solid_profile(profile, labels, several.then_some(*c))?);
+        }
+        let sl = self.label(labels.mark(labels.start.clone()));
+        let el = self.label(labels.mark(labels.end.clone()));
+        let mut ints = vec![groups.len() as i64];
+        ints.extend_from_slice(&slots);
+        ints.extend_from_slice(&[sl, el]);
+        ints.extend(groups.iter().map(|(_, _, i1)| *i1 as i64));
+        let mut r = Vec::with_capacity(path.len() * 3);
+        for q in path {
+            r.extend_from_slice(q);
+        }
+        Ok(self.push(48, ints, r))
     }
 
     fn loft(
@@ -3599,7 +3643,13 @@ impl OcctKernel {
                         profile,
                         path,
                         path_curves,
-                    } => l.sweep(profile, path, path_curves, &labels, false)?,
+                        follow_path,
+                    } => {
+                        if *follow_path {
+                            return Err(not_supported("swept sheets that follow their path"));
+                        }
+                        l.sweep(profile, path, path_curves, &labels, false)?
+                    }
                     ToolShape::Loft { profiles } => l.loft(profiles, &labels, false)?,
                     ToolShape::Holes { .. } => return Err(not_supported("swept sheets of holes")),
                 };

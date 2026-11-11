@@ -69,8 +69,12 @@ fn the_checked_in_project_is_current() {
     let write = std::env::var("RUNMAT_CIRCUIT_PROJECTS").is_ok();
     let here = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/projects/io");
     check_in(&here, &files, write);
-    let desktop = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../runmat-private-cad/desktop/src/app/components/circuit/fixtures");
+    let desktop = std::env::var_os("RUNMAT_PRIVATE_CAD_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../runmat-private-cad")
+        })
+        .join("desktop/src/app/components/circuit/fixtures");
     if desktop.exists() {
         check_in(&desktop.join("io"), &files, write);
     }

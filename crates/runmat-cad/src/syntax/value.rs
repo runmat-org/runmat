@@ -154,8 +154,8 @@ impl ValueSyntax for DocumentValues<'_> {
 }
 
 /// Fields that hold only planes, so a face reference there is the plane of that face
-/// (`neutral = feature.body.face.end`).
-pub const PLANE_FIELDS: &[&str] = &["neutral", "tool", "parting"];
+/// (`neutral = feature.body.face.end`; a section view's `plane = feature.body.face.side(s.c)`).
+pub const PLANE_FIELDS: &[&str] = &["neutral", "tool", "parting", "plane"];
 
 /// `value` as a `T` when it is exactly `T`'s serialised form.
 pub fn exactly<T: serde::Serialize + serde::de::DeserializeOwned>(value: &Json) -> Option<T> {

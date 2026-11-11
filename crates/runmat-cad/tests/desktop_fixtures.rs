@@ -31,8 +31,12 @@ fn out_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("RUNMAT_DESKTOP_FIXTURES") {
         return Some(PathBuf::from(dir));
     }
-    let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../runmat-private-cad/desktop/src/app/components/cad/fixtures");
+    let sibling = std::env::var_os("RUNMAT_PRIVATE_CAD_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../runmat-private-cad")
+        })
+        .join("desktop/src/app/components/cad/fixtures");
     sibling.exists().then_some(sibling)
 }
 
@@ -452,7 +456,9 @@ fn drawing() -> DrawingDocument {
                 "a_a",
                 ViewKind::Section {
                     from: "front".into(),
-                    plane: Reference::start_cap("body"),
+                    plane: PlaneRef::Face {
+                        face: Reference::start_cap("body"),
+                    },
                     label: "A".into(),
                     aligned: false,
                 },

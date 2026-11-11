@@ -48,6 +48,7 @@ mod edit;
 mod fabrication;
 mod kicad;
 mod library_edit;
+mod picks;
 pub mod libraries;
 pub mod modules;
 pub mod values;

@@ -15,6 +15,8 @@ use crate::board_rules::BItem;
 use crate::geom::poly::circle_ring;
 use crate::geom::{mm, Coord, Point};
 use crate::layout::NetId;
+use super::picks;
+use crate::item_ref::ItemRef;
 
 /// Runs `board.stitch`.
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
@@ -64,7 +66,9 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
     let mut summary = String::new();
     let (change, ()) = board_edit::edit_board(&layout.path, &layout.text, |board| {
         let (net, candidates, what) = if mode == "shield" {
-            let net = net_named(board, target.strip_prefix("net:").unwrap_or(&target))?;
+            let pick = ItemRef::read(&target, ItemRef::Net)
+                .ok_or_else(|| format!("`{target}` names no net"))?;
+            let net = picks::net_on(board, &pick)?;
             let shield = net_named(board, &shield_net)?;
             if shield == net {
                 return Err("a net can't shield itself; name another shield net".into());
@@ -75,7 +79,10 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                 format!("beside {}", board.nets[net.0 as usize].name),
             )
         } else {
-            let zone = zone_named(board, target.strip_prefix("zone:").unwrap_or(&target))?;
+            let zone = match ItemRef::parse(&target) {
+                Some(ItemRef::Zone(id)) => zone_named(board, &id.to_string())?,
+                _ => zone_named(board, &target)?,
+            };
             let z = &board.zones[&zone];
             let net = z
                 .net

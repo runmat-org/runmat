@@ -331,3 +331,109 @@ fn a_parts_list_groups_one_part_number_and_fills_its_description() {
         layout["findings"]
     );
 }
+
+/// A section's plane can be an origin plane: the cutting line crosses the parent view through
+/// the model's origin. A face reference there still works, and a datum feature is an error that
+/// says what a section takes.
+#[test]
+fn a_section_cuts_through_an_origin_plane() {
+    let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
+    let with = |plane: &str| {
+        let text = DRAWING.replacen(
+            "\n}\n",
+            &format!("\n    view a_a = section(from = top, plane = {plane}, label = A, sheet = \"1\", model = {{ part = bracket }}, at = [250, 200], display = visible_lines)\n}}\n"),
+            1,
+        );
+        let out: Value =
+            serde_json::from_str(&compile_json("/p/bracket.drawing", &text, &files)).unwrap();
+        out
+    };
+    // The compile's own problems, and the drawing check's (in the projection's data).
+    let findings = |out: &Value| {
+        let mut all: Vec<Value> = Vec::new();
+        for list in [
+            &out["diagnostics"],
+            &out["projection"]["data"]["diagnostics"],
+        ] {
+            all.extend(list.as_array().into_iter().flatten().cloned());
+        }
+        all
+    };
+    let out = with("origin.zx");
+    assert_eq!(findings(&out), Vec::<Value>::new());
+    let cut = &out["projection"]["data"]["hlr"]["a_a"]["cut"];
+    assert_eq!(cut["view"], "top", "{cut}");
+    assert!(
+        cut["at"].as_f64().is_some_and(|at| at.abs() < 1e-6),
+        "{cut}"
+    );
+    let out = with("plane.nowhere");
+    let messages = Value::Array(findings(&out)).to_string();
+    assert!(
+        messages.contains("a section cuts through a face or an origin plane"),
+        "{messages}"
+    );
+}
+
+/// A top-level parts list lists each sub-assembly as one line, and a balloon on a
+/// sub-assembly occurrence reads that line's number (a general arrangement's parts list).
+#[test]
+fn a_top_level_parts_list_numbers_balloons_on_sub_assemblies() {
+    let pair = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use assembly pair as left\n    use assembly pair as right {\n        placement = { placement = offset, offset = { translation = [0 mm, 100 mm, 0 mm] } }\n    }\n    use part bracket as base {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, -50 mm] } }\n    }\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation b1 = balloon(occurrence = [{ name = left }], table = parts, view = iso)\n    annotation b2 = balloon(occurrence = [{ name = base }], table = parts, view = iso)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0], spec = { structure = top_level })\n}\n";
+    let files: Files = [
+        ("/p/bracket.part".to_owned(), BRACKET.to_owned()),
+        ("/p/pair.assembly".to_owned(), pair.to_owned()),
+        ("/p/rig.assembly".to_owned(), rig.to_owned()),
+    ]
+    .into();
+    let out: Value =
+        serde_json::from_str(&compile_json("/p/rig.drawing", drawing, &files)).unwrap();
+    let data = &out["projection"]["data"];
+    // The pair has no description to show (a warning); nothing is an error.
+    let errors: Vec<&Value> = data["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["severity"] == "error")
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(data["balloons"]["b1"].is_string(), "{}", data["balloons"]);
+    // The balloon on the sub-assembly points at the parts under it.
+    let findings = &data["layouts"]["1"]["findings"];
+    assert!(
+        findings.as_array().is_some_and(|f| f.is_empty()),
+        "{findings}"
+    );
+    let lines = data["bom_tables"]["parts"]["lines"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{}", out["diagnostics"]));
+    // The pair (2 off) and the base bracket.
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    let quantities: Vec<i64> = lines
+        .iter()
+        .filter_map(|l| l["quantity"].as_i64())
+        .collect();
+    assert_eq!(quantities.iter().sum::<i64>(), 3, "{lines:?}");
+}
+
+/// A radius dimension carries its arc's radius, so the sheet ends the leader's arrow on the
+/// arc rather than at the arc's centre.
+#[test]
+fn a_radius_dimension_carries_its_arc_radius() {
+    let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
+    let text = DRAWING.replacen(
+        "\n}\n",
+        "\n    annotation r = dimension(style = radius, references = [feature.h.face.wall(a)], view = top)\n}\n",
+        1,
+    );
+    let out: Value =
+        serde_json::from_str(&compile_json("/p/bracket.drawing", &text, &files)).unwrap();
+    let r = &out["projection"]["data"]["radii"]["r"];
+    assert!(
+        r.as_f64().is_some_and(|r| (r - 2.0).abs() < 1e-6),
+        "{r} {}",
+        out["projection"]["data"]["diagnostics"]
+    );
+}

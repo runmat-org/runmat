@@ -10,6 +10,7 @@
 
 use super::edit::{lock_change, EditError, EditOutput, EditRequest};
 use super::*;
+use crate::item_ref::ItemRef;
 
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
     let values = &request.values;
@@ -151,7 +152,7 @@ pub(super) fn move_items(
         for s in &page.symbols {
             if ids
                 .iter()
-                .any(|id| *id == format!("component:{}", s.designator))
+                .any(|id| *id == ItemRef::Component(s.designator.clone()).to_string())
             {
                 keys.insert(s.key.clone(), s.art != "box");
             }
@@ -159,7 +160,10 @@ pub(super) fn move_items(
         for t in &page.texts {
             if ids
                 .iter()
-                .any(|id| *id == format!("text:{}/{}", page.sheet, t.name))
+                .any(|id| {
+                    *id == ItemRef::Text { sheet: page.sheet.clone(), name: t.name.clone() }
+                        .to_string()
+                })
             {
                 // A note moves like a symbol and doesn't turn or mirror.
                 let key = crate::schematic::text_key(&page.sheet, &t.name);
@@ -168,7 +172,7 @@ pub(super) fn move_items(
             }
         }
         for s in &page.sheet_symbols {
-            if ids.iter().any(|id| *id == format!("sheet:{}", s.path)) {
+            if ids.iter().any(|id| *id == ItemRef::Sheet(s.path.clone()).to_string()) {
                 sheet_symbols.insert(s.key.clone());
                 keys.insert(s.key.clone(), false);
             }

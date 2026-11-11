@@ -67,31 +67,15 @@ evaluate.section-properties part
 evaluate.thickness part
 evaluate.zebra part
 explode.auto assembly
-library.create-part circuit
-library.create-part circuit.layout
-library.manufacturer-search circuit
-library.manufacturer-search circuit.layout
 manage.document-settings part
 manage.recognize-features part
 manage.replace-reference part
-mold.parting-line part
-mold.parting-surface part
-mold.parting-surface part type=normal
-mold.parting-surface part type=perpendicular
-mold.parting-surface part type=tangent
-mold.scale part
-mold.shut-off part
-mold.shut-off part type=contact
-mold.shut-off part type=none
-mold.shut-off part type=tangent
-mold.undercut part
 motion.animation assembly
 motion.basic assembly
 motion.collision assembly
 motion.drag assembly
 motion.mate-controller assembly
 motion.to-fea assembly
-part.body-scale part
 part.edit-feature part
 part.edit-sketch-plane part
 part.library part

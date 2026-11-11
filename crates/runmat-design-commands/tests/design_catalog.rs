@@ -56,8 +56,12 @@ fn design_commands_json_is_current() {
         std::fs::write(&out, &json).expect("write design-commands.json");
         return;
     }
-    let sibling = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../runmat-private-cad/desktop/src/generated/design-commands.json");
+    let sibling = std::env::var_os("RUNMAT_PRIVATE_CAD_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../runmat-private-cad")
+        })
+        .join("desktop/src/generated/design-commands.json");
     if let Ok(checked_in) = std::fs::read_to_string(&sibling) {
         assert!(
             checked_in == json,

@@ -221,7 +221,7 @@ fn a_silhouette_along_a_smooth_split_between_two_faces_still_draws() {
         (vs[0] + r).abs() < 1e-9 && (vs[1] - r).abs() < 1e-9,
         "silhouettes at {vs:?}"
     );
-    let lines = lines_of(&model, &front);
+    let lines = lines_of(&model, &front, true);
     let top: f64 = segments(&lines.visible)
         .iter()
         .filter(|s| (s[1] - r).abs() < 1e-9 && (s[3] - r).abs() < 1e-9)
@@ -239,4 +239,32 @@ fn a_silhouette_along_a_smooth_split_between_two_faces_still_draws() {
         bodies: 2,
     };
     assert!(silhouettes(&apart, front.depth).is_empty());
+}
+
+/// Hidden runs under visible lines are dropped and the others kept, and a view of an assembly's
+/// size (tens of thousands of runs each way) merges at once: each point tests only the visible
+/// segments near it.
+#[test]
+fn hidden_runs_under_visible_lines_merge_by_neighbourhood() {
+    let mut out = ViewLines::default();
+    let n = 40_000;
+    for i in 0..n {
+        let (x, y) = ((i % 200) as f64 * 3.0, (i / 200) as f64 * 3.0);
+        // A visible stroke, a hidden run along it (dropped) and one beside it (kept).
+        out.visible.push(vec![x, y, x + 2.0, y]);
+        out.hidden.push(vec![x + 0.5, y, x + 1.5, y]);
+        out.hidden.push(vec![x + 0.5, y + 1.0, x + 1.5, y + 1.0]);
+    }
+    // A long diagonal visible line with a hidden run on it.
+    out.visible.push(vec![0.0, 0.0, 600.0, 600.0]);
+    out.hidden.push(vec![100.0, 100.0, 101.0, 101.0]);
+    let started = std::time::Instant::now();
+    merge::merge_overlaps(&mut out);
+    assert_eq!(out.hidden.len(), n, "only the runs beside the strokes stay");
+    assert!(out.hidden.iter().all(|l| l[1] % 3.0 == 1.0));
+    assert!(
+        started.elapsed().as_secs_f64() < 5.0,
+        "{:?}",
+        started.elapsed()
+    );
 }

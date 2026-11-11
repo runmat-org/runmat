@@ -33,6 +33,7 @@ use crate::geom::poly::Polygon;
 use crate::geom::Point;
 use crate::ids::{LockSection, Uuid};
 use crate::ir::Design;
+use crate::item_ref::ItemRef;
 use crate::library::Pool;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -311,17 +312,21 @@ pub struct Impact {
 impl Impact {
     /// Canvas region ids (`component:R1`, `pad:R1.2`, `net:GND`, `track:12`…), as the Outline uses.
     pub fn regions(&self) -> Vec<String> {
-        let mut v: Vec<String> = Vec::new();
-        v.extend(self.footprints.iter().map(|f| format!("component:{f}")));
-        v.extend(self.pads.iter().map(|p| format!("pad:{p}")));
-        v.extend(self.nets.iter().map(|n| format!("net:{n}")));
-        v.extend(self.tracks.iter().map(|t| format!("track:{t}")));
-        v.extend(self.vias.iter().map(|t| format!("via:{t}")));
-        v.extend(self.zones.iter().map(|t| format!("zone:{t}")));
+        let pad = |p: &String| match p.split_once('.') {
+            Some((component, pad)) => ItemRef::Pad { component: component.into(), pad: pad.into() },
+            None => ItemRef::Component(p.clone()),
+        };
+        let mut v: Vec<ItemRef> = Vec::new();
+        v.extend(self.footprints.iter().cloned().map(ItemRef::Component));
+        v.extend(self.pads.iter().map(pad));
+        v.extend(self.nets.iter().cloned().map(ItemRef::Net));
+        v.extend(self.tracks.iter().copied().map(ItemRef::Track));
+        v.extend(self.vias.iter().copied().map(ItemRef::Via));
+        v.extend(self.zones.iter().copied().map(ItemRef::Zone));
         if let Some(room) = self.placement.as_ref().and_then(|p| p.room.as_ref()) {
-            v.push(format!("room:{room}"));
+            v.push(ItemRef::Room(room.clone()));
         }
-        v
+        v.iter().map(ItemRef::to_string).collect()
     }
     fn merge(&mut self, o: Impact) {
         self.tracks.extend(o.tracks);
