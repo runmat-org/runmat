@@ -8012,12 +8012,14 @@ dependencies = [
 name = "runmat-cad-wasm"
 version = "0.7.1"
 dependencies = [
+ "hex",
  "runmat-cad",
  "runmat-circuit",
  "runmat-design-syntax",
  "runmat-types",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "wasm-bindgen",
 ]
 
@@ -9219,6 +9221,7 @@ dependencies = [
  "runmat-analysis-language",
  "runmat-async",
  "runmat-builtins",
+ "runmat-cad-wasm",
  "runmat-canonical-codec",
  "runmat-clarabel",
  "runmat-cpu-execution",

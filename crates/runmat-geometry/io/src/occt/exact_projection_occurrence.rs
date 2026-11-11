@@ -121,6 +121,26 @@ impl<'a> OccurrenceIndex<'a> {
             .ok_or_else(|| invalid("OCCT exact topology references an unknown occurrence"))
     }
 
+    /// The occurrence's path by authored instance names, outermost first and joined by `/`
+    /// (`"arm"`, `"wing/aileron"`), so a study can select a published region of one occurrence
+    /// as `"<path>/<region>"`. `None` for the root, or when an instance on the path is unnamed.
+    pub fn named_path(&self, occurrence_index: u64) -> Option<String> {
+        let mut names = Vec::new();
+        let mut current = self.occurrences.get(&occurrence_index)?;
+        while current.parent_occurrence_index != 0 {
+            if current.occurrence_name.is_empty() || current.occurrence_name.contains('/') {
+                return None;
+            }
+            names.push(current.occurrence_name.as_str());
+            current = self.occurrences.get(&current.parent_occurrence_index)?;
+        }
+        if names.is_empty() {
+            return None;
+        }
+        names.reverse();
+        Some(names.join("/"))
+    }
+
     pub fn project_assemblies(
         &self,
         body_partitions: &BodyPartitions,

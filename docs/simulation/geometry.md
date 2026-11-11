@@ -104,7 +104,12 @@ regions come from the same regeneration:
 
 - each face of a part's face `region` carries the region's name, or its `label` when it has one;
 - each output body carries its output's name or `label`, so a `solid` region selects it by that name;
-- an assembly carries the names of every part it places, under the same rules.
+- an assembly carries the names of every part it places, under the same rules. Each name is also
+  carried with the occurrence path in front of it, joined by `/`, so a study selects one
+  occurrence's region when several occurrences carry the same name. In an assembly that places the
+  arm twice, `as left` and `as right`, `select name "root"` selects both arms' root faces and
+  `select name "left/root"` selects the left arm's only. A sub-assembly's occurrences extend the
+  path (`"wing/aileron/hinge"`).
 
 A `select name` that the design does not carry is a check error. The error names the design file,
 the region and the names the design does carry. A design that does not regenerate (a syntax error,
@@ -121,7 +126,7 @@ regions.
 
 A study reads each design in its default configuration with its full representation. A face
 carries one name, so a face in two face regions carries the first region's name. Edge and vertex
-regions, and region paths through an assembly's occurrences, are not carried yet.
+regions are not carried yet.
 
 ## Regions And Selectors
 

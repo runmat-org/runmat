@@ -313,6 +313,35 @@ mod tests {
         assert_eq!(inspected, runmat_geometry_io::GeometryFormat::Step);
     }
 
+    #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+    #[test]
+    fn an_assemblys_occurrences_qualify_their_published_region_names_by_path() {
+        let puck = "runmat 0.7\nstd 1\n\npart puck {\n    feature base = plane.offset(base = origin.xy, distance = 0 mm)\n    sketch s on plane.base {\n        c = circle(center = [0 mm, 0 mm], radius = 7 mm)\n    }\n    feature puck = extrude(profile = sketch.s, distance = 5 mm)\n    region top : face = { select = [feature.puck.face.end], expect = exactly_one }\n    output puck = { body = feature.puck.body, material = \"aluminum_6061\" }\n}\n";
+        let stack = "runmat 0.7\nstd 1\n\nassembly stack {\n    use part puck as lower\n    use part puck as upper {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 20 mm] } }\n    }\n}\n";
+        let view = BTreeMap::from([
+            (PathBuf::from("/p/sim/puck.part"), puck.as_bytes().to_vec()),
+            (PathBuf::from("/p/sim/stack.assembly"), stack.as_bytes().to_vec()),
+        ]);
+        let path = Path::new("/p/sim/stack.assembly");
+        let bytes = design_geometry(path, None, &CapturedDesignFiles(&view)).unwrap();
+        let imported = runmat_geometry_io::import_exact_cad(
+            "stack.assembly",
+            &bytes,
+            runmat_geometry_io::GeometryFormat::Step,
+            &runmat_geometry_io::ExactCadImportOptions::default(),
+            &runmat_geometry_io::GeometryImportContext::new(),
+        )
+        .unwrap();
+        let face = runmat_geometry_core::GeometryRegionRole::Face;
+        let both = imported.entities_named(face, "top").unwrap();
+        let lower = imported.entities_named(face, "lower/top").unwrap();
+        let upper = imported.entities_named(face, "upper/top").unwrap();
+        assert_eq!(both.len(), 2, "both occurrences publish `top`");
+        assert_eq!((lower.len(), upper.len()), (1, 1));
+        assert_ne!(lower, upper);
+        assert_ne!(lower[0].assembly_path, upper[0].assembly_path);
+    }
+
     #[test]
     fn only_parts_and_assemblies_are_design_geometry() {
         assert!(is_design_geometry("sim/arm.part"));

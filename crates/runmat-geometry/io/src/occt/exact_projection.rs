@@ -78,6 +78,12 @@ pub(super) fn project_exact_contracts(
                 path,
             )?;
             record_names(&mut entity_names, &id, &vertex.names);
+            record_occurrence_names(
+                &mut entity_names,
+                &id,
+                &vertex.names,
+                occurrences.named_path(vertex.occurrence_index),
+            );
             record_names(&mut entity_tags, &id, &vertex.tags);
             Ok(ExactVertex {
                 id,
@@ -111,6 +117,12 @@ pub(super) fn project_exact_contracts(
                 path,
             )?;
             record_names(&mut entity_names, &id, &edge.names);
+            record_occurrence_names(
+                &mut entity_names,
+                &id,
+                &edge.names,
+                occurrences.named_path(edge.occurrence_index),
+            );
             record_names(&mut entity_tags, &id, &edge.tags);
             Ok(ExactEdge {
                 id,
@@ -228,6 +240,12 @@ pub(super) fn project_exact_contracts(
             )?;
             source_face_ids.insert(face.source_face_index, id.clone());
             record_names(&mut entity_names, &id, &face.names);
+            record_occurrence_names(
+                &mut entity_names,
+                &id,
+                &face.names,
+                occurrences.named_path(face.occurrence_index),
+            );
             record_names(&mut entity_tags, &id, &face.tags);
             Ok(ExactFace {
                 id,
@@ -312,6 +330,12 @@ pub(super) fn project_exact_contracts(
                 path,
             )?;
             record_names(&mut entity_names, &id, &solid.names);
+            record_occurrence_names(
+                &mut entity_names,
+                &id,
+                &solid.names,
+                occurrences.named_path(solid.occurrence_index),
+            );
             record_names(&mut entity_tags, &id, &solid.tags);
             Ok(ExactSolid {
                 id,
@@ -406,6 +430,25 @@ fn record_names(
             names.push(name.clone());
         }
     }
+}
+
+/// An entity of a named assembly occurrence also carries each authored name qualified by the
+/// occurrence path (`"arm/root"`), so a study selects one occurrence's region when several
+/// occurrences publish the same name.
+fn record_occurrence_names(
+    entity_names: &mut BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+    id: &runmat_geometry_core::PersistentEntityId,
+    authored: &[String],
+    occurrence_path: Option<String>,
+) {
+    let Some(path) = occurrence_path else {
+        return;
+    };
+    let qualified = authored
+        .iter()
+        .map(|name| format!("{path}/{name}"))
+        .collect::<Vec<_>>();
+    record_names(entity_names, id, &qualified);
 }
 
 fn project_kernel_entity_ids(
