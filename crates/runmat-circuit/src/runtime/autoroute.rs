@@ -19,7 +19,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
         let clearance = clearance(board);
         let widths = widths(board);
         let default_width = mm_of(values, "width").unwrap_or(mm(0.2));
-        let via = via_of(values, "via").unwrap_or((mm(0.45), mm(0.2)));
+        let via = via_of(values, "via").unwrap_or_else(|| default_via(&board.limits));
         let planes = plane_nets(board);
         match request.command.as_str() {
             "board.fanout" => {
@@ -242,6 +242,14 @@ fn mm_of(values: &serde_json::Map<String, Value>, id: &str) -> Option<Coord> {
 }
 
 /// A via given as `drill/diameter` (either order; the smaller is the drill), in mm.
+/// The via the routers place when the request names none: 0.45 mm over a 0.2 mm drill, grown to
+/// the board's limits (drill, via diameter and annular ring) so new vias pass DRC.
+fn default_via(limits: &crate::layout::FabLimits) -> (Coord, Coord) {
+    let drill = mm(0.2).max(limits.min_drill);
+    let diameter = mm(0.45).max(limits.min_via_diameter).max(drill + 2 * limits.min_annular);
+    (diameter, drill)
+}
+
 fn via_of(values: &serde_json::Map<String, Value>, id: &str) -> Option<(Coord, Coord)> {
     let text = values.get(id)?.as_str()?;
     let (a, b) = text.split_once('/')?;
