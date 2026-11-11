@@ -231,9 +231,8 @@ pub use problem::target::{
 };
 pub use study::accuracy::{
     AccuracyCriterion, AccuracyLimitAction, AccuracyPlan, AccuracyPlanId, AccuracyResourceCeiling,
-    AlgebraicAccuracyMeasure,
-    AccuracyTarget, AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy,
-    RequiredAccuracyEvidence, UnavailableEvidencePolicy,
+    AccuracyTarget, AccuracyTolerance, AlgebraicAccuracyMeasure, ErrorContributionKind,
+    NumericalEquivalencePolicy, RequiredAccuracyEvidence, UnavailableEvidencePolicy,
 };
 pub use study::output::{
     sound_pressure_level_db, AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy,

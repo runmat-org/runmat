@@ -49,7 +49,9 @@ pub(super) fn apply(
             let slot = match &setting.kind {
                 CheckedFeaStatementKind::Assignment { target, value, .. } => {
                     match target.as_slice() {
-                        [name] if name == "algebraic_measure" => Some((&mut measure_setting, value)),
+                        [name] if name == "algebraic_measure" => {
+                            Some((&mut measure_setting, value))
+                        }
                         [name] if name == "algebraic_relative_tolerance" => {
                             Some((&mut tolerance_setting, value))
                         }

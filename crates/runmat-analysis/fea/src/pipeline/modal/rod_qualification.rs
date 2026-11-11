@@ -558,7 +558,10 @@ fn solid_rod_modes_qualify_on_the_backward_error_and_publish_both_measures() {
     assert_eq!(relative.len(), backward.len());
     for (eta, residual) in backward.iter().zip(&relative) {
         assert!(*eta <= production.algebraic_tolerance(), "η = {eta}");
-        assert!(*eta <= *residual, "η = {eta} above the relative residual {residual}");
+        assert!(
+            *eta <= *residual,
+            "η = {eta} above the relative residual {residual}"
+        );
     }
     let accuracy = core
         .run

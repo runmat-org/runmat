@@ -21,10 +21,10 @@ mod inertia;
 mod lanczos;
 mod lobpcg;
 
+pub use crate::backward_error::{eigenpair_backward_error, ResidualMeasure};
 pub use inertia::{pencil_inertia_estimate, PencilInertia, PencilInertiaEstimate};
 pub use lanczos::Selection;
 pub use lobpcg::{lobpcg, lobpcg_block_size, lobpcg_working_value_count, LobpcgOptions};
-pub use crate::backward_error::{eigenpair_backward_error, ResidualMeasure};
 
 use crate::control::SolveControl;
 use crate::csr::{CsrMatrix, CsrRef};

@@ -22,8 +22,8 @@ use crate::solve::dynamics::{DirectHarmonicPolicy, RandomResponseIntegrationPoli
 use crate::solve::transient::StructuralTimeStepPolicy;
 
 use super::{
-    algebraic_residual_target, linear_workload, relative_accuracy_target, unsupported, CompiledAnalysisStudy,
-    StructuralStudyPlanningError, StructuralStudyPlanningPolicy,
+    algebraic_residual_target, linear_workload, relative_accuracy_target, unsupported,
+    CompiledAnalysisStudy, StructuralStudyPlanningError, StructuralStudyPlanningPolicy,
 };
 
 pub(super) fn plan(

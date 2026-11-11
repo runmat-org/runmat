@@ -443,7 +443,11 @@ fn backward_error_qualifies_an_exact_pair_the_relative_residual_rejects() {
     let quotient = 0.5 * (lambda_1 + lambda_2);
     let (_, backward_mixed) =
         super::true_residuals(k.as_ref(), identity.as_ref(), &[quotient], &mixed);
-    assert!(backward_mixed[0] > 1.0e-10, "mixed backward error {}", backward_mixed[0]);
+    assert!(
+        backward_mixed[0] > 1.0e-10,
+        "mixed backward error {}",
+        backward_mixed[0]
+    );
 }
 
 /// LOBPCG stopping on the backward error reaches the same frequencies as shift-invert, and every

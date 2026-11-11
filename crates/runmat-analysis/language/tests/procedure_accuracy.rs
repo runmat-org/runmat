@@ -205,7 +205,11 @@ fn modal_solver_method_is_authored_on_the_extraction() {
             ModalSolverMethod::Iterative,
         ),
     ] {
-        let checked = check(&format!("structural modal {{ modes = 2{setting} }}"), "", "");
+        let checked = check(
+            &format!("structural modal {{ modes = 2{setting} }}"),
+            "",
+            "",
+        );
         assert!(checked.is_valid(), "{setting}: {:#?}", checked.diagnostics);
         let step = step(&checked);
         assert_eq!(step.modal_solver_method(), expected, "{setting}");
