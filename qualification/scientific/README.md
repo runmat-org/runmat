@@ -42,8 +42,9 @@ python3 scripts/qualification/scientific.py command --cohort driver-recovery-phy
 ```
 
 Run the printed command through the machine's resource gate, using its existing
-Cargo cache. Physics and board-timing cohorts use the release profile; the
-airliner heap check uses the test profile. Record the actual profile in the
+Cargo cache. Physics, board-timing and airliner heap cohorts use the release
+profile. The airliner command selects the browser host's own features rather
+than enabling unrelated CLI rendering and `.m` evaluation. Record the actual profile in the
 receipt. Keep `CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0` and
 `CARGO_INCREMENTAL=0` for development/test builds so they reuse the same cache.
 

@@ -262,6 +262,10 @@ class ScientificRoutingTests(unittest.TestCase):
         self.assertIn(name, runner.scientific_filters("geometry-analysis"))
         self.assertNotIn(name, runner.scientific_filters("tooling-distributed"))
         self.assertIn("cad_airliner_drawing", cohort["command"])
+        self.assertIn("--release", cohort["command"])
+        packages = [cohort["command"][i + 1] for i, token in enumerate(cohort["command"])
+                    if token == "-p"]
+        self.assertEqual(packages, ["runmat-geometry-wasm-host"])
         self.assertNotIn("--ignored", cohort["command"])
         self.assertNotIn("--skip", cohort["command"])
 
