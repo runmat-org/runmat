@@ -288,7 +288,10 @@ impl ViewKind {
     pub fn references(&self) -> Vec<(&'static str, &Reference)> {
         match self {
             ViewKind::Standard { frame: Some(f), .. } => vec![("frame", f)],
-            ViewKind::Section { plane: crate::model::PlaneRef::Face { face }, .. } => vec![("plane", face)],
+            ViewKind::Section {
+                plane: crate::model::PlaneRef::Face { face },
+                ..
+            } => vec![("plane", face)],
             ViewKind::Detail { center, .. } => vec![("center", center)],
             ViewKind::Auxiliary { edge, .. } => vec![("edge", edge)],
             ViewKind::Break { gaps, .. } => gaps
@@ -740,7 +743,11 @@ pub fn check_drawing_with(
                 );
             }
         }
-        if let ViewKind::Section { plane: crate::model::PlaneRef::Datum { datum }, .. } = &v.kind {
+        if let ViewKind::Section {
+            plane: crate::model::PlaneRef::Datum { datum },
+            ..
+        } = &v.kind
+        {
             if !matches!(datum, crate::model::DatumRef::OriginPlane { .. }) {
                 err(
                     &mut rep,
@@ -1062,11 +1069,23 @@ pub fn check_drawing_with(
                 } else if let Some(numbers) = boms.get(table.as_str()) {
                     let bom = model.bom(&v.model).unwrap_or_default();
                     let wanted = occurrence.to_string();
-                    match bom
+                    // A parts-only list numbers the flat BOM's lines; a top-level or indented
+                    // one also numbers sub-assembly lines, which only the indented BOM holds.
+                    let indented = model.indented_bom(&v.model).unwrap_or_default();
+                    let items = bom
                         .rows
                         .iter()
-                        .find(|r| r.paths.contains(&wanted))
-                        .and_then(|r| numbers.get(&bom_item_key(&r.item)))
+                        .filter(|r| r.paths.contains(&wanted))
+                        .map(|r| &r.item)
+                        .chain(
+                            indented
+                                .iter()
+                                .filter(|r| r.paths.contains(&wanted))
+                                .map(|r| &r.item),
+                        );
+                    match items
+                        .filter_map(|item| numbers.get(&bom_item_key(item)))
+                        .next()
                     {
                         Some(n) => {
                             rep.balloons.insert(a.id.clone(), n.clone());

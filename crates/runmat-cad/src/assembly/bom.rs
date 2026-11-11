@@ -61,6 +61,10 @@ pub struct IndentedRow {
     pub parent: String,
     pub item: BomItem,
     pub quantity: u64,
+    /// The first few occurrence paths of the line (as many as a flat row keeps), so a balloon
+    /// on a sub-assembly finds its line.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -255,11 +259,17 @@ pub fn indented_bom(
         let parent = tree.path(n);
         for (_, (item, q, members)) in groups {
             let expand = item.kind == BomKind::Assembly;
+            let paths = members
+                .iter()
+                .take(BomOptions::default().paths_per_row)
+                .map(|&m| tree.path(m))
+                .collect();
             out.push(IndentedRow {
                 level: node.depth + 1,
                 parent: parent.clone(),
                 item,
                 quantity: q,
+                paths,
             });
             // Every member of the group has the same structure; list the first's children.
             if expand {
@@ -276,6 +286,7 @@ pub fn indented_bom(
                 parent: parent.clone(),
                 item,
                 quantity: q,
+                paths: Vec::new(),
             });
         }
     }

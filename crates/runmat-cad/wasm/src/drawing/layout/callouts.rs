@@ -776,30 +776,40 @@ fn occurrence_box(ctx: &Ctx<'_>, v: &ViewPlan, occurrence: &Value) -> Option<Box
         return None;
     }
     let data = &display["data"];
-    let occ = data["occurrences"]
-        .as_array()?
-        .iter()
-        .find(|o| o["path"] == path.as_str())?;
-    let proto = &data["prototypes"][occ["prototype"].as_u64()? as usize];
-    let bounds = if proto["shape"] == "mesh" {
-        &proto["part"]["bounds"]
-    } else {
-        &proto["bounds"]
-    };
-    let (lo, hi) = (floats(&bounds["min"]), floats(&bounds["max"]));
-    let t = floats(&occ["transform"]);
-    if lo.len() < 3 || hi.len() < 3 || t.len() < 12 {
-        return None;
-    }
+    // The occurrence itself, or everything under it when it is a sub-assembly (which has no
+    // prototype of its own).
+    let under = format!("{path}/");
     let mut b: Option<BoxR> = None;
-    for k in 0..8 {
-        let l = [0, 1, 2].map(|a| if (k >> a) & 1 == 1 { hi[a] } else { lo[a] });
-        let w = [0, 1, 2].map(|r| {
-            (t[3 * r] * l[0] + t[3 * r + 1] * l[1] + t[3 * r + 2] * l[2] + t[9 + r]) * 1000.0
-        });
-        let p = v.model_to_sheet(w);
-        let pb = BoxR::around(p, 0.0, 0.0);
-        b = Some(b.map_or(pb, |x| x.union(&pb)));
+    for occ in data["occurrences"].as_array()?.iter().filter(|o| {
+        o["path"]
+            .as_str()
+            .is_some_and(|p| p == path || p.starts_with(&under))
+    }) {
+        let Some(proto) = occ["prototype"]
+            .as_u64()
+            .and_then(|i| data["prototypes"].get(i as usize))
+        else {
+            continue;
+        };
+        let bounds = if proto["shape"] == "mesh" {
+            &proto["part"]["bounds"]
+        } else {
+            &proto["bounds"]
+        };
+        let (lo, hi) = (floats(&bounds["min"]), floats(&bounds["max"]));
+        let t = floats(&occ["transform"]);
+        if lo.len() < 3 || hi.len() < 3 || t.len() < 12 {
+            continue;
+        }
+        for k in 0..8 {
+            let l = [0, 1, 2].map(|a| if (k >> a) & 1 == 1 { hi[a] } else { lo[a] });
+            let w = [0, 1, 2].map(|r| {
+                (t[3 * r] * l[0] + t[3 * r + 1] * l[1] + t[3 * r + 2] * l[2] + t[9 + r]) * 1000.0
+            });
+            let p = v.model_to_sheet(w);
+            let pb = BoxR::around(p, 0.0, 0.0);
+            b = Some(b.map_or(pb, |x| x.union(&pb)));
+        }
     }
     b
 }

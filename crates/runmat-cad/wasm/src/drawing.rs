@@ -25,7 +25,7 @@ pub mod title;
 pub(crate) mod values;
 mod view_picks;
 
-use crate::runtime::{compile_assembly, resolve_path, Diagnostic, Files, RegeneratedPart};
+use crate::runtime::{compile_assembly_indented, resolve_path, Diagnostic, Files, RegeneratedPart};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
@@ -58,6 +58,8 @@ pub struct CompiledModels {
     characteristics: BTreeMap<String, BTreeMap<String, runmat_cad::pmi::Characteristic>>,
     /// File → the assembly's flat BOM (its index's), for BOM tables and balloons.
     boms: BTreeMap<String, Bom>,
+    /// File → the assembly's indented BOM, for top-level and indented parts lists.
+    indented: BTreeMap<String, Vec<runmat_cad::assembly::bom::IndentedRow>>,
     /// Assembly file → BOM item definition file → its properties (parts lists' description).
     item_properties: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
     /// Part file → flat pattern or unfold feature → its layout, the outline as cut.
@@ -138,6 +140,12 @@ impl ModelReferences for CompiledModels {
     }
     fn bom(&self, model: &ModelRef) -> Option<Bom> {
         self.boms.get(model.file.as_str()).cloned()
+    }
+    fn indented_bom(
+        &self,
+        model: &ModelRef,
+    ) -> Option<Vec<runmat_cad::assembly::bom::IndentedRow>> {
+        self.indented.get(model.file.as_str()).cloned()
     }
     fn flat_layout(&self, model: &ModelRef, feature: &FeatureId) -> Option<FlatLayout> {
         self.flats.get(model.file.as_str())?.get(feature).cloned()
@@ -280,8 +288,9 @@ pub fn compile_json_in(
                 file.clone(),
                 progress::model_key(&at, source, None, Some(files)),
             );
-            match compile_assembly(&at, source, files) {
-                Ok((index, display, _)) => {
+            match compile_assembly_indented(&at, source, files) {
+                Ok((index, display, _, indented)) => {
+                    models.indented.insert(file.clone(), indented);
                     let occ = index["occurrences"]
                         .as_array()
                         .map(|rows| {
@@ -712,6 +721,11 @@ pub fn compile_json_in(
             {
                 if let Some(c) = cylinder_of(display, r, *p) {
                     cylinders.insert(a.id.clone(), c);
+                }
+                // The arc's radius (mm), so the leader's arrow ends on the arc, not at its
+                // centre (a fillet or corner arc has no center mark to take it from).
+                if let Some(rad) = values::radius_of(display, r) {
+                    radii.insert(a.id.clone(), json!(rad));
                 }
             }
             if matches!(

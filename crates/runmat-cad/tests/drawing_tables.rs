@@ -193,6 +193,7 @@ fn indented() -> Vec<IndentedRow> {
         parent: parent.into(),
         item: i,
         quantity: q,
+        paths: Vec::new(),
     };
     let sub = BomItem {
         kind: BomKind::Assembly,
