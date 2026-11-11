@@ -72,24 +72,33 @@ fn a_block_seats_under_a_plate_by_a_ray_in_one_call() {
     assert_eq!(seat["mate_kind"], "fasten", "{seat:#}");
     assert_eq!(seat["mate_status"], "satisfied", "{seat:#}");
     assert_eq!(seat["pose"]["status"], "solved", "{seat:#}");
-    // The grid test kernel has no exact proximity: the pair is reported as not measured, never
-    // as clear. On OCCT the gap is 0.5 mm and a pressed-in seat reports its overlap volume (the
-    // CAD host's cad_design_tools tests).
+    // Both kernels preserve the pose. OCCT measures the half-millimetre gap;
+    // the grid kernel reports that proximity is unmeasured.
     assert_eq!(seat["interference"], json!([]), "{seat:#}");
-    assert_eq!(
-        seat["clearance"],
-        json!([{ "with": "plate", "not_measured": true }]),
-        "{seat:#}"
-    );
-    assert!(
-        seat["notes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|n| n.as_str().unwrap().starts_with("plate / foot: ")),
-        "{seat:#}"
-    );
-    assert!(seat["summary"].as_str().unwrap().starts_with("Seated foot on plate (fasten, satisfied) at [30, 20, 94.5] mm: interference with plate not measured"), "{seat:#}");
+    if cfg!(feature = "occt") {
+        assert_eq!(
+            seat["clearance"],
+            json!([{ "with": "plate", "distance_mm": 0.5 }]),
+            "{seat:#}"
+        );
+        assert!(seat.get("notes").is_none(), "{seat:#}");
+        assert_eq!(seat["summary"], "Seated foot on plate (fasten, satisfied) at [30, 20, 94.5] mm: no interference; 0.5 mm from plate.", "{seat:#}");
+    } else {
+        assert_eq!(
+            seat["clearance"],
+            json!([{ "with": "plate", "not_measured": true }]),
+            "{seat:#}"
+        );
+        assert!(
+            seat["notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|n| n.as_str().unwrap().starts_with("plate / foot: ")),
+            "{seat:#}"
+        );
+        assert!(seat["summary"].as_str().unwrap().starts_with("Seated foot on plate (fasten, satisfied) at [30, 20, 94.5] mm: interference with plate not measured"), "{seat:#}");
+    }
     // The staged change inserts the occurrence free to move, its two connectors and the fasten.
     assert_eq!(out["ok"], true, "{:#}", out["diagnostics"]);
     let text = staged_text(&out, "/p/rig.assembly");
