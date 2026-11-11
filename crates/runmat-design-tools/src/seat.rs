@@ -472,7 +472,7 @@ pub fn seat(input: &SeatInput, files: &Files) -> Result<SeatOutput, ToolError> {
                 translation_mm: mm3(n.world.translation),
                 rotation_axis: axis.map(|v| round(v, 4)),
                 rotation_deg: round(angle.to_degrees(), 3),
-                status: serde_json::to_value(&n.pose).unwrap_or(Value::Null),
+                status: serde_json::to_value(n.pose).unwrap_or(Value::Null),
                 dof: n.dof,
             }
         }

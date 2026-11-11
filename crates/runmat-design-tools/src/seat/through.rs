@@ -174,7 +174,7 @@ pub(super) fn through(
                     format!(
                         "{} at [{}] mm",
                         label(0, c[0]),
-                        c[0].middle.map(|v| mm(v)).join(", ")
+                        c[0].middle.map(mm).join(", ")
                     )
                 })
                 .collect();
