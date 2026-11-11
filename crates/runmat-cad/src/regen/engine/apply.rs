@@ -369,6 +369,13 @@ impl<'a, 'b> Run<'a, 'b> {
             let mut foreign: Vec<Vec<EntityName>> = Vec::new();
             let mut ok = true;
             for (k, (r, o)) in rg.select.iter().zip(each).enumerate() {
+                // An optional region (`expect = any`) selects nothing from a face its feature
+                // doesn't make at these inputs: a full-turn revolve has no start or end face.
+                if rg.expect == Cardinality::Any
+                    && matches!(o, ResolveOutcome::Failed(RefProblem::NotGenerated { .. }))
+                {
+                    continue;
+                }
                 let site = Site {
                     subject: Subject::Region {
                         region: rg.name.clone(),
