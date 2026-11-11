@@ -1453,6 +1453,30 @@ fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
 }
 
 #[test]
+fn reconciliation_without_a_wall_time_ceiling_plans_unbounded_cpu_time() {
+    // G34: no authored ceiling plans the wire-maximum wall time; cores x that must not overflow.
+    let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let mut request = plan.request.clone();
+    request.max_wall_millis = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+    request.cpu_millicores = u32::MAX;
+    let actual = AnalysisResourceUsage {
+        scheduler: ResourceUsage {
+            cpu_core_millis: u64::MAX,
+            wall_millis: 1,
+            ..ResourceUsage::default()
+        },
+        peak_cpu_millicores: 0,
+        peak_memory_bytes: ByteCount(0),
+        peak_scratch_bytes: ByteCount(0),
+        artifact_bytes: ByteCount(0),
+    };
+    let overruns = super::reconciliation::reconcile_resource_request(&request, &actual).unwrap();
+    assert!(!overruns
+        .iter()
+        .any(|overrun| matches!(overrun, ResourceOverrun::CpuTime { .. })));
+}
+
+#[test]
 fn reconciliation_checks_accelerator_device_time() {
     let mut accelerated = input(PartitioningPolicy::Monolithic);
     accelerated.worker.accelerators = vec![AcceleratorRequirement {

@@ -18,13 +18,15 @@ pub(crate) fn reconcile_resource_request(
             actual: actual.peak_cpu_millicores,
         });
     }
-    let planned_core_millis = u64::from(request.cpu_millicores)
-        .checked_mul(request.max_wall_millis)
-        .map(|millicore_millis| millicore_millis.div_ceil(1000))
-        .ok_or(ResourcePlanningError::Overflow("planned CPU time"))?;
-    if actual.scheduler.cpu_core_millis > planned_core_millis {
+    // Planned CPU time is cores x wall time. A study with no authored wall-time ceiling plans the
+    // wire maximum (2^53 - 1 ms), so the product needs u128; it cannot overflow there.
+    let planned_core_millis =
+        (u128::from(request.cpu_millicores) * u128::from(request.max_wall_millis)).div_ceil(1000);
+    if u128::from(actual.scheduler.cpu_core_millis) > planned_core_millis {
         overruns.push(ResourceOverrun::CpuTime {
-            planned_core_millis,
+            // Below a u64 actual, so it fits.
+            planned_core_millis: u64::try_from(planned_core_millis)
+                .map_err(|_| ResourcePlanningError::Overflow("planned CPU time"))?,
             actual_core_millis: actual.scheduler.cpu_core_millis,
         });
     }
