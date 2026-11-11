@@ -175,11 +175,25 @@ impl DesignDocumentAnalysis {
         }
     }
 
+    /// The range a problem marks. A note or warning about a whole declaration (an assembly's
+    /// unlocked items, an unused input) marks the declaration's first line: underlining the
+    /// block would underline every line in it. Errors keep their full span.
+    fn marked_range(&self, p: &Problem) -> Range {
+        let range = self.range(p.span);
+        if p.severity == DiagnosticSeverity::ERROR || range.start.line == range.end.line {
+            return range;
+        }
+        let source = self.source();
+        let start = p.span.start.min(source.len());
+        let end = source[start..].find('\n').map_or(source.len(), |i| start + i);
+        Range::new(range.start, offset_to_position(source, end))
+    }
+
     pub fn diagnostics(&self) -> Vec<Diagnostic> {
         self.problems
             .iter()
             .map(|p| Diagnostic {
-                range: self.range(p.span),
+                range: self.marked_range(p),
                 severity: Some(p.severity),
                 code: p.code.clone().map(NumberOrString::String),
                 source: Some(source_label(self.dialect).into()),

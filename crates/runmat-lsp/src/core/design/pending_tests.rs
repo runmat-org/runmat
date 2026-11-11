@@ -80,3 +80,18 @@ fn an_assembly_resolves_a_circuit_imported_from_a_subfolder() {
     let m = messages(&analyze("/d/drone.assembly", top, &files, &[]));
     assert!(m.iter().all(|m| !m.contains("not in the project") && !m.contains("holds no designs") && !m.contains("no `circuit io`")), "{m:?}");
 }
+
+#[test]
+fn a_note_about_a_whole_declaration_marks_its_first_line() {
+    let a = analyze("/d/drone.assembly", TOP, &DesignFiles::new(), &[]);
+    let mut b = a.clone();
+    b.problems = vec![super::super::Problem {
+        span: runmat_types::Span { start: TOP.find("assembly drone").unwrap(), end: TOP.len() - 1 },
+        severity: DiagnosticSeverity::INFORMATION,
+        code: Some("asm.unlocked".into()),
+        message: "1 item(s) of `/d/drone.assembly` have no lock entry".into(),
+    }];
+    let d = b.diagnostics();
+    assert_eq!((d[0].range.start.line, d[0].range.end.line), (3, 3));
+    assert_eq!(d[0].range.end.character as usize, "assembly drone {".len());
+}
