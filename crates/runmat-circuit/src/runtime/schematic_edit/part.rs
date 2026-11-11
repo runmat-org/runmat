@@ -16,6 +16,7 @@
 use super::super::edit::{lock_change, EditError, EditOutput, EditRequest};
 use super::super::{file_change, load_with, Files, Project};
 use crate::ids::SchPlace;
+use crate::item_ref::ItemRef;
 use crate::ir::Endpoint;
 use crate::library::catalog::{prefix_for, CatalogPart};
 use crate::syntax::board_edit::SourceChange;
@@ -69,8 +70,7 @@ fn point(v: Option<&Value>) -> Option<(f64, f64)> {
         Value::Array(a) => a.iter().find_map(|v| v.as_str().map(str::to_owned))?,
         _ => return None,
     };
-    let (x, y) = s.strip_prefix("point:")?.split_once(',')?;
-    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+    ItemRef::parse(&s)?.xy_mm()
 }
 
 /// Where a sheet's components end, and its braces.
@@ -521,7 +521,7 @@ pub(super) fn paste(
     }
     let designators: Vec<String> = ids
         .iter()
-        .filter_map(|id| id.strip_prefix("component:").map(str::to_owned))
+        .filter_map(|id| ItemRef::parse(id)?.component().map(str::to_owned))
         .collect();
     if designators.is_empty() {
         return Err(EditError::new("copy one or more parts first"));

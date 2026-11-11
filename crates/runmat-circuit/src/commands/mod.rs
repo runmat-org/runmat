@@ -29,6 +29,8 @@ pub fn catalog() -> Catalog {
 /// catalog, so no toolbar, menu or search offers a button that does nothing; an id leaves this
 /// list in the commit that builds its applier, with its test.
 pub const UNBUILT: &[&str] = &[
+    // Library: the new-part wizard (a part, symbol or footprint from a pin table or another part).
+    "library.create-part",
     // Board: panels and bus routing.
     "board.panelize",
     "board.multi-route",

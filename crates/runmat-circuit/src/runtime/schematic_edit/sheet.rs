@@ -5,6 +5,7 @@ use super::super::edit::EditError;
 use super::wire::{declare_port, endpoint_of, place, written_name};
 use super::{Editor, End};
 use crate::ids::NamePath;
+use crate::item_ref::ItemRef;
 use crate::ir::{
     Binding, BlanketDecl, BusDecl, DiffPairDecl, HarnessDecl, NetDecl, PortDir, SheetDef,
     SheetInstance,
@@ -31,7 +32,7 @@ fn page_sheet<'a>(e: &Editor<'a>) -> Result<&'a SheetDef, EditError> {
         e.request
             .selection
             .iter()
-            .find(|s| s.starts_with("sheet:"))
+            .find(|s| super::is_sheet(s))
             .cloned()
     });
     let name = match page {
@@ -70,7 +71,7 @@ impl Editor<'_> {
             self.request
                 .selection
                 .iter()
-                .find(|s| s.starts_with("sheet:"))
+                .find(|s| super::is_sheet(s))
                 .cloned()
         })
     }
@@ -286,7 +287,7 @@ fn picked_nets<'a>(e: &Editor<'a>) -> Result<Vec<(&'a SheetDef, String)>, EditEr
             .request
             .selection
             .iter()
-            .filter(|s| s.starts_with("net:"))
+            .filter(|s| ItemRef::parse(s).is_some_and(|r| r.net().is_some()))
             .cloned()
             .collect();
     }

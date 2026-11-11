@@ -24,6 +24,7 @@ mod wire;
 use super::edit::{lock_change, EditError, EditOutput, EditRequest};
 use super::{file_change, load_with, Files, Project};
 use crate::elab::find_pins;
+use crate::item_ref::ItemRef;
 use crate::ids::{NamePath, SchWire, WireKey, WireMode};
 use crate::ir::{Connection, Endpoint, SheetDef};
 use crate::syntax::board_edit::SourceChange;
@@ -49,9 +50,18 @@ pub(super) fn sheet_def_of(project: &Project, instance: &NamePath) -> Result<Str
         .ok_or_else(|| EditError::new(format!("no sheet instance `{instance}`")))
 }
 
+/// Whether `id` picks a schematic page (`sheet:/sens`).
+pub(super) fn is_sheet(id: &str) -> bool {
+    matches!(ItemRef::parse(id), Some(ItemRef::Sheet(_)))
+}
+
 /// The instance a page id shows: `sheet:/sens` and its later pages `sheet:/sens#2` → `/sens`.
 pub(super) fn page_instance(id: &str) -> NamePath {
-    let path = id.strip_prefix("sheet:").unwrap_or(id);
+    let path = match ItemRef::parse(id) {
+        Some(ItemRef::Sheet(page)) => page,
+        _ => id.to_owned(),
+    };
+    let path = path.as_str();
     NamePath::parse(path.split('#').next().unwrap_or(path))
 }
 
@@ -66,11 +76,11 @@ pub(super) fn target_sheet(project: &Project, request: &EditRequest) -> Result<S
         .map(str::trim)
         .filter(|s| !s.is_empty());
     match field {
-        Some(id) if id.starts_with("sheet:") || id.starts_with('/') => {
+        Some(id) if is_sheet(id) || id.starts_with('/') => {
             sheet_def_of(project, &page_instance(id))
         }
         Some(name) => Ok(name.to_owned()),
-        None => match request.selection.iter().find(|s| s.starts_with("sheet:")) {
+        None => match request.selection.iter().find(|s| is_sheet(s)) {
             Some(id) => sheet_def_of(project, &page_instance(id)),
             None => Ok(project.design.root.clone()),
         },
@@ -266,10 +276,7 @@ impl<'a> Editor<'a> {
 
     /// The clicked points in field `id` (`point:x,y`, page mm, y up), in order.
     pub fn points(&self, id: &str) -> Vec<(f64, f64)> {
-        let one = |s: &str| -> Option<(f64, f64)> {
-            let (x, y) = s.strip_prefix("point:")?.split_once(',')?;
-            Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
-        };
+        let one = |s: &str| ItemRef::parse(s)?.xy_mm();
         match self.request.values.get(id) {
             Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().and_then(one)).collect(),
             Some(Value::String(s)) => s.split(';').filter_map(|p| one(p.trim())).collect(),
@@ -318,7 +325,7 @@ impl<'a> Editor<'a> {
             self.request
                 .selection
                 .iter()
-                .filter(|s| s.starts_with("pin:") || s.starts_with("net:"))
+                .filter(|s| matches!(ItemRef::parse(s), Some(ItemRef::Pin { .. } | ItemRef::Net(_))))
                 .nth(n)
                 .cloned()
         })
@@ -326,10 +333,9 @@ impl<'a> Editor<'a> {
 
     pub fn resolve(&self, id: &str) -> Result<End, EditError> {
         let nl = &self.project.netlist;
-        if let Some(rest) = id.strip_prefix("pin:") {
-            let (designator, pin) = rest
-                .split_once('.')
-                .ok_or_else(|| EditError::new(format!("`{id}` names no pin")))?;
+        let picked = ItemRef::parse(id);
+        if let Some(ItemRef::Pin { component: designator, pin }) = &picked {
+            let (designator, pin) = (designator.as_str(), pin.as_str());
             let (comp, c) = nl
                 .component(designator)
                 .ok_or_else(|| EditError::new(format!("{designator} isn't in the design")))?;
@@ -345,7 +351,7 @@ impl<'a> Editor<'a> {
                 .ok_or_else(|| EditError::new(format!("{designator} has no pin `{pin}`")))?;
             return Ok(End::Pin { comp, pin });
         }
-        if let Some(name) = id.strip_prefix("net:") {
+        if let Some(name) = picked.as_ref().and_then(ItemRef::net) {
             let net = nl
                 .nets
                 .iter()

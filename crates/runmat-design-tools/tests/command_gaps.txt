@@ -67,10 +67,6 @@ evaluate.section-properties part
 evaluate.thickness part
 evaluate.zebra part
 explode.auto assembly
-library.create-part circuit
-library.create-part circuit.layout
-library.manufacturer-search circuit
-library.manufacturer-search circuit.layout
 manage.document-settings part
 manage.recognize-features part
 manage.replace-reference part

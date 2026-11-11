@@ -491,12 +491,6 @@ This file is generated from the command catalog.
 
 ## `library.` commands (`.circuit`, `.circuit.layout`)
 
-- `library.create-part`: Create a symbol, footprint or part in the pool.
-  - Required: `kind` (one of `part`, `symbol`, `footprint`, default `part`); `name` (text)
-- `library.manufacturer-search`: Search manufacturer parts with stock and pricing.
-  - Required: `query` (text)
-  - Optional: `manufacturer` (text)
-  - Runs on the `selection`: `component`
 - `library.open-part`: Open the selected part's pool entry.
   - Runs on the `selection`: `component`
 - `library.place`: Search the library and manufacturer parts, and place one on the sheet.

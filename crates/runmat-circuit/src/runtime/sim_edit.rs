@@ -15,6 +15,7 @@
 
 use super::edit::{EditError, EditOutput, EditRequest};
 use super::{file_change, Project};
+use crate::item_ref::ItemRef;
 use crate::simulation::{SimAnalysis, SimProbe, SimTolerance, SimulationDef};
 use crate::syntax::board_edit::SourceChange;
 use crate::syntax::parse_circuit;
@@ -80,10 +81,17 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                 .or_else(|| string(v, "net"))
                 .or_else(|| request.selection.first().cloned())
                 .ok_or_else(|| EditError::new("name the net or pin to probe"))?;
-            let probe = match at.strip_prefix("net:").or_else(|| at.strip_prefix("net.")) {
+            let picked = ItemRef::parse(&at);
+            // `net.X` is the simulation language's own spelling of a net.
+            let net = picked.as_ref().and_then(ItemRef::net).or_else(|| at.strip_prefix("net."));
+            let probe = match net {
                 Some(net) => SimProbe::Net(net.to_string()),
                 None => {
-                    let pin = at.strip_prefix("pin:").unwrap_or(&at);
+                    let pin = match &picked {
+                        Some(ItemRef::Pin { component, pin }) => format!("{component}.{pin}"),
+                        _ => at.clone(),
+                    };
+                    let pin = pin.as_str();
                     match pin.split_once('.').or_else(|| pin.split_once(':')) {
                         Some((component, pin))
                             if string(v, "kind").as_deref() != Some("voltage") =>

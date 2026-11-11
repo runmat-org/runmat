@@ -9,6 +9,8 @@ use crate::autoroute::{self, FanoutOptions, RouteOptions};
 use crate::geom::{mm, Coord};
 use crate::layer_set::CopperIndex;
 use crate::layout::NetId;
+use super::picks;
+use crate::item_ref::ItemRef;
 
 /// Runs `board.fanout`, `board.autoroute` or `board.route-net`.
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
@@ -23,7 +25,11 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
         let planes = plane_nets(board);
         match request.command.as_str() {
             "board.fanout" => {
-                let picked = picks(values, "component", &request.selection, "component:");
+                let picked: Vec<String> =
+                    picks::picks(values, &request.selection, "component", ItemRef::Component)
+                        .into_iter()
+                        .filter_map(|r| r.component().map(str::to_owned))
+                        .collect();
                 if picked.is_empty() {
                     return Err("pick the component to fan out".into());
                 }
@@ -268,48 +274,15 @@ fn via_of(values: &serde_json::Map<String, Value>, id: &str) -> Option<(Coord, C
     Some((mm(a.max(b)), mm(a.min(b))))
 }
 
-/// Picked ids with `prefix` stripped, from the field or else the selection.
-fn picks(
-    values: &serde_json::Map<String, Value>,
-    field: &str,
-    selection: &[String],
-    prefix: &str,
-) -> Vec<String> {
-    let listed: Vec<String> = match values.get(field) {
-        Some(Value::String(s)) => vec![s.clone()],
-        Some(Value::Array(a)) => a
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
-        _ => Vec::new(),
-    };
-    let ids = if listed.is_empty() {
-        selection.to_vec()
-    } else {
-        listed
-    };
-    ids.iter()
-        .filter_map(|id| {
-            id.strip_prefix(prefix)
-                .map(str::to_owned)
-                .or_else(|| (!id.contains(':')).then(|| id.clone()))
-        })
-        .collect()
-}
-
 fn net_picks(
     board: &Board,
     values: &serde_json::Map<String, Value>,
     field: &str,
     selection: &[String],
 ) -> Result<Vec<NetId>, String> {
-    picks(values, field, selection, "net:")
+    picks::picks(values, selection, field, ItemRef::Net)
         .iter()
-        .map(|n| {
-            board
-                .net(n)
-                .ok_or_else(|| format!("`{n}` is not a net on the board"))
-        })
+        .filter(|pick| pick.carries_net())
+        .map(|pick| picks::net_on(board, pick))
         .collect()
 }

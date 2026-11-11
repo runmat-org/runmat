@@ -15,6 +15,7 @@
 use crate::geom::shape::Prim;
 use crate::geom::{to_mm, Point};
 use crate::layer_set::CopperIndex;
+use crate::item_ref::ItemRef;
 use crate::layout::{Board, Footprint, Side};
 use crate::library::PadKind;
 use serde::Serialize;
@@ -307,7 +308,7 @@ pub fn board_model(board: &Board) -> BoardModel {
     m.owner.clear();
     // Pads in the finish; through holes on both sides with their drill.
     for f in board.footprints.values() {
-        m.owner = format!("component:{}", f.reference);
+        m.owner = ItemRef::Component(f.reference.clone()).to_string();
         for p in f.pads(n) {
             let both = p.layers.len() > 1;
             let sides: Vec<bool> = if both {
@@ -360,7 +361,7 @@ pub fn board_model(board: &Board) -> BoardModel {
                 );
             }
         }
-        m.owner = format!("component:{}", f.reference);
+        m.owner = ItemRef::Component(f.reference.clone()).to_string();
         component(&mut m, f, n, top);
         m.owner.clear();
     }
@@ -434,7 +435,7 @@ pub fn board_model(board: &Board) -> BoardModel {
 /// The face owner of a net's copper (`net:GND`), so selecting the net lights its tracks and vias.
 fn net_owner(board: &Board, net: Option<crate::layout::NetId>) -> String {
     net.and_then(|n| board.nets.get(n.0 as usize))
-        .map(|n| format!("net:{}", n.name))
+        .map(|n| ItemRef::Net(n.name.clone()).to_string())
         .unwrap_or_default()
 }
 
@@ -649,7 +650,7 @@ pub fn board_solid(board: &Board) -> BoardSolid {
         .filter_map(|f| {
             let (ring, z0, z1) = body_extent(f, n, thickness)?;
             Some(SolidBody {
-                reference: format!("component:{}", f.reference),
+                reference: ItemRef::Component(f.reference.clone()).to_string(),
                 ring,
                 z0,
                 z1,
