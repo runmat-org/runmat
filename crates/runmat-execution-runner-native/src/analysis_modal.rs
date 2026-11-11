@@ -49,7 +49,12 @@ async fn execute_with_pool(
 ) -> NativeExecutionResult<CompletedStructuralModalStudy> {
     policy.validate()?;
     let limits = preparation.inventory_limits;
-    let prepared = prepare_structural_modal_task(preparation).map_err(protocol)?;
+    let prepared = prepare_structural_modal_task(preparation).map_err(|error| match error {
+        runmat_analysis_execution::AnalysisBridgeError::Resource(error) => {
+            NativeExecutionError::Resource(error)
+        }
+        error => protocol(error),
+    })?;
     let [executed] = execute_analysis_task_batch(
         pool,
         vec![PreparedAnalysisTask {

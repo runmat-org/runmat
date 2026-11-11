@@ -1294,10 +1294,10 @@ fn inventory_admits_or_rejects_a_monolithic_plan() {
     ));
 }
 
-// G25: the drone arm modal study (378,609 Tet10 nodes, 1,135,827 DOFs, 256-vector admitted
-// search capacity) plans a 290,919,200-value retained basis. No fixed item or byte constant
-// refuses it; the worker's admitted memory and scratch decide, and a refusal names the bytes
-// needed and the bytes available.
+// G25: a 290,919,200-value retained basis (the drone arm modal study's 1,135,827 DOFs at the
+// 256-vector search ceiling, its size before G26 sized the subspace by the request). No fixed
+// item or byte constant refuses it; the worker's admitted memory and scratch decide, and a
+// refusal names the bytes needed and the bytes available.
 #[test]
 fn modal_basis_above_one_hundred_million_values_plans_within_the_admitted_budget() {
     let (full_dofs, modes, nodes) = (1_135_827_u64, 256_u64, 378_609_u64);

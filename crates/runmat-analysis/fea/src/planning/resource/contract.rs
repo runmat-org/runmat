@@ -92,8 +92,8 @@ pub use transient_recovery_demand::StructuralTransientFieldRecoveryResourceDeman
 pub use transient_scope_demand::StructuralTransientScopeResourceDemand;
 
 pub use super::solve_policy::{
-    NumericalScalar, PreconditionerStorage, SolveResourcePolicy, SolverAdmissionResourcePolicy,
-    StaticSolvePath, StaticSolveSelection,
+    ModalSolveSelection, NumericalScalar, PreconditionerStorage, SolveResourcePolicy,
+    SolverAdmissionResourcePolicy, StaticSolvePath, StaticSolveSelection, SubspaceSolvePath,
 };
 
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";

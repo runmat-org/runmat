@@ -113,7 +113,14 @@ pub(super) fn execute_structural_modal_extraction(
     let result_output =
         structural_modal_result_output_resource_facts(Some(&mesh), &constraints, &workload)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let expected_resource_plan = build_structural_modal_resource_plan_from_compilation(
+    // The submitted plan records its solve path; the re-derivation reproduces that path and the
+    // solver follows it.
+    let path = runmat_analysis_fea::planning::resource::recorded_modal_solve_path(&resource_plan)
+        .ok_or_else(|| {
+        AnalysisBridgeError::Invalid("structural modal resource plan records no solve path".into())
+    })?;
+    let expected_resource_plan =
+        runmat_analysis_fea::planning::resource::build_structural_modal_resource_plan_selecting(
         Some(&mesh),
         &compiled,
         &observations,
@@ -140,8 +147,9 @@ pub(super) fn execute_structural_modal_extraction(
                 )?,
             output_set: projected_output_set_resource_facts(),
         },
+        runmat_analysis_fea::planning::resource::ModalSolveSelection::Recorded(path),
     )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    .map_err(AnalysisBridgeError::Resource)?;
     if resource_plan != expected_resource_plan
         || resource_plan.input.phase
             != FeaResourcePhase::StructuralModalExtraction(workload.identity())
@@ -164,10 +172,14 @@ pub(super) fn execute_structural_modal_extraction(
     let result = runmat_cpu_execution::with_cpu_pool(cpu_threads, || {
         let _progress = runmat_analysis_fea::replace_fea_progress_context(progress);
         span.in_scope(|| match prestress_state.as_ref() {
-            Some(state) => runmat_analysis_fea::execute_structural_prestressed_modal_workload(
-                &workload, &mesh, state,
+            Some(state) => {
+                runmat_analysis_fea::execute_structural_prestressed_modal_workload_on_path(
+                    &workload, &mesh, state, path,
+                )
+            }
+            None => runmat_analysis_fea::execute_structural_modal_workload_on_path(
+                &workload, &mesh, path,
             ),
-            None => runmat_analysis_fea::execute_structural_modal_workload(&workload, &mesh),
         })
     })
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?

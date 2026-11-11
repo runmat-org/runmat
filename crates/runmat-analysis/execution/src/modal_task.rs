@@ -10,9 +10,9 @@ use runmat_analysis_fea::{
         StructuralModalSolverResult, StructuralModalWorkload, StudyIdentity,
     },
     planning::resource::{
-        build_structural_modal_resource_plan_from_compilation,
+        build_structural_modal_resource_plan_selecting,
         structural_modal_receipt_payload_bytes_upper_bound,
-        structural_modal_result_output_resource_facts, FeaResourcePlan,
+        structural_modal_result_output_resource_facts, FeaResourcePlan, ModalSolveSelection,
         PreparedStructuralModalResourceFacts,
     },
     post::fields::structural_observable_field_definitions,
@@ -57,6 +57,9 @@ pub struct StructuralModalTaskPreparation {
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
+    /// How the plan chooses the modal solve path: within min(authored, the admitted machine
+    /// memory) for a fresh run, or the path an admitted plan recorded.
+    pub solve_selection: ModalSolveSelection,
 }
 
 pub struct PreparedStructuralModalTask {
@@ -194,7 +197,7 @@ pub fn prepare_structural_modal_task(
         &preparation.workload,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let resource_plan = build_structural_modal_resource_plan_from_compilation(
+    let resource_plan = build_structural_modal_resource_plan_selecting(
         Some(&preparation.mesh),
         &compiled,
         &observations,
@@ -216,8 +219,9 @@ pub fn prepare_structural_modal_task(
             )?,
             output_set: projected_output_set_resource_facts(),
         },
+        preparation.solve_selection,
     )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    .map_err(AnalysisBridgeError::Resource)?;
     let resource_bytes = resource_plan
         .canonical_bytes()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;

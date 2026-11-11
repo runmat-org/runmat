@@ -249,6 +249,7 @@ pub(super) fn validate_operator_demand(
             orthogonalization_passes_per_block,
             dense_projected_value_count_upper_bound,
             workspace_bytes_upper_bound,
+            ..
         } if full_dimension.0 == 0
             || reduced_dimension.0 == 0
             || reduced_dimension.0 > full_dimension.0

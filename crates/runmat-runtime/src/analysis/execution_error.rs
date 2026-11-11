@@ -84,6 +84,8 @@ pub(super) fn map_fea_run_error(
                 | ResourcePlanningError::AccuracyCeiling { .. }
                 | ResourcePlanningError::StaticSolveCeiling { .. }
                 | ResourcePlanningError::ThermalSolveCeiling { .. }
+                | ResourcePlanningError::ModalSolveCeiling { .. }
+                | ResourcePlanningError::ModalSubspaceCapacity { .. }
                 | ResourcePlanningError::Inventory(_)
                 | ResourcePlanningError::Capability(_)
                 | ResourcePlanningError::Accelerator { .. } => OperationErrorType::Capacity,
@@ -240,6 +242,15 @@ mod tests {
                 resource: "resident memory bytes",
                 required: 2,
                 maximum: 1,
+            },
+            ResourcePlanningError::ModalSubspaceCapacity {
+                requested_mode_count: 4,
+                admitted_subspace_dimension: 13,
+            },
+            ResourcePlanningError::ModalSolveCeiling {
+                factorization_resident_bytes: 4,
+                lobpcg_resident_bytes: 3,
+                maximum: 2,
             },
         ] {
             let ceiling = map_fea_run_error(

@@ -17,10 +17,10 @@ use super::{
     structural_facts::derive_structural_resource_facts,
     AcceleratorRequirement, AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount,
     CheckpointArtifactPolicy, Count, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
-    FeaResourcePlanningInput, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
-    PreparedStructuralModalResourceFacts, ResourcePlanningError, SolveResourcePolicy,
-    StructuralModalResourceDemand, StructuralOperatorResourceDemand, WorkerResourcePolicy,
-    RESOURCE_ESTIMATION_MODEL_REVISION,
+    FeaResourcePlanningInput, ModalSolveSelection, ObservationResourceFacts, PartitioningPolicy,
+    PhaseResourcePolicy, PreparedStructuralModalResourceFacts, ResourcePlanningError,
+    SolveResourcePolicy, StructuralModalResourceDemand, StructuralOperatorResourceDemand,
+    SubspaceSolvePath, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const ACCELERATOR_CG_RESIDENT_VECTOR_COUNT: u64 = 6;
@@ -40,8 +40,8 @@ use observations::resolve_modal_observations;
 pub(super) use sizing::structural_modal_accelerator_minimum_bytes;
 
 use sizing::{
-    modal_output_value_count, modal_phase_value_count, modal_result_payload_bytes,
-    modal_workspace_bytes, prepared_output_covers_transport,
+    modal_eigensolver_working_values, modal_output_value_count, modal_phase_value_count,
+    modal_result_payload_bytes, modal_workspace_bytes, prepared_output_covers_transport,
 };
 pub use sizing::{
     structural_modal_receipt_payload_bytes_upper_bound,
@@ -81,7 +81,8 @@ pub fn build_structural_modal_resource_plan(
     )
 }
 
-/// Reuse the exact fresh construction; detached or cold inventory is not accepted.
+/// Reuse the exact fresh construction; detached or cold inventory is not accepted. Plans
+/// within the authored ceiling alone (no machine memory is known).
 pub fn build_structural_modal_resource_plan_from_compilation(
     mesh: Option<&SolverMeshArtifact>,
     compilation: &crate::constraints::ConstraintCompilation<'_>,
@@ -90,6 +91,117 @@ pub fn build_structural_modal_resource_plan_from_compilation(
     prestress_state: Option<&CanonicalSemanticState>,
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedStructuralModalResourceFacts,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    build_structural_modal_resource_plan_selecting(
+        mesh,
+        compilation,
+        observations,
+        workload,
+        prestress_state,
+        accelerator_requests,
+        prepared,
+        ModalSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
+    )
+}
+
+/// The modal solve path a plan recorded (`None` for other plans).
+pub fn recorded_modal_solve_path(plan: &FeaResourcePlan) -> Option<SubspaceSolvePath> {
+    match &plan.input.demand {
+        FeaResourceDemand::StructuralModalExtraction(demand) => {
+            demand.operator.solve.subspace_solve_path()
+        }
+        _ => None,
+    }
+}
+
+/// Plans a modal workload on the path `selection` names.
+///
+/// Path-selection law: with the effective ceiling min(authored resident budget, machine
+/// memory when known), the shift-invert factorization is chosen when its whole plan (memory
+/// and scratch) fits the ceiling; otherwise preconditioned LOBPCG when its plan fits;
+/// otherwise [`ResourcePlanningError::ModalSolveCeiling`] names both requirements. The plan
+/// records the path, and the worker's re-derivation and the solver follow the record.
+#[allow(clippy::too_many_arguments)]
+pub fn build_structural_modal_resource_plan_selecting(
+    mesh: Option<&SolverMeshArtifact>,
+    compilation: &crate::constraints::ConstraintCompilation<'_>,
+    observations: &ResolvedObservationPlan,
+    workload: &StructuralModalWorkload,
+    prestress_state: Option<&CanonicalSemanticState>,
+    accelerator_requests: &[AcceleratorRequest],
+    prepared: PreparedStructuralModalResourceFacts,
+    selection: ModalSolveSelection,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let plan_path = |path: SubspaceSolvePath| {
+        build_structural_modal_resource_plan_on_path(
+            mesh,
+            compilation,
+            observations,
+            workload,
+            prestress_state,
+            accelerator_requests,
+            prepared.clone(),
+            path,
+        )
+    };
+    let machine_memory_bytes = match selection {
+        ModalSolveSelection::Recorded(path) => return plan_path(path),
+        ModalSolveSelection::WithinCeiling {
+            machine_memory_bytes,
+        } => machine_memory_bytes,
+    };
+    let authored = workload
+        .procedure_step()
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+        .accuracy
+        .resources
+        .resident_byte_budget();
+    let ceiling = machine_memory_bytes.map_or(authored, |machine| machine.min(authored));
+    let fits = |plan: &FeaResourcePlan| {
+        plan.request.memory_bytes <= ceiling && plan.request.scratch_bytes <= ceiling
+    };
+    let required = |planned: Result<FeaResourcePlan, ResourcePlanningError>| match planned {
+        Ok(plan) if fits(&plan) => Ok(Ok(plan)),
+        Ok(plan) => Ok(Err(plan
+            .request
+            .memory_bytes
+            .max(plan.request.scratch_bytes))),
+        Err(ResourcePlanningError::AccuracyCeiling {
+            resource: super::RESIDENT_MEMORY_RESOURCE,
+            required,
+            ..
+        }) => Ok(Err(required)),
+        Err(error) => Err(error),
+    };
+    let factorization_resident_bytes =
+        match required(plan_path(SubspaceSolvePath::ShiftInvertFactorization))? {
+            Ok(plan) => return Ok(plan),
+            Err(bytes) => bytes,
+        };
+    let lobpcg_resident_bytes = match required(plan_path(SubspaceSolvePath::PreconditionedLobpcg))?
+    {
+        Ok(plan) => return Ok(plan),
+        Err(bytes) => bytes,
+    };
+    Err(ResourcePlanningError::ModalSolveCeiling {
+        factorization_resident_bytes,
+        lobpcg_resident_bytes,
+        maximum: ceiling,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_structural_modal_resource_plan_on_path(
+    mesh: Option<&SolverMeshArtifact>,
+    compilation: &crate::constraints::ConstraintCompilation<'_>,
+    observations: &ResolvedObservationPlan,
+    workload: &StructuralModalWorkload,
+    prestress_state: Option<&CanonicalSemanticState>,
+    accelerator_requests: &[AcceleratorRequest],
+    prepared: PreparedStructuralModalResourceFacts,
+    path: SubspaceSolvePath,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let constraints = compilation.plan();
     let compiler_peak = super::constraint_compilation::original_compilation_peak(
@@ -224,14 +336,33 @@ pub fn build_structural_modal_resource_plan_from_compilation(
         workload.model(),
         admission,
     )?;
-    let shifted_nonzeros = count(
-        reduced_tangent
-            .union(&reduced_mass)
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
-            .column_indices()
-            .len(),
-        "shifted operator nonzeros",
-    )?;
+    let shifted_pattern = reduced_tangent
+        .union(&reduced_mass)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    // The completeness proof's factor-free inertia count on the pencil's union pattern, with
+    // the coercivity envelope's 25% headroom between the planned support and the numerical
+    // pattern the solver analyzes.
+    let inertia_bytes = {
+        let words = |values: &[u64]| -> Result<Vec<usize>, ResourcePlanningError> {
+            values
+                .iter()
+                .map(|&value| {
+                    usize::try_from(value)
+                        .map_err(|_| ResourcePlanningError::Overflow("modal inertia pattern"))
+                })
+                .collect()
+        };
+        let estimate = runmat_sparse_solvers::eigen::pencil_inertia_estimate(
+            usize::try_from(reduced_dimension)
+                .map_err(|_| ResourcePlanningError::Overflow("modal reduced dimension"))?,
+            &words(shifted_pattern.row_offsets())?,
+            &words(shifted_pattern.column_indices())?,
+            &crate::solve::modal::modal_eigen_options(1, workload.convergence()).ordering,
+        )
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        checked_mul(estimate.resident_bytes, 5, "modal inertia headroom")? / 4
+    };
+    drop(shifted_pattern);
     // The local-energy proof holds the operator's entry intervals plus its block-derived
     // storage, which the source inventory bounds (capture or proof additions, the larger).
     let energy_proof_bytes = if source_bytes == 0 {
@@ -243,6 +374,35 @@ pub fn build_structural_modal_resource_plan_from_compilation(
             "modal local-energy proof",
         )?
     };
+    let (eigensolver_values, residency) = match path {
+        SubspaceSolvePath::ShiftInvertFactorization => (
+            modal_eigensolver_working_values(
+                reduced_dimension,
+                maximum_subspace_dimension,
+                workload.convergence(),
+            )?,
+            sizing::ModalSearchResidency::ShiftInvertFactor {
+                factor_bytes: admission.factor_resident_limit(),
+                energy_proof_bytes,
+            },
+        ),
+        SubspaceSolvePath::PreconditionedLobpcg => (
+            sizing::modal_lobpcg_working_values(
+                reduced_dimension,
+                maximum_subspace_dimension,
+                workload.convergence(),
+            )?,
+            sizing::ModalSearchResidency::Multigrid {
+                preconditioner_bytes: runmat_sparse_solvers::estimate::amg_bytes(
+                    usize::try_from(reduced_dimension)
+                        .map_err(|_| ResourcePlanningError::Overflow("modal reduced dimension"))?,
+                    usize::try_from(reduced_tangent_nonzeros)
+                        .map_err(|_| ResourcePlanningError::Overflow("modal stiffness nonzeros"))?,
+                    3,
+                ),
+            },
+        ),
+    };
     let workspace_bytes = modal_workspace_bytes(
         sizing::ModalWorkspaceDimensions {
             full: full_dimension,
@@ -250,12 +410,12 @@ pub fn build_structural_modal_resource_plan_from_compilation(
             subspace: maximum_subspace_dimension,
             residual_vectors: residual_vector_count,
         },
-        sizing::ModalOperatorStorage {
+        sizing::ModalSearchStorage {
             stiffness_nonzeros: reduced_tangent_nonzeros,
             mass_nonzeros: reduced_mass_nonzeros,
-            shifted_nonzeros,
-            factor_bytes: admission.factor_resident_limit(),
-            energy_proof_bytes,
+            eigensolver_values,
+            inertia_bytes,
+            residency,
         },
     )?;
 
@@ -472,6 +632,7 @@ pub fn build_structural_modal_resource_plan_from_compilation(
                     )?),
                     dense_projected_value_count_upper_bound: Count(dense_projected_values),
                     workspace_bytes_upper_bound: ByteCount(workspace_bytes),
+                    path,
                 },
                 phase_resources: PhaseResourcePolicy {
                     resident_value_count: Count(modal_phase_values),

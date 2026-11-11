@@ -27,6 +27,38 @@ fn measured_dense<R>(
     Ok(result)
 }
 
+/// Parallel above 512 rows, with at most `n` threads so the scratch stays within
+/// [`symmetric_eigen_scratch_values`].
+fn symmetric_eigen_parallelism(n: usize) -> faer::Par {
+    let parallelism = par::faer_par();
+    if n >= 512 && parallelism.degree() <= n {
+        parallelism
+    } else {
+        faer::Par::Seq
+    }
+}
+
+fn symmetric_eigen_scratch(n: usize, parallelism: faer::Par) -> faer::dyn_stack::StackReq {
+    faer::linalg::evd::self_adjoint_evd_scratch::<f64>(
+        n,
+        faer::linalg::evd::ComputeEigenvectors::Yes,
+        parallelism,
+        Default::default(),
+    )
+}
+
+/// Upper bound on the scratch [`symmetric_eigen`] allocates for an `n × n` matrix, in `f64`
+/// values. The parallel tridiagonalization holds one `n`-vector per thread, and the solver runs
+/// at most `n` threads, so the parallel case adds at most `n²` values to the serial scratch.
+/// The bound does not depend on the host's thread count.
+pub fn symmetric_eigen_scratch_values(n: usize) -> usize {
+    let serial = symmetric_eigen_scratch(n, faer::Par::Seq)
+        .size_bytes()
+        .div_ceil(std::mem::size_of::<f64>());
+    let parallel = if n >= 512 { n.saturating_mul(n) } else { 0 };
+    serial.saturating_add(parallel)
+}
+
 /// Eigen-decomposition of a real symmetric `n × n` matrix (lower triangle read). Returns
 /// ascending eigenvalues and column-major orthonormal eigenvectors.
 /// The opaque faer eigen kernel is explicitly excluded from rsua-1 in 0.7.0;
@@ -38,17 +70,8 @@ pub fn symmetric_eigen(a: &[f64], n: usize) -> SolverResult<(Vec<f64>, Vec<f64>)
     if n == 0 {
         return Ok((values, vectors));
     }
-    let parallelism = if n >= 512 {
-        par::faer_par()
-    } else {
-        faer::Par::Seq
-    };
-    let req = faer::linalg::evd::self_adjoint_evd_scratch::<f64>(
-        n,
-        faer::linalg::evd::ComputeEigenvectors::Yes,
-        parallelism,
-        Default::default(),
-    );
+    let parallelism = symmetric_eigen_parallelism(n);
+    let req = symmetric_eigen_scratch(n, parallelism);
     let mut buffer =
         faer::dyn_stack::MemBuffer::try_new(req).map_err(|_| SolverError::OutOfMemory {
             bytes: req.size_bytes() as u64,

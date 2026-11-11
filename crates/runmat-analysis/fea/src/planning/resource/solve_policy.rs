@@ -40,6 +40,31 @@ pub enum StaticSolveSelection {
     Recorded(StaticSolvePath),
 }
 
+/// How a symmetric eigen-search finds its modes and proves that no mode below the reported
+/// ones was missed; recorded in the plan so every re-derivation and the solver follow it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubspaceSolvePath {
+    /// The Cholesky factor that proves `K` coercive is the shift-invert operator of block
+    /// Lanczos. The factor is released before the Sturm inertia count.
+    ShiftInvertFactorization,
+    /// Block LOBPCG with an AMG preconditioner of `K`; no factor is retained. Two factor-free
+    /// inertia counts prove `K` positive definite and count the eigenvalues below the Sturm
+    /// probe.
+    PreconditionedLobpcg,
+}
+
+/// Selects the modal solve path while planning.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModalSolveSelection {
+    /// The shift-invert factorization when its plan fits the effective memory ceiling,
+    /// min(authored ceiling, this machine's admitted memory when known); otherwise LOBPCG when
+    /// its plan fits that ceiling.
+    WithinCeiling { machine_memory_bytes: Option<u64> },
+    /// Reproduce the path an admitted plan recorded.
+    Recorded(SubspaceSolvePath),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NumericalScalar {
@@ -125,10 +150,19 @@ pub enum SolveResourcePolicy {
         orthogonalization_passes_per_block: Count,
         dense_projected_value_count_upper_bound: Count,
         workspace_bytes_upper_bound: ByteCount,
+        path: SubspaceSolvePath,
     },
 }
 
 impl SolveResourcePolicy {
+    /// The recorded eigen-search path (`None` for policies without one).
+    pub fn subspace_solve_path(&self) -> Option<SubspaceSolvePath> {
+        match self {
+            Self::SymmetricSubspaceIteration { path, .. } => Some(*path),
+            _ => None,
+        }
+    }
+
     /// The recorded static solve path (`None` for policies without one).
     pub fn static_solve_path(&self) -> Option<StaticSolvePath> {
         match self {
