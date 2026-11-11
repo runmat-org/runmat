@@ -79,3 +79,29 @@ fn assembly_step_preview_keeps_face_and_product_names() {
         .collect();
     assert_eq!(bodies, ["arm", "motor_pod"], "regions: {:?}", names());
 }
+
+const DRONE_ESC: &[u8] = include_bytes!("fixtures/drone_esc_thermal.step");
+
+// The drone ESC thermal study places product `esc_board_thermal` as occurrence `esc_board`. A
+// body takes its product's name, as the exact import names solids, so the study's
+// `select name "esc_board_thermal"` resolves in the preview too.
+#[test]
+fn assembly_step_preview_names_bodies_by_product() {
+    let imported = import_geometry(
+        "drone_esc_thermal.step",
+        DRONE_ESC,
+        GeometryImportOptions::default(),
+    )
+    .unwrap();
+    let regions = &imported.asset.regions;
+    let mut bodies: Vec<_> = regions
+        .iter()
+        .filter(|r| r.tag.as_deref() == Some("cad_body"))
+        .map(|r| r.name.as_str())
+        .collect();
+    bodies.sort();
+    assert_eq!(bodies, ["esc_board_thermal", "esc_heatsink", "thermal_pad"]);
+    assert!(regions
+        .iter()
+        .any(|r| r.name == "fins" && r.tag.as_deref() == Some("occt_face")));
+}
