@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::layer_set::CopperIndex;
+use crate::item_ref::ItemRef;
 
 /* ------------------------------------------------------------------------------------------------
  * Edits
@@ -435,7 +436,10 @@ fn update_schematic(project: &Project, request: &EditRequest) -> Result<EditOutp
 
 /// `room:ch[0]` → `ch[0]`; a bare room name stays.
 fn room_name(id: &str) -> String {
-    id.strip_prefix("room:").unwrap_or(id).to_owned()
+    match ItemRef::read(id, ItemRef::Room) {
+        Some(ItemRef::Room(name)) => name,
+        _ => id.to_owned(),
+    }
 }
 
 fn room_formats(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
@@ -446,7 +450,7 @@ fn room_formats(project: &Project, request: &EditRequest) -> Result<EditOutput, 
             request
                 .selection
                 .iter()
-                .filter(|s| s.starts_with("room:"))
+                .filter(|s| matches!(ItemRef::parse(s), Some(ItemRef::Room(_))))
                 .cloned(),
         )
         .next()
@@ -623,7 +627,10 @@ pub(super) fn board_edit(
             let nets = strings(values.get("nets"));
             let net = nets
                 .first()
-                .map(|n| n.strip_prefix("net:").unwrap_or(n).to_owned())
+                .and_then(|n| ItemRef::read(n, ItemRef::Net))
+                .map(|r| super::picks::net_name_on(board, &r))
+                .transpose()
+                .map_err(EditError::new)?
                 .ok_or_else(|| EditError::new("pick the net for the test point"))?;
             if nets.len() > 1 {
                 return Err(EditError::new("test points are placed one net at a time"));
