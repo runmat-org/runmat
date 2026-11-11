@@ -9,10 +9,58 @@ use crate::planning::resource::{
 };
 
 const ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
-/// Block size of the shared shift-invert Lanczos (`EigenOptions::default().block_size`).
-const LANCZOS_BLOCK_SIZE: u64 = 6;
 const MODAL_RECEIPT_PAYLOAD_BYTES_UPPER_BOUND: u64 = 16 * 1024;
 
+/// `f64` values the shift-invert eigensolver holds for one search of `subspace_dimension`
+/// vectors, from the options the solver itself uses.
+pub(super) fn modal_eigensolver_working_values(
+    reduced_dimension: u64,
+    subspace_dimension: u64,
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+) -> Result<u64, ResourcePlanningError> {
+    let reduced = usize::try_from(reduced_dimension)
+        .map_err(|_| ResourcePlanningError::Overflow("modal reduced dimension"))?;
+    let subspace = usize::try_from(subspace_dimension)
+        .map_err(|_| ResourcePlanningError::Overflow("modal subspace dimension"))?;
+    let options = crate::solve::modal::modal_eigen_options(subspace, convergence);
+    runmat_sparse_solvers::eigen::modal_working_value_count(&options, reduced)
+        .and_then(|values| u64::try_from(values).ok())
+        .ok_or(ResourcePlanningError::Overflow(
+            "modal eigensolver working set",
+        ))
+}
+
+/// `f64` values the LOBPCG iteration holds for one search of `subspace_dimension` vectors,
+/// from the options the solver itself uses.
+pub(super) fn modal_lobpcg_working_values(
+    reduced_dimension: u64,
+    subspace_dimension: u64,
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+) -> Result<u64, ResourcePlanningError> {
+    let reduced = usize::try_from(reduced_dimension)
+        .map_err(|_| ResourcePlanningError::Overflow("modal reduced dimension"))?;
+    let subspace = usize::try_from(subspace_dimension)
+        .map_err(|_| ResourcePlanningError::Overflow("modal subspace dimension"))?;
+    let options = crate::solve::modal::modal_lobpcg_options(subspace, convergence);
+    runmat_sparse_solvers::eigen::modal_lobpcg_working_value_count(&options, reduced)
+        .and_then(|values| u64::try_from(values).ok())
+        .ok_or(ResourcePlanningError::Overflow("modal LOBPCG working set"))
+}
+
+/// What the eigen-search holds besides its vectors while it iterates, by path.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum ModalSearchResidency {
+    /// The coercivity-proving Cholesky factor (the shift-invert operator), or the local-energy
+    /// proof that runs before it and releases its storage when it returns.
+    ShiftInvertFactor {
+        factor_bytes: u64,
+        energy_proof_bytes: u64,
+    },
+    /// The AMG hierarchy of K that preconditions LOBPCG.
+    Multigrid { preconditioner_bytes: u64 },
+}
+
+/// Vector dimensions of one modal search.
 pub(super) struct ModalWorkspaceDimensions {
     pub full: u64,
     pub reduced: u64,
@@ -20,17 +68,27 @@ pub(super) struct ModalWorkspaceDimensions {
     pub residual_vectors: u64,
 }
 
-pub(super) struct ModalOperatorStorage {
+/// What one modal search stores besides its vectors' dimensions.
+pub(super) struct ModalSearchStorage {
     pub stiffness_nonzeros: u64,
     pub mass_nonzeros: u64,
-    pub shifted_nonzeros: u64,
-    pub factor_bytes: u64,
-    pub energy_proof_bytes: u64,
+    pub eigensolver_values: u64,
+    pub inertia_bytes: u64,
+    pub residency: ModalSearchResidency,
 }
 
+/// Bytes of one modal search, with each store held only for its lifetime:
+///
+/// 1. the reduced operators (K, M and C) throughout;
+/// 2. the eigen-search: the path's factor or preconditioner together with the search vectors
+///    (`eigensolver_values`, plus the expanded full-length candidates);
+/// 3. the completeness proof after the factor or preconditioner is released: the factor-free
+///    inertia count (`inertia_bytes`) beside the retained candidates.
+///
+/// The peak is the reduced operators plus the larger of phases 2 and 3.
 pub(super) fn modal_workspace_bytes(
     dimensions: ModalWorkspaceDimensions,
-    operators: ModalOperatorStorage,
+    storage: ModalSearchStorage,
 ) -> Result<u64, ResourcePlanningError> {
     let ModalWorkspaceDimensions {
         full: full_dimension,
@@ -38,13 +96,13 @@ pub(super) fn modal_workspace_bytes(
         subspace: subspace_dimension,
         residual_vectors: residual_vector_count,
     } = dimensions;
-    let ModalOperatorStorage {
+    let ModalSearchStorage {
         stiffness_nonzeros: reduced_stiffness_nonzeros,
         mass_nonzeros: reduced_mass_nonzeros,
-        shifted_nonzeros,
-        factor_bytes,
-        energy_proof_bytes,
-    } = operators;
+        eigensolver_values,
+        inertia_bytes,
+        residency,
+    } = storage;
     let reduced_row_offsets = checked_bytes(
         checked_mul(
             checked_add(reduced_dimension, 1, "reduced row offsets")?,
@@ -68,79 +126,49 @@ pub(super) fn modal_workspace_bytes(
         checked_bytes(reduced_entries, 16, "reduced operator entries")?,
         "reduced operators",
     )?;
-    // Shift-invert block Lanczos (shared sparse layer): basis of
-    // max(2s + 2p, s + 8p) vectors with block p, plus restart, block and Ritz-vector copies.
-    let block = LANCZOS_BLOCK_SIZE;
-    let basis = checked_add(
-        checked_mul(subspace_dimension, 2, "Lanczos basis")?,
-        2 * block,
-        "Lanczos basis",
-    )?
-    .max(checked_add(subspace_dimension, 8 * block, "Lanczos basis")?);
-    let vector_values = checked_add(
+    let candidates = checked_bytes(
         checked_mul(full_dimension, subspace_dimension, "expanded modal vectors")?,
-        checked_mul(
-            reduced_dimension,
-            checked_add(
-                checked_mul(basis, 2, "Lanczos basis and restart copy")?,
-                checked_add(subspace_dimension, 6 * block, "Ritz vectors and blocks")?,
-                "reduced Lanczos vectors",
-            )?,
-            "reduced Lanczos vectors",
-        )?,
-        "modal vector values",
+        8,
+        "expanded modal vectors",
     )?;
-    let dense_values = checked_mul(
-        checked_mul(basis, basis, "dense projected matrices")?,
-        4,
-        "dense projected matrices",
-    )?;
-    let residual_workspace_values = if residual_vector_count == 0 {
+    let residual_workspace = if residual_vector_count == 0 {
         0
     } else {
-        checked_add(
-            checked_mul(full_dimension, 6, "residual-vector full workspace")?,
-            checked_mul(reduced_dimension, 8, "residual-vector reduced workspace")?,
+        checked_bytes(
+            checked_add(
+                checked_mul(full_dimension, 6, "residual-vector full workspace")?,
+                checked_mul(reduced_dimension, 8, "residual-vector reduced workspace")?,
+                "residual-vector workspace",
+            )?,
+            8,
             "residual-vector workspace",
         )?
     };
-    let vector_and_dense = checked_bytes(
-        checked_add(
-            checked_add(vector_values, dense_values, "modal numerical workspace")?,
-            residual_workspace_values,
-            "modal and residual-vector workspace",
-        )?,
-        8,
-        "modal numerical workspace",
+    let search_store = match residency {
+        ModalSearchResidency::ShiftInvertFactor {
+            factor_bytes,
+            energy_proof_bytes,
+        } => factor_bytes.max(energy_proof_bytes),
+        ModalSearchResidency::Multigrid {
+            preconditioner_bytes,
+        } => preconditioner_bytes,
+    };
+    let search = checked_add(
+        search_store,
+        checked_bytes(eigensolver_values, 8, "modal eigensolver working set")?,
+        "modal eigen-search",
     )?;
-    // The coercivity-proving Cholesky factor is the shift-invert operator. After the Lanczos
-    // iteration the Sturm check assembles K − σ'M on the union pattern and factors it
-    // (Bunch–Kaufman, same symbolic size) while the Cholesky factor is still held. A
-    // local-energy proof, when the original source is captured, runs before either factor
-    // exists and releases its storage when it returns.
-    let shifted_operator = checked_add(
-        checked_bytes(
-            checked_add(reduced_dimension, 1, "shifted row offsets")?,
-            8,
-            "shifted row offsets",
-        )?,
-        checked_bytes(shifted_nonzeros, 16, "shifted operator entries")?,
-        "shifted operator",
-    )?;
-    let factors = checked_add(
-        checked_mul(factor_bytes, 2, "Cholesky and Sturm factors")?,
-        shifted_operator,
-        "Sturm factorization",
-    )?;
-    checked_add(
-        checked_add(
-            reduced_operator_bytes,
-            factors.max(energy_proof_bytes),
-            "reduced operators and factors",
-        )?,
-        vector_and_dense,
-        "modal workspace",
-    )
+    let phases = search.max(inertia_bytes);
+    [
+        reduced_operator_bytes,
+        phases,
+        candidates,
+        residual_workspace,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, value| {
+        checked_add(total, value, "modal workspace")
+    })
 }
 
 pub(super) fn modal_output_value_count(
@@ -313,4 +341,103 @@ pub(in crate::planning::resource) fn structural_modal_accelerator_minimum_bytes(
         .try_fold(0_u64, |total, value| {
             checked_add(total, value, "modal accelerator")
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::modal_governance::ModalConvergencePolicy;
+
+    // G26: the drone arm modal study requests 4 modes on 1,135,827 DOFs (378,609 Tet10 nodes).
+    // Its inventories follow the 13-vector working subspace, not the 256-vector search ceiling.
+    #[test]
+    fn arm_modal_inventories_follow_the_requested_working_subspace() {
+        let (full, nodes) = (1_135_827_u64, 378_609_u64);
+        let convergence = ModalConvergencePolicy::production();
+        let subspace = convergence
+            .admitted_subspace_dimension(1_135_827, 4)
+            .unwrap() as u64;
+        assert_eq!(subspace, 13);
+        let output = modal_output_value_count(full, subspace, 0).unwrap();
+        assert_eq!(output, full * 13 + 2 * 13 * 13 + 64 * 13 + 32);
+        assert_eq!(output, 14_766_953);
+        let ceiling = modal_output_value_count(full, 256, 0).unwrap();
+        assert_eq!(ceiling, 290_919_200);
+        let phase = modal_phase_value_count(output, full, subspace, nodes, 0).unwrap();
+        let phase_at_ceiling = modal_phase_value_count(ceiling, full, 256, nodes, 0).unwrap();
+        assert!(
+            phase * 19 < phase_at_ceiling,
+            "{phase} vs {phase_at_ceiling}"
+        );
+
+        // The eigensolver's working set comes from the solver's own options: a 61-vector
+        // Lanczos basis (max(2·13 + 2·6, 13 + 8·6)) and its restart copy, four blocks of 6,
+        // two copies of the 13 Ritz vectors, and four 61 × 61 projected matrices.
+        let working = modal_eigensolver_working_values(full, subspace, convergence).unwrap();
+        assert_eq!(working, full * (2 * 61 + 4 * 6 + 2 * 13) + 4 * 61 * 61);
+        let at_ceiling = modal_eigensolver_working_values(full, 256, convergence).unwrap();
+        assert!(working * 9 < at_ceiling, "{working} vs {at_ceiling}");
+    }
+
+    // G29: the proving factor is released before the Sturm count, so the plan charges the
+    // larger of the two, never their sum.
+    #[test]
+    fn modal_workspace_follows_the_sequential_lifetime_of_factor_and_proof() {
+        let (full, reduced, subspace) = (1_135_827_u64, 1_132_980_u64, 13_u64);
+        let (stiffness, mass) = (94_600_000_u64, 31_500_000_u64);
+        let factor = 28_374_290_490_u64;
+        let inertia = 6_000_000_000_u64;
+        let eigen = 70_000_000_u64;
+        let workspace = |inertia_bytes, residency| {
+            modal_workspace_bytes(
+                ModalWorkspaceDimensions {
+                    full,
+                    reduced,
+                    subspace,
+                    residual_vectors: 0,
+                },
+                ModalSearchStorage {
+                    stiffness_nonzeros: stiffness,
+                    mass_nonzeros: mass,
+                    eigensolver_values: eigen,
+                    inertia_bytes,
+                    residency,
+                },
+            )
+            .unwrap()
+        };
+        let direct = |inertia_bytes| {
+            workspace(
+                inertia_bytes,
+                ModalSearchResidency::ShiftInvertFactor {
+                    factor_bytes: factor,
+                    energy_proof_bytes: 0,
+                },
+            )
+        };
+        let base = direct(0) - factor - eigen * 8;
+        // The factor phase dominates: the inertia count adds nothing.
+        assert_eq!(direct(inertia), direct(0));
+        // A proof larger than the factor phase replaces it; it never adds to it.
+        assert_eq!(direct(factor * 2), base + factor * 2);
+        assert!(direct(factor) < base + 2 * factor);
+        // The LOBPCG path holds the multigrid hierarchy during the search instead.
+        let amg = 5_000_000_000_u64;
+        let iterative = workspace(
+            inertia,
+            ModalSearchResidency::Multigrid {
+                preconditioner_bytes: amg,
+            },
+        );
+        assert_eq!(iterative, base + (amg + eigen * 8).max(inertia));
+    }
+
+    #[test]
+    fn small_pencils_reserve_the_dense_fallback() {
+        let convergence = ModalConvergencePolicy::production();
+        let n = 300_u64;
+        let working = modal_eigensolver_working_values(n, 13, convergence).unwrap();
+        // The densified pencil, its copy and transpose, and the dense eigenvectors.
+        assert!(working >= 5 * n * n, "{working}");
+    }
 }

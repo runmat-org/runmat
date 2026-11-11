@@ -814,6 +814,11 @@ pub async fn execute_structural_workloads_locally(
                     inventory_limits: inventory,
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests,
+                    // The plan chooses its solve path within the memory this run admits.
+                    solve_selection:
+                        runmat_analysis_fea::planning::resource::ModalSolveSelection::WithinCeiling {
+                            machine_memory_bytes: Some(maximum_resident_bytes),
+                        },
                 },
                 policy,
             )

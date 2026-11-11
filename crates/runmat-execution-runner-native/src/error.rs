@@ -56,7 +56,34 @@ pub enum NativeExecutionError {
     )]
     UnsupportedMeteredCooperative,
     #[error("portable execution driver failed: {0}")]
-    Driver(#[from] runmat_execution_runner::RunnerError),
+    Driver(runmat_execution_runner::RunnerError),
+    /// A typed resource refusal: a plan that fits no admitted path, or a task whose memory or
+    /// scratch request exceeds what the target pool offers.
+    #[error("FEA resource planning failed: {0}")]
+    Resource(runmat_analysis_fea::planning::resource::ResourcePlanningError),
+}
+
+impl From<runmat_execution_runner::RunnerError> for NativeExecutionError {
+    /// A pool refusal for memory or scratch is the typed memory-budget error, with the bytes
+    /// the task needs and the bytes the pool offers; every other driver failure stays a driver
+    /// error.
+    fn from(error: runmat_execution_runner::RunnerError) -> Self {
+        match error {
+            runmat_execution_runner::RunnerError::PoolCapacity(refusal)
+                if refusal.exceeds_memory() =>
+            {
+                Self::Resource(
+                    runmat_analysis_fea::planning::resource::ResourcePlanningError::MemoryBudget {
+                        required_memory_bytes: refusal.requested_memory_bytes,
+                        available_memory_bytes: refusal.pool_memory_bytes,
+                        required_scratch_bytes: refusal.requested_scratch_bytes,
+                        available_scratch_bytes: refusal.pool_scratch_bytes,
+                    },
+                )
+            }
+            error => Self::Driver(error),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

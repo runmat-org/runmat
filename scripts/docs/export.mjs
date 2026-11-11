@@ -1,5 +1,5 @@
 import Ajv from "ajv";
-import { mkdirSync, mkdtempSync, renameSync, rmSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -8,6 +8,7 @@ import { collectExamples } from "./examples.mjs";
 import { collectFea } from "./fea.mjs";
 import { collectDesign } from "./design.mjs";
 import { loadLedger, registerExport } from "./ledger.mjs";
+import { statusPage } from "./generate-pages.mjs";
 import { writeManifest } from "./manifest.mjs";
 import { collectGraphics } from "./graphics.mjs";
 import { productionDocumentation } from "./production-documentation.mjs";
@@ -31,6 +32,9 @@ export function buildSourceDocs({ source, output, builtinDescriptorsPath, builti
         const examples = collectExamples(source, staging, validate, requirements, snapshotsRoot);
         if (examples.some(example => example.playback)) collectGraphics(graphicsRoot, staging);
         collectDocuments(source, staging, validate, builtinDocumentationPath, verifiedBuiltinDocumentation);
+        // Status carries automated-test counts from the source, refreshed at publish time.
+        const status = join(staging, "documents/docs/simulation/validation/status.md");
+        if (existsSync(status)) writeFileSync(status, statusPage(source));
         collectFea(source, staging, register, examples, evidencePath ? readJson(evidencePath) : { schema_version: 1, records: [] }, validate);
         // The Design tab: design/manual.json, design/ledger.json and the pages under documents/docs/design.
         collectDesign(source, staging, validate);

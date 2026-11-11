@@ -37,6 +37,11 @@ impl LinearPreparationReuse {
         self.certificate.as_ref()
     }
 
+    /// Drops the retained factorization and keeps the certificate it produced.
+    pub(crate) fn release_factor(&mut self) {
+        self.factor = None;
+    }
+
     pub(crate) fn clear(&mut self) {
         self.certificate = None;
         self.factor = None;
