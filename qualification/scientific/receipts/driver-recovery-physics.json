@@ -84,14 +84,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "e76f801975ecc2a2304c8f383cbe5a876f5e179af2316f146c77f74f7500b4b4",
+      "sha256": "22322d2db88a4ad8623cb1ffcc2741cb82ffb92a9826e10ba431c35f7094f238",
       "files": 26096,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "reason": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts.",
     "review": {
       "path": "qualification/scientific/reviews/d8e06-final-integration.json",
-      "sha256": "ce104205f132542dc28348ab1a8b9fc9b4e1f295f0ee1dc5fd4c560305632899"
+      "sha256": "7013249d738dfb4cb3a8788fdb7d6c52514e268d482c4b5f0b2568d8ebb098f4"
     }
   }
 }

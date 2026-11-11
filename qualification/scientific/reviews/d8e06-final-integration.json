@@ -6,7 +6,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "e76f801975ecc2a2304c8f383cbe5a876f5e179af2316f146c77f74f7500b4b4",
+    "sha256": "22322d2db88a4ad8623cb1ffcc2741cb82ffb92a9826e10ba431c35f7094f238",
     "files": 26096,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -227,6 +227,20 @@
       "reason": "The seat fixture keeps every pose, contact and staged-edit assertion. Its OCCT branch requires the measured 0.5 mm clearance and complete no-interference summary; its grid branch retains the unmeasured-gap diagnostic. Both kernel profiles pass all nine seat cases. No production seating or proximity behavior changed."
     },
     {
+      "path": "crates/runmat-geometry/io/tests/step_face_names.rs",
+      "before": [
+        "100644",
+        "blob",
+        "85044cb12bd914b9a242c9671f73b118a045c002"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8ee3798bba5e4564ea74c26e96007f714bc5db4a"
+      ],
+      "reason": "The assembly fixture compares the exact sorted body-name list. Both expected names, duplicate rejection and the root/motor_seat face-name counts remain required; kernel enumeration order has no name-preservation meaning. All three STEP name tests pass with native OCCT on Windows, with the complete 27,237-file source verified before and after. Production geometry, topology identities, ownership, numerical kernels and timing thresholds are unchanged."
+    },
+    {
       "path": "crates/runmat-process-host/tests/startup_diagnostics.rs",
       "before": [
         "100644",
@@ -300,7 +314,7 @@
   "qualification_evidence": [
     {
       "path": "qualification/scientific/evidence/final-integration-inputs.json",
-      "sha256": "5dd6a9821e76e9a064ebf76cf6bace1b6e1f912950465d68893cd3416bf12c62"
+      "sha256": "9e9050e3bfb5c56387ff8a16a7197c7f9f5a759e0f7afdcc99f4fb3fb0f71b02"
     }
   ]
 }
