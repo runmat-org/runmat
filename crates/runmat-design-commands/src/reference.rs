@@ -111,7 +111,11 @@ impl Catalog {
     /// `docs/design/commands.md`: every command, grouped by id prefix, with its required and optional fields.
     pub fn commands_reference(&self) -> String {
         let mut out = String::from(
-            "# Design commands\n\n\
+            "---\n\
+             description: Design commands and their required fields for proposing edits to parts, assemblies, drawings, circuits and boards.\n\
+             keywords: [design commands, design_propose_edit, MCAD, ECAD]\n\
+             ---\n\
+             # Design commands\n\n\
              `design_propose_edit` runs one of these commands: give its id as `command` and its fields as `values`, \
              one per field id. A pick field takes the item's reference text or Outline id as its value, \
              for example `{\"command\": \"part.sketch\", \"values\": {\"plane\": \"origin.xy\"}}`. \

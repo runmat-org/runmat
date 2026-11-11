@@ -1,3 +1,7 @@
+---
+description: Design commands and their required fields for proposing edits to parts, assemblies, drawings, circuits and boards.
+keywords: [design commands, design_propose_edit, MCAD, ECAD]
+---
 # Design commands
 
 `design_propose_edit` runs one of these commands: give its id as `command` and its fields as `values`, one per field id. A pick field takes the item's reference text or Outline id as its value, for example `{"command": "part.sketch", "values": {"plane": "origin.xy"}}`. A command that runs on existing items also takes them in `selection` (`feature:boss`, `component:R1`). Numbers are in the unit shown. A field marked *when* applies only while another field has that value.

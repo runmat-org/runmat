@@ -2,6 +2,20 @@
   "schema_version": 1,
   "topics": [
     {
+      "id": "language-commands",
+      "route": "/docs/design-language/commands",
+      "title": "Design commands",
+      "summary": "Design commands and their required fields for proposing edits to parts, assemblies, drawings, circuits and boards.",
+      "keywords": ["design commands", "design_propose_edit", "MCAD", "ECAD"],
+      "group": "Design language",
+      "order": 20,
+      "narrative": "docs/design/commands.md",
+      "examples": [],
+      "related_topics": [
+        {"title": "The design language", "href": "/docs/design-language"}
+      ]
+    },
+    {
       "id": "language-overview",
       "route": "/docs/design-language",
       "title": "The design language",
