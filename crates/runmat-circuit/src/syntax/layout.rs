@@ -84,15 +84,6 @@ pub mod words {
     pub const DIMENSION: &str = "dimension";
     pub const PACKAGE: &str = "package";
     pub const NAME: &str = "name";
-    pub const UUID: &str = "uuid";
-    pub const DESCRIPTION: &str = "description";
-    pub const SMD: &str = "smd";
-    pub const PAD: &str = "pad";
-    pub const COURTYARD: &str = "courtyard";
-    pub const SILK: &str = "silk";
-    pub const FAB: &str = "fab";
-    pub const MODEL: &str = "model";
-    pub const BODY: &str = "body";
     /// Every statement word, for completion and the highlighter.
     pub const ALL: &[&str] = &[
         LAYOUT,
@@ -126,15 +117,6 @@ pub mod words {
         DIMENSION,
         PACKAGE,
         NAME,
-        UUID,
-        DESCRIPTION,
-        SMD,
-        PAD,
-        COURTYARD,
-        SILK,
-        FAB,
-        MODEL,
-        BODY,
     ];
 }
 

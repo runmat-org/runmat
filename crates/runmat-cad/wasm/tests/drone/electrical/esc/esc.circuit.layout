@@ -2508,276 +2508,270 @@ layout esc {
     keepout "keepout-35" = { outline = [[-10.45, 7.75], [-10.45, 5], [-9.75, 5], [-9.75, 7.75]], layers = [F.Cu], tracks = true }
     keepout "keepout-36" = { outline = [[-10.9, 7.75], [-10.9, 6.7], [-8.35, 6.7], [-8.35, 7.75]], layers = [F.Cu], tracks = true }
     keepout "keepout-37" = { outline = [[-15.15, 7.5], [-15.15, 5], [-14.55, 5], [-14.55, 7.5]], layers = [F.Cu], tracks = true }
-    package C_2512_6332Metric_IPCN {
-        uuid = "c3828856-ec3e-8ed4-aef1-8510388e7162"
-        description = "C chip 2512 (6332 metric), IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [1.36, 3.41], ratio = 0.25, at = [-2.925, 0] }
-        pad "2" = { shape = roundrect, size = [1.36, 3.41], ratio = 0.25, at = [2.925, 0] }
-        courtyard = [[-3.86, -1.96], [3.86, -1.96], [3.86, 1.96], [-3.86, 1.96]]
-        silk line = { points = [[-1.985, -1.71], [1.985, -1.71]], width = 0.12 }
-        silk line = { points = [[-1.985, 1.71], [1.985, 1.71]], width = 0.12 }
-        fab rect = { from = [-3.15, -1.6], to = [3.15, 1.6], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
-        model = { path = "${RUNMAT_3DMODELS}/C_2512_6332Metric_IPCN.step" }
-        body = { width = 6.3, length = 3.2, height = 0.6 }
+    package C_2512_6332Metric_IPCN = {
+        description = "C chip 2512 (6332 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.36, 3.41], at = [-2.925, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [1.36, 3.41], at = [2.925, 0], layers = smd }
+        ],
+        courtyard = rect([-3.86, -1.96], [3.86, 1.96]),
+        silk = [line([-1.985, -1.71], [1.985, -1.71]), line([-1.985, 1.71], [1.985, 1.71])],
+        fab = [rect([-3.15, -1.6], [3.15, 1.6]), text([0, 0], "${REFERENCE}")],
+        body = { height = 0.6, model = "${RUNMAT_3DMODELS}/C_2512_6332Metric_IPCN.step" }
     }
-    package C_0603_1608Metric_IPCN {
-        uuid = "b29bd995-6390-80ce-9ad5-95e057f2b019"
-        description = "C chip 0603 (1608 metric), IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [0.96, 0.96], ratio = 0.25, at = [-0.75, 0] }
-        pad "2" = { shape = roundrect, size = [0.96, 0.96], ratio = 0.25, at = [0.75, 0] }
-        courtyard = [[-1.48, -0.73], [1.48, -0.73], [1.48, 0.73], [-1.48, 0.73]]
-        fab rect = { from = [-0.8, -0.4], to = [0.8, 0.4], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 0.32 }
-        model = { path = "${RUNMAT_3DMODELS}/C_0603_1608Metric_IPCN.step" }
-        body = { width = 1.6, length = 0.8, height = 0.45 }
+    package C_0603_1608Metric_IPCN = {
+        description = "C chip 0603 (1608 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.96, 0.96], at = [-0.75, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [0.96, 0.96], at = [0.75, 0], layers = smd }
+        ],
+        courtyard = rect([-1.48, -0.73], [1.48, 0.73]),
+        fab = [rect([-0.8, -0.4], [0.8, 0.4]), text([0, 0], "${REFERENCE}", size = 0.32)],
+        body = { height = 0.45, model = "${RUNMAT_3DMODELS}/C_0603_1608Metric_IPCN.step" }
     }
-    package C_0402_1005Metric_IPCN {
-        uuid = "b946e4d1-883a-8666-8192-3154a77b8ac8"
-        description = "C chip 0402 (1005 metric), IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [0.515, 0.57], ratio = 0.25, at = [-0.3775, 0] }
-        pad "2" = { shape = roundrect, size = [0.515, 0.57], ratio = 0.25, at = [0.3775, 0] }
-        courtyard = [[-0.79, -0.44], [0.79, -0.44], [0.79, 0.44], [-0.79, 0.44]]
-        fab rect = { from = [-0.5, -0.25], to = [0.5, 0.25], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 0.2 }
-        model = { path = "${RUNMAT_3DMODELS}/C_0402_1005Metric_IPCN.step" }
-        body = { width = 1, length = 0.5, height = 0.35 }
+    package C_0402_1005Metric_IPCN = {
+        description = "C chip 0402 (1005 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.515, 0.57], at = [-0.3775, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [0.515, 0.57], at = [0.3775, 0], layers = smd }
+        ],
+        courtyard = rect([-0.79, -0.44], [0.79, 0.44]),
+        fab = [rect([-0.5, -0.25], [0.5, 0.25]), text([0, 0], "${REFERENCE}", size = 0.2)],
+        body = { height = 0.35, model = "${RUNMAT_3DMODELS}/C_0402_1005Metric_IPCN.step" }
     }
-    package C_1206_3216Metric_IPCN {
-        uuid = "1bd1dafb-a6dd-8cc4-b99d-f29839dec309"
-        description = "C chip 1206 (3216 metric), IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [1.26, 1.81], ratio = 0.25, at = [-1.425, 0] }
-        pad "2" = { shape = roundrect, size = [1.26, 1.81], ratio = 0.25, at = [1.425, 0] }
-        courtyard = [[-2.31, -1.16], [2.31, -1.16], [2.31, 1.16], [-2.31, 1.16]]
-        silk line = { points = [[-0.535, -0.91], [0.535, -0.91]], width = 0.12 }
-        silk line = { points = [[-0.535, 0.91], [0.535, 0.91]], width = 0.12 }
-        fab rect = { from = [-1.6, -0.8], to = [1.6, 0.8], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 0.64 }
-        model = { path = "${RUNMAT_3DMODELS}/C_1206_3216Metric_IPCN.step" }
-        body = { width = 3.2, length = 1.6, height = 0.6 }
+    package C_1206_3216Metric_IPCN = {
+        description = "C chip 1206 (3216 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.26, 1.81], at = [-1.425, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [1.26, 1.81], at = [1.425, 0], layers = smd }
+        ],
+        courtyard = rect([-2.31, -1.16], [2.31, 1.16]),
+        silk = [line([-0.535, -0.91], [0.535, -0.91]), line([-0.535, 0.91], [0.535, 0.91])],
+        fab = [rect([-1.6, -0.8], [1.6, 0.8]), text([0, 0], "${REFERENCE}", size = 0.64)],
+        body = { height = 0.6, model = "${RUNMAT_3DMODELS}/C_1206_3216Metric_IPCN.step" }
     }
-    package "MountingHole_3.6mm_Pad4.6mm" {
-        uuid = "42cc43bf-a324-81f8-8e2a-69110c02475e"
-        description = "Mounting hole, drill 3.6 mm, plated pad 4.6 mm"
-        pad "1" = { kind = tht, shape = circle, d = 4.6, drill = 3.6 }
-        courtyard = [[-2.55, -2.55], [2.55, -2.55], [2.55, 2.55], [-2.55, 2.55]]
-        fab rect = { from = [-2.3, -2.3], to = [2.3, 2.3], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
-        model = { path = "${RUNMAT_3DMODELS}/MountingHole_3.6mm_Pad4.6mm.step" }
+    package "MountingHole_3.6mm_Pad4.6mm" = {
+        description = "Mounting hole, drill 3.6 mm, plated pad 4.6 mm",
+        pads = [
+            { number = "1", shape = circle, size = [4.6, 4.6], at = [0, 0], layers = through, drill = 3.6 }
+        ],
+        courtyard = rect([-2.55, -2.55], [2.55, 2.55]),
+        fab = [rect([-2.3, -2.3], [2.3, 2.3]), text([0, 0], "${REFERENCE}")],
+        body = { model = "${RUNMAT_3DMODELS}/MountingHole_3.6mm_Pad4.6mm.step" }
     }
-    package "JST-SH_1x08_P1mm" {
-        uuid = "cf8f0aaf-ec29-8eae-a615-7f244a7e98dc"
-        description = "JST-SH 8 pins"
-        smd = true
-        pad "1" = { shape = roundrect, size = [0.6, 1.55], ratio = 0.25, at = [-3.5, -2.125] }
-        pad "2" = { shape = roundrect, size = [0.6, 1.55], ratio = 0.25, at = [-2.5, -2.125] }
-        pad "3" = { shape = roundrect, size = [0.6, 1.55], ratio = 0.25, at = [-1.5, -2.125] }
-        pad "4" = { shape = roundrect, size = [0.6, 1.55], ratio = 0.25, at = [-0.5, -2.125] }
-        pad "5" = { shape = roundrect, size = [0.6, 1.55], ratio = 0.25, at = [0.5, -2.125] }
-        pad "6" = { shape = roundrect, size = [0.6, 1.55], ratio = 0.25, at = [1.5, -2.125] }
-        pad "7" = { shape = roundrect, size = [0.6, 1.55], ratio = 0.25, at = [2.5, -2.125] }
-        pad "8" = { shape = roundrect, size = [0.6, 1.55], ratio = 0.25, at = [3.5, -2.125] }
-        pad MP1 = { shape = roundrect, size = [1.2, 1.8], ratio = 0.25, at = [-4.85, 1.1] }
-        pad MP2 = { shape = roundrect, size = [1.2, 1.8], ratio = 0.25, at = [4.85, 1.1] }
-        courtyard = [[-5.95, -3.4], [5.95, -3.4], [5.95, 2.63], [-5.95, 2.63]]
-        silk line = { points = [[-5.11, -2.235], [-4.06, -2.235]], width = 0.12 }
-        silk line = { points = [[4.06, -2.235], [5.11, -2.235]], width = 0.12 }
-        silk line = { points = [[5.11, -2.235], [5.11, -0.06]], width = 0.12 }
-        silk line = { points = [[-3.99, 2.235], [3.99, 2.235]], width = 0.12 }
-        silk line = { points = [[-5.11, -2.235], [-5.11, -0.06]], width = 0.12 }
-        fab rect = { from = [-5, -2.125], to = [5, 2.125], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
-        model = { path = "${RUNMAT_3DMODELS}/JST-SH_1x08_P1mm.step" }
-        body = { width = 10, length = 4.25, height = 3 }
+    package "JST-SH_1x08_P1mm" = {
+        description = "JST-SH 8 pins",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.6, 1.55], at = [-3.5, -2.125], layers = smd },
+            { number = "2", shape = roundrect, size = [0.6, 1.55], at = [-2.5, -2.125], layers = smd },
+            { number = "3", shape = roundrect, size = [0.6, 1.55], at = [-1.5, -2.125], layers = smd },
+            { number = "4", shape = roundrect, size = [0.6, 1.55], at = [-0.5, -2.125], layers = smd },
+            { number = "5", shape = roundrect, size = [0.6, 1.55], at = [0.5, -2.125], layers = smd },
+            { number = "6", shape = roundrect, size = [0.6, 1.55], at = [1.5, -2.125], layers = smd },
+            { number = "7", shape = roundrect, size = [0.6, 1.55], at = [2.5, -2.125], layers = smd },
+            { number = "8", shape = roundrect, size = [0.6, 1.55], at = [3.5, -2.125], layers = smd },
+            { number = "MP1", shape = roundrect, size = [1.2, 1.8], at = [-4.85, 1.1], layers = smd },
+            { number = "MP2", shape = roundrect, size = [1.2, 1.8], at = [4.85, 1.1], layers = smd }
+        ],
+        courtyard = rect([-5.95, -3.4], [5.95, 2.63]),
+        silk = [
+            line([-5.11, -2.235], [-4.06, -2.235]),
+            line([4.06, -2.235], [5.11, -2.235]),
+            line([5.11, -2.235], [5.11, -0.06]),
+            line([-3.99, 2.235], [3.99, 2.235]),
+            line([-5.11, -2.235], [-5.11, -0.06])
+        ],
+        fab = [rect([-5, -2.125], [5, 2.125]), text([0, 0], "${REFERENCE}")],
+        body = { height = 3, model = "${RUNMAT_3DMODELS}/JST-SH_1x08_P1mm.step" }
     }
-    package "MountingHole_2.2mm_Pad4.2mm" {
-        uuid = "e3bae6f6-af29-8e24-b1b9-326e009c2733"
-        description = "Mounting hole, drill 2.2 mm, plated pad 4.2 mm"
-        pad "1" = { kind = tht, shape = circle, d = 4.2, drill = 2.2 }
-        courtyard = [[-2.35, -2.35], [2.35, -2.35], [2.35, 2.35], [-2.35, 2.35]]
-        fab rect = { from = [-2.1, -2.1], to = [2.1, 2.1], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
-        model = { path = "${RUNMAT_3DMODELS}/MountingHole_2.2mm_Pad4.2mm.step" }
+    package "MountingHole_2.2mm_Pad4.2mm" = {
+        description = "Mounting hole, drill 2.2 mm, plated pad 4.2 mm",
+        pads = [
+            { number = "1", shape = circle, size = [4.2, 4.2], at = [0, 0], layers = through, drill = 2.2 }
+        ],
+        courtyard = rect([-2.35, -2.35], [2.35, 2.35]),
+        fab = [rect([-2.1, -2.1], [2.1, 2.1]), text([0, 0], "${REFERENCE}")],
+        body = { model = "${RUNMAT_3DMODELS}/MountingHole_2.2mm_Pad4.2mm.step" }
     }
-    package "MountingHole_1.2mm_Pad2.6mm" {
-        uuid = "e97551a8-64c6-856a-b3c3-8ed246be22e0"
-        description = "Mounting hole, drill 1.2 mm, plated pad 2.6 mm"
-        pad "1" = { kind = tht, shape = circle, d = 2.6, drill = 1.2 }
-        courtyard = [[-1.55, -1.55], [1.55, -1.55], [1.55, 1.55], [-1.55, 1.55]]
-        fab rect = { from = [-1.3, -1.3], to = [1.3, 1.3], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
-        model = { path = "${RUNMAT_3DMODELS}/MountingHole_1.2mm_Pad2.6mm.step" }
+    package "MountingHole_1.2mm_Pad2.6mm" = {
+        description = "Mounting hole, drill 1.2 mm, plated pad 2.6 mm",
+        pads = [
+            { number = "1", shape = circle, size = [2.6, 2.6], at = [0, 0], layers = through, drill = 1.2 }
+        ],
+        courtyard = rect([-1.55, -1.55], [1.55, 1.55]),
+        fab = [rect([-1.3, -1.3], [1.3, 1.3]), text([0, 0], "${REFERENCE}")],
+        body = { model = "${RUNMAT_3DMODELS}/MountingHole_1.2mm_Pad2.6mm.step" }
     }
-    package "DFN-8_3.3x3.3mm_P0.65mm_EP2.4x1.8mm_IPCN" {
-        uuid = "41964930-1b6a-8d07-8fc6-fddf4de36828"
-        description = "DFN 8 pins, pitch 0.65 mm, IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [0.585, 0.27], ratio = 0.25, at = [-1.6925, 0.975] }
-        pad "2" = { shape = roundrect, size = [0.585, 0.27], ratio = 0.25, at = [-1.6925, 0.325] }
-        pad "3" = { shape = roundrect, size = [0.585, 0.27], ratio = 0.25, at = [-1.6925, -0.325] }
-        pad "4" = { shape = roundrect, size = [0.585, 0.27], ratio = 0.25, at = [-1.6925, -0.975] }
-        pad "5" = { shape = roundrect, size = [0.885, 0.27], ratio = 0.25, at = [1.5425, -0.975] }
-        pad "6" = { shape = roundrect, size = [0.885, 0.27], ratio = 0.25, at = [1.5425, -0.325] }
-        pad "7" = { shape = roundrect, size = [0.885, 0.27], ratio = 0.25, at = [1.5425, 0.325] }
-        pad "8" = { shape = roundrect, size = [0.885, 0.27], ratio = 0.25, at = [1.5425, 0.975] }
-        pad "9" = { shape = roundrect, size = [2.4, 1.8], ratio = 0.05, paste_margin = -0.18, thermal = true }
-        courtyard = [[-2.24, -1.9], [2.24, -1.9], [2.24, 1.9], [-2.24, 1.9]]
-        silk line = { points = [[-1.76, -1.76], [1.76, -1.76]], width = 0.12 }
-        silk line = { points = [[1.76, -1.76], [1.76, -1.37]], width = 0.12 }
-        silk line = { points = [[1.76, 1.37], [1.76, 1.76]], width = 0.12 }
-        silk line = { points = [[-1.76, 1.76], [1.76, 1.76]], width = 0.12 }
-        silk line = { points = [[-1.76, -1.76], [-1.76, -1.37]], width = 0.12 }
-        silk line = { points = [[-1.76, 1.37], [-1.76, 1.76]], width = 0.12 }
-        silk circle = { center = [-2.425, 0.975], radius = 0.1, width = 0.12, fill = true }
-        fab rect = { from = [-1.65, -1.65], to = [1.65, 1.65], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
-        model = { path = "${RUNMAT_3DMODELS}/DFN-8_3.3x3.3mm_P0.65mm_EP2.4x1.8mm_IPCN.step" }
-        body = { width = 3.3, length = 3.3, height = 0.8 }
+    package "DFN-8_3.3x3.3mm_P0.65mm_EP2.4x1.8mm_IPCN" = {
+        description = "DFN 8 pins, pitch 0.65 mm, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.585, 0.27], at = [-1.6925, 0.975], layers = smd },
+            { number = "2", shape = roundrect, size = [0.585, 0.27], at = [-1.6925, 0.325], layers = smd },
+            { number = "3", shape = roundrect, size = [0.585, 0.27], at = [-1.6925, -0.325], layers = smd },
+            { number = "4", shape = roundrect, size = [0.585, 0.27], at = [-1.6925, -0.975], layers = smd },
+            { number = "5", shape = roundrect, size = [0.885, 0.27], at = [1.5425, -0.975], layers = smd },
+            { number = "6", shape = roundrect, size = [0.885, 0.27], at = [1.5425, -0.325], layers = smd },
+            { number = "7", shape = roundrect, size = [0.885, 0.27], at = [1.5425, 0.325], layers = smd },
+            { number = "8", shape = roundrect, size = [0.885, 0.27], at = [1.5425, 0.975], layers = smd },
+            { number = "9", shape = roundrect, size = [2.4, 1.8], ratio = 0.05, at = [0, 0], layers = smd, paste_expand = -0.18, thermal = true }
+        ],
+        courtyard = rect([-2.24, -1.9], [2.24, 1.9]),
+        silk = [
+            line([-1.76, -1.76], [1.76, -1.76]),
+            line([1.76, -1.76], [1.76, -1.37]),
+            line([1.76, 1.37], [1.76, 1.76]),
+            line([-1.76, 1.76], [1.76, 1.76]),
+            line([-1.76, -1.76], [-1.76, -1.37]),
+            line([-1.76, 1.37], [-1.76, 1.76]),
+            circle([-2.425, 0.975], 0.1, fill = true)
+        ],
+        fab = [rect([-1.65, -1.65], [1.65, 1.65]), text([0, 0], "${REFERENCE}")],
+        body = {
+            height = 0.8,
+            model = "${RUNMAT_3DMODELS}/DFN-8_3.3x3.3mm_P0.65mm_EP2.4x1.8mm_IPCN.step"
+        }
     }
-    package R_0402_1005Metric_IPCN {
-        uuid = "d2538180-97a8-835d-a51e-55aa0e963a21"
-        description = "R chip 0402 (1005 metric), IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [0.515, 0.57], ratio = 0.25, at = [-0.3775, 0] }
-        pad "2" = { shape = roundrect, size = [0.515, 0.57], ratio = 0.25, at = [0.3775, 0] }
-        courtyard = [[-0.79, -0.44], [0.79, -0.44], [0.79, 0.44], [-0.79, 0.44]]
-        fab rect = { from = [-0.5, -0.25], to = [0.5, 0.25], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 0.2 }
-        model = { path = "${RUNMAT_3DMODELS}/R_0402_1005Metric_IPCN.step" }
-        body = { width = 1, length = 0.5, height = 0.35 }
+    package R_0402_1005Metric_IPCN = {
+        description = "R chip 0402 (1005 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.515, 0.57], at = [-0.3775, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [0.515, 0.57], at = [0.3775, 0], layers = smd }
+        ],
+        courtyard = rect([-0.79, -0.44], [0.79, 0.44]),
+        fab = [rect([-0.5, -0.25], [0.5, 0.25]), text([0, 0], "${REFERENCE}", size = 0.2)],
+        body = { height = 0.35, model = "${RUNMAT_3DMODELS}/R_0402_1005Metric_IPCN.step" }
     }
-    package R_1206_3216Metric_IPCN {
-        uuid = "1bbee6a1-cbdc-822d-8735-86c277d152e8"
-        description = "R chip 1206 (3216 metric), IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [1.26, 1.81], ratio = 0.25, at = [-1.425, 0] }
-        pad "2" = { shape = roundrect, size = [1.26, 1.81], ratio = 0.25, at = [1.425, 0] }
-        courtyard = [[-2.31, -1.16], [2.31, -1.16], [2.31, 1.16], [-2.31, 1.16]]
-        silk line = { points = [[-0.535, -0.91], [0.535, -0.91]], width = 0.12 }
-        silk line = { points = [[-0.535, 0.91], [0.535, 0.91]], width = 0.12 }
-        fab rect = { from = [-1.6, -0.8], to = [1.6, 0.8], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 0.64 }
-        model = { path = "${RUNMAT_3DMODELS}/R_1206_3216Metric_IPCN.step" }
-        body = { width = 3.2, length = 1.6, height = 0.6 }
+    package R_1206_3216Metric_IPCN = {
+        description = "R chip 1206 (3216 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.26, 1.81], at = [-1.425, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [1.26, 1.81], at = [1.425, 0], layers = smd }
+        ],
+        courtyard = rect([-2.31, -1.16], [2.31, 1.16]),
+        silk = [line([-0.535, -0.91], [0.535, -0.91]), line([-0.535, 0.91], [0.535, 0.91])],
+        fab = [rect([-1.6, -0.8], [1.6, 0.8]), text([0, 0], "${REFERENCE}", size = 0.64)],
+        body = { height = 0.6, model = "${RUNMAT_3DMODELS}/R_1206_3216Metric_IPCN.step" }
     }
-    package "SOT-23-5_IPCN" {
-        uuid = "bc5be67b-9e09-8d38-adc8-b149343c111b"
-        description = "SOT-23 5 pins, IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [1.58, 0.57], ratio = 0.25, at = [-0.885, 0.95] }
-        pad "2" = { shape = roundrect, size = [1.58, 0.57], ratio = 0.25, at = [-0.885, 0] }
-        pad "3" = { shape = roundrect, size = [1.58, 0.57], ratio = 0.25, at = [-0.885, -0.95] }
-        pad "4" = { shape = roundrect, size = [1.58, 0.57], ratio = 0.25, at = [0.885, -0.95] }
-        pad "5" = { shape = roundrect, size = [1.58, 0.57], ratio = 0.25, at = [0.885, 0.95] }
-        courtyard = [[-1.93, -1.7], [1.93, -1.7], [1.93, 1.7], [-1.93, 1.7]]
-        silk line = { points = [[-0.91, -1.56], [0.91, -1.56]], width = 0.12 }
-        silk line = { points = [[0.91, -0.405], [0.91, 0.405]], width = 0.12 }
-        silk line = { points = [[-0.91, 1.56], [0.91, 1.56]], width = 0.12 }
-        silk circle = { center = [-1.975, 0.95], radius = 0.1, width = 0.12, fill = true }
-        fab rect = { from = [-0.8, -1.45], to = [0.8, 1.45], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 0.64 }
-        model = { path = "${RUNMAT_3DMODELS}/SOT-23-5_IPCN.step" }
-        body = { width = 1.6, length = 2.9, height = 1.1 }
+    package "SOT-23-5_IPCN" = {
+        description = "SOT-23 5 pins, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.58, 0.57], at = [-0.885, 0.95], layers = smd },
+            { number = "2", shape = roundrect, size = [1.58, 0.57], at = [-0.885, 0], layers = smd },
+            { number = "3", shape = roundrect, size = [1.58, 0.57], at = [-0.885, -0.95], layers = smd },
+            { number = "4", shape = roundrect, size = [1.58, 0.57], at = [0.885, -0.95], layers = smd },
+            { number = "5", shape = roundrect, size = [1.58, 0.57], at = [0.885, 0.95], layers = smd }
+        ],
+        courtyard = rect([-1.93, -1.7], [1.93, 1.7]),
+        silk = [
+            line([-0.91, -1.56], [0.91, -1.56]),
+            line([0.91, -0.405], [0.91, 0.405]),
+            line([-0.91, 1.56], [0.91, 1.56]),
+            circle([-1.975, 0.95], 0.1, fill = true)
+        ],
+        fab = [rect([-0.8, -1.45], [0.8, 1.45]), text([0, 0], "${REFERENCE}", size = 0.64)],
+        body = { height = 1.1, model = "${RUNMAT_3DMODELS}/SOT-23-5_IPCN.step" }
     }
-    package "QFN-24_4x4mm_P0.5mm_EP2.6x2.6mm_IPCN" {
-        uuid = "ac4ca80a-5986-8754-8e4e-6d9141bce65c"
-        description = "QFN 24 pins, pitch 0.5 mm, IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [-1.9175, 1.25] }
-        pad "2" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [-1.9175, 0.75] }
-        pad "3" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [-1.9175, 0.25] }
-        pad "4" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [-1.9175, -0.25] }
-        pad "5" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [-1.9175, -0.75] }
-        pad "6" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [-1.9175, -1.25] }
-        pad "7" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [-1.25, -1.9175] }
-        pad "8" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [-0.75, -1.9175] }
-        pad "9" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [-0.25, -1.9175] }
-        pad "10" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [0.25, -1.9175] }
-        pad "11" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [0.75, -1.9175] }
-        pad "12" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [1.25, -1.9175] }
-        pad "13" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [1.9175, -1.25] }
-        pad "14" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [1.9175, -0.75] }
-        pad "15" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [1.9175, -0.25] }
-        pad "16" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [1.9175, 0.25] }
-        pad "17" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [1.9175, 0.75] }
-        pad "18" = { shape = roundrect, size = [0.835, 0.19], ratio = 0.25, at = [1.9175, 1.25] }
-        pad "19" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [1.25, 1.9175] }
-        pad "20" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [0.75, 1.9175] }
-        pad "21" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [0.25, 1.9175] }
-        pad "22" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [-0.25, 1.9175] }
-        pad "23" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [-0.75, 1.9175] }
-        pad "24" = { shape = roundrect, size = [0.19, 0.835], ratio = 0.25, at = [-1.25, 1.9175] }
-        pad "25" = { shape = roundrect, size = [2.6, 2.6], ratio = 0.05, paste_margin = -0.26, thermal = true }
-        courtyard = [[-2.59, -2.59], [2.59, -2.59], [2.59, 2.59], [-2.59, 2.59]]
-        silk line = { points = [[-2.11, -2.11], [-1.605, -2.11]], width = 0.12 }
-        silk line = { points = [[1.605, -2.11], [2.11, -2.11]], width = 0.12 }
-        silk line = { points = [[2.11, -2.11], [2.11, -1.605]], width = 0.12 }
-        silk line = { points = [[2.11, 1.605], [2.11, 2.11]], width = 0.12 }
-        silk line = { points = [[-2.11, 2.11], [-1.605, 2.11]], width = 0.12 }
-        silk line = { points = [[1.605, 2.11], [2.11, 2.11]], width = 0.12 }
-        silk line = { points = [[-2.11, -2.11], [-2.11, -1.605]], width = 0.12 }
-        silk line = { points = [[-2.11, 1.605], [-2.11, 2.11]], width = 0.12 }
-        silk circle = { center = [-2.65, 1.25], radius = 0.1, width = 0.12, fill = true }
-        fab rect = { from = [-2, -2], to = [2, 2], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
-        model = { path = "${RUNMAT_3DMODELS}/QFN-24_4x4mm_P0.5mm_EP2.6x2.6mm_IPCN.step" }
-        body = { width = 4, length = 4, height = 0.9 }
+    package "QFN-24_4x4mm_P0.5mm_EP2.6x2.6mm_IPCN" = {
+        description = "QFN 24 pins, pitch 0.5 mm, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.835, 0.19], at = [-1.9175, 1.25], layers = smd },
+            { number = "2", shape = roundrect, size = [0.835, 0.19], at = [-1.9175, 0.75], layers = smd },
+            { number = "3", shape = roundrect, size = [0.835, 0.19], at = [-1.9175, 0.25], layers = smd },
+            { number = "4", shape = roundrect, size = [0.835, 0.19], at = [-1.9175, -0.25], layers = smd },
+            { number = "5", shape = roundrect, size = [0.835, 0.19], at = [-1.9175, -0.75], layers = smd },
+            { number = "6", shape = roundrect, size = [0.835, 0.19], at = [-1.9175, -1.25], layers = smd },
+            { number = "7", shape = roundrect, size = [0.19, 0.835], at = [-1.25, -1.9175], layers = smd },
+            { number = "8", shape = roundrect, size = [0.19, 0.835], at = [-0.75, -1.9175], layers = smd },
+            { number = "9", shape = roundrect, size = [0.19, 0.835], at = [-0.25, -1.9175], layers = smd },
+            { number = "10", shape = roundrect, size = [0.19, 0.835], at = [0.25, -1.9175], layers = smd },
+            { number = "11", shape = roundrect, size = [0.19, 0.835], at = [0.75, -1.9175], layers = smd },
+            { number = "12", shape = roundrect, size = [0.19, 0.835], at = [1.25, -1.9175], layers = smd },
+            { number = "13", shape = roundrect, size = [0.835, 0.19], at = [1.9175, -1.25], layers = smd },
+            { number = "14", shape = roundrect, size = [0.835, 0.19], at = [1.9175, -0.75], layers = smd },
+            { number = "15", shape = roundrect, size = [0.835, 0.19], at = [1.9175, -0.25], layers = smd },
+            { number = "16", shape = roundrect, size = [0.835, 0.19], at = [1.9175, 0.25], layers = smd },
+            { number = "17", shape = roundrect, size = [0.835, 0.19], at = [1.9175, 0.75], layers = smd },
+            { number = "18", shape = roundrect, size = [0.835, 0.19], at = [1.9175, 1.25], layers = smd },
+            { number = "19", shape = roundrect, size = [0.19, 0.835], at = [1.25, 1.9175], layers = smd },
+            { number = "20", shape = roundrect, size = [0.19, 0.835], at = [0.75, 1.9175], layers = smd },
+            { number = "21", shape = roundrect, size = [0.19, 0.835], at = [0.25, 1.9175], layers = smd },
+            { number = "22", shape = roundrect, size = [0.19, 0.835], at = [-0.25, 1.9175], layers = smd },
+            { number = "23", shape = roundrect, size = [0.19, 0.835], at = [-0.75, 1.9175], layers = smd },
+            { number = "24", shape = roundrect, size = [0.19, 0.835], at = [-1.25, 1.9175], layers = smd },
+            { number = "25", shape = roundrect, size = [2.6, 2.6], ratio = 0.05, at = [0, 0], layers = smd, paste_expand = -0.26, thermal = true }
+        ],
+        courtyard = rect([-2.59, -2.59], [2.59, 2.59]),
+        silk = [
+            line([-2.11, -2.11], [-1.605, -2.11]),
+            line([1.605, -2.11], [2.11, -2.11]),
+            line([2.11, -2.11], [2.11, -1.605]),
+            line([2.11, 1.605], [2.11, 2.11]),
+            line([-2.11, 2.11], [-1.605, 2.11]),
+            line([1.605, 2.11], [2.11, 2.11]),
+            line([-2.11, -2.11], [-2.11, -1.605]),
+            line([-2.11, 1.605], [-2.11, 2.11]),
+            circle([-2.65, 1.25], 0.1, fill = true)
+        ],
+        fab = [rect([-2, -2], [2, 2]), text([0, 0], "${REFERENCE}")],
+        body = {
+            height = 0.9,
+            model = "${RUNMAT_3DMODELS}/QFN-24_4x4mm_P0.5mm_EP2.6x2.6mm_IPCN.step"
+        }
     }
-    package "QFN-32_5x5mm_P0.5mm_EP3.3x3.3mm_IPCN" {
-        uuid = "abf7e5dd-57f4-87f8-b467-8015dab640c8"
-        description = "QFN 32 pins, pitch 0.5 mm, IPC-7351B density B"
-        smd = true
-        pad "1" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [-2.4025, 1.75] }
-        pad "2" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [-2.4025, 1.25] }
-        pad "3" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [-2.4025, 0.75] }
-        pad "4" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [-2.4025, 0.25] }
-        pad "5" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [-2.4025, -0.25] }
-        pad "6" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [-2.4025, -0.75] }
-        pad "7" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [-2.4025, -1.25] }
-        pad "8" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [-2.4025, -1.75] }
-        pad "9" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [-1.75, -2.4025] }
-        pad "10" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [-1.25, -2.4025] }
-        pad "11" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [-0.75, -2.4025] }
-        pad "12" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [-0.25, -2.4025] }
-        pad "13" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [0.25, -2.4025] }
-        pad "14" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [0.75, -2.4025] }
-        pad "15" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [1.25, -2.4025] }
-        pad "16" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [1.75, -2.4025] }
-        pad "17" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [2.4025, -1.75] }
-        pad "18" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [2.4025, -1.25] }
-        pad "19" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [2.4025, -0.75] }
-        pad "20" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [2.4025, -0.25] }
-        pad "21" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [2.4025, 0.25] }
-        pad "22" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [2.4025, 0.75] }
-        pad "23" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [2.4025, 1.25] }
-        pad "24" = { shape = roundrect, size = [0.865, 0.19], ratio = 0.25, at = [2.4025, 1.75] }
-        pad "25" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [1.75, 2.4025] }
-        pad "26" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [1.25, 2.4025] }
-        pad "27" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [0.75, 2.4025] }
-        pad "28" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [0.25, 2.4025] }
-        pad "29" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [-0.25, 2.4025] }
-        pad "30" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [-0.75, 2.4025] }
-        pad "31" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [-1.25, 2.4025] }
-        pad "32" = { shape = roundrect, size = [0.19, 0.865], ratio = 0.25, at = [-1.75, 2.4025] }
-        pad "33" = { shape = roundrect, size = [3.3, 3.3], ratio = 0.05, paste_margin = -0.33, thermal = true }
-        courtyard = [[-3.09, -3.09], [3.09, -3.09], [3.09, 3.09], [-3.09, 3.09]]
-        silk line = { points = [[-2.61, -2.61], [-2.105, -2.61]], width = 0.12 }
-        silk line = { points = [[2.105, -2.61], [2.61, -2.61]], width = 0.12 }
-        silk line = { points = [[2.61, -2.61], [2.61, -2.105]], width = 0.12 }
-        silk line = { points = [[2.61, 2.105], [2.61, 2.61]], width = 0.12 }
-        silk line = { points = [[-2.61, 2.61], [-2.105, 2.61]], width = 0.12 }
-        silk line = { points = [[2.105, 2.61], [2.61, 2.61]], width = 0.12 }
-        silk line = { points = [[-2.61, -2.61], [-2.61, -2.105]], width = 0.12 }
-        silk line = { points = [[-2.61, 2.105], [-2.61, 2.61]], width = 0.12 }
-        silk circle = { center = [-3.135, 1.75], radius = 0.1, width = 0.12, fill = true }
-        fab rect = { from = [-2.5, -2.5], to = [2.5, 2.5], width = 0.1 }
-        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
-        model = { path = "${RUNMAT_3DMODELS}/QFN-32_5x5mm_P0.5mm_EP3.3x3.3mm_IPCN.step" }
-        body = { width = 5, length = 5, height = 0.9 }
+    package "QFN-32_5x5mm_P0.5mm_EP3.3x3.3mm_IPCN" = {
+        description = "QFN 32 pins, pitch 0.5 mm, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.865, 0.19], at = [-2.4025, 1.75], layers = smd },
+            { number = "2", shape = roundrect, size = [0.865, 0.19], at = [-2.4025, 1.25], layers = smd },
+            { number = "3", shape = roundrect, size = [0.865, 0.19], at = [-2.4025, 0.75], layers = smd },
+            { number = "4", shape = roundrect, size = [0.865, 0.19], at = [-2.4025, 0.25], layers = smd },
+            { number = "5", shape = roundrect, size = [0.865, 0.19], at = [-2.4025, -0.25], layers = smd },
+            { number = "6", shape = roundrect, size = [0.865, 0.19], at = [-2.4025, -0.75], layers = smd },
+            { number = "7", shape = roundrect, size = [0.865, 0.19], at = [-2.4025, -1.25], layers = smd },
+            { number = "8", shape = roundrect, size = [0.865, 0.19], at = [-2.4025, -1.75], layers = smd },
+            { number = "9", shape = roundrect, size = [0.19, 0.865], at = [-1.75, -2.4025], layers = smd },
+            { number = "10", shape = roundrect, size = [0.19, 0.865], at = [-1.25, -2.4025], layers = smd },
+            { number = "11", shape = roundrect, size = [0.19, 0.865], at = [-0.75, -2.4025], layers = smd },
+            { number = "12", shape = roundrect, size = [0.19, 0.865], at = [-0.25, -2.4025], layers = smd },
+            { number = "13", shape = roundrect, size = [0.19, 0.865], at = [0.25, -2.4025], layers = smd },
+            { number = "14", shape = roundrect, size = [0.19, 0.865], at = [0.75, -2.4025], layers = smd },
+            { number = "15", shape = roundrect, size = [0.19, 0.865], at = [1.25, -2.4025], layers = smd },
+            { number = "16", shape = roundrect, size = [0.19, 0.865], at = [1.75, -2.4025], layers = smd },
+            { number = "17", shape = roundrect, size = [0.865, 0.19], at = [2.4025, -1.75], layers = smd },
+            { number = "18", shape = roundrect, size = [0.865, 0.19], at = [2.4025, -1.25], layers = smd },
+            { number = "19", shape = roundrect, size = [0.865, 0.19], at = [2.4025, -0.75], layers = smd },
+            { number = "20", shape = roundrect, size = [0.865, 0.19], at = [2.4025, -0.25], layers = smd },
+            { number = "21", shape = roundrect, size = [0.865, 0.19], at = [2.4025, 0.25], layers = smd },
+            { number = "22", shape = roundrect, size = [0.865, 0.19], at = [2.4025, 0.75], layers = smd },
+            { number = "23", shape = roundrect, size = [0.865, 0.19], at = [2.4025, 1.25], layers = smd },
+            { number = "24", shape = roundrect, size = [0.865, 0.19], at = [2.4025, 1.75], layers = smd },
+            { number = "25", shape = roundrect, size = [0.19, 0.865], at = [1.75, 2.4025], layers = smd },
+            { number = "26", shape = roundrect, size = [0.19, 0.865], at = [1.25, 2.4025], layers = smd },
+            { number = "27", shape = roundrect, size = [0.19, 0.865], at = [0.75, 2.4025], layers = smd },
+            { number = "28", shape = roundrect, size = [0.19, 0.865], at = [0.25, 2.4025], layers = smd },
+            { number = "29", shape = roundrect, size = [0.19, 0.865], at = [-0.25, 2.4025], layers = smd },
+            { number = "30", shape = roundrect, size = [0.19, 0.865], at = [-0.75, 2.4025], layers = smd },
+            { number = "31", shape = roundrect, size = [0.19, 0.865], at = [-1.25, 2.4025], layers = smd },
+            { number = "32", shape = roundrect, size = [0.19, 0.865], at = [-1.75, 2.4025], layers = smd },
+            { number = "33", shape = roundrect, size = [3.3, 3.3], ratio = 0.05, at = [0, 0], layers = smd, paste_expand = -0.33, thermal = true }
+        ],
+        courtyard = rect([-3.09, -3.09], [3.09, 3.09]),
+        silk = [
+            line([-2.61, -2.61], [-2.105, -2.61]),
+            line([2.105, -2.61], [2.61, -2.61]),
+            line([2.61, -2.61], [2.61, -2.105]),
+            line([2.61, 2.105], [2.61, 2.61]),
+            line([-2.61, 2.61], [-2.105, 2.61]),
+            line([2.105, 2.61], [2.61, 2.61]),
+            line([-2.61, -2.61], [-2.61, -2.105]),
+            line([-2.61, 2.105], [-2.61, 2.61]),
+            circle([-3.135, 1.75], 0.1, fill = true)
+        ],
+        fab = [rect([-2.5, -2.5], [2.5, 2.5]), text([0, 0], "${REFERENCE}")],
+        body = {
+            height = 0.9,
+            model = "${RUNMAT_3DMODELS}/QFN-32_5x5mm_P0.5mm_EP3.3x3.3mm_IPCN.step"
+        }
     }
     sync {
         version = 1

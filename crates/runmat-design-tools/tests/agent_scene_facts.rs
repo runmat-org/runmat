@@ -30,9 +30,13 @@ const DAQ_LOCK: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq
 /// The sections a circuit guide turn reads when the whole inspection doesn't fit.
 const CIRCUIT_GUIDE_SECTIONS: &[&str] = &["erc_power", "unplaced", "eco", "rooms", "nets", "bom"];
 
+/// The private checkout's scene folder: `RUNMAT_PRIVATE_DIR` names the checkout (a lane's own
+/// worktree), else the `runmat-private-cad` beside this one.
 fn scenes_dir() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../runmat-private-cad/desktop/scripts/site-captures/agent-scenes")
+    let private = std::env::var_os("RUNMAT_PRIVATE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../runmat-private-cad"));
+    private.join("desktop/scripts/site-captures/agent-scenes")
 }
 
 /// The scene workspace: every scene file at the root, as the capture creates them (with the
