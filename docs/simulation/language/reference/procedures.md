@@ -253,6 +253,20 @@ Every analysis step checks that its computed solution satisfies the assembled eq
 
 Structural modal and prestressed modal steps use `backward_error` by default. Every mode publishes both numbers: `modal.backward_error` and `modal.residual_norm` (the relative residual). The step's measure decides which one is checked. The other procedures check `relative_residual` in this release, and setting `algebraic_measure = backward_error` on them is an error.
 
+| Procedure | Algebraic check in this release | Published |
+| --- | --- | --- |
+| `structural modal`, `structural prestressed_modal` | backward error of each mode, 1e-12 | `modal.backward_error` and `modal.residual_norm` per mode; diagnostics `FEA_MODAL_ACCURACY` and `FEA_MODAL_CONVERGENCE` |
+| `structural static`, `structural harmonic`, `structural transient`, `structural prestressed_harmonic` | relative residual of the solved equations, 1e-8 | `structural.residual_norm` |
+| `structural nonlinear` | relative residual of every Newton correction solve, 1e-8 | the largest correction residual in the numerical receipt |
+| `thermal` steady, transient and nonlinear steps | relative residual of every accepted linear solve, 1e-8 | the largest linear residual in the numerical receipt |
+| `electrical` static steps | relative residual of the lifted linear system, 1e-8 | `linear_relative_residual` in the numerical receipt |
+| `magnetic` static steps | relative physical and gauge residuals, 1e-8 | the numerical receipt |
+| `structural buckling` | relative residual of each mode | the buckling modes' backward errors are computed but not checked |
+
+The engineering checks are separate from this table and keep their own criteria: mesh convergence, modal mass capture, energy balance, Newton force balance and the fluid scaled residuals.
+
+The backward-error check for every algebraic solve is [not yet in the current release](pending:accuracy.backward-error-every-solve). Static, thermal, electrostatic, magnetostatic and harmonic solves, each transient step and each Newton linearization will check η = ‖b − A x‖ / (‖A‖ ‖x‖ + ‖b‖) at 1e-12 by default and publish it beside the relative residual. `algebraic_measure = relative_residual` will keep the current check.
+
 Setting `algebraic_measure` resets the tolerance to that measure's default, and `algebraic_relative_tolerance` then replaces it:
 
 ```fea fragment

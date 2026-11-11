@@ -508,7 +508,8 @@ interface-projection, field-transfer, signal-interpolation, recovery, observatio
 precision, and execution-equivalence error are not added into a decorative total.
 
 Required evidence may be an a-posteriori estimator, convergence study, conservation balance,
-residual bound, reference comparison, statistical confidence, or transfer bound. When required
+residual bound, backward-error bound, reference comparison, statistical confidence, or transfer
+bound. When required
 evidence is unavailable, the plan's `fea.UnavailableEvidencePolicy` decides the outcome:
 `fail()` blocks publication, and `markIndeterminate()` publishes the result with an indeterminate
 accuracy status that every reader sees. When a resource ceiling is reached, the typed action may
@@ -523,6 +524,10 @@ independently of the accuracy plan.
 of 1e-8 on global equilibrium, reports evidence the solver cannot produce as indeterminate, and
 fails when a resource ceiling is reached. A residual bound is not a field-error bound; add spatial,
 temporal or reference criteria when a result needs that evidence.
+Structural modal and prestressed modal steps replace that bound with a backward-error bound of
+1e-12 on every mode, and publish both the backward error and the relative residual of each mode.
+The [algebraic accuracy](language/reference/procedures.md#algebraic-accuracy) section of the
+procedures reference lists the measure each procedure checks and the numbers it publishes.
 Response-spectrum and random-response steps evaluate their typed whole-result evidence at the
 portable execution boundary. A blocked accuracy gate prevents terminal semantic-state
 publication. Their publication request also names the exact resource plan and canonical aggregated
