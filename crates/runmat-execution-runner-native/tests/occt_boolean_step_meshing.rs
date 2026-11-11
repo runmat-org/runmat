@@ -13,6 +13,9 @@
 //!   touching solids.
 //! - `esc_thermal.step`: a lofted lower shell trimmed by a plane and cut by an inner loft, with
 //!   bosses joined to it, and the ESC board touching it.
+//! - `battery_cold_plate.step`: a battery module's eight cells on 3 mm gap-filler pads, each pad
+//!   on a 1 mm land of an 8 mm cold plate with a 14 x 4 mm serpentine coolant channel (2 mm lid
+//!   and floor), joined with shared interfaces.
 
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, FilesystemObjectStore};
@@ -37,6 +40,7 @@ const ARM_BOX_BEAM: &[u8] = include_bytes!("fixtures/boolean_step/arm_box_beam.s
 const ARM_ONLY: &[u8] = include_bytes!("fixtures/boolean_step/arm_only.step");
 const ARM_STUDY: &[u8] = include_bytes!("fixtures/boolean_step/arm_study.step");
 const ESC_THERMAL: &[u8] = include_bytes!("fixtures/boolean_step/esc_thermal.step");
+const BATTERY_COLD_PLATE: &[u8] = include_bytes!("fixtures/boolean_step/battery_cold_plate.step");
 const HEATSINK: &[u8] =
     include_bytes!("../../../docs/simulation/examples/geometry/electronics-heatsink.step");
 
@@ -88,6 +92,114 @@ fn the_docs_heat_sink_meshes() {
 #[ignore = "tetrahedralization facet recovery: constrained Delaunay Steiner insertion leaves a non-Delaunay neighbor on the y = 31.5 mm trim plane"]
 fn a_trimmed_and_cut_lofted_shell_with_its_board_meshes_with_a_shared_interface() {
     assert_meshes("esc_thermal.step", ESC_THERMAL, true, 2.5e-3, 2);
+}
+
+/// Geometry-induced sizing of the battery cold plate at its 12 mm study target. The thinnest
+/// material is the channel's 2 mm lid and floor: two cells across their side strips (1 mm edge
+/// sizing) and one layer across the lid and floor faces (2 mm). The 1 mm lands are steps on the
+/// plate's full thickness and the pads are 3 mm layers, so nothing in the model calls for
+/// sizing below 1 mm.
+///
+/// Before the fix, the shared pad/land face's material sides were composed with its first
+/// shell's orientation a second time, so the plate seemed to lie above the land top. The land
+/// top and the plate top 1 mm below then read as the two sides of a 1 mm wall (1 mm over every
+/// 34 x 500 mm pad face), and the land's 1 mm side strips as a thickness (0.5 mm along 16 m of
+/// edges). The surface had 1,688,558 triangles and took about 1.8 h to mesh.
+#[test]
+fn the_battery_cold_plate_sizes_its_thin_material_and_not_its_steps() {
+    let mut options = ExactCadImportOptions::default();
+    options.analysis.healing.shared_interfaces = true;
+    let imported = import_exact_cad(
+        "battery_cold_plate.step",
+        BATTERY_COLD_PLATE,
+        GeometryFormat::Step,
+        &options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let document = imported.geometry_document().unwrap();
+    let limits = ObjectInventoryLimits::default();
+    let geometry = prepare_exact_geometry_objects(
+        document.clone(),
+        imported.topology,
+        imported.evaluators,
+        Some(imported.representation),
+        imported.healing_report,
+        limits,
+    )
+    .unwrap();
+    let request = runmat_meshing_core::resolve_meshing_request(
+        document.tolerance,
+        MeshingRequestSettings {
+            element_order: ElementOrder::Tet4,
+            target_edge_length_m: runmat_types::physical::Length::new(12.0e-3),
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(2.0e-4),
+            ..MeshingRequestSettings::default()
+        },
+    )
+    .unwrap();
+    let representation = geometry.kernel_representation().unwrap().unwrap().to_vec();
+    let evaluator = runmat_geometry_io::OcctExactEvaluator::from_closure_controlled(
+        &representation,
+        geometry.document.source.representation_units.meters_per_unit(),
+        &geometry.topology,
+        &geometry.evaluators,
+        &Unlimited,
+    )
+    .unwrap();
+    let metric = runmat_meshing_curve::derive_curve_geometry_metric(
+        &geometry.topology,
+        &evaluator,
+        &Unlimited,
+        &request.metric,
+        request.quality,
+    )
+    .unwrap();
+    let size_mm = |metric: &runmat_meshing_core::MetricTensor3| 1.0e3 / metric.xx.sqrt();
+    let face_gaps = metric
+        .contributions
+        .iter()
+        .filter(|contribution| {
+            contribution.source == runmat_meshing_core::MetricSourceKind::Proximity
+        })
+        .map(|contribution| size_mm(&contribution.metric))
+        .collect::<Vec<_>>();
+    let edge_gaps = metric
+        .located_sources
+        .iter()
+        .map(|source| size_mm(&source.metric))
+        .collect::<Vec<_>>();
+    let smallest = |sizes: &[f64]| sizes.iter().copied().fold(f64::INFINITY, f64::min);
+    assert!(
+        (smallest(&face_gaps) - 2.0).abs() < 1.0e-6,
+        "smallest face gap size {} mm",
+        smallest(&face_gaps)
+    );
+    assert!(
+        (smallest(&edge_gaps) - 1.0).abs() < 1.0e-6,
+        "smallest edge gap size {} mm",
+        smallest(&edge_gaps)
+    );
+}
+
+struct Unlimited;
+
+impl runmat_geometry_core::GeometryEvaluationControl for Unlimited {
+    fn checkpoint(&self) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
+        Ok(())
+    }
+    fn consume_iterations(&self, _: u64) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
+        Ok(())
+    }
+    fn consume_search_work(&self, _: u64) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
+        Ok(())
+    }
+    fn consume_allocation_bytes(
+        &self,
+        _: u64,
+    ) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
+        Ok(())
+    }
 }
 
 fn assert_meshes(
