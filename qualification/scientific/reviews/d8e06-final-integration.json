@@ -6,7 +6,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "14dc8f7eb4d6ea581e099c7d396ced37c85282df6c82f225be2326ea8b3ae397",
+    "sha256": "23a15c466637b093edf315b6c3c8254f050b5b6fde70801bd7148cd61afc0bd8",
     "files": 26096,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -29,6 +29,76 @@
         "1e9cac6489858265cd900e3d859e4bb99acda902"
       ],
       "reason": "Fillet patterns are implemented. The translated seed without a matching edge must report RegenInvalid at feature p/layout, with root cause, error severity and the specific missing-edge remedy. Both stub and native-kernel paths pass this witness; no production behavior changed."
+    },
+    {
+      "path": "crates/runmat-cad/wasm/src/drawing/progress.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c5b1c15f43660e1ccee3fb89f3efb7b237cfe838"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0494c79a79c30c7c636a6d5f43efebe714e42336"
+      ],
+      "reason": "The Stage::Full thread-local initializer is constant. Its value and stage restoration behavior are unchanged; all 196 CAD browser library regressions pass and strict Clippy passes for all targets/features."
+    },
+    {
+      "path": "crates/runmat-cad/wasm/src/edit/assembly/structure_tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3f5a98d255fe15d1010db20d4f24121f4acde119"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "353802d7d2e93ce3e2e2193d360fcb90ee72c94f"
+      ],
+      "reason": "The test-local empty Files map initializer is constant. Tests retain the same per-thread storage, edited files and assertions; all 196 CAD browser library regressions pass."
+    },
+    {
+      "path": "crates/runmat-cad/wasm/src/edit/assembly/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "09186ac6fb9c05075a03340d2c264084bd1a7e43"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "d63d9c1863cdba822c0db4f4edd1a2bfbb0896a6"
+      ],
+      "reason": "The test-local empty Files map initializer is constant. Tests retain the same per-thread storage, edited files and assertions; all 196 CAD browser library regressions pass."
+    },
+    {
+      "path": "crates/runmat-cad/wasm/src/evaluate.rs",
+      "before": [
+        "100644",
+        "blob",
+        "664f5fa60aa363dfb80f0b9893fcef7d4e64b680"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "d6529c0a0170d5e1c8796e600d2c7270f0c3e3b9"
+      ],
+      "reason": "Each positions.chunks_exact(3) slice has exactly three coordinates. Enumerating it updates the same bounding-box indices with the same f32-to-f64 conversions, min/max calls and order as 0..3. No numerical operation or allocation changes; all 196 CAD browser regressions pass."
+    },
+    {
+      "path": "crates/runmat-cad/wasm/src/measure/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6a1b021d3b84b55fbdb985bf38aa884459cd6dfa"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e2d5e40c6a76002eec0e5705eb0801518cb81570"
+      ],
+      "reason": "Singleton measurement input slices borrow the same strings rather than cloning them. Measurement inputs, kernel calls and every expected geometric result are unchanged; all 196 CAD browser library regressions pass."
     },
     {
       "path": "crates/runmat-circuit/src/syntax/footprint_decl.rs",
@@ -202,7 +272,7 @@
   "qualification_evidence": [
     {
       "path": "qualification/scientific/evidence/final-integration-inputs.json",
-      "sha256": "4685e89d6776680b5a109cf286f2f3343b11cef3ccf1ec144660fb3c0ef50a5d"
+      "sha256": "a7fca46d5fad5fc487be932181f37aba754edb6adbb4b75d501c8e3a0ccf5cd5"
     }
   ]
 }

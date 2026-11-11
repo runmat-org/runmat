@@ -1,7 +1,14 @@
 {
   "schema_version": 1,
-  "accepted_source_revision": "8f6896b390ac9c5ae72a5b2e237eaa6dd5f3639e",
+  "accepted_source_revision": "be3584a98f23f7ced34793221ff3c2e06cdb7835",
   "checks": [
+    {
+      "name": "CAD browser library regressions after mechanical strict-Clippy repairs",
+      "passed": 196,
+      "failed": 0,
+      "log_sha256": "afc093452f59ef8a382c243e8fdec9777f4113bc18473b140818379e9e74f77f",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-cad-wasm-lint-regressions.log"
+    },
     {
       "name": "Preview pick chunk ownership",
       "passed": 1,
@@ -166,5 +173,5 @@
     }
   ],
   "windows_source_scope": "The focused transfer verifier checked 27,226 files and omitted eight Rust source files under directories named target. This evidence retains that partial source-verification scope. Final Windows CI uses the complete Git checkout; the corrected Linux verifier checks every canonical source file.",
-  "scope": "These checks qualify the enumerated documentation, fixture, chunk-lookup and import-metadata changes, plus two lint repairs. A private type alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. Arithmetic, allocations, dependencies, authored scientific cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts."
+  "scope": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts."
 }

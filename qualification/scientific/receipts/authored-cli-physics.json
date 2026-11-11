@@ -83,14 +83,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "14dc8f7eb4d6ea581e099c7d396ced37c85282df6c82f225be2326ea8b3ae397",
+      "sha256": "23a15c466637b093edf315b6c3c8254f050b5b6fde70801bd7148cd61afc0bd8",
       "files": 26096,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "These checks qualify the enumerated documentation, fixture, chunk-lookup and import-metadata changes, plus two lint repairs. A private type alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. Arithmetic, allocations, dependencies, authored scientific cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts.",
+    "reason": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts.",
     "review": {
       "path": "qualification/scientific/reviews/d8e06-final-integration.json",
-      "sha256": "e2e3296a99d2b27692e73b1ff2417992757b07e46d6c7c2f3ee4f353eb958c25"
+      "sha256": "18120c8c149279327a2dd5bde251e1ebd231019ffac2c222a57d1a41bdb3e8ac"
     }
   }
 }
