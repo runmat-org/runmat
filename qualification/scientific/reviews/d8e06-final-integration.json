@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
+    "files": 26096,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "14dc8f7eb4d6ea581e099c7d396ced37c85282df6c82f225be2326ea8b3ae397",
+    "files": 26096,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "circuit-large-board-performance",
+    "authored-cli-physics",
+    "driver-recovery-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-cad/tests/regen.rs",
+      "before": [
+        "100644",
+        "blob",
+        "19ac2f7429679d4c79cf20f15e695fcd87178f94"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1e9cac6489858265cd900e3d859e4bb99acda902"
+      ],
+      "reason": "Fillet patterns are implemented. The translated seed without a matching edge must report RegenInvalid at feature p/layout, with root cause, error severity and the specific missing-edge remedy. Both stub and native-kernel paths pass this witness; no production behavior changed."
+    },
+    {
+      "path": "crates/runmat-circuit/src/syntax/footprint_decl.rs",
+      "before": [
+        "100644",
+        "blob",
+        "72ca6197ba70a15f4b800da43a75cf0b4323157a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "478df62c265713aa75cffa54ef31d54759646d55"
+      ],
+      "reason": "A private alias names the existing drawing-call tuple. The returned tuple, parser logic, ownership and allocations are unchanged; strict Clippy and all six library-file checks pass."
+    },
+    {
+      "path": "crates/runmat-circuit/tests/kicad.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c29c824da72f308bb2c65204bc96773da07864de"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "abc30d889a58dd87479248423c69bcb59be45ed9"
+      ],
+      "reason": "The fixture intentionally lacks packages for exactly two parts. The test asserts their complete current diagnostics in both parser and circuit/layout checks instead of filtering a stale message suffix. No additional errors are accepted and the importer is unchanged."
+    },
+    {
+      "path": "crates/runmat-circuit/tests/runtime.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e86e9f2b11beef9075891e4164e8e67d595f3169"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "37a3c0ef39128f856c26e16a90b7dd0b8369735d"
+      ],
+      "reason": "The unknown board command keeps its required refusal. Its test asserts the current exact handler error, empty compile diagnostics and the unhandled-command marker. No production routing changes."
+    },
+    {
+      "path": "crates/runmat-design-commands/src/reference.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c716dce8f15c60df2ea67efc067c7c2699929af9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "bd799d7d3e9e4996b35a38676f7fc9c3b8849e85"
+      ],
+      "reason": "Generated command-reference front matter; dispatch and numerical behavior are unchanged. Canonical generator and documentation tests pass."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/command_registry.rs",
+      "before": [
+        "100644",
+        "blob",
+        "4d323841e6b90597e6c6404ed63e94d13e86f68e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0e747e3c3fd1915570069741ed62903695c05349"
+      ],
+      "reason": "The handler inventory routes one authored net, retains every handler/format/type check, and requires autoroute success. Dedicated routing/clearance tests are unchanged."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/native_cli.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a2c36e1bd692b01a960e44a1d66a09852492a6f2"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "40197a5838734cea8d9f00911927806dd8c8018f"
+      ],
+      "reason": "The new native export fixture supplies the drawing format's required title block. Native export assertions are unchanged."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/seat.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c7095bf812a7a915d4e6c23c529a90c055ed9b2f"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "31c491c9fc000468156622f26c350dbefdf95069"
+      ],
+      "reason": "The seat fixture keeps every pose, contact and staged-edit assertion. Its OCCT branch requires the measured 0.5 mm clearance and complete no-interference summary; its grid branch retains the unmeasured-gap diagnostic. Both kernel profiles pass all nine seat cases. No production seating or proximity behavior changed."
+    },
+    {
+      "path": "crates/runmat-process-host/tests/startup_diagnostics.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c315c2d89e63891651559409eaee56daa33bd544"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fbcd2b8523266b99d4d2c483c062f9eb03734095"
+      ],
+      "reason": "The detached test child publishes its completed marker by same-directory rename after writing the bytes. The parent can no longer observe a created but empty completion file. Startup bytes, truncation, EndOfStream, detached lifetime and exact completion contents remain required. Both startup diagnostic cases pass; production process handling is unchanged."
+    },
+    {
+      "path": "crates/runmat-runtime/src/geometry/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "92913d260964b52ae5443f8ff82ee9f166de9860"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "bb6cb1ddd363668fa36b808f60b2faa07a29a3f6"
+      ],
+      "reason": "The preview edge witness reads vertices from the chunk named by the pick result. Every edge-coordinate assertion is retained; production picking and preview code are unchanged."
+    },
+    {
+      "path": "crates/runmat-sparse-solvers/src/eigen/inertia.rs",
+      "before": [
+        "100644",
+        "blob",
+        "2a7af461181ac98a02f02b6346223629c98558bf"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "df1116eefc503ef949d20f6757fcb68dc8d0a9ef"
+      ],
+      "reason": "The immutable parent vector is collected from 0..count immediately above this loop, so its length is count. Enumerating it visits the same (s, parent[s]) pairs in the same order and appends the same child indices. It changes no arithmetic or allocation. Exact inertia counts and pattern-based peak quotes pass."
+    },
+    {
+      "path": "verification/meshing/corpus.json",
+      "before": [
+        "100644",
+        "blob",
+        "e3138991e63da273ae0d5a0fede81f5ccdd94cdc"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "30611cb10a0a5a60c924749e6e5dda9ec71e93c1"
+      ],
+      "reason": "Registers the existing ESC STEP fixture checksum and exact import/name scope. Independent mass properties and volume-meshing bounds remain explicitly unmeasured."
+    },
+    {
+      "path": "verification/meshing/integration.json",
+      "before": [
+        "100644",
+        "blob",
+        "9feef86f74fd48574cf45276ec2da6792a9be4c0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c5b95fff8e1eb4dedcbac980428343e09a3062e0"
+      ],
+      "reason": "Adds the same fixture's three-region import admission case. It adds no meshing scenario or scientific success claim."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/final-integration-inputs.json",
+      "sha256": "4685e89d6776680b5a109cf286f2f3343b11cef3ccf1ec144660fb3c0ef50a5d"
+    }
+  ]
+}
