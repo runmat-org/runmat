@@ -4,6 +4,7 @@
 use super::*;
 use crate::board_rules::{props, BItem, BoardGraph, BoardRules, RuleValue};
 use crate::drc::Drc;
+use crate::item_ref::ItemRef;
 use crate::layer_set::CopperIndex;
 use crate::layout::{Board, ItemId, NetId, PadConnect, Side, StackKind};
 use crate::library::PadShape;
@@ -12,26 +13,22 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// A board item's scene region, as the board view names it.
 pub fn item_region(board: &Board, it: &BItem) -> Option<String> {
-    match it {
-        BItem::Edge => Some("board:outline".to_owned()),
-        BItem::Net(n) => board
-            .nets
-            .get(*n as usize)
-            .map(|n| format!("net:{}", n.name)),
-        BItem::Footprint(id) => board
-            .footprints
-            .get(id)
-            .map(|f| format!("component:{}", f.reference)),
-        BItem::Pad(id, pad) => board.footprints.get(id).and_then(|f| {
-            f.package
-                .pads
-                .get(*pad as usize)
-                .map(|p| format!("pad:{}.{}", f.reference, p.name))
-        }),
-        BItem::Track(id) => Some(format!("track:{}", id.0)),
-        BItem::Via(id) => Some(format!("via:{}", id.0)),
-        BItem::Zone(id) => Some(format!("zone:{}", id.0)),
-    }
+    let r = match it {
+        BItem::Edge => ItemRef::BoardOutline,
+        BItem::Net(n) => ItemRef::Net(board.nets.get(*n as usize)?.name.clone()),
+        BItem::Footprint(id) => ItemRef::Component(board.footprints.get(id)?.reference.clone()),
+        BItem::Pad(id, pad) => {
+            let f = board.footprints.get(id)?;
+            ItemRef::Pad {
+                component: f.reference.clone(),
+                pad: f.package.pads.get(*pad as usize)?.name.clone(),
+            }
+        }
+        BItem::Track(id) => ItemRef::Track(id.0),
+        BItem::Via(id) => ItemRef::Via(id.0),
+        BItem::Zone(id) => ItemRef::Zone(id.0),
+    };
+    Some(r.to_string())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
