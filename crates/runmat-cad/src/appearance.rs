@@ -106,9 +106,52 @@ pub fn apply_document_appearance(
 
 /// Gives each output's body its own color (the output's `color`, else its material's
 /// appearance) when the part has more than one output, so a study part's solid, fluid and air
-/// bodies read apart. A body that already carries a color keeps it; a one-output part draws in
+/// bodies read apart; then gives every body a `material = { body, material }` statement names
+/// that material's appearance, so a wall's batts, plates and foam read apart in one part. A body
+/// that already carries a color keeps it; a one-output part with no material statements draws in
 /// the part's appearance as before.
 pub fn color_output_bodies(
+    doc: &crate::model::PartDocument,
+    result: &crate::regen::engine::RegenResult,
+    display: &mut crate::display::PartDisplay,
+) {
+    color_outputs(doc, result, display);
+    for (m, o) in doc.materials.iter().zip(&result.materials) {
+        let rgba = material_appearance(Some(m.material.0.as_str())).1;
+        for b in assigned_bodies(result, o) {
+            if let Some(body) = display.bodies.iter_mut().find(|d| d.index as usize == b) {
+                body.color.get_or_insert(rgba);
+            }
+        }
+    }
+}
+
+/// Every live body a material statement resolved to: each body carrying all the names of one
+/// resolved entity, so a feature that makes several bodies (a multi-loop extrude, a split) colors
+/// them all.
+fn assigned_bodies(
+    result: &crate::regen::engine::RegenResult,
+    o: &crate::regen::engine::ItemOutcome,
+) -> Vec<usize> {
+    if !o.ok {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for names in &o.entities {
+        let want: std::collections::BTreeSet<_> = names.iter().collect();
+        if want.is_empty() {
+            continue;
+        }
+        for (b, body) in result.state.bodies.iter().enumerate() {
+            if want.iter().all(|n| body.names.body.contains(*n)) && !out.contains(&b) {
+                out.push(b);
+            }
+        }
+    }
+    out
+}
+
+fn color_outputs(
     doc: &crate::model::PartDocument,
     result: &crate::regen::engine::RegenResult,
     display: &mut crate::display::PartDisplay,
