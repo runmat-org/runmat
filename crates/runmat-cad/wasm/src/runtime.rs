@@ -693,6 +693,40 @@ pub fn compile_assembly_known(
     files: &Files,
     known: &BTreeSet<String>,
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
+    compile_assembly_with(path, text, files, known, |_, _| ())
+}
+
+/// [`compile_assembly`] with the assembly's indented BOM (sub-assemblies as lines with their
+/// contents under them), for a drawing's top-level and indented parts lists.
+pub fn compile_assembly_indented(
+    path: &str,
+    text: &str,
+    files: &Files,
+) -> Result<
+    (
+        Value,
+        Value,
+        Vec<Diagnostic>,
+        Vec<runmat_cad::assembly::bom::IndentedRow>,
+    ),
+    Vec<Diagnostic>,
+> {
+    let mut rows = Vec::new();
+    let (index, display, problems) =
+        compile_assembly_with(path, text, files, &BTreeSet::new(), |resolved, source| {
+            rows = runmat_cad::assembly::bom::indented_bom(resolved, Some(source));
+        })?;
+    Ok((index, display, problems, rows))
+}
+
+/// [`compile_assembly_known`], handing the resolved tree and its source to `also` first.
+fn compile_assembly_with(
+    path: &str,
+    text: &str,
+    files: &Files,
+    known: &BTreeSet<String>,
+    also: impl FnOnce(&runmat_cad::assembly::resolve::ResolvedAssembly, &MemorySource),
+) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
     let AssemblyResolution {
         source,
         displays,
@@ -701,6 +735,7 @@ pub fn compile_assembly_known(
         problems,
         digests,
     } = resolve_assembly(path, text, files)?;
+    also(&resolved, &source);
     let index = build_assembly_index(&resolved, Some(&source));
     let configured = crate::configured::configured_displays(&resolved, &documents);
     let mut display = assembly_display_configured(&resolved, &source, &displays, &configured);

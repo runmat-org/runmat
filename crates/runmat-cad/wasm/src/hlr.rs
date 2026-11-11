@@ -616,7 +616,13 @@ fn hidden(model: &Model, grid: &Grid, axes: &Axes, p: P3, own: [usize; 2]) -> bo
 
 /// Every edge of the drawn model under `axes`, split into visible and hidden runs.
 pub fn view_lines(display: &Value, axes: &Axes) -> ViewLines {
-    lines_of(&model_of(display), axes)
+    view_lines_drawn(display, axes, true)
+}
+
+/// [`view_lines`] for a view that draws hidden lines only when `hidden`: a view that draws
+/// visible lines keeps none (each edge is still classified, so its visible runs are the same).
+pub fn view_lines_drawn(display: &Value, axes: &Axes, hidden: bool) -> ViewLines {
+    lines_of(&model_of(display), axes, hidden)
 }
 
 /// A section view: the model beyond the cutting plane through `point` (normal to `axes.depth`,
@@ -713,8 +719,7 @@ pub fn section_lines(display: &Value, axes: &Axes, point: P3) -> ViewLines {
         axes: model.axes.iter().map(|a| Axis { ..*a }).collect(),
         bodies: model.bodies,
     };
-    let mut out = lines_of(&clipped, axes);
-    out.hidden.clear();
+    let mut out = lines_of(&clipped, axes, false);
     let project = |p: P3| [dot(p, axes.u), dot(p, axes.v)];
     for (a, b) in &cut {
         let (pa, pb) = (project(*a), project(*b));
@@ -760,7 +765,9 @@ fn loops(cut: &[(P3, P3)], project: &dyn Fn(P3) -> [f64; 2]) -> Vec<Vec<f64>> {
     out
 }
 
-fn lines_of(model: &Model, axes: &Axes) -> ViewLines {
+/// `hidden`: whether the view draws hidden lines; when it doesn't, hidden runs are dropped as
+/// they are found.
+fn lines_of(model: &Model, axes: &Axes, hidden_drawn: bool) -> ViewLines {
     let grid = Grid::new(model, axes);
     let mut out = ViewLines::default();
     let project = |p: P3| [dot(p, axes.u), dot(p, axes.v)];
@@ -802,7 +809,9 @@ fn lines_of(model: &Model, axes: &Axes) -> ViewLines {
                     Some((state, pts)) if *state == h => pts.extend([p1[0], p1[1]]),
                     _ => {
                         if let Some((state, pts)) = run.take() {
-                            push(&mut out, state, pts);
+                            if !state || hidden_drawn {
+                                push(&mut out, state, pts);
+                            }
                         }
                         run = Some((h, vec![p0[0], p0[1], p1[0], p1[1]]));
                     }
@@ -819,7 +828,9 @@ fn lines_of(model: &Model, axes: &Axes) -> ViewLines {
                     _ => {}
                 }
                 seen.insert(k, visible);
-                push(&mut out, state, pts);
+                if visible || hidden_drawn {
+                    push(&mut out, state, pts);
+                }
             }
         }
     }

@@ -25,7 +25,7 @@ pub mod title;
 pub(crate) mod values;
 mod view_picks;
 
-use crate::runtime::{compile_assembly, resolve_path, Diagnostic, Files, RegeneratedPart};
+use crate::runtime::{compile_assembly_indented, resolve_path, Diagnostic, Files, RegeneratedPart};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
@@ -58,6 +58,8 @@ pub struct CompiledModels {
     characteristics: BTreeMap<String, BTreeMap<String, runmat_cad::pmi::Characteristic>>,
     /// File → the assembly's flat BOM (its index's), for BOM tables and balloons.
     boms: BTreeMap<String, Bom>,
+    /// File → the assembly's indented BOM, for top-level and indented parts lists.
+    indented: BTreeMap<String, Vec<runmat_cad::assembly::bom::IndentedRow>>,
     /// Assembly file → BOM item definition file → its properties (parts lists' description).
     item_properties: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
     /// Part file → flat pattern or unfold feature → its layout, the outline as cut.
@@ -138,6 +140,12 @@ impl ModelReferences for CompiledModels {
     }
     fn bom(&self, model: &ModelRef) -> Option<Bom> {
         self.boms.get(model.file.as_str()).cloned()
+    }
+    fn indented_bom(
+        &self,
+        model: &ModelRef,
+    ) -> Option<Vec<runmat_cad::assembly::bom::IndentedRow>> {
+        self.indented.get(model.file.as_str()).cloned()
     }
     fn flat_layout(&self, model: &ModelRef, feature: &FeatureId) -> Option<FlatLayout> {
         self.flats.get(model.file.as_str())?.get(feature).cloned()
@@ -280,8 +288,9 @@ pub fn compile_json_in(
                 file.clone(),
                 progress::model_key(&at, source, None, Some(files)),
             );
-            match compile_assembly(&at, source, files) {
-                Ok((index, display, _)) => {
+            match compile_assembly_indented(&at, source, files) {
+                Ok((index, display, _, indented)) => {
+                    models.indented.insert(file.clone(), indented);
                     let occ = index["occurrences"]
                         .as_array()
                         .map(|rows| {
@@ -400,22 +409,26 @@ pub fn compile_json_in(
     let views = serde_json::to_value(&document.views).unwrap_or(Value::Null);
     let mut hlr = serde_json::Map::new();
     // A view's lines: exact on the part's kernel when it projects, else from the display.
-    let lines_of =
-        |file: &str, display: &Value, axes: &crate::hlr::Axes| -> crate::hlr::ViewLines {
-            exact
-                .get(file)
-                .and_then(|part| {
-                    let bodies: Vec<_> = part
-                        .result
-                        .state
-                        .bodies
-                        .iter()
-                        .map(|b| (&b.handle, runmat_cad::regen::kernel::Transform::IDENTITY))
-                        .collect();
-                    crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes)
-                })
-                .unwrap_or_else(|| crate::hlr::view_lines(display, axes))
-        };
+    // `hidden`: whether the view draws hidden lines (a view that doesn't keeps none).
+    let lines_of = |file: &str,
+                    display: &Value,
+                    axes: &crate::hlr::Axes,
+                    hidden: bool|
+     -> crate::hlr::ViewLines {
+        exact
+            .get(file)
+            .and_then(|part| {
+                let bodies: Vec<_> = part
+                    .result
+                    .state
+                    .bodies
+                    .iter()
+                    .map(|b| (&b.handle, runmat_cad::regen::kernel::Transform::IDENTITY))
+                    .collect();
+                crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes)
+            })
+            .unwrap_or_else(|| crate::hlr::view_lines_drawn(display, axes, hidden))
+    };
     for view in views.as_array().into_iter().flatten() {
         let (Some(name), Some(file)) = (view["name"].as_str(), view["model"]["file"].as_str())
         else {
@@ -445,6 +458,8 @@ pub fn compile_json_in(
                 }
                 continue;
             }
+            let shows_hidden =
+                !matches!(view["display"].as_str(), Some("visible_lines" | "shaded"));
             let project = || -> Value {
                 // The occurrences the view leaves out (`exclude`), and everything under them.
                 let excluded: Vec<String> = document
@@ -493,8 +508,13 @@ pub fn compile_json_in(
                             }
                             _ => (
                                 parent_axes,
-                                serde_json::to_value(lines_of(file, display, &parent_axes))
-                                    .unwrap_or(Value::Null),
+                                serde_json::to_value(lines_of(
+                                    file,
+                                    display,
+                                    &parent_axes,
+                                    shows_hidden,
+                                ))
+                                .unwrap_or(Value::Null),
                             ),
                         };
                         let center = document
@@ -554,8 +574,9 @@ pub fn compile_json_in(
                             .and_then(|r| view_picks::auxiliary_axes(display, &parent_axes, &r))
                             .unwrap_or(parent_axes);
                         drawn_in = Some(axes);
-                        let mut lines = serde_json::to_value(lines_of(file, display, &axes))
-                            .unwrap_or(Value::Null);
+                        let mut lines =
+                            serde_json::to_value(lines_of(file, display, &axes, shows_hidden))
+                                .unwrap_or(Value::Null);
                         if let Value::Object(o) = &mut lines {
                             o.insert("picks".into(), view_picks::picks(display, &axes));
                         }
@@ -563,7 +584,7 @@ pub fn compile_json_in(
                     }
                     // A broken-out section: the parent's lines with the cut inside its boundary.
                     Some("broken_out") => {
-                        let parent_lines = lines_of(file, display, &parent_axes);
+                        let parent_lines = lines_of(file, display, &parent_axes, shows_hidden);
                         let cut = document
                             .views
                             .iter()
@@ -595,8 +616,9 @@ pub fn compile_json_in(
                     _ => {
                         let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
                         drawn_in = Some(axes);
-                        let mut lines = serde_json::to_value(lines_of(file, display, &axes))
-                            .unwrap_or(Value::Null);
+                        let mut lines =
+                            serde_json::to_value(lines_of(file, display, &axes, shows_hidden))
+                                .unwrap_or(Value::Null);
                         // What a click on each line means (the face it shows edge-on, or the edge).
                         if let Value::Object(o) = &mut lines {
                             o.insert("picks".into(), view_picks::picks(display, &axes));
@@ -619,8 +641,6 @@ pub fn compile_json_in(
                         .and_then(|a| Some(a[0].as_f64()? / a[1].as_f64().filter(|d| *d != 0.0)?))
                 };
                 let scale = ratio(&view["scale"]).or(sheet_scale).unwrap_or(1.0);
-                let shows_hidden =
-                    !matches!(view["display"].as_str(), Some("visible_lines" | "shaded"));
                 crate::hlr::thin::thin(&mut entry, scale, shows_hidden);
                 entry
             };
@@ -701,6 +721,11 @@ pub fn compile_json_in(
             {
                 if let Some(c) = cylinder_of(display, r, *p) {
                     cylinders.insert(a.id.clone(), c);
+                }
+                // The arc's radius (mm), so the leader's arrow ends on the arc, not at its
+                // centre (a fillet or corner arc has no center mark to take it from).
+                if let Some(rad) = values::radius_of(display, r) {
+                    radii.insert(a.id.clone(), json!(rad));
                 }
             }
             if matches!(
@@ -935,7 +960,16 @@ fn section_entry(
         return Value::Null;
     };
     let _ = views;
-    let Some(p0) = point_of(display, plane) else {
+    use runmat_cad::model::{DatumRef, PlaneRef};
+    let p0 = match plane {
+        PlaneRef::Face { face } => point_of(display, face),
+        // Every origin plane passes through the model's origin.
+        PlaneRef::Datum {
+            datum: DatumRef::OriginPlane { .. },
+        } => Some([0.0; 3]),
+        PlaneRef::Datum { .. } => None,
+    };
+    let Some(p0) = p0 else {
         return Value::Null;
     };
     let axes = section_axes(parent);
