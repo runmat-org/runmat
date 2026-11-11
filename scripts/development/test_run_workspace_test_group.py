@@ -21,6 +21,38 @@ SPEC.loader.exec_module(runner)
 
 
 class ScientificRoutingTests(unittest.TestCase):
+    def test_solver_feature_variants_reuse_distinct_rust_archives(self):
+        manifest = Path(__file__).resolve().parents[2] / "crates/runmat-clarabel/Cargo.toml"
+        import tomllib
+        self.assertEqual(tomllib.loads(manifest.read_text())["lib"]["crate-type"], ["lib"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text('[workspace]\nmembers=["shared", "app"]\nresolver="2"\n')
+            for name in ("shared", "app"):
+                (root / name / "src").mkdir(parents=True)
+            (root / "shared/Cargo.toml").write_text(
+                '[package]\nname="cache-shared"\nversion="0.1.0"\nedition="2021"\n'
+                '[lib]\ncrate-type=["lib"]\n[features]\nextra=[]\n')
+            (root / "shared/src/lib.rs").write_text('pub fn value() -> bool { cfg!(feature="extra") }\n')
+            (root / "app/Cargo.toml").write_text(
+                '[package]\nname="cache-app"\nversion="0.1.0"\nedition="2021"\n'
+                '[dependencies]\ncache-shared={path="../shared"}\n')
+            (root / "app/src/lib.rs").write_text('pub fn value() -> bool { cache_shared::value() }\n')
+            environment = {**os.environ, "CARGO_TARGET_DIR": str(root / "target"), "CARGO_NET_OFFLINE": "true"}
+            observations = []
+            for features in (["--features", "cache-shared/extra"], [], ["--features", "cache-shared/extra"]):
+                result = subprocess.run(
+                    ["cargo", "test", "-p", "cache-app", "--lib", "--message-format=json", *features],
+                    cwd=root, env=environment, text=True, capture_output=True, check=True)
+                artifacts = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+                artifact = next(row for row in artifacts if row.get("reason") == "compiler-artifact"
+                                and row["target"]["name"] == "cache_shared")
+                observations.append(artifact)
+            self.assertFalse(observations[0]["fresh"])
+            self.assertFalse(observations[1]["fresh"])
+            self.assertTrue(observations[2]["fresh"])
+            self.assertNotEqual(observations[0]["filenames"], observations[1]["filenames"])
+
     def test_linux_runtime_directory_is_private_live_and_replaces_stale_input(self):
         with patch.object(runner.sys, "platform", "linux"), patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/stale-runtime"}):
             with runner.test_runtime_environment() as environment:

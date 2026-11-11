@@ -118,7 +118,6 @@ serde = [
 name = "clarabel"
 crate-type = [
     "lib",
-    "cdylib",
 ]
 path = "src/lib.rs"
 
