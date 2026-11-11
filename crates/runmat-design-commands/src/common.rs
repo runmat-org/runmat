@@ -159,6 +159,7 @@ pub fn common() -> Catalog {
                     ("modal", "Modal"),
                     ("thermal", "Thermal"),
                     ("ir_drop", "IR drop"),
+                    ("warpage", "Warpage"),
                     ("thermal_structural", "Thermal and structural"),
                 ],
             ),

@@ -21,6 +21,8 @@
 //! | solder mask | `pcb/<board>/mask/<stackup layer name>` |
 //! | via barrels of a net | `pcb/<board>/via/<net>` |
 //! | a component body | `pcb/<board>/component/<designator>` |
+//! | a pad's copper, every layer it is on | `pcb/<board>/pad/<designator>.<pin>` (e.g. `pad/Q1.3`) |
+//! | the board's top or bottom face | `pcb/<board>/surface/top`, `pcb/<board>/surface/bottom` |
 //!
 //! Units are SI in the data (metres, watts, K/W, W/(m·K)); geometry polygons stay in board
 //! nanometres with z measured down from the top surface.
@@ -95,6 +97,31 @@ pub struct ViaRegion {
     pub plating: f64,
 }
 
+/// One pad's copper: where a study puts a source or a sink by designator and pin (an IR-drop
+/// study's battery pad and its loads' pins).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PadRegion {
+    pub region: String,
+    pub id: Uuid,
+    pub designator: String,
+    pub pin: String,
+    pub net: Option<String>,
+    /// Pad center, nm.
+    pub center: Point,
+    /// The pad's copper on each copper layer it is on, by stackup layer name (a through-hole
+    /// pad is on every layer).
+    pub layers: Vec<(String, PolySet)>,
+}
+
+/// One outer face of the board (its outline at the top or bottom surface): where a study puts
+/// convection or a support.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceRegion {
+    pub region: String,
+    pub id: Uuid,
+    pub side: Side,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerSource {
     /// Authored on the component (`power`).
@@ -134,6 +161,10 @@ pub struct PcbFeaSource {
     pub copper: Vec<CopperRegion>,
     pub vias: Vec<ViaRegion>,
     pub components: Vec<ComponentRegion>,
+    /// Every pad of a fitted footprint, by designator and pin.
+    pub pads: Vec<PadRegion>,
+    /// The board's top and bottom faces.
+    pub surfaces: Vec<SurfaceRegion>,
     /// Region name → dissipated power, W (components with known power only).
     pub power_map: BTreeMap<String, f64>,
     /// Controlled-impedance lines' cross-sections, for a field-solved impedance study
@@ -324,6 +355,34 @@ pub fn pcb_source(
             tj_max: part.as_ref().and_then(|p| p.thermal.tj_max),
         });
     }
+    let copper_names = board.stackup.copper_names();
+    let mut pads = Vec::new();
+    for p in board.all_pads() {
+        let Some(f) = board.footprints.get(&p.footprint).filter(|f| f.fitted) else { continue };
+        let name = reg(&format!("pad/{}.{}", segment(&f.reference), segment(&p.name)));
+        let rings = p.prim.outline(0, tol);
+        pads.push(PadRegion {
+            id: canonical_id(&name),
+            region: name,
+            designator: f.reference.clone(),
+            pin: p.name.clone(),
+            net: p.net.map(|x| board.net_name(x).to_string()),
+            center: p.center,
+            layers: p
+                .layers
+                .iter()
+                .filter_map(|l| copper_names.get(*l as usize))
+                .map(|layer| (layer.clone(), boolean(&rings, &[], BoolOp::Union)))
+                .collect(),
+        });
+    }
+    let surfaces = [(Side::Top, "top"), (Side::Bottom, "bottom")]
+        .into_iter()
+        .map(|(side, word)| {
+            let name = reg(&format!("surface/{word}"));
+            SurfaceRegion { id: canonical_id(&name), region: name, side }
+        })
+        .collect();
     let _ = n;
     let region = reg("board");
     PcbFeaSource {
@@ -336,6 +395,8 @@ pub fn pcb_source(
         copper,
         vias: vias.into_values().collect(),
         components,
+        pads,
+        surfaces,
         power_map,
         lines: crate::high_speed::cross_section::cross_sections(board, &pairs),
     }

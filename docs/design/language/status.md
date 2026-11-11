@@ -40,7 +40,7 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 ### design.ecad.board-studies
 
-**Board studies through the pcb source.** A .fea study reads a board's stackup, copper and component power through its pcb source and runs thermal and vibration studies of it.
+**Board studies through the pcb source.** Board » Analysis » New study writes a .fea study beside the layout that reads the board's stackup, copper, pads and component power through FEA's pcb geometry source, and FEA checks and runs its thermal, IR drop and warpage studies. Until the source lands, FEA's check answers "pcb geometry source is not yet available" and the Desktop shows the study as planned, with the release flag.
 
 ### design.ecad.fab.assembly-drawing
 

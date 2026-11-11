@@ -398,7 +398,7 @@ pub(super) fn tab() -> DomainTab {
                     "study",
                     "study.new",
                     "physics",
-                    &[("thermal", "Thermal"), ("ir_drop", "IR drop")],
+                    &[("thermal", "Thermal"), ("ir_drop", "IR drop"), ("warpage", "Warpage")],
                 )],
             ),
         ],

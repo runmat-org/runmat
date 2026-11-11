@@ -929,7 +929,7 @@ This file is generated from the command catalog.
 ## `study.` commands (`.part`, `.assembly`, `.circuit`, `.circuit.layout`)
 
 - `study.new`: Create a .fea study from this design.
-  - Required: `physics` (one of `structural`, `modal`, `thermal`, `ir_drop`, `thermal_structural`, default `structural`); `name` (text)
+  - Required: `physics` (one of `structural`, `modal`, `thermal`, `ir_drop`, `warpage`, `thermal_structural`, default `structural`); `name` (text)
 
 ## `surface.` commands (`.part`)
 

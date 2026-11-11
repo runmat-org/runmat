@@ -60,6 +60,8 @@ Inside a segment, `/`, `%` and whitespace are percent-encoded. Nothing else chan
 | solder mask | `pcb/<board>/mask/<stackup layer name>` |
 | via barrels of a net | `pcb/<board>/via/<net>` |
 | component body | `pcb/<board>/component/<designator>` |
+| a pad's copper on each layer it is on | `pcb/<board>/pad/<designator>.<pin>` |
+| the board's top or bottom face | `pcb/<board>/surface/top`, `pcb/<board>/surface/bottom` |
 
 **Canonical IDs.** `canonical_id(name)` is a UUID derived from the full region name. The
 same authored name always gives the same ID. FEA matches on the ID, so no sidecar or alias

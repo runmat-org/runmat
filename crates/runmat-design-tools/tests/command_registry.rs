@@ -36,8 +36,21 @@ drawing sheet {
 }
 "#;
 
+/// The circuit editors run on the ECO scenario's checked-in project: a schematic with its board
+/// and lock (`runmat-circuit/tests/projects/io`).
+const IO_CIRCUIT: &str = include_str!("../../runmat-circuit/tests/projects/io/io.circuit");
+const IO_LAYOUT: &str = include_str!("../../runmat-circuit/tests/projects/io/io.circuit.layout");
+const IO_LOCK: &str = include_str!("../../runmat-circuit/tests/projects/io/io.circuit.lock");
+
 fn files() -> Files {
-    [("/p/plate.part", PLATE), ("/p/pair.assembly", PAIR), ("/p/sheet.drawing", SHEET)]
+    [
+        ("/p/plate.part", PLATE),
+        ("/p/pair.assembly", PAIR),
+        ("/p/sheet.drawing", SHEET),
+        ("/p/io.circuit", IO_CIRCUIT),
+        ("/p/io.circuit.layout", IO_LAYOUT),
+        ("/p/io.circuit.lock", IO_LOCK),
+    ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect()
@@ -54,15 +67,17 @@ fn run(path: &str, request: &RunRequest) -> (Value, bool) {
     (out, commands::take_unhandled())
 }
 
-/// The MCAD editors' commands: none reaches a dispatcher without a handler.
+/// The MCAD and ECAD editors' commands: none reaches a dispatcher without a handler.
 #[test]
-fn every_mcad_command_has_a_handler_on_its_surfaces() {
+fn every_design_command_has_a_handler_on_its_surfaces() {
     let mut missing = Vec::new();
     for route in commands::routes() {
         let path = match route.editor {
             EditorKind::Part => "/p/plate.part",
             EditorKind::Assembly => "/p/pair.assembly",
             EditorKind::Drawing => "/p/sheet.drawing",
+            EditorKind::Circuit => "/p/io.circuit",
+            EditorKind::CircuitLayout => "/p/io.circuit.layout",
             _ => continue,
         };
         if route.handler == Handler::Shell {

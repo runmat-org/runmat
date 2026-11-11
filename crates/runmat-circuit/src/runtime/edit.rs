@@ -113,6 +113,7 @@ pub fn edit(
         "schematic.move" => super::annotate::move_items(&project, request),
         "library.place" => super::library_edit::place(&project, request),
         "circuit.set-property" => super::set_property::run(&project, request),
+        "study.new" => super::board_study::run(&project, files, request),
         c if super::schematic_edit::COMMANDS.contains(&c) => super::schematic_edit::run(&project, files, request),
         "simulate.probe" | "simulate.probe-net" | "simulate.probe-pin" | "simulate.monte-carlo" | "simulate.op-point" | "simulate.dc-sweep" | "simulate.transient" | "simulate.ac" | "simulate.noise" | "simulate.temperature" | "simulate.set-tolerance" => super::sim_edit::run(&project, request),
         command => {
