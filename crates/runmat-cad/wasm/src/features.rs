@@ -315,17 +315,7 @@ fn extrude(values: &Values, picks: &Picks, profile: Value) -> Result<Value, Edit
     Ok(kind)
 }
 
-fn seeds(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
-    let all = some(values, "seeds", "the features or bodies to repeat")?;
-    let features: Vec<&str> = all
-        .iter()
-        .filter_map(|p| p.strip_prefix("feature:"))
-        .collect();
-    if features.len() == all.len() {
-        return Ok(json!({ "seeds": "features", "features": features }));
-    }
-    Ok(json!({ "seeds": "bodies", "bodies": picks.references(&all)? }))
-}
+use layouts::seeds;
 
 fn chamfer_form(values: &Values) -> Result<Value, EditFailure> {
     Ok(match text(values, "type", "distance_angle") {
@@ -402,17 +392,26 @@ fn fillet(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
                 }
                 out["variable"] = Value::Array(variable);
             }
-            if kind == "setback" {
-                let distance = value(values, "setback", "mm")?;
-                out["setbacks"] = vertices
-                    .iter()
-                    .map(|v| Ok(json!({ "vertex": picks.reference(v)?, "distance": distance })))
-                    .collect::<Result<Vec<_>, EditFailure>>()?
-                    .into();
+            if !vertices.is_empty() {
+                return Err(model(
+                    "a fillet rounds edges, faces or a feature's edges; pick those, not vertices",
+                ));
             }
             Ok(out)
         }
     }
+}
+
+/// A shell's walls with their own thickness: the picked faces, at the form's other thickness.
+fn shell_faces(values: &Values, picks: &Picks) -> Result<Vec<Value>, EditFailure> {
+    let faces = picks_of(values, "thick_faces");
+    if faces.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(vec![json!({
+        "faces": picks.references(&faces)?,
+        "thickness": value(values, "face_thickness", "mm")?,
+    })])
 }
 
 fn hole(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
@@ -458,6 +457,10 @@ fn hole(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
         _ if kind == "pipe_tap" => "npt",
         _ => "iso",
     };
+    if flag(values, "series") {
+        // Through every body the hole's axis crosses, in order, ending in the same form.
+        out["series"] = json!({ "bodies": [], "end": out["form"].clone() });
+    }
     if kind == "simple" && values.get("diameter").is_some() {
         out["diameter"] = value(values, "diameter", "mm")?;
     } else {
@@ -507,22 +510,21 @@ fn pattern(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
             "boundary": { "sketch": picks.sketch(&one(values, "boundary", "the region to fill")?)? },
             "spacing": value(values, "spacing", "mm")?,
         }),
+        "table" => layouts::table_layout(values, false)?,
+        "variable" => layouts::table_layout(values, true)?,
         other => {
             return Err(model(format!(
                 "a {other} pattern is set up in the source editor"
             )))
         }
     };
-    if picks_of(values, "skip").len()
-        + values
-            .get("skip")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len)
-        > 0
-    {
-        return Err(model("skipping pattern instances is picked on the canvas in a later build; skip them in the source editor"));
+    let skip = layouts::skip_keys(values, &layout)?;
+    let mut kind =
+        json!({ "feature": "pattern", "seeds": seeds(values, picks)?, "layout": layout });
+    if !skip.is_empty() {
+        kind["skip"] = Value::Array(skip);
     }
-    Ok(json!({ "feature": "pattern", "seeds": seeds(values, picks)?, "layout": layout }))
+    Ok(kind)
 }
 
 /// The feature a part command adds, as its model JSON, and the stem its name takes.
@@ -587,6 +589,7 @@ pub fn feature_kind(
                     "body": body,
                     "open_faces": picks.references(&open)?,
                     "thickness": value(values, "thickness", "mm")?,
+                    "faces": shell_faces(values, picks)?,
                     "outward": flag(values, "outward"),
                 }),
             )
@@ -658,30 +661,11 @@ pub fn feature_kind(
             json!({
                 "feature": "split",
                 "body": picks.reference(&one(values, "body", "the body to split")?)?,
-                "tool": picks.plane(&one(values, "tool", "the plane or face to split with")?)?,
+                "tool": picks.plane(&one(values, "tool", "the plane, face or body to split with")?)?,
             }),
         ),
-        "part.body-move" => {
-            if values
-                .get("angle")
-                .and_then(Value::as_f64)
-                .is_some_and(|a| a != 0.0)
-                || flag(values, "copy")
-            {
-                return Err(model("moving bodies by rotation or as copies isn't in the part model yet; move them by translation"));
-            }
-            (
-                "move",
-                json!({
-                    "feature": "body_op",
-                    "op": "translate",
-                    "bodies": picks.references(&some(values, "bodies", "the bodies to move")?)?,
-                    "dx": value(values, "dx", "mm")?,
-                    "dy": value(values, "dy", "mm")?,
-                    "dz": value(values, "dz", "mm")?,
-                }),
-            )
-        }
+        "part.body-move" => layouts::body_move(values, picks)?,
+        "part.body-indent" => ("indent", layouts::body_indent(values, picks)?),
         "part.body-delete" => {
             if text(values, "keep", "delete") == "keep" {
                 return Err(model(
@@ -866,6 +850,11 @@ pub fn feature_kind(
 
 mod curves;
 mod details;
+mod layouts;
+#[cfg(test)]
+mod picked_tests;
+#[cfg(test)]
+mod layout_tests;
 
 #[cfg(test)]
 mod tests {

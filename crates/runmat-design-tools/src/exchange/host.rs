@@ -1,6 +1,6 @@
 //! The CAD host's Export call (`export(path, text, files, request)`, `request` `{ command, values }`)
-//! for a part or an assembly. STEP AP242 goes to `runmat_cad_wasm::exchange::export`; STL, 3MF and
-//! glTF are the same files `design.export` writes ([`super::model_export`]), from the host kernel's
+//! for a part or an assembly. STEP AP242 goes to `runmat_cad_wasm::exchange::export`; STL, 3MF,
+//! glTF and USD are the same files `design.export` writes ([`super::model_export`]), from the host kernel's
 //! exact tessellation; DXF of a face is [`super::face_dxf`]. The answer is `{ ok: true, name, mime, text }` for a text file,
 //! `{ ok: true, name, mime, base64 }` for a binary one, or `{ ok: false, message }`.
 
@@ -17,6 +17,7 @@ pub fn export_json(path: &str, text: &str, files: &Files, request: &str) -> Stri
         "stl" => ExportFormat::Stl,
         "3mf" => ExportFormat::ThreeMf,
         "gltf" => ExportFormat::Gltf,
+        "usd" => ExportFormat::Usd,
         "dxf_face" => return face_export(path, text, values),
         _ => return runmat_cad_wasm::exchange::export::export_json(path, text, files, request),
     };

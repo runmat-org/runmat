@@ -14,6 +14,7 @@
 //! for standard families from IPC-7351 parameters.
 
 pub mod catalog;
+pub mod checks;
 pub mod footprint;
 pub mod kicad_lib;
 pub mod preview;

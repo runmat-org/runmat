@@ -6,6 +6,7 @@
 mod board;
 mod context;
 mod items;
+mod layers;
 mod schematic;
 
 use runmat_design_commands::*;
@@ -15,6 +16,7 @@ pub fn catalog() -> Catalog {
     let mut c = runmat_design_commands::common();
     schematic::add(&mut c);
     board::add(&mut c);
+    layers::add(&mut c);
     items::add(&mut c);
     context::add(&mut c);
     rows(&mut c);
@@ -79,6 +81,7 @@ fn rows(c: &mut Catalog) {
                 e("view.fit"),
                 e("view.zoom-selection"),
                 e("circuit.flip-board"),
+                e("circuit.single-layer"),
             ],
         ),
         c_item("view.measure"),

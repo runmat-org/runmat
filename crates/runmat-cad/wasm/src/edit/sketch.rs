@@ -427,7 +427,7 @@ fn draw(
                     },
                     _ => {
                         return Err(model(format!(
-                            "offsetting `{rest}` isn't in this build: offset lines and circles"
+                            "Offset takes lines and circles, not `{rest}`"
                         )))
                     }
                 };
@@ -443,15 +443,7 @@ fn draw(
             }
             Ok((out, Vec::new()))
         }
-        "sketch.spline" | "sketch.ellipse" | "sketch.text" | "sketch.polygon" => {
-            Err(model(format!(
-                "{} isn't in the sketch model yet: sketches hold points, lines, arcs and circles",
-                &command["sketch.".len()..]
-            )))
-        }
-        other => Err(model(format!(
-            "`{other}` draws through the source editor in this build"
-        ))),
+        other => Err(super::unhandled(other)),
     }
 }
 
@@ -661,7 +653,12 @@ fn new_sketch(
     let pick = picks(values, "plane")
         .into_iter()
         .next()
-        .ok_or_else(|| model("pick a plane or a planar face to sketch on"))?;
+        .ok_or_else(|| {
+            model(format!(
+                "pick a plane or a planar face to sketch on: `part.sketch` reads it from `values.plane`. {}",
+                crate::picks::PLANE_PICK_FORMS
+            ))
+        })?;
     let plane: PlaneRef = serde_json::from_value(picks_of.plane(&pick)?)
         .map_err(|e| model(format!("the sketch plane: {e}")))?;
     let mut added = String::new();

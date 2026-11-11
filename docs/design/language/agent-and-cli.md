@@ -29,7 +29,7 @@ An agent works in three steps: read with `design.inspect` and `design.check`, ch
 ## The command line
 
 ```sh
-runmat-design check <file>... [--json] [--no-simulate] [--root <dir>]
+runmat-design check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]
 runmat-design export <file> --format <format> [options]
 ```
 

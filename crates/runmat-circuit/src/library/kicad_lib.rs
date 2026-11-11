@@ -103,6 +103,7 @@ pub fn read(text: &str) -> Result<(Vec<CatalogPart>, Vec<String>), String> {
                 .filter(|d| d.starts_with("http"))
                 .map(str::to_owned),
             spice,
+            ..Default::default()
         });
     }
     Ok((parts, skipped))

@@ -16,6 +16,7 @@
 //! Mates are picked by their Outline IDs, `mate:<assembly>/<name>`; only mates of the open
 //! assembly change here.
 
+use super::anchors::Publisher;
 use super::frames::{dot, edge_frame, face_frame, norm, sub, to_world, Frame, FrameKind};
 use super::mate::field;
 use super::{model, parse_pick, Compiled};
@@ -83,7 +84,7 @@ fn set_flip(
 }
 
 /// The X axis of connector `name` in assembly coordinates, and the floating component it sits
-/// on, when it has an explicit or origin anchor on a top-level component.
+/// on, when it has an explicit, origin or published anchor on a top-level component.
 fn connector_x(
     document: &AssemblyDocument,
     compiled: &Compiled,
@@ -93,6 +94,7 @@ fn connector_x(
     let [segment] = c.occurrence.0.as_slice() else {
         return None;
     };
+    let (prototype, t) = compiled.placed_named(&segment.name)?;
     let local = match &c.anchor {
         AnchorRef::Origin => [1.0, 0.0, 0.0],
         AnchorRef::Explicit {
@@ -109,15 +111,9 @@ fn connector_x(
                     ..
                 },
         } => [1.0, 0.0, 0.0],
+        AnchorRef::Published { name } => compiled.published_frame(prototype, name.as_str())?.x,
         _ => return None,
     };
-    let uuid = compiled
-        .rows
-        .iter()
-        .find(|r| r["path"].as_str() == Some(segment.name.as_str()))?["uuid"]
-        .as_str()?
-        .to_owned();
-    let (_, t) = compiled.placed(&uuid)?;
     (t.len() >= 9).then(|| {
         (
             segment.name.clone(),
@@ -210,6 +206,7 @@ pub(super) const TRAVEL: [&str; 2] = ["near", "far"];
 pub(super) fn edit(
     document: &mut AssemblyDocument,
     compiled: &Compiled,
+    publisher: &mut Publisher,
     selection: &[String],
     values: &Values,
 ) -> Result<String, EditFailure> {
@@ -279,7 +276,7 @@ pub(super) fn edit(
                 },
             }
         }
-        other => super::mate::advanced(document, compiled, values, other, Some(&old))?
+        other => super::mate::advanced(document, compiled, publisher, values, other, Some(&old))?
             .ok_or_else(|| model(format!("there is no `{other}` mate")))?,
     };
     let changed_kind = kind.name() != old.name();
@@ -345,6 +342,7 @@ fn candidates(compiled: &Compiled, uuid: &str) -> Vec<Candidate> {
 pub(super) fn smart(
     document: &mut AssemblyDocument,
     compiled: &Compiled,
+    publisher: &mut Publisher,
     values: &Values,
 ) -> Result<String, EditFailure> {
     let component = picks_of(values, "component")
@@ -403,6 +401,9 @@ pub(super) fn smart(
                 });
             ("concentric", best)
         }
+        FrameKind::Point | FrameKind::Frame => {
+            return Err(model("drop the component onto a face or an axis"))
+        }
     };
     let best = best.ok_or_else(|| {
         model(match kind {
@@ -411,7 +412,12 @@ pub(super) fn smart(
         })
     })?;
     let request = json!({ "type": kind, "first": [onto], "second": [best.id], "flip": false });
-    let summary = super::mate::mate(document, compiled, request.as_object().expect("an object"))?;
+    let summary = super::mate::mate(
+        document,
+        compiled,
+        publisher,
+        request.as_object().expect("an object"),
+    )?;
     Ok(format!(
         "Smart mate: {}",
         summary.trim_start_matches("Mated ")

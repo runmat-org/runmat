@@ -110,6 +110,7 @@ fn first_segment(path: &RelPath) -> Option<&str> {
 
 pub(super) fn replace(
     document: &mut AssemblyDocument,
+    compiled: &super::Compiled,
     files: &Files,
     names: &[String],
     values: &Values,
@@ -157,6 +158,9 @@ pub(super) fn replace(
         .get("remate")
         .and_then(Value::as_bool)
         .unwrap_or(true);
+    if remate {
+        freeze_unpublished(document, compiled, files, names, &file);
+    }
     if !remate {
         let on: BTreeSet<String> = document
             .connectors
@@ -635,4 +639,57 @@ pub(super) fn new_part(
         ),
         vec![created(path, printed)],
     ))
+}
+
+/// Connectors on the replaced components `names` that anchor to a name the new part `file`
+/// doesn't publish keep the frame they had, in the component's coordinates.
+fn freeze_unpublished(
+    document: &mut AssemblyDocument,
+    compiled: &super::Compiled,
+    files: &Files,
+    names: &[String],
+    file: &str,
+) {
+    use runmat_cad::assembly::model::{AnchorRef, OffsetExpr, RotationExpr};
+    let publishes: BTreeSet<String> = files
+        .get(file)
+        .and_then(|t| runmat_cad::syntax::parse_part(file, t).document)
+        .map(|d| {
+            d.publishes
+                .iter()
+                .map(|p| p.name.as_str().to_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    for c in document.connectors.iter_mut() {
+        let Some(on) = first_segment(&c.occurrence)
+            .filter(|s| names.iter().any(|n| n == s))
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let AnchorRef::Published { name } = &c.anchor else {
+            continue;
+        };
+        if publishes.contains(name.as_str()) {
+            continue;
+        }
+        let Some(frame) = compiled
+            .placed_named(&on)
+            .and_then(|(prototype, _)| compiled.published_frame(prototype, name.as_str()))
+        else {
+            continue;
+        };
+        let mm = |v: f64| super::mate::quantity((v * 1e6).round() / 1e3, "mm");
+        let unit = |v: [f64; 3]| v.map(|c| (c * 1e6).round() / 1e6 + 0.0);
+        c.anchor = AnchorRef::Explicit {
+            offset: OffsetExpr {
+                translation: frame.origin.map(mm),
+                rotation: RotationExpr::Basis {
+                    x: unit(frame.x),
+                    z: unit(frame.z),
+                },
+            },
+        };
+    }
 }

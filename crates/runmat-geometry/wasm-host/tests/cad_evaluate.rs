@@ -434,3 +434,35 @@ fn an_inside_corner_fillet_adds_material_tangent_to_both_faces() {
         "volume {volume_mm3} mm³, want {want}"
     );
 }
+
+/// Interference checks every body of a multi-body part, not only its first, and names the
+/// bodies that overlap; bodies of compressible fill (a batt) are left out and counted. The wall
+/// has a stud body and a batt body; a cable through the batt alone doesn't interfere, and a
+/// cable through the stud does, named by the stud's body.
+#[test]
+fn every_body_of_a_part_is_checked_and_fill_is_left_out() {
+    let wall = "runmat 0.7\nstd 1\n\npart wall {\n    sketch first_s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [10 mm, 0 mm])\n        l2 = line(start = [10 mm, 0 mm], end = [10 mm, 100 mm])\n        l3 = line(start = [10 mm, 100 mm], end = [0 mm, 100 mm])\n        l4 = line(start = [0 mm, 100 mm], end = [0 mm, 0 mm])\n    }\n    feature first = extrude(profile = sketch.first_s, distance = 100 mm)\n    sketch stud_s on origin.xy {\n        l1 = line(start = [200 mm, 0 mm], end = [240 mm, 0 mm])\n        l2 = line(start = [240 mm, 0 mm], end = [240 mm, 100 mm])\n        l3 = line(start = [240 mm, 100 mm], end = [200 mm, 100 mm])\n        l4 = line(start = [200 mm, 100 mm], end = [200 mm, 0 mm])\n    }\n    feature stud = extrude(profile = sketch.stud_s, distance = 100 mm, mode = new)\n    sketch batt_s on origin.xy {\n        l1 = line(start = [40 mm, 0 mm], end = [190 mm, 0 mm])\n        l2 = line(start = [190 mm, 0 mm], end = [190 mm, 100 mm])\n        l3 = line(start = [190 mm, 100 mm], end = [40 mm, 100 mm])\n        l4 = line(start = [40 mm, 100 mm], end = [40 mm, 0 mm])\n    }\n    feature batt = extrude(profile = sketch.batt_s, distance = 100 mm, mode = new)\n    material = { body = feature.batt.body, material = \"material.fiberglass_batt\" }\n}\n";
+    let cable = "runmat 0.7\nstd 1\n\npart cable {\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 50 mm], radius = 5 mm)\n    }\n    feature body = extrude(profile = sketch.s, distance = 100 mm)\n}\n";
+    let files = json!({ "/p/wall.part": wall, "/p/cable.part": cable }).to_string();
+    let run = |x: &str| {
+        let assembly = format!("runmat 0.7\nstd 1\n\nassembly w {{\n    use part wall as wall\n    use part cable as cable {{\n        placement = {{ placement = offset, offset = {{ translation = [{x}, 0 mm, 0 mm] }} }}\n    }}\n}}\n");
+        let request = json!({ "command": "evaluate.interference", "values": {} }).to_string();
+        let out = call("analyze", &["/p/w.assembly", &assembly, &files, &request]);
+        assert_eq!(out["ok"], true, "{out}");
+        out
+    };
+    let through_batt = run("100 mm");
+    assert_eq!(
+        through_batt["data"]["overlaps"].as_array().unwrap().len(),
+        0,
+        "{through_batt}"
+    );
+    assert_eq!(through_batt["data"]["fill_bodies"], 1, "{through_batt}");
+    let through_stud = run("220 mm");
+    let overlaps = through_stud["data"]["overlaps"].as_array().unwrap();
+    assert_eq!(overlaps.len(), 1, "{through_stud}");
+    assert_eq!(
+        overlaps[0]["bodies"][0], "feature.stud.body",
+        "{through_stud}"
+    );
+}

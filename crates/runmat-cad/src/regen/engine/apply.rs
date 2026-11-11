@@ -53,6 +53,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 tools,
             } => {
                 let record = self.pending_record.take();
+                let dressup = self.dressup_of(&op, &operands);
                 let bodies = std::mem::take(&mut self.st.bodies);
                 let ran = self.execute(
                     id,
@@ -79,6 +80,9 @@ impl<'a, 'b> Run<'a, 'b> {
                 }
                 if let Some(t) = tools {
                     self.st.tools.insert(id.clone(), t);
+                }
+                if let Some(d) = dressup {
+                    self.st.dressups.insert(id.clone(), d);
                 }
                 if let Some(r) = record {
                     self.st.records.insert(id.clone(), r);
@@ -369,6 +373,13 @@ impl<'a, 'b> Run<'a, 'b> {
             let mut foreign: Vec<Vec<EntityName>> = Vec::new();
             let mut ok = true;
             for (k, (r, o)) in rg.select.iter().zip(each).enumerate() {
+                // An optional region (`expect = any`) selects nothing from a face its feature
+                // doesn't make at these inputs: a full-turn revolve has no start or end face.
+                if rg.expect == Cardinality::Any
+                    && matches!(o, ResolveOutcome::Failed(RefProblem::NotGenerated { .. }))
+                {
+                    continue;
+                }
                 let site = Site {
                     subject: Subject::Region {
                         region: rg.name.clone(),

@@ -1067,6 +1067,13 @@ pub enum KernelOp {
     PatternBodies {
         instances: Vec<Instance>,
     },
+    /// Repeat the material `faces` (all of one operand) bound, a boss or a pocket, at each
+    /// instance: the faces are lifted off the body and healed, the added and removed material
+    /// moved per instance, fused and cut. Instance faces are copies tagged by instance.
+    PatternFaces {
+        faces: Vec<OperandEntity>,
+        instances: Vec<Instance>,
+    },
     /// Operand 0 is the target; the rest are tools.
     Boolean {
         combine: Combine,
@@ -1075,6 +1082,17 @@ pub enum KernelOp {
     /// Split every operand by a plane (`frame.z` is the tool normal; positive is along it).
     Split {
         frame: Frame,
+    },
+    /// Split operand 0 by the surfaces of `faces` (each extended across the body) or, with no
+    /// faces, by operand 1 (a sheet or a solid). New faces are [`Role::SplitFace`]; the tool
+    /// operands are kept.
+    SplitWith {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<OperandEntity>,
+    },
+    /// Cut operand 1, grown by `clearance`, out of operand 0 (an indent); operand 1 is kept.
+    Indent {
+        clearance: f64,
     },
     Transform {
         transform: Transform,
@@ -1207,8 +1225,11 @@ impl KernelOp {
             KernelOp::Draft { .. } => "draft",
             KernelOp::PatternTools { .. } => "pattern_tools",
             KernelOp::PatternBodies { .. } => "pattern_bodies",
+            KernelOp::PatternFaces { .. } => "pattern_faces",
             KernelOp::Boolean { .. } => "boolean",
             KernelOp::Split { .. } => "split",
+            KernelOp::SplitWith { .. } => "split_with",
+            KernelOp::Indent { .. } => "indent",
             KernelOp::Transform { .. } => "transform",
             KernelOp::Import { .. } => "import",
             KernelOp::Labeled { .. } => "labeled",

@@ -80,6 +80,10 @@ pub(super) fn project(
         .filter(|axes| source.axes_metadata[axes.source].overlay_parent.is_none())
         .count()
         .max(1);
+    // An imported geometry scene stays only when the projection keeps every plot it drew.
+    let geometry_source = (plots.len() == source.plots.len())
+        .then(|| source.geometry_source.clone())
+        .flatten();
     let mut figure = Figure {
         plots,
         name: source.name.clone(),
@@ -123,6 +127,7 @@ pub(super) fn project(
         } else {
             TextStyle::default()
         },
+        geometry_source,
     };
     figure.sync_legacy_fields_from_active_axes();
     Ok(FigurePersistenceProjection { figure, remap })

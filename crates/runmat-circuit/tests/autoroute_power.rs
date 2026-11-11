@@ -159,3 +159,41 @@ fn a_power_net_with_room_routes_clean() {
     let end = passes("VBAT");
     assert_eq!(end.unrouted, 0, "VBAT left unrouted");
 }
+
+/// With no via asked for, the router's vias meet the board's limits: on the ESC with the limits
+/// raised to a 0.3 mm drill, 0.6 mm vias and a 0.15 mm ring, every via the VBAT pass adds is at
+/// least that size.
+#[test]
+fn new_vias_meet_the_board_limits() {
+    let (mut files, _) = esc_without_centre_vias("VBAT");
+    let raised = files[LAYOUT].replace(
+        "via_diameter = 0.45, drill = 0.2, annular = 0.1",
+        "via_diameter = 0.6, drill = 0.3, annular = 0.15",
+    );
+    assert_ne!(raised, files[LAYOUT], "the ESC's limits line changed");
+    files.insert(LAYOUT.to_owned(), raised);
+    let before: Vec<_> = parse_board(LAYOUT, &files[LAYOUT])
+        .board
+        .unwrap()
+        .vias
+        .values()
+        .map(|v| v.at)
+        .collect();
+    autoroute(&mut files, "VBAT");
+    let board = parse_board(LAYOUT, &files[LAYOUT]).board.unwrap();
+    let added: Vec<_> = board
+        .vias
+        .values()
+        .filter(|v| !before.contains(&v.at))
+        .collect();
+    assert!(!added.is_empty(), "the VBAT pass added no vias");
+    for v in added {
+        assert!(
+            v.drill >= runmat_circuit::geom::mm(0.3) && v.diameter >= runmat_circuit::geom::mm(0.6),
+            "via {:?} is {} over {}",
+            v.at,
+            v.diameter,
+            v.drill
+        );
+    }
+}

@@ -47,12 +47,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
             )])
             .edit(view_action("visibility")),
-        cmd(
-            "view.configuration",
-            "Configuration",
-            "configuration",
-            &[Part, Assembly],
-        )
+        cmd("view.configuration", "Configuration", "configuration", &[Part])
         .desc("Switch the active configuration.")
         .kw(&["config", "variant", "design table"])
         .inputs(vec![text("configuration", "Configuration", None)])
@@ -107,6 +102,9 @@ pub(super) fn add(catalog: &mut Catalog) {
         )
         .desc("Choose how components load and draw in this view.")
         .kw(&["rep", "lightweight", "envelope"])
+        .when(unavailable(
+            "Per-view representations aren't available yet. Set a component's representation in its Properties.",
+        ))
         .inputs(vec![choice(
             "representation",
             "Representation",

@@ -3,6 +3,7 @@
 #include "exact_healing.hxx"
 #include "exact_shared_interfaces.hxx"
 #include "exact_names.hxx"
+#include "preview_face_owners.hxx"
 #include "exact_xcaf_healing.hxx"
 
 #include <BRep_Builder.hxx>
@@ -165,6 +166,8 @@ struct CadDocument {
   Handle(XCAFDoc_LayerTool) layer_tool;
   Handle(XCAFDoc_MaterialTool) material_tool;
   bool has_xcaf = false;
+  // Built on first use by face_semantics; holds labels, so it is released before the document.
+  mutable std::shared_ptr<PreviewFaceOwners> face_owners;
 
   CadDocument() = default;
   CadDocument(const CadDocument&) = delete;
@@ -184,6 +187,7 @@ struct CadDocument {
       layer_tool = std::move(other.layer_tool);
       material_tool = std::move(other.material_tool);
       has_xcaf = other.has_xcaf;
+      face_owners = std::move(other.face_owners);
 
       other.document.Nullify();
       other.shape_tool.Nullify();
@@ -201,6 +205,7 @@ struct CadDocument {
 
 private:
   void close_document() {
+    face_owners.reset();
     if (document.IsNull()) {
       return;
     }
@@ -829,6 +834,50 @@ TDF_Label face_label(const CadDocument& document, const TopoDS_Face& face) {
   return label;
 }
 
+// A face inside an assembly product carries its occurrence's placement, which XCAF's located
+// search misses. Resolve it by kernel shape instead, as the exact import does, so the face keeps
+// its authored name and its owner path reaches the product's occurrence (the body's name).
+OcctFaceSemanticPayload assembly_face_semantics(const CadDocument& document,
+                                                const TopoDS_Face& face,
+                                                std::uint64_t face_id) {
+  OcctFaceSemanticPayload semantic;
+  semantic.face_id = face_id;
+  if (!document.has_xcaf || document.shape_tool.IsNull()) {
+    return semantic;
+  }
+  if (!document.face_owners) {
+    document.face_owners =
+        std::make_shared<PreviewFaceOwners>(PreviewFaceOwners::build(document.shape_tool));
+  }
+  PreviewFaceOwner owner;
+  if (!document.face_owners->resolve(face, owner)) {
+    return semantic;
+  }
+  if (!owner.face.IsNull()) {
+    semantic.label_entry = label_entry(owner.face);
+    semantic.label_name = label_name(owner.face);
+    semantic.label_kind = label_kind(owner.face);
+  }
+  std::vector<TDF_Label> owners =
+      semantic_owner_path(document, owner.face.IsNull() ? owner.definition : owner.face);
+  std::set<std::string> seen;
+  for (const TDF_Label& label : owners) {
+    seen.insert(label_entry(label));
+  }
+  for (const TDF_Label& occurrence : owner.occurrences) {
+    if (seen.insert(label_entry(occurrence)).second) {
+      owners.push_back(occurrence);
+    }
+  }
+  for (const TDF_Label& label : owners) {
+    append_label_ref(semantic, label);
+  }
+  append_layers(semantic, document, owners);
+  append_color(semantic, owners);
+  append_material(semantic, owners);
+  return semantic;
+}
+
 OcctFaceSemanticPayload face_semantics(const CadDocument& document,
                                        const TopoDS_Face& face,
                                        std::uint64_t face_id) {
@@ -836,7 +885,7 @@ OcctFaceSemanticPayload face_semantics(const CadDocument& document,
   semantic.face_id = face_id;
   TDF_Label label = face_label(document, face);
   if (label.IsNull()) {
-    return semantic;
+    return assembly_face_semantics(document, face, face_id);
   }
 
   semantic.label_entry = label_entry(label);

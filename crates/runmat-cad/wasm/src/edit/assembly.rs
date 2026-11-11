@@ -14,19 +14,25 @@
 //! - `explode.new`, `explode.step`, `explode.radial`, `explode.lines`: exploded views, their
 //!   steps and trail lines ([`explode`]).
 //!
-//! Picks are Outline IDs: `occurrence:<uuid>` for a component, and
-//! `occurrence:<uuid>/face:<body>:<face>` or `occurrence:<uuid>/edge:<body>:<edge>` for a face
-//! or edge of one, indexed into the compiled display of its definition.
+//! Picks are Outline IDs: `occurrence:<uuid>` for a component;
+//! `occurrence:<uuid>/face:<body>:<face>`, `occurrence:<uuid>/edge:<body>:<edge>` or
+//! `occurrence:<uuid>/vertex:<body>:<vertex>` for a face, edge or vertex of one, indexed into the
+//! compiled display of its definition; `occurrence:<uuid>/datum:<feature>` for one of its part's
+//! datum planes, axes, points, frames or mate connectors; `connector:<name>` for a connector
+//! the assembly declares.
 
+pub(crate) mod anchors;
 mod configure;
 mod explode;
-mod frames;
+pub(crate) mod frames;
 mod mate;
 mod mate_edits;
 mod mirror;
 mod path_picks;
 mod place;
 mod structure;
+#[cfg(test)]
+mod anchors_tests;
 #[cfg(test)]
 mod configure_tests;
 #[cfg(test)]
@@ -50,6 +56,8 @@ use serde_json::Value;
 pub(super) struct Compiled {
     rows: Vec<Value>,
     display: Value,
+    /// The files the assembly compiled from: the parts whose publishes connectors read.
+    files: Files,
 }
 
 impl Compiled {
@@ -59,7 +67,63 @@ impl Compiled {
         Ok(Self {
             rows: index["occurrences"].as_array().cloned().unwrap_or_default(),
             display,
+            files: files.clone(),
         })
+    }
+
+    /// The display occurrence of top-level component `name`: its prototype and transform.
+    fn placed_named(&self, name: &str) -> Option<(usize, Vec<f64>)> {
+        let uuid = self
+            .rows
+            .iter()
+            .find(|r| r["path"].as_str() == Some(name))?["uuid"]
+            .as_str()?;
+        self.placed(uuid)
+    }
+
+    /// The frame prototype `prototype`'s part publishes as `name`, in the part's coordinates:
+    /// a face, edge or vertex (found in the display by its reference) or a datum.
+    fn published_frame(&self, prototype: usize, name: &str) -> Option<frames::Frame> {
+        use runmat_cad::model::datum::DatumRef;
+        use runmat_cad::model::items::PublishTarget;
+        use runmat_cad::refs::{Reference, TopoKind};
+        let file = self.prototype_file(prototype)?;
+        let text = self.files.get(&file)?;
+        let document = runmat_cad::syntax::parse_part(&file, text).document?;
+        let entry = document
+            .publishes
+            .iter()
+            .find(|p| p.name.as_str() == name)?;
+        match &entry.target {
+            PublishTarget::Datum {
+                datum: DatumRef::Feature { feature },
+            } => self
+                .reference(prototype, &feature.0)
+                .and_then(frames::datum_frame),
+            PublishTarget::Entities { kind, references } if references.len() == 1 => {
+                let (list, frame): (&str, fn(&Value) -> Option<frames::Frame>) = match kind {
+                    TopoKind::Face => ("faces", frames::face_frame),
+                    TopoKind::Edge => ("edges", frames::edge_frame),
+                    TopoKind::Vertex => ("vertices", frames::vertex_frame),
+                    _ => return None,
+                };
+                let picks = crate::picks::Picks::new(&document, &file, text);
+                let same = |e: &&Value| {
+                    e["reference"]
+                        .as_str()
+                        .and_then(|r| picks.reference(r).ok())
+                        .and_then(|v| serde_json::from_value::<Reference>(v).ok())
+                        .is_some_and(|r| r == references[0])
+                };
+                let bodies = self.display["prototypes"][prototype]["part"]["bodies"].as_array()?;
+                bodies
+                    .iter()
+                    .flat_map(|b| b[list].as_array().into_iter().flatten())
+                    .find(same)
+                    .and_then(frame)
+            }
+            _ => None,
+        }
     }
 
     /// The authored name of the top-level component `uuid` names.
@@ -101,6 +165,14 @@ impl Compiled {
             .map(str::to_owned)
     }
 
+    /// The drawn reference `feature` (a datum or mate connector) of prototype `prototype`'s part.
+    fn reference(&self, prototype: usize, feature: &str) -> Option<&Value> {
+        self.display["prototypes"][prototype]["part"]["references"]
+            .as_array()?
+            .iter()
+            .find(|r| r["id"].as_str() == Some(feature))
+    }
+
     /// A body of prototype `prototype`'s part display.
     fn body(&self, prototype: usize, body: usize) -> Option<&Value> {
         self.display["prototypes"][prototype]["part"]["bodies"]
@@ -117,10 +189,24 @@ pub(super) struct Pick {
     pub entity: Option<Entity>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum Entity {
-    Face { body: usize, face: usize },
-    Edge { body: usize, edge: usize },
+    Face {
+        body: usize,
+        face: usize,
+    },
+    Edge {
+        body: usize,
+        edge: usize,
+    },
+    Vertex {
+        body: usize,
+        vertex: usize,
+    },
+    /// A datum plane, axis, point, frame or mate connector of the part, by feature id.
+    Datum {
+        feature: String,
+    },
 }
 
 pub(super) fn parse_pick(id: &str) -> Option<Pick> {
@@ -129,11 +215,23 @@ pub(super) fn parse_pick(id: &str) -> Option<Pick> {
         None => (rest, None),
         Some((uuid, tail)) => {
             let (kind, at) = tail.split_once(':')?;
+            if kind == "datum" {
+                return (!at.is_empty()).then(|| Pick {
+                    uuid: uuid.to_owned(),
+                    entity: Some(Entity::Datum {
+                        feature: at.to_owned(),
+                    }),
+                });
+            }
             let (body, index) = at.split_once(':')?;
             let (body, index) = (body.parse().ok()?, index.parse().ok()?);
             let entity = match kind {
                 "face" => Entity::Face { body, face: index },
                 "edge" => Entity::Edge { body, edge: index },
+                "vertex" => Entity::Vertex {
+                    body,
+                    vertex: index,
+                },
                 _ => return None,
             };
             (uuid, Some(entity))
@@ -285,7 +383,7 @@ fn repair(
                 Ok(summary)
             }
             None => Err(model(format!(
-                "`{other:?}` applies from the source editor in this build"
+                "`{other:?}` is applied in the source editor: edit the line it names"
             ))),
         },
     }
@@ -304,6 +402,7 @@ pub(super) fn edit(
         return Err(EditFailure::Invalid(parsed.diagnostics));
     };
     let compiled = Compiled::new(path, text, files)?;
+    let mut publisher = anchors::Publisher::new(files);
     let summary = match request.command.as_str() {
         "assembly.delete" => {
             let names = selected_names(&compiled, request)?;
@@ -359,18 +458,26 @@ pub(super) fn edit(
         "assembly.mate" => {
             let values =
                 path_picks::publish_picked_path(&compiled, files, &request.values, &mut others)?;
-            mate::mate(&mut document, &compiled, &values)?
+            mate::mate(&mut document, &compiled, &mut publisher, &values)?
         }
         "assembly.flip-mate" => mate_edits::flip(&mut document, &compiled, &request.selection)?,
         "assembly.edit-mate" => {
             let values =
                 path_picks::publish_picked_path(&compiled, files, &request.values, &mut others)?;
-            mate_edits::edit(&mut document, &compiled, &request.selection, &values)?
+            mate_edits::edit(
+                &mut document,
+                &compiled,
+                &mut publisher,
+                &request.selection,
+                &values,
+            )?
         }
-        "assembly.smart-mate" => mate_edits::smart(&mut document, &compiled, &request.values)?,
+        "assembly.smart-mate" => {
+            mate_edits::smart(&mut document, &compiled, &mut publisher, &request.values)?
+        }
         "assembly.replace" => {
             let names = selected_names(&compiled, request)?;
-            structure::replace(&mut document, files, &names, &request.values)?
+            structure::replace(&mut document, &compiled, files, &names, &request.values)?
         }
         "assembly.subassembly" => {
             let names = selected_names(&compiled, request)?;
@@ -407,12 +514,9 @@ pub(super) fn edit(
             )?
         }
         "explode.lines" => explode::lines(&mut document, &request.values, &request.selection)?,
-        other => {
-            return Err(model(format!(
-                "`{other}` edits assemblies through the source editor in this build"
-            )))
-        }
+        other => return Err(super::unhandled(other)),
     };
+    publisher.finish(&mut others)?;
     // The minimal diff can't yet place every occurrence statement (one with a body block):
     // then the file is reprinted whole and the change says so.
     // Files the command creates (a new part or subassembly) are in scope for the read-back.

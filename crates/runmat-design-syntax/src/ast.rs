@@ -261,6 +261,14 @@ pub trait Headed {
     }
 }
 
+impl Declaration {
+    /// The value of a file-level value declaration (`footprint lcc18 = { … }`); `None` for a
+    /// block declaration.
+    pub fn value(&self) -> Option<Expr> {
+        self.0.children().find_map(Expr::cast)
+    }
+}
+
 impl Headed for Declaration {
     fn node(&self) -> &SyntaxNode {
         &self.0

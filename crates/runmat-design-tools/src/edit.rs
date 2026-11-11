@@ -4,6 +4,8 @@
 //! undo it, the feature and dimension diff (parts and assemblies) or the schematic-to-board
 //! change rows (circuits), and the diagnostics of every changed design file after the change.
 
+mod hand_placement;
+
 use crate::check::{check, CheckInput, DesignDiagnostic};
 use crate::{is_design_path, kind_of, text_of, DesignKind, Files, ToolError};
 use schemars::JsonSchema;
@@ -23,7 +25,7 @@ pub struct ProposeEditInput {
     /// A catalog command id (`part.extrude`, `part.fillet`, `part.suppress`,
     /// `assembly.fix`, `board.route`, `schematic.update-board`, …). Give this or `text`.
     /// A blank id counts as no command: models fill every optional field and send `""` beside
-    /// `replace`.
+    /// `replace` (or the word `null`).
     #[serde(default, deserialize_with = "blank_as_none")]
     pub command: Option<String>,
     /// The command's values by field id, numbers in the field's unit (`{ "depth": 12 }` for
@@ -45,7 +47,8 @@ fn blank_as_none<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error> {
     let value = Option::<String>::deserialize(deserializer)?;
-    Ok(value.filter(|text| !text.trim().is_empty()))
+    // Models also send the word `null` as text for a field they mean to leave out.
+    Ok(value.filter(|text| !text.trim().is_empty() && text.trim() != "null"))
 }
 
 /// One replacement of [`ProposeEditInput::replace`].
@@ -605,7 +608,8 @@ fn known_command(id: &str, kind: DesignKind) -> Result<(), ToolError> {
         .take(12)
         .collect();
     Err(ToolError::invalid(format!(
-        "{id} isn't a catalog command for this file{}",
+        "{id} isn't a catalog command for this file{}. Every command with the fields it needs is listed in \
+         runmat_docs design/commands.md; or change the file's text with `replace`",
         if near.is_empty() {
             String::new()
         } else {
@@ -654,6 +658,9 @@ pub fn propose(input: &ProposeEditInput, files: &Files) -> Result<StagedChange, 
     let text_input = from_replace.as_ref().or(input.text.as_ref());
     match (text_input, &input.command) {
         (Some(new), None) => {
+            if kind == DesignKind::Assembly {
+                hand_placement::refuse_hand_placement(&input.path, text, new)?;
+            }
             let summary = format!("Edit {} ({} → {} bytes)", input.path, text.len(), new.len());
             Ok(stage(
                 summary,
@@ -666,43 +673,77 @@ pub fn propose(input: &ProposeEditInput, files: &Files) -> Result<StagedChange, 
             known_command(command, kind)?;
             let values = input.values.clone().unwrap_or_default();
             let selection = input.selection.clone().unwrap_or_default();
-            let (summary, changed): (String, Vec<(String, String)>) = if kind.is_circuit() {
-                let request = runmat_circuit::runtime::EditRequest {
-                    command: command.clone(),
-                    values,
-                    selection,
-                    options: Default::default(),
-                };
-                let out = runmat_circuit::runtime::edit(&input.path, text, files, &request)
-                    .map_err(|e| ToolError::new("edit_failed", e.message))?;
-                (
-                    out.summary,
-                    out.files.into_iter().map(|f| (f.path, f.text)).collect(),
-                )
-            } else if kind.is_model() {
-                let request = runmat_cad_wasm::edit::EditRequest {
-                    command: command.clone(),
-                    values,
-                    selection,
-                };
-                let out = runmat_cad_wasm::edit::edit(&input.path, text, files, &request)
-                    .map_err(|e| ToolError::new("edit_failed", e.to_string()))?;
-                (
-                    out.summary,
-                    out.files.into_iter().map(|f| (f.path, f.text)).collect(),
-                )
-            } else {
-                return Err(ToolError::new(
-                    "unsupported",
-                    "drawings change through their source text: pass `text`",
-                ));
-            };
+            // The command registry runs it, as the Desktop and the CLI do.
+            let request = crate::commands::RunRequest { command: command.clone(), values, selection };
+            let answer = crate::commands::run(&input.path, text, files, &request);
+            if answer["ok"] != true {
+                return Err(ToolError::new("edit_failed", answer["message"].as_str().unwrap_or("the command failed").to_owned()));
+            }
+            if answer["kind"] != "edit" {
+                return Err(not_an_edit(command, &answer));
+            }
+            let summary = answer["summary"].as_str().unwrap_or("").to_owned();
+            let changed: Vec<(String, String)> = answer["files"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|f| Some((f["path"].as_str()?.to_owned(), f["text"].as_str()?.to_owned())))
+                .collect();
+            if kind == DesignKind::Assembly {
+                if let Some((_, after)) = changed.iter().find(|(p, _)| *p == input.path) {
+                    hand_placement::refuse_hand_placement(&input.path, text, after)?;
+                }
+            }
             Ok(stage(summary, changed, files, &input.path))
         }
         _ => Err(ToolError::invalid(
             "give one of `text` (the new source), `replace` (replacements on the current source) or `command` (a catalog command id)",
         )),
     }
+}
+
+/// A report or an export run through `design.propose_edit`: nothing to stage, so the answer
+/// says what the command made and which tool returns it as data.
+fn not_an_edit(command: &str, answer: &serde_json::Value) -> ToolError {
+    let text = |v: &serde_json::Value| {
+        v.as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| v.to_string())
+    };
+    let message = match answer["kind"].as_str() {
+        Some("table") => {
+            let mut lines = vec![format!(
+                "{command} changes nothing; its result: {}: {}",
+                text(&answer["title"]),
+                text(&answer["summary"])
+            )];
+            let row = |cells: &serde_json::Value| {
+                cells
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(text)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            };
+            lines.push(row(&answer["columns"]));
+            lines.extend(
+                answer["rows"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .take(200)
+                    .map(|r| row(&r["cells"])),
+            );
+            lines.join("\n")
+        }
+        Some("file") => format!(
+            "{command} writes a file ({}), not an edit: call design.export to get it",
+            text(&answer["name"])
+        ),
+        _ => format!("{command} runs in the editor's canvas, not as an edit"),
+    };
+    ToolError::new("not_an_edit", message)
 }
 
 #[cfg(test)]
@@ -764,6 +805,11 @@ mod tests {
             "command": "",
             "replace": [{ "old": "b", "new": "c" }],
         }))
+        .unwrap();
+        assert!(input.command.is_none());
+        let input: ProposeEditInput = serde_json::from_value(
+            json!({ "path": "/a.part", "command": "null", "text": "part a {}" }),
+        )
         .unwrap();
         assert!(input.command.is_none());
         let input: ProposeEditInput =

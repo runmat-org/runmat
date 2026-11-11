@@ -71,6 +71,10 @@ impl fmt::Display for DatumRef {
     }
 }
 
+/// How a plane is written, for messages that ask for one: the text forms `on` and plane fields take.
+pub const PLANE_REFERENCE_FORMS: &str = "an origin plane (`origin.xy`, `origin.yz` or `origin.zx`), \
+a datum plane (`plane.<name>`) or a planar face (`feature.<name>.face.<face>`, such as `feature.body.face.end`)";
+
 /// Where a sketch or a plane-taking feature sits: a datum plane or a planar face.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "on")]
@@ -96,12 +100,25 @@ impl PlaneRef {
     }
 }
 
-/// An axis-taking parameter: a datum axis, or a linear edge.
+/// An axis-taking parameter: a datum axis; a straight edge (along it) or a circular edge (its
+/// centre and normal); a cylindrical face or a face bounded by a circle, such as a cone (its
+/// axis); or a sketch line, usually a construction centerline.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "along")]
 pub enum AxisRef {
-    Datum { datum: DatumRef },
-    Edge { edge: Reference },
+    Datum {
+        datum: DatumRef,
+    },
+    Edge {
+        edge: Reference,
+    },
+    Face {
+        face: Reference,
+    },
+    SketchLine {
+        sketch: FeatureId,
+        entity: crate::ids::SketchEntityId,
+    },
 }
 
 impl AxisRef {

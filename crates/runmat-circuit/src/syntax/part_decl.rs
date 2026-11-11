@@ -6,6 +6,8 @@
 //!     description = "60 V 3 A synchronous buck",
 //!     category = regulator,
 //!     package = "SOT23-6",
+//!     symbol = buck_regulator,
+//!     body = "models/buck.step",
 //!     datasheet = "https://example.com/buck.pdf",
 //!     params = { vin_max = "60 V" },
 //!     pins = [
@@ -15,6 +17,14 @@
 //!     spice = { model = BUCK60, library = "models/buck.lib", nodes = [VIN, SW, FB, GND] }
 //! }
 //! ```
+//!
+//! `package` is a footprint-generator string (`"QFN24_4mm_P0.5_EP2.6"`), the identifier of a
+//! `footprint` declaration in the file or a library it uses (`package = gps_lcc18`), or a
+//! `.kicad_mod` file read in place for interop. `symbol` names a `symbol` declaration the part
+//! draws with; `body` is an MCAD `.part` or a STEP file over the footprint's 3D body; `nc`
+//! lists pads the part leaves without a pin. `package = none` declares a part with no footprint,
+//! such as a receptacle or a breaker wired in the field: its pins take no pads, and it appears
+//! on schematics, in netlists and in the BOM, but no board places it.
 
 use super::printer::{list, name, names, record, PrintError};
 use super::*;
@@ -81,7 +91,23 @@ pub(super) fn read(mpn: String, expr: Option<Expr>, span: Span) -> Read<CatalogP
             "description" => part.description = text_of(value, span)?,
             "category" => part.category = text_of(value, span)?,
             "prefix" => part.prefix = text_of(value, span)?,
-            "package" => part.package = text_of(value, span)?,
+            "package" => match value {
+                Expr::Reference(r) if r.segments().len() == 1 && r.segments()[0] == crate::library::catalog::NO_PACKAGE => {
+                    part.package = crate::library::catalog::NO_PACKAGE.into()
+                }
+                Expr::Reference(r) if r.segments().len() == 1 => part.footprint = Some(r.segments().remove(0)),
+                other => {
+                    let text = text_of(other, span)?;
+                    part.package = if text == crate::library::catalog::NO_PACKAGE {
+                        text
+                    } else {
+                        crate::library::footprint::canonical(&text)
+                    }
+                }
+            },
+            "symbol" => part.symbol = Some(text_of(value, span)?),
+            "body" => part.body = Some(text_of(value, span)?),
+            "nc" => part.nc = words_of(Some(value), span)?,
             "datasheet" => part.datasheet = Some(text_of(value, span)?),
             "params" => {
                 for (k, v) in record_of(Some(value), span)? {
@@ -98,15 +124,15 @@ pub(super) fn read(mpn: String, expr: Option<Expr>, span: Span) -> Read<CatalogP
             other => {
                 return Err(diagnostic(
                     value.span(),
-                    format!("a part has no `{other}`; it takes manufacturer, description, category, prefix, package, datasheet, params, pins and spice"),
+                    format!("a part has no `{other}`; it takes manufacturer, description, category, prefix, package, symbol, body, datasheet, params, pins, nc and spice"),
                 ))
             }
         }
     }
-    if part.package.is_empty() {
+    if part.package.is_empty() && part.footprint.is_none() {
         return Err(diagnostic(
             span,
-            format!("part `{}` needs its `package`", part.mpn),
+            format!("part `{}` needs its `package`: a footprint, or `package = none` for a part wired in the field", part.mpn),
         ));
     }
     part.check().map_err(|m| diagnostic(span, m))?;
@@ -126,7 +152,22 @@ pub fn print(part: &CatalogPart) -> Result<String, PrintError> {
     if !part.prefix.is_empty() {
         entries.push(("prefix".into(), name(&part.prefix)));
     }
-    entries.push(("package".into(), quote(&part.package)));
+    match &part.footprint {
+        Some(f) => entries.push(("package".into(), name(f))),
+        None if crate::library::catalog::has_no_package(part) => {
+            entries.push(("package".into(), crate::library::catalog::NO_PACKAGE.into()))
+        }
+        None => entries.push((
+            "package".into(),
+            quote(&crate::library::footprint::canonical(&part.package)),
+        )),
+    }
+    if let Some(s) = &part.symbol {
+        entries.push(("symbol".into(), name(s)));
+    }
+    if let Some(b) = &part.body {
+        entries.push(("body".into(), quote(b)));
+    }
     if let Some(d) = &part.datasheet {
         entries.push(("datasheet".into(), quote(d)));
     }
@@ -165,6 +206,12 @@ pub fn print(part: &CatalogPart) -> Result<String, PrintError> {
         "pins".into(),
         format!("[\n{INDENT}{}\n]", pins.join(&format!(",\n{INDENT}"))),
     ));
+    if !part.nc.is_empty() {
+        entries.push((
+            "nc".into(),
+            list(&part.nc.iter().map(|x| quote(x)).collect::<Vec<_>>()),
+        ));
+    }
     if let Some(s) = &part.spice {
         let mut e = vec![("model".to_string(), name(&s.model))];
         if let Some(l) = &s.library {

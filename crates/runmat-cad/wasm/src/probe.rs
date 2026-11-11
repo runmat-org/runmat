@@ -272,6 +272,64 @@ pub fn probe(path: &str, text: &str, files: &Files, rays: &[Ray]) -> Result<Vec<
     Ok(out)
 }
 
+/// A part occurrence as the probe sees it: its display (part coordinates, the probe's
+/// tessellation, kept as the rays' are) and where it sits in the assembly.
+pub struct PlacedPart {
+    /// The occurrence's path in the assembly.
+    pub occurrence: String,
+    pub world: Transform,
+    pub display: Rc<PartDisplay>,
+}
+
+/// The part occurrences at or under each of `names` (occurrence paths), in their configurations,
+/// from one resolution of the assembly: what a seating computes its contact on.
+pub fn placed_parts(
+    path: &str,
+    text: &str,
+    files: &Files,
+    names: &[String],
+) -> Result<Vec<PlacedPart>, String> {
+    let resolution = resolve_assembly_in(path, text, files, None)
+        .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
+    let resolved = &resolution.resolved;
+    let mut out = Vec::new();
+    for (id, node) in resolved.nodes.iter().enumerate() {
+        if node.parent.is_none()
+            || node.failed
+            || node.represented_by_ancestor
+            || node.definition.kind != DefinitionKind::Part
+        {
+            continue;
+        }
+        let occurrence = resolved.path(id as u32);
+        if !names
+            .iter()
+            .any(|n| occurrence == *n || occurrence.starts_with(&format!("{n}/")))
+        {
+            continue;
+        }
+        let file = node.definition.file.0.clone();
+        let Some(document) = resolution.documents.get(&file) else {
+            continue;
+        };
+        let key = crate::evaluate::content_key(&file, &node.configuration.digest(), files);
+        let display = displays::get_or(key, || {
+            let (result, kernel) = regenerate_configured(document, &node.configuration);
+            Ok::<_, String>(part_display(
+                &result,
+                kernel.as_ref(),
+                &TessellationOptions::default(),
+            ))
+        })?;
+        out.push(PlacedPart {
+            occurrence,
+            world: node.world,
+            display,
+        });
+    }
+    Ok(out)
+}
+
 /// The probe's displays (the default tessellation, finer than the assembly view's), kept by
 /// content ([`crate::evaluate::content_key`]: the part's text, the files it reads and its
 /// configuration), so the rays of one seating, cast over several calls, regenerate a curved

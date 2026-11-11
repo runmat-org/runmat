@@ -438,6 +438,7 @@ pub fn device_part(
         params,
         datasheet: None,
         spice: None,
+        ..Default::default()
     };
     let _ = library;
     DevicePart { part, pins }

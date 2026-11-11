@@ -146,10 +146,24 @@ pub(super) fn drawing_sheet(
         .iter()
         .find(|s| sheet.is_none_or(|n| s["name"].as_str() == Some(n)))
     else {
-        return Err(ToolError::invalid(format!(
-            "{path} has no sheet {}",
-            sheet.unwrap_or("")
-        )));
+        // A drawing that doesn't compile has no sheets: say why, not which sheet is missing.
+        let errors: Vec<String> = compiled["diagnostics"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|d| d["severity"] == "error")
+            .filter_map(|d| d["message"].as_str().map(str::to_owned))
+            .collect();
+        if !errors.is_empty() {
+            return Err(ToolError::invalid(format!(
+                "{path} does not compile: {}",
+                errors.join("; ")
+            )));
+        }
+        return Err(ToolError::invalid(match sheet {
+            Some(name) => format!("{path} has no sheet {name}"),
+            None => format!("{path} has no sheets"),
+        }));
     };
     let sheet_name = sheet["name"].as_str().unwrap_or("1").to_owned();
     let layout = &data["layouts"][&sheet_name];

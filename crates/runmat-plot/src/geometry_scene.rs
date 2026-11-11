@@ -13,6 +13,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 mod annotations;
 mod edge_stroke;
+#[cfg(test)]
+mod highlight_tests;
 mod instances;
 mod paint;
 mod pick;
@@ -1037,7 +1039,7 @@ impl GeometrySceneChunk {
             self.apply_region_color(
                 &mut render_data,
                 &highlight.region_id,
-                RegionPaint::Fill(
+                RegionPaint::Highlight(
                     highlight
                         .color
                         .unwrap_or_else(|| geometry_region_role_color(highlight.role.as_deref())),

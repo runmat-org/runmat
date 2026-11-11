@@ -25,6 +25,7 @@ mod mates;
 pub mod model;
 pub mod options;
 mod place;
+pub mod polyline_frame;
 pub mod representation;
 pub mod resolve;
 pub mod source;

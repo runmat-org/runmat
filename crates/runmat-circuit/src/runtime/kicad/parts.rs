@@ -165,6 +165,7 @@ pub(crate) fn declare_parts(
                 params: BTreeMap::new(),
                 datasheet,
                 spice: None,
+                ..Default::default()
             });
             c.part = PartRef::Part(name);
         }

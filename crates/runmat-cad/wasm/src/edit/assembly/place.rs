@@ -38,6 +38,7 @@ fn literal_mm(value: &ValueExpr) -> Option<f64> {
             "cm" => value * 10.0,
             "m" => value * 1000.0,
             "in" => value * 25.4,
+            "ft" => value * 304.8,
             _ => return None,
         }),
         ValueExpr::Number { value } if *value == 0.0 => Some(0.0),
@@ -376,6 +377,11 @@ pub(super) fn direction(compiled: &Compiled, id: &str) -> Result<(V3, V3), EditF
                     .find(|e| e["index"].as_u64() == Some(edge as u64))
             })
             .and_then(edge_frame),
+        Entity::Datum { feature } => compiled
+            .reference(prototype, &feature)
+            .and_then(super::frames::datum_frame)
+            .filter(|f| f.kind != super::frames::FrameKind::Point),
+        Entity::Vertex { .. } => None,
     }
     .ok_or_else(|| model("the direction pick has no direction"))?;
     let world = to_world(frame, &transform);
@@ -413,7 +419,7 @@ pub(super) fn pattern(
         },
         _ => {
             return Err(model(
-                "a pattern that follows a part's feature pattern is written in the source editor in this build",
+                "a pattern that follows a part's feature pattern is written in the source",
             ))
         }
     };

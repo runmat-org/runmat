@@ -76,10 +76,41 @@ impl MassReport {
 }
 
 /// A part's integrated bodies at unit density in its own frame, and its density.
+#[derive(Clone)]
 struct Integrated {
     unit: Mass,
     material: Option<String>,
     density: Option<(f64, DensitySource)>,
+}
+
+/// Each part's integration, kept between calls on this thread by content (the part's text,
+/// the files it reads and its configuration: [`crate::evaluate::content_key`]), so an
+/// assembly's mass after a seating integrates only the parts the seating added or changed.
+mod kept {
+    use super::Integrated;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    /// Integrations kept; a few hundred numbers each, so the whole set is cleared past this.
+    const KEPT: usize = 512;
+
+    thread_local! {
+        static KEPT_PARTS: RefCell<HashMap<u64, Integrated>> = RefCell::new(HashMap::new());
+    }
+
+    pub fn get(key: u64) -> Option<Integrated> {
+        KEPT_PARTS.with(|k| k.borrow().get(&key).cloned())
+    }
+
+    pub fn put(key: u64, part: Integrated) {
+        KEPT_PARTS.with(|k| {
+            let mut k = k.borrow_mut();
+            if k.len() >= KEPT {
+                k.clear();
+            }
+            k.insert(key, part);
+        });
+    }
 }
 
 /// The first output's solid bodies of a regenerated part (all of them when it has one output).
@@ -333,13 +364,21 @@ pub fn assembly_mass(
         let file = node.definition.file.0.clone();
         let occurrence = resolved.path(id as u32);
         let key = (file.clone(), node.configuration.digest());
+        let content = crate::evaluate::content_key(&file, &key.1, files);
         let entry = integrated.entry(key).or_insert_with(|| {
+            if let Some(found) = content.and_then(kept::get) {
+                return Ok(found);
+            }
             let Some(document) = resolution.documents.get(&file) else {
                 return Err("its file isn't in the workspace".into());
             };
             let configured = document.in_configuration(node.configuration.name.as_ref());
             let (result, kernel) = regenerate_configured(document, &node.configuration);
-            integrate(&configured, &result, kernel.as_ref())
+            let found = integrate(&configured, &result, kernel.as_ref());
+            if let (Some(k), Ok(part)) = (content, &found) {
+                kept::put(k, part.clone());
+            }
+            found
         });
         match entry {
             Err(e) => report.problems.push(format!("{occurrence}: {e}")),

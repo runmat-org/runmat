@@ -200,6 +200,7 @@ pub fn read(
                     params,
                     datasheet: None,
                     spice: None,
+                    ..Default::default()
                 };
                 design.parts.entry(mpn.clone()).or_insert(part);
                 let mut c = ComponentDecl::new(&designator, PartRef::Part(mpn));

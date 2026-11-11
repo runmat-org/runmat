@@ -189,27 +189,7 @@ impl<'a, 'b> Run<'a, 'b> {
                         self.axis(i, id, "edge", &AxisRef::Edge { edge: edge.clone() })?
                     }
                     AxisDef::OfFace { face } => {
-                        let r = self.single(i, id, "face", face, Some(TopoKind::Face))?;
-                        let h = *r.entities().iter().next().expect("one");
-                        match self.st.bodies[h.body as usize].topology.faces[h.index as usize]
-                            .geom
-                            .surface
-                        {
-                            SurfaceKind::Cylinder {
-                                axis_point,
-                                axis_direction,
-                                ..
-                            } => (axis_point, axis_direction),
-                            _ => {
-                                return Err(self.error(
-                                    id,
-                                    Some("face"),
-                                    DiagCode::RefKindMismatch,
-                                    format!("`{}` is not cylindrical", face),
-                                    Vec::new(),
-                                ))
-                            }
-                        }
+                        self.axis(i, id, "face", &AxisRef::Face { face: face.clone() })?
                     }
                     _ => unreachable!("handled by compile_family"),
                 };
@@ -375,6 +355,9 @@ impl<'a, 'b> Run<'a, 'b> {
             FeatureKind::Split(s) => {
                 let b = self.single(i, id, "body", &s.body, Some(TopoKind::Body))?;
                 let body = b.entities().iter().next().expect("one").body as usize;
+                if let Some(c) = self.split_with(i, id, body, &s.tool)? {
+                    return Ok(c);
+                }
                 let frame = self.plane(i, id, "tool", &s.tool)?;
                 Ok(Compiled::Op {
                     op: KernelOp::Split { frame },
@@ -402,6 +385,108 @@ impl<'a, 'b> Run<'a, 'b> {
                             transform: Transform::translation(t),
                         },
                         operands: Self::bodies_of(&set),
+                        naming: simple(Vec::new()),
+                        import: false,
+                        instances: None,
+                        tools: None,
+                    })
+                }
+                BodyOp::Rotate {
+                    bodies,
+                    axis,
+                    angle,
+                } => {
+                    let set = self.list(i, id, "bodies", bodies, Some(TopoKind::Body))?;
+                    let (point, direction) = self.axis(i, id, "axis", axis)?;
+                    let a = self.value(id, "angle", angle, Dimension::ANGLE)?;
+                    Ok(Compiled::Op {
+                        op: KernelOp::Transform {
+                            transform: Transform::rotation_about(point, direction, a),
+                        },
+                        operands: Self::bodies_of(&set),
+                        naming: simple(Vec::new()),
+                        import: false,
+                        instances: None,
+                        tools: None,
+                    })
+                }
+                BodyOp::Copy {
+                    bodies,
+                    dx,
+                    dy,
+                    dz,
+                    axis,
+                    angle,
+                    count,
+                } => {
+                    let set = self.list(i, id, "bodies", bodies, Some(TopoKind::Body))?;
+                    let t = [
+                        self.value(id, "dx", dx, Dimension::LENGTH)?,
+                        self.value(id, "dy", dy, Dimension::LENGTH)?,
+                        self.value(id, "dz", dz, Dimension::LENGTH)?,
+                    ];
+                    let turn = match (axis, angle) {
+                        (Some(ax), Some(a)) => {
+                            let (point, direction) = self.axis(i, id, "axis", ax)?;
+                            Some((
+                                point,
+                                direction,
+                                self.value(id, "angle", a, Dimension::ANGLE)?,
+                            ))
+                        }
+                        _ => None,
+                    };
+                    let n = match count {
+                        Some(c) => self.count(id, "count", c)?,
+                        None => 1,
+                    };
+                    let mut instances = Vec::new();
+                    for k in 1..=n {
+                        let mut transform = Transform::translation(scale(t, k as f64));
+                        if let Some((point, direction, a)) = turn {
+                            transform = Transform::rotation_about(point, direction, a * k as f64)
+                                .compose(&transform);
+                        }
+                        instances.push(Instance {
+                            key: InstanceKey::Linear { step: k },
+                            transform,
+                        });
+                    }
+                    let keys = instances.iter().map(|x| x.key.clone()).collect();
+                    Ok(Compiled::Op {
+                        op: KernelOp::PatternBodies { instances },
+                        operands: Self::bodies_of(&set),
+                        naming: NamingContext::simple(id, Vec::new()),
+                        import: false,
+                        instances: Some(keys),
+                        tools: None,
+                    })
+                }
+                BodyOp::Indent {
+                    target,
+                    tool,
+                    clearance,
+                } => {
+                    let t = self.single(i, id, "target", target, Some(TopoKind::Body))?;
+                    let target = t.entities().iter().next().expect("one").body as usize;
+                    let u = self.single(i, id, "tool_body", tool, Some(TopoKind::Body))?;
+                    let tool_body = u.entities().iter().next().expect("one").body as usize;
+                    if tool_body == target {
+                        return Err(self.error(
+                            id,
+                            Some("tool_body"),
+                            DiagCode::RegenInvalid,
+                            "the tool body is the target; pick another body to press in".into(),
+                            Vec::new(),
+                        ));
+                    }
+                    let clearance = match clearance {
+                        Some(c) => self.value(id, "clearance", c, Dimension::LENGTH)?,
+                        None => 0.0,
+                    };
+                    Ok(Compiled::Op {
+                        op: KernelOp::Indent { clearance },
+                        operands: vec![target, tool_body],
                         naming: simple(Vec::new()),
                         import: false,
                         instances: None,
@@ -446,6 +531,24 @@ impl<'a, 'b> Run<'a, 'b> {
     ) -> Result<Compiled, Halt> {
         let keys: BTreeSet<InstanceKey> = instances.iter().map(|x| x.key.clone()).collect();
         match seeds {
+            PatternSeeds::Features { features }
+                if !features.is_empty()
+                    && features.iter().all(|s| {
+                        !self.st.tools.contains_key(s) && self.st.dressups.contains_key(s)
+                    }) =>
+            {
+                if !varied.is_empty() {
+                    return Err(self.error(
+                        id,
+                        Some("layout"),
+                        DiagCode::RegenInvalid,
+                        "a variable pattern can't vary a fillet or chamfer; pattern it with a table"
+                            .into(),
+                        Vec::new(),
+                    ));
+                }
+                self.dressup_pattern(i, id, features, &instances)
+            }
             PatternSeeds::Features { features } => {
                 let mut tools = Vec::new();
                 let mut seed_ids = Vec::new();
@@ -497,6 +600,37 @@ impl<'a, 'b> Run<'a, 'b> {
                     },
                     operands,
                     naming,
+                    import: false,
+                    instances: Some(keys),
+                    tools: None,
+                })
+            }
+            PatternSeeds::Faces { faces } => {
+                if !varied.is_empty() {
+                    return Err(self.error(
+                        id,
+                        Some("layout"),
+                        DiagCode::RegenInvalid,
+                        "a variable pattern rebuilds features; pattern faces with a table".into(),
+                        Vec::new(),
+                    ));
+                }
+                let set = self.list(i, id, "faces", faces, Some(TopoKind::Face))?;
+                let operands = Self::bodies_of(&set);
+                if operands.len() != 1 {
+                    return Err(self.error(
+                        id,
+                        Some("faces"),
+                        DiagCode::RegenInvalid,
+                        "the faces to repeat lie on several bodies; pick faces of one body".into(),
+                        Vec::new(),
+                    ));
+                }
+                let faces = Self::operand_entities(&set, &operands);
+                Ok(Compiled::Op {
+                    op: KernelOp::PatternFaces { faces, instances },
+                    operands,
+                    naming: NamingContext::simple(id, Vec::new()),
                     import: false,
                     instances: Some(keys),
                     tools: None,

@@ -77,7 +77,7 @@ impl GeometrySceneChunk {
         ((b.min + b.max) * 0.5, (b.max - b.min).length() * 0.5)
     }
 
-    /// The placements with the presentation's paints: role highlights fill, hover and selection
+    /// The placements with the presentation's paints: role highlights tint by their alpha, hover and selection
     /// tint a placement's faces and color (and thicken) its edges.
     pub(super) fn instance_paints(
         &self,
@@ -101,8 +101,11 @@ impl GeometrySceneChunk {
             };
             let r = &mut raw[n];
             match (edges, paint) {
-                (_, RegionPaint::Fill(c)) | (false, RegionPaint::Face(c)) => {
+                (false, RegionPaint::Face(c)) | (true, RegionPaint::Highlight(c)) => {
                     r.tint = [c[0], c[1], c[2], 1.0]
+                }
+                (false, RegionPaint::Highlight(c)) => {
+                    r.tint = [c[0], c[1], c[2], c[3].clamp(0.0, 1.0)]
                 }
                 (true, RegionPaint::Face(_)) => {}
                 (false, RegionPaint::Tint { face, amount, .. }) => {
@@ -121,7 +124,7 @@ impl GeometrySceneChunk {
             let color = highlight
                 .color
                 .unwrap_or_else(|| geometry_region_role_color(highlight.role.as_deref()));
-            paint(&highlight.region_id, RegionPaint::Fill(color));
+            paint(&highlight.region_id, RegionPaint::Highlight(color));
         }
         if let Some(region_id) = presentation.hovered_region_id.as_deref() {
             paint(region_id, HOVER_PAINT);

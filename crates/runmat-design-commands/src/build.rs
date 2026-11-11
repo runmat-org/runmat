@@ -504,6 +504,13 @@ pub fn any(predicates: Vec<Predicate>) -> Predicate {
     Predicate::Any { any: predicates }
 }
 
+/// A command shown disabled until the work `reason` names lands.
+pub fn unavailable(reason: &str) -> Predicate {
+    Predicate::Unavailable {
+        reason: reason.to_owned(),
+    }
+}
+
 /* ----------------------------------------------------------------------------------------- */
 /* Rows                                                                                      */
 /* ----------------------------------------------------------------------------------------- */

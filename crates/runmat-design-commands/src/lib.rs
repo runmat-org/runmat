@@ -15,6 +15,7 @@
 
 mod build;
 mod common;
+mod reference;
 mod withdraw;
 
 pub use build::*;
@@ -477,6 +478,11 @@ pub enum Predicate {
     },
     Any {
         any: Vec<Predicate>,
+    },
+    /// The command isn't available yet: the Desktop shows it disabled with `reason`, which names
+    /// what it waits for (an engineering gap, not a state the person can change).
+    Unavailable {
+        reason: String,
     },
 }
 

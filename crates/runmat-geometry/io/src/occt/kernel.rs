@@ -20,8 +20,9 @@ use runmat_geometry_kernel::analysis::{
 };
 use runmat_geometry_kernel::frame::Frame;
 use runmat_geometry_kernel::history::{
-    BodyRecord, BoundaryRecord, EdgeGeom, EdgeTopo, Evolution, FaceGeom, FaceRecord, FaceTopo,
-    HistorySource, KernelTag, OpHistory, OperandEntity, SurfaceKind, Topology, VertexTopo,
+    BodyRecord, BoundaryRecord, EdgeCurve, EdgeGeom, EdgeTopo, Evolution, FaceGeom, FaceRecord,
+    FaceTopo, HistorySource, KernelTag, OpHistory, OperandEntity, SurfaceKind, Topology,
+    VertexTopo,
 };
 use runmat_geometry_kernel::ids::SketchEntityId;
 use runmat_geometry_kernel::names::{InstanceKey, PlaneSide, Role};
@@ -424,6 +425,19 @@ fn gen(role: Role, tag: KernelTag, ordinal: Option<u32>) -> HistorySource {
 
 fn of_label(l: &FaceLabel) -> HistorySource {
     gen(l.role, l.tag.clone(), l.ordinal)
+}
+
+/// An edge payload's curve: kind 0 line, 1 circle (centre, axis, radius), else another curve.
+fn edge_curve(g: &[f64]) -> EdgeCurve {
+    match g.get(7..15) {
+        Some([k, ..]) if *k == 0.0 => EdgeCurve::Line,
+        Some([k, cx, cy, cz, nx, ny, nz, r]) if *k == 1.0 => EdgeCurve::Circle {
+            center: [*cx, *cy, *cz],
+            normal: [*nx, *ny, *nz],
+            radius: *r,
+        },
+        _ => EdgeCurve::Other,
+    }
 }
 
 fn not_supported(what: impl Into<String>) -> KernelError {
@@ -2608,6 +2622,8 @@ impl OcctKernel {
                     reals.push(a);
                     reals.push(b);
                 }
+                // Corner patches where three chamfered edges meet take the vertex they cut.
+                ints.push(l.vertex_labels(operand, Role::Chamfer)?);
                 let r = l.push(9, ints, reals);
                 l.output(r, false, OutputSpec::default());
                 l.keep_others(operand)
@@ -2815,6 +2831,65 @@ impl OcctKernel {
                     );
                 }
                 Ok(())
+            }
+            KernelOp::PatternFaces { faces, instances } => {
+                let operand = single_operand(faces)?;
+                let slot = l.operand(operand)?;
+                let mut ints = vec![slot, operand as i64, faces.len() as i64];
+                ints.extend(faces.iter().map(|f| f.entity as i64));
+                ints.push(instances.len() as i64);
+                let mut reals = Vec::new();
+                for inst in instances {
+                    let ii = l.instance(&inst.key);
+                    ints.push(ii);
+                    reals.extend(transform_reals(&inst.transform));
+                }
+                let r = l.push(45, ints, reals);
+                l.output(r, false, OutputSpec::default());
+                l.keep_others(operand)
+            }
+            KernelOp::SplitWith { faces } => {
+                let target = l.operand(0)?;
+                let (tool, tool_operand) = if faces.is_empty() {
+                    if n < 2 {
+                        return Err(failed("a split needs a tool body or faces"));
+                    }
+                    (l.operand(1)?, 1)
+                } else {
+                    let op = single_operand(faces)?;
+                    (l.operand(op)?, op as i64)
+                };
+                let label = l.label(gen(Role::SplitFace, KernelTag::None, None));
+                let mut ints = vec![target, tool, tool_operand, faces.len() as i64];
+                ints.extend(faces.iter().map(|f| f.entity as i64));
+                ints.push(label);
+                let r = l.push(46, ints, vec![]);
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        material: Some(vec![0]),
+                        ..Default::default()
+                    },
+                );
+                l.keep_operands(1..n)
+            }
+            KernelOp::Indent { clearance } => {
+                if n < 2 {
+                    return Err(failed("an indent needs a target body and a tool body"));
+                }
+                let target = l.operand(0)?;
+                let tool = l.operand(1)?;
+                let r = l.push(47, vec![target, tool], vec![*clearance]);
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        material: Some(vec![0]),
+                        ..Default::default()
+                    },
+                );
+                l.keep_operands(1..n)
             }
             KernelOp::Transform { transform } => {
                 for i in 0..n as u32 {
@@ -3882,6 +3957,7 @@ impl OcctKernel {
                         start: [g[0], g[1], g[2]],
                         end: [g[3], g[4], g[5]],
                         length: g[6],
+                        curve: edge_curve(g),
                     },
                     laminar: e.laminar,
                 });

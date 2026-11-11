@@ -152,6 +152,38 @@ fn c03_more_profile_sides_keeps_existing_names() {
 }
 
 #[test]
+fn c04b_optional_region_selects_nothing_from_a_face_no_longer_made() {
+    // `expect = any`: once the notch replaces l3, the optional region is empty and clean, where
+    // a required region on the same face reports RefNotGenerated (c04).
+    let env = Env::new();
+    let mut d = base();
+    d.regions.push(region(
+        "back",
+        TopoKind::Face,
+        vec![side("body", "s1", "l3")],
+        Cardinality::Any,
+    ));
+    assert_eq!(region_count(&env.regen(&d), "back"), 1);
+    let notch = polygon(
+        PlaneRef::origin_xy(),
+        &[
+            (mm(0.0), mm(0.0)),
+            (input("width"), mm(0.0)),
+            (input("width"), input("depth")),
+            (mm(40.0), input("depth")),
+            (mm(40.0), mm(40.0)),
+            (mm(0.0), mm(40.0)),
+        ],
+        Some(&["l1", "l2", "l7", "l8", "l9", "l4"]),
+    );
+    d.features[0] = sketch("s1", notch);
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert!(region_ok(&r, "back"));
+    assert_eq!(region_count(&r, "back"), 0);
+}
+
+#[test]
 fn c04_removed_curve_reports_not_generated_with_candidates() {
     let env = Env::new();
     let mut d = base();

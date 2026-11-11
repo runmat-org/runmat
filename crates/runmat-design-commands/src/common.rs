@@ -42,7 +42,7 @@ pub fn common() -> Catalog {
             "view.grid",
             "Grid",
             "grid",
-            &[Part, Assembly, Drawing, Circuit, CircuitLayout, Fea],
+            &[Part, Assembly, Circuit, CircuitLayout, Fea],
         )
         .desc("Show the grid and set its spacing.")
         .inputs(vec![
@@ -159,6 +159,7 @@ pub fn common() -> Catalog {
                     ("modal", "Modal"),
                     ("thermal", "Thermal"),
                     ("ir_drop", "IR drop"),
+                    ("warpage", "Warpage"),
                     ("thermal_structural", "Thermal and structural"),
                 ],
             ),
