@@ -36,6 +36,29 @@ pub(super) struct StructuralResourceFacts {
     pub recovery_has_rotational_dofs: bool,
 }
 
+/// Metered projection work for one structural resource-fact derivation.
+/// Includes the connector realization used by symbolic planning. Static solve
+/// candidates share these facts; selecting a fallback does not derive another
+/// projection. This quote does not complete any work.
+pub fn structural_resource_derivation_work_upper_bound(
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+) -> Result<runmat_simulation_usage::OperationCount, ResourcePlanningError> {
+    let projection = mesh
+        .map(AnalysisProjection::derivation_work_upper_bound)
+        .transpose()
+        .map(|work| work.unwrap_or(runmat_simulation_usage::OperationCount::ZERO))
+        .map_err(ResourcePlanningError::from_projection_error)?;
+    let connectors =
+        crate::assembly::explicit_connectors::connector_plan_projection_work_upper_bound(
+            model, mesh,
+        )
+        .map_err(ResourcePlanningError::from_projection_error)?;
+    projection
+        .checked_add(connectors)
+        .map_err(|cause| ResourcePlanningError::Accounting(cause.into()))
+}
+
 pub(super) fn derive_structural_resource_facts(
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
@@ -45,7 +68,7 @@ pub(super) fn derive_structural_resource_facts(
     let projection = mesh
         .map(AnalysisProjection::derive)
         .transpose()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        .map_err(ResourcePlanningError::from_projection_error)?;
     let symbolic = match constraints.topology {
         CanonicalStructuralTopologyIdentity::Explicit { .. } => {
             StructuralSymbolicOperators::derive_explicit(constraints, model)?

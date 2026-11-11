@@ -162,12 +162,16 @@ fn stackup_body(tokens: &[Token], mut index: usize) -> Result<(Vec<Layer>, usize
             Some(Token::Word(word)) if word == "layer" => {
                 let name = match tokens.get(index + 1) {
                     Some(Token::Text(name) | Token::Word(name)) => name.clone(),
-                    _ => return Err("a stackup layer is written `layer \"<name>\" = { ... }`".into()),
+                    _ => {
+                        return Err("a stackup layer is written `layer \"<name>\" = { ... }`".into())
+                    }
                 };
                 if tokens.get(index + 2) != Some(&Token::Equal)
                     || tokens.get(index + 3) != Some(&Token::Open)
                 {
-                    return Err(format!("layer \"{name}\" is written `layer \"{name}\" = {{ ... }}`"));
+                    return Err(format!(
+                        "layer \"{name}\" is written `layer \"{name}\" = {{ ... }}`"
+                    ));
                 }
                 let (record, next) = record(tokens, index + 4)?;
                 layers.push(layer(name, &record)?);
@@ -340,7 +344,11 @@ layout esc {
     #[test]
     fn reads_a_named_stackup_with_units_and_materials() {
         let stackup = read(LAYOUT, Some("rigid")).unwrap();
-        let names = stackup.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>();
+        let names = stackup
+            .layers
+            .iter()
+            .map(|l| l.name.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(
             names,
             ["F.Mask", "F.Cu", "dielectric 1", "In1.Cu", "dielectric 2"]
@@ -359,6 +367,8 @@ layout esc {
     fn several_stackups_need_a_name() {
         let error = read(LAYOUT, None).unwrap_err();
         assert!(error.contains("rigid, flex"), "{error}");
-        assert!(read(LAYOUT, Some("none")).unwrap_err().contains("no stackup `none`"));
+        assert!(read(LAYOUT, Some("none"))
+            .unwrap_err()
+            .contains("no stackup `none`"));
     }
 }

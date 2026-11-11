@@ -229,10 +229,9 @@ pub(crate) fn plan_family_study(
             if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
                 compiled = electrothermal_heat_study(&compiled, context.mesh, policy)?;
             }
-            // The thermal plan selects its solve path (the proving factor, or the conduction
-            // multigrid when the factor does not fit) within the admitted step ceiling, so the
-            // plan, the worker's re-derivation and the worker envelope agree.
-            admit(&mut compiled.model.sequence.steps)?;
+            // Thermal preparation carries the worker ceiling separately and derives the
+            // numerical path with prepare_primary_fields_admitted. Keep the authored
+            // resource declaration intact so host availability cannot change its identity.
             let product = plan_thermal_study_product_with_fields(
                 compiled,
                 context.mesh,
@@ -243,6 +242,7 @@ pub(crate) fn plan_family_study(
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Thermal(Box::new(ThermalStudyPreparation {
+                    maximum_resident_bytes: Some(worker_memory()?),
                     local_execution: context.local_execution,
                     field_source: None,
                     scope: ThermalStudyScope::Standalone,

@@ -11,7 +11,14 @@ use runmat_execution_runner_native::{NativeExecutionConfig, NativeExecutionServi
 use runmat_runtime::execution::{ExecutionServiceError, RuntimeExecutionServices};
 use runmat_value::Value;
 
+#[path = "support/native_host.rs"]
+mod native_host;
+
 fn main() {
+    native_host::run(run);
+}
+
+fn run() {
     if std::env::args_os().nth(1).as_deref()
         == Some(OsStr::new(
             runmat_process_host::HiddenMode::ExecutionWorker.marker(),

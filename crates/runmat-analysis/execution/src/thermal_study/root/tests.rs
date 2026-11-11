@@ -22,7 +22,8 @@ fn roundtrip(wire: &PreparationWire) -> PreparationWire {
 
 #[test]
 fn preparation_codec_preserves_authored_and_execution_inputs() {
-    let input = preparation();
+    let mut input = preparation();
+    input.maximum_resident_bytes = Some(128 * 1024 * 1024);
     let access = input.artifact_access.clone();
     let compiled = input.product.compiled.clone();
     let workload = input.product.workload.clone();
@@ -31,6 +32,7 @@ fn preparation_codec_preserves_authored_and_execution_inputs() {
     let expected_workload = workload.identity().unwrap();
     let wire = PreparationWire::new(input);
     let decoded = roundtrip(&wire).into_preparation(access.clone()).unwrap();
+    assert_eq!(decoded.maximum_resident_bytes, Some(128 * 1024 * 1024));
     assert_eq!(decoded.product.compiled, compiled);
     assert_eq!(decoded.product.workload, workload);
     assert_eq!(

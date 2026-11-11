@@ -222,7 +222,10 @@ async fn axis_off_hides_the_3d_axes_and_orientation_triad() {
         0,
         "`axis off` leaves no orientation triad"
     );
-    assert!(content_box(&hidden).is_some(), "`axis off` still draws the model");
+    assert!(
+        content_box(&hidden).is_some(),
+        "`axis off` still draws the model"
+    );
 }
 
 #[tokio::test]

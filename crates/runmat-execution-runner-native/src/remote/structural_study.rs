@@ -32,16 +32,18 @@ pub(super) async fn execute(
     {
         super::exact_structural_study::RemoteExactStructuralStudyComposition::Completed(
             response,
-        ) => packaged(response, pool).map(RemotePoolExecutionOutcome::Completed),
+        ) => packaged(response, pool).map(Ok),
         super::exact_structural_study::RemoteExactStructuralStudyComposition::Failed(message) => {
             execution_failure_outcome(pool, message)
         }
-        super::exact_structural_study::RemoteExactStructuralStudyComposition::Cancelled => {
-            Ok(RemotePoolExecutionOutcome::Cancelled)
-        }
+        super::exact_structural_study::RemoteExactStructuralStudyComposition::Cancelled => Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+        )),
         super::exact_structural_study::RemoteExactStructuralStudyComposition::Indeterminate(
             message,
-        ) => Ok(RemotePoolExecutionOutcome::Indeterminate(message)),
+        ) => Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message),
+        )),
     }
 }
 

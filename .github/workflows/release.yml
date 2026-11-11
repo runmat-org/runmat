@@ -49,7 +49,7 @@ jobs:
       source_ref: ${{ github.event.inputs.ref || github.ref_name }}
 
   meshing-release-evidence:
-    name: Verify measured meshing release evidence
+    name: Verify meshing catalogs and scientific release evidence
     needs: [validate-release-state]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -68,8 +68,8 @@ jobs:
           python3 scripts/meshing/validate_reliability.py
           python3 scripts/meshing/validate_release_evidence.py
           python3 -m unittest discover -s scripts/meshing/tests -p 'test_*.py'
-      - name: Verify previously measured scientific inputs and results
-        run: python3 scripts/qualification/scientific.py verify --cohort meshing-release
+      - name: Verify required scientific receipts and approved dispositions
+        run: python3 scripts/qualification/scientific.py verify
       - name: Stage committed qualification evidence
         run: |
           mkdir -p target/runmat-meshing-release-evidence
@@ -92,8 +92,14 @@ jobs:
     needs: [validate-release-state]
     environment: Production
     name: Build ${{ matrix.platform.release_for }}
+    timeout-minutes: 480
     env:
       RUNMAT_TELEMETRY_KEY: ${{ secrets.TELEMETRY_INGESTION_KEY }}
+      CARGO_BUILD_JOBS: ${{ matrix.platform.target == 'x86_64-unknown-linux-gnu' && '8' || '1' }}
+      # The archive packer is a dev-profile host tool even for release products.
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_DEV_SPLIT_DEBUGINFO: 'off'
     strategy:
       fail-fast: false
       max-parallel: 8
@@ -101,7 +107,7 @@ jobs:
         platform:
           
           - release_for: windows-x86_64
-            os: warp-windows-latest-x64-8x
+            os: warp-windows-latest-x64-16x
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
             name: runmat-windows-x86_64.zip
@@ -136,6 +142,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
+      - name: Prepare bounded Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
+            -TargetDirectory "$env:GITHUB_WORKSPACE/target" `
+            -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch" `
+            -ReclaimUnusedRunnerTools
+          "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+          "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+
       - name: Setup Node.js for product evidence
         uses: actions/setup-node@v4
         with:
@@ -164,12 +181,34 @@ jobs:
       - name: Restore native artifact build cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: native-artifact-v1-${{ matrix.platform.target }}
+          shared-key: native-artifact-0.7-v2-${{ matrix.platform.target }}
           # The prefix is also part of restore keys: never reuse pre-policy
           # Darwin C/CMake objects whose build scripts do not track this env.
           prefix-key: ${{ runner.os == 'macOS' && 'v1-rust-macos-min11-cmake11' || 'v0-rust' }}
           env-vars: MACOSX_DEPLOYMENT_TARGET CMAKE_OSX_DEPLOYMENT_TARGET
           cache-workspace-crates: true
+          save-if: false
+
+      - name: Resolve native checkpoint compatibility
+        id: native-checkpoint-key
+        shell: bash
+        env:
+          RUNMAT_CACHE_TARGET: ${{ matrix.platform.target }}
+          RUNMAT_CACHE_INPUTS: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', '.cargo/config.toml', 'rust-toolchain.toml', '.github/workflows/ci.yml', '.github/workflows/release.yml', 'scripts/build-runmat-with-aot-runtime.*', 'scripts/ci-install-macos-cross-dependencies.sh', 'infra/scripts/native-build-cache-key.mjs', 'infra/scripts/native-build-cache-source.mjs', 'infra/scripts/*windows*.ps1', 'infra/vcpkg-ports/**') }}
+        run: node infra/scripts/native-build-cache-key.mjs >> "$GITHUB_OUTPUT"
+
+      - name: Restore rolling native checkpoint
+        uses: actions/cache/restore@v5
+        with:
+          path: target
+          key: ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-
+            ${{ steps.native-checkpoint-key.outputs.key }}-
+
+      - name: Restore byte-verified same-commit source timestamps
+        shell: bash
+        run: node infra/scripts/native-build-cache-source.mjs restore target/.runmat-source-inputs.json
 
       - name: Restore Windows native dependency cache
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -181,6 +220,8 @@ jobs:
       - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
 
       - name: Build release CLI with embedded AOT runtime (Unix)
@@ -205,6 +246,8 @@ jobs:
       - name: Prepare pinned Windows shader compiler
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           ./scripts/distribution/prepare-windows-dxc-runtime.ps1 `
             -Target "${{ matrix.platform.target }}" `
@@ -215,6 +258,8 @@ jobs:
         shell: pwsh
         env:
           CARGO_PROFILE_RELEASE_STRIP: symbols
+          # Match the Windows branch product: do not generate an unused PDB.
+          _LINK_: /DEBUG:NONE
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
           RUNMAT_BUILD_TARGET: ${{ matrix.platform.target }}
@@ -235,7 +280,7 @@ jobs:
           APPLE_NOTARIZE_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZE_PRIVATE_KEY }}
         run: bash scripts/sign-and-notarize-macos-binary.sh "target/${{ matrix.platform.target }}/release/runmat"
 
-      - name: Stage and probe signed release product (Unix)
+      - name: Stage and accept distributed product (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -249,14 +294,15 @@ jobs:
             --product native-cli --profile embedded-aot --source-revision "$source_revision" \
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" \
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
-          node scripts/runtime/verify-builtin-examples.mjs probe \
-            --kind native-embedded-aot-compile-and-execute-v1 \
-            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
-            --output "$root/${{ matrix.platform.release_for }}.product-probe.json"
+          node scripts/distribution/accept-native-product.mjs \
+            "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
+            "$root/${{ matrix.platform.release_for }}.acceptance.json"
 
-      - name: Stage and probe signed release product (Windows)
+      - name: Stage and accept distributed product (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $root = "artifacts/release-product/${{ matrix.platform.release_for }}"
@@ -284,49 +330,10 @@ jobs:
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" `
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
           if ($LASTEXITCODE -ne 0) { throw "native artifact manifest failed with exit code $LASTEXITCODE" }
-          & node scripts/runtime/verify-builtin-examples.mjs probe `
-            --kind native-embedded-aot-compile-and-execute-v1 `
-            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
-            --output "$root/${{ matrix.platform.release_for }}.product-probe.json"
+          & node scripts/distribution/accept-native-product.mjs `
+            "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
+            "$root/${{ matrix.platform.release_for }}.acceptance.json"
           if ($LASTEXITCODE -ne 0) { throw "native product probe failed with exit code $LASTEXITCODE" }
-
-      - name: Verify examples against exact staged native product
-        if: runner.os != 'Windows' || matrix.platform.target != 'aarch64-pc-windows-gnu'
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="artifacts/release-product/${{ matrix.platform.release_for }}"
-          mkdir -p "$root/verification/results"
-          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/verification/inventory.json"
-          node scripts/runtime/verify-builtin-examples.mjs plan \
-            --inventory "$root/verification/inventory.json" --product native-cli \
-            --topology scripts/runtime/builtin-example-topology.c00.json \
-            --output "$root/verification/plan.json"
-          set +e
-          node scripts/runtime/run-builtin-example-product.mjs \
-            --inventory "$root/verification/inventory.json" --plan "$root/verification/plan.json" \
-            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
-            --output-dir "$root/verification/results"
-          execution_status=$?
-          set -e
-          set +e
-          node scripts/runtime/verify-builtin-examples.mjs reconcile \
-            --inventory "$root/verification/inventory.json" --plan "$root/verification/plan.json" \
-            --results-dir "$root/verification/results" \
-            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
-            --product-probe "$root/${{ matrix.platform.release_for }}.product-probe.json" \
-            --report-dir "$root/verification/report" \
-            --output "$root/${{ matrix.platform.release_for }}.example-reconciliation.json"
-          reconciliation_status=$?
-          set -e
-          tar -czf "runmat-${VERSION}-${{ matrix.platform.release_for }}-builtin-example-evidence.tar.gz" \
-            -C "$root" \
-            "${{ matrix.platform.release_for }}.artifact-manifest.json" \
-            "${{ matrix.platform.release_for }}.product-probe.json" \
-            "${{ matrix.platform.release_for }}.example-reconciliation.json" \
-            verification
-          test "$execution_status" -eq 0
-          test "$reconciliation_status" -eq 0
 
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -381,6 +388,19 @@ jobs:
             runmat-*.zip
             artifacts/release-product/${{ matrix.platform.release_for }}/*.json
           if-no-files-found: error
+
+      - name: Save rolling native checkpoint
+        id: native-checkpoint-source
+        if: always() && steps.native-checkpoint-key.outputs.key != ''
+        shell: bash
+        run: node infra/scripts/native-build-cache-source.mjs capture target/.runmat-source-inputs.json
+
+      - name: Upload rolling native checkpoint
+        if: always() && steps.native-checkpoint-source.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: target
+          key: ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   create-release:
     if: github.event_name == 'push'

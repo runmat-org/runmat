@@ -111,10 +111,14 @@ fn large_step_assembly_imports_and_reports_incidence_gaps() {
             )
             .unwrap()
             .map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value));
-            let mapped =
-                ExactSurfaceEvaluator::point(&evaluator, &face.surface_evaluator_id, uv, &Unlimited)
-                    .unwrap()
-                    .canonical_value();
+            let mapped = ExactSurfaceEvaluator::point(
+                &evaluator,
+                &face.surface_evaluator_id,
+                uv,
+                &Unlimited,
+            )
+            .unwrap()
+            .canonical_value();
             let gap = (0..3)
                 .map(|axis| (curve[axis] - mapped[axis]).powi(2))
                 .sum::<f64>()

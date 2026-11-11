@@ -16,6 +16,11 @@ use runmat_value::NumericStorage;
 
 pub type HostScatterData = (Vec<f64>, Vec<f64>);
 
+/// Convert marker area in typographic points squared to the rendered diameter.
+pub fn marker_area_points2_to_diameter_px(area_points2: f64) -> f32 {
+    (area_points2.max(0.1).sqrt() as f32 * (96.0_f32 / 72.0_f32)).max(1.0)
+}
+
 /// High-performance GPU-accelerated scatter plot
 #[derive(Debug, Clone)]
 pub struct ScatterPlot {

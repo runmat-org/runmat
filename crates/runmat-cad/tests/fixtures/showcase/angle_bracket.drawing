@@ -1,0 +1,82 @@
+runmat 0.7
+std 1
+
+// The angle bracket's production drawing at 1:1 on A3, third-angle projection, ASME Y14.5.
+// The front view carries the heights, the top view the hole pattern in the base, the right
+// view the depth and the wall. Section A-A cuts through the base's counterbored holes and
+// detail B enlarges one counterbore. GD&T is to datums A (the base's underside), B (the
+// upright's back face) and C (the left end), as the part's PMI declares them.
+drawing angle_bracket {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        standard = asme,
+        title_block = [
+            { label = "Title", source = { source = property, name = description } },
+            { label = "Part number", source = { source = property, name = part_number } },
+            { label = "Material", source = { source = property, name = material } },
+            { label = "Finish", source = { source = literal, text = "Clear anodize, MIL-A-8625 Type II" } },
+            { label = "Drawn", source = { source = literal, text = "RunMat Design" } },
+            { label = "Checked", source = { source = literal, text = "Engineering" } },
+            { label = "Date", source = { source = literal, text = "2026-11-06" } },
+            { label = "Scale", source = { source = scale } },
+            { label = "Sheet", source = { source = sheet_number } },
+            { label = "Rev", source = { source = revision } }
+        ]
+    }
+
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+
+    view front = standard(orientation = front, sheet = "1", model = { part = angle_bracket }, at = [96, 132], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = angle_bracket }, at = [96, 206], display = hidden_lines)
+    view right = projected(from = front, direction = right, sheet = "1", model = { part = angle_bracket }, at = [205, 132], display = hidden_lines)
+    view a_a = section(from = top, plane = feature.mount.face.wall(a), label = A, sheet = "1", model = { part = angle_bracket }, at = [216, 236], display = visible_lines)
+    view b = detail(from = a_a, center = feature.mount.face.wall(a), radius = 9 mm, label = B, sheet = "1", model = { part = angle_bracket }, at = [345, 215], scale = [3, 1], display = visible_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { part = angle_bracket }, at = [329, 113], scale = [1, 2], display = visible_lines)
+
+    // Front: overall width, height, base thickness and the carry holes' height.
+    annotation width = dimension(style = linear, references = [feature.body.face.start, feature.body.face.end], pmi = overall_width, view = front)
+    annotation height = dimension(style = linear, references = [feature.body.face.side(profile.p1), feature.body.face.side(profile.p3)], view = front)
+    annotation base_t = dimension(style = linear, references = [feature.body.face.side(profile.p1), feature.body.face.side(profile.p5)], view = front)
+    annotation carry_pitch = dimension(style = linear, references = [feature.carry.face.wall(a), feature.carry.face.wall(b)], pmi = carry_pitch, view = front)
+    annotation carry_holes = hole_callout(hole = feature.carry.face.wall(a), view = front)
+    annotation carry_pos = gdt(tolerance = carry_position, view = front)
+    annotation datum_a = datum_symbol(label = A, view = front)
+    annotation datum_c = datum_symbol(label = C, view = front)
+    annotation base_flat = gdt(tolerance = base_flat, view = front)
+    annotation seat_finish = surface_finish(on = feature.body.face.side(profile.p1), view = front)
+
+    // Top: the base's hole pattern.
+    annotation mount_pitch = dimension(style = linear, references = [feature.mount.face.wall(a), feature.mount.face.wall(b)], pmi = mount_pitch, view = top)
+    annotation mount_to_c = dimension(style = linear, references = [feature.body.face.start, feature.mount.face.wall(a)], view = top)
+    annotation mount_to_front = dimension(style = linear, references = [feature.body.face.side(profile.p6), feature.mount.face.wall(a)], view = top)
+    annotation mount_holes = hole_callout(hole = feature.mount.face.wall(a), view = top)
+    annotation mount_pos = gdt(tolerance = mount_position, view = top)
+
+    // Right: depth, wall thickness and the chamfer.
+    annotation depth = dimension(style = linear, references = [feature.body.face.side(profile.p6), feature.body.face.side(profile.p2)], view = right)
+    annotation wall_t = dimension(style = linear, references = [feature.body.face.side(profile.p4), feature.body.face.side(profile.p2)], view = right)
+    annotation corner_r = dimension(style = radius, references = [feature.body.face.side(profile.r)], view = right)
+    annotation datum_b = datum_symbol(label = B, view = right)
+    annotation wall_square = gdt(tolerance = wall_square, view = right)
+    annotation face_finish = surface_finish(on = feature.body.face.side(profile.p2), view = right)
+
+    // Section A-A: the bore's size tolerance. Detail B: the counterbore.
+    annotation bore_dia = dimension(style = diameter, references = [feature.mount.face.wall(b)], pmi = mount_bore, view = a_a)
+    annotation cb_dia = dimension(style = diameter, references = [feature.mount.face.counterbore_wall(a)], view = b)
+    annotation cb_depth = dimension(style = linear, references = [feature.mount.face.counterbore(a), feature.body.face.side(profile.p5)], view = b)
+
+    annotation notes = note(
+        text = "NOTES:\n1. MATERIAL: {material}.\n2. FINISH: CLEAR ANODIZE, MIL-A-8625 TYPE II, CLASS 1.\n3. BREAK SHARP EDGES 0.2-0.5.\n4. DIMENSIONS IN MM. INTERPRET PER ASME Y14.5-2018.\n5. UNTOLERANCED DIMENSIONS: ISO 2768-m.\n6. PART MARK {part_number} REV {revision} ON THE BASE UNDERSIDE.",
+        view = iso,
+        at = [16, 70]
+    )
+
+    table revisions = revision(
+        rows = [
+            { rev = "A", description = "Initial release", date = "2026-10-30", by = "RD" },
+            { rev = "B", description = "Counterbores to 11 x 6.5 for M6 socket head", date = "2026-11-06", by = "RD" }
+        ],
+        sheet = "1",
+        at = [410, 287]
+    )
+}

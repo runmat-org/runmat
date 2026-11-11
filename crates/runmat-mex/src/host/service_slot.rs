@@ -47,9 +47,8 @@ impl LocalBoundaryServiceGuard {
 
 impl Drop for LocalBoundaryServiceGuard {
     fn drop(&mut self) {
-        LOCAL_SERVICES.with(|registry| {
-            registry.borrow_mut().remove(&self.key);
-        });
+        let retired = LOCAL_SERVICES.with(|registry| registry.borrow_mut().remove(&self.key));
+        drop(retired);
     }
 }
 
@@ -79,11 +78,12 @@ impl BoundaryServiceSlot {
             Self::Unavailable => Err(unavailable()),
             #[cfg(not(target_family = "wasm"))]
             Self::Concurrent(services) => operation(services.as_ref()),
-            Self::Local(key) => LOCAL_SERVICES.with(|registry| {
-                let registry = registry.borrow();
-                let services = registry.get(key).ok_or_else(wrong_thread)?;
+            Self::Local(key) => {
+                let services = LOCAL_SERVICES
+                    .with(|registry| registry.borrow().get(key).cloned())
+                    .ok_or_else(wrong_thread)?;
                 operation(services.as_ref())
-            }),
+            }
         }
     }
 }

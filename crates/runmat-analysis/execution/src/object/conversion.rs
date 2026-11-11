@@ -281,7 +281,11 @@ mod tests {
             ObjectInventoryLimits::admitted(1 << 20),
         )
         .unwrap();
-        let required: u64 = fits.objects.iter().map(|o| o.descriptor.encoded_length).sum();
+        let required: u64 = fits
+            .objects
+            .iter()
+            .map(|o| o.descriptor.encoded_length)
+            .sum();
         prepare_chunked_analysis_objects(
             chunked.clone(),
             ObjectNamespace::InputValue,
@@ -296,7 +300,10 @@ mod tests {
         .unwrap_err();
         match error {
             AnalysisBridgeError::InventoryCapacity(capacity) => {
-                assert_eq!((capacity.required, capacity.maximum), (required, required - 1));
+                assert_eq!(
+                    (capacity.required, capacity.maximum),
+                    (required, required - 1)
+                );
                 assert!(capacity.to_string().contains(&required.to_string()));
             }
             other => panic!("expected an inventory capacity refusal, got {other:?}"),

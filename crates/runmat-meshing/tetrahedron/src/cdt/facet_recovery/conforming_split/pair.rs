@@ -512,7 +512,6 @@ pub(super) type EncroachedCornerSegment = (
     crate::cdt::DelaunayRecoveredSegmentNode,
 );
 
-
 /// The pair-split points of `edges = [edge, other]`, which share the vertex `shared`: dyadic
 /// points the same distance from `shared`, that distance being half the shorter edge (see
 /// [`split_pair_at_shared_vertex`]). `locations` are the edges' segment intervals.

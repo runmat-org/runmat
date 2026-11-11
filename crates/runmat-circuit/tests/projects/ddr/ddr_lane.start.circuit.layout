@@ -1,0 +1,10 @@
+runmat 0.7
+std 1
+
+use circuit ddr_lane
+
+layout ddr_lane {
+    outline = [[-20, -12], [20, -12], [20, 12], [-20, 12]]
+    limits = { capability = advanced }
+    net_class supply = { track_width = 0.25 mm, clearance = 0.1 mm }
+}

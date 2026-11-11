@@ -23,7 +23,7 @@ pub(in crate::native) fn open(path: &Path, mode: Mode) -> io::Result<File> {
 }
 
 fn open_leaf(path: &Path) -> io::Result<File> {
-    let encoded = wide(path.as_os_str())?;
+    let encoded = wide(path)?;
     // SAFETY: valid path. Keep a leaf handle without delete sharing through
     // credential load/publication. This is deliberately not an ancestry lock.
     let handle = unsafe {
@@ -76,7 +76,7 @@ pub(super) fn check_chain(path: &Path, mode: Mode) -> io::Result<()> {
             {
                 let descriptor = descriptor(PrivateObject::Directory)?;
                 let attributes = attributes(&descriptor);
-                let encoded = wide(current.as_os_str())?;
+                let encoded = wide(&current)?;
                 // SAFETY: protected ACL is supplied before a new directory is
                 // visible. Existing ancestors' ACLs/ownership are never reset.
                 if unsafe { CreateDirectoryW(encoded.as_ptr(), &attributes) } == 0 {

@@ -519,8 +519,12 @@ impl ObservationPublicationCatalog {
                         "entry history publication holds samples of individual entries",
                     ));
                 }
-                self.source
-                    .validate_volume_mesh_history_plan(&self.plan, self.producer, step, mesh)?;
+                self.source.validate_volume_mesh_history_plan(
+                    &self.plan,
+                    self.producer,
+                    step,
+                    mesh,
+                )?;
             }
             (
                 ObservationFieldCatalogSource::EntryHistory { .. },

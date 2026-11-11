@@ -318,7 +318,7 @@ impl BaseWorkspaceOwner {
                     let permit = receipt
                         .output_permit(context)
                         .map_err(BaseWorkspaceError::HostAllocation)?;
-                    let completion = projection.prepare_completion(source, &permit)?;
+                    let completion = projection.prepare_completion(context, source, &permit)?;
                     // The completion quote includes this independent effect
                     // buffer. Fund it before the checkpoint; publication may
                     // not allocate after the language-visible completion.
@@ -359,7 +359,7 @@ impl BaseWorkspaceOwner {
                 effect,
             )
         };
-        let publication = projection.publish_terminal_with_effect(effect);
+        let publication = projection.publish_terminal_with_effect(effect, Some(context));
         drop(retired);
         publication?;
         Ok(())

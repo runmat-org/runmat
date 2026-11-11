@@ -237,7 +237,7 @@ fn gpu_integer_short_linear_logical_mask_preserves_residency_and_class() {
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape() == vec![2, 1]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::U64(vec![10, 30]))
     )));

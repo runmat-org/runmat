@@ -315,6 +315,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+// Dynamic marker-corner indexing needs addressable function storage in the
+// pinned SPIR-V backend, matching scatter's quad packing.
 pub const MARKER_F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
@@ -351,7 +353,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let py = buf_y[idx];
 
     let base = idx * 6u;
-    let corners = array<vec2<f32>, 6u>(
+    var corners = array<vec2<f32>, 6u>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
         vec2<f32>( 1.0,  1.0),
@@ -414,7 +416,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let py = f32(buf_y[idx]);
 
     let base = idx * 6u;
-    let corners = array<vec2<f32>, 6u>(
+    var corners = array<vec2<f32>, 6u>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
         vec2<f32>( 1.0,  1.0),

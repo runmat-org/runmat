@@ -285,7 +285,10 @@ study response {
     assert_eq!(study.module_path, "project/main.fea");
     assert_eq!(study.geometry.definition.module_path, "project/library.fea");
     assert_eq!(study.mesh.module_path, "project/library.fea");
-    assert_eq!(study.model.as_ref().unwrap().model.module_path, "project/library.fea");
+    assert_eq!(
+        study.model.as_ref().unwrap().model.module_path,
+        "project/library.fea"
+    );
 }
 
 // witness: FEA-AUTHORING-COMPILER-002/study_and_sweep_lowering @
@@ -458,7 +461,9 @@ study response {{
     let plain = check(&study("", ""));
     assert!(plain.is_valid(), "{:#?}", plain.diagnostics);
     let sequence = &plain.studies.values().next().unwrap().sequence;
-    assert!(sequence.steps[0].modal_residual_vector_directions().is_empty());
+    assert!(sequence.steps[0]
+        .modal_residual_vector_directions()
+        .is_empty());
     assert_eq!(
         sequence.steps[1].modal_static_correction(),
         runmat_analysis_core::ModalStaticCorrection::None

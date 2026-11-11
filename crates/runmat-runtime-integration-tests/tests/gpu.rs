@@ -78,8 +78,12 @@ fn gpu_device_requires_session_and_provider_device_control() {
     let _context = runtime.enter();
     // The in-process numerical provider has no physical device-control port.
     // Its metadata cannot substitute for a session-owned GPUDevice handle.
-    let error = runmat_runtime::call_builtin("gpuDevice", &[])
-        .expect_err("provider metadata is not device-control authority");
+    let error = futures::executor::block_on(runmat_runtime::call_builtin_async_in_context(
+        &runtime,
+        "gpuDevice",
+        &[],
+    ))
+    .expect_err("provider metadata is not device-control authority");
     assert_eq!(
         error.identifier(),
         runmat_builtins::GPU_DEVICE_ERROR_NO_PROVIDER.identifier

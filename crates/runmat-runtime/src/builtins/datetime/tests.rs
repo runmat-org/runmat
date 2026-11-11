@@ -259,6 +259,31 @@ fn datetime_descriptor_signatures_cover_constructor_and_methods() {
 
 #[test]
 fn hour_supports_datetime_legacy_serial_and_formatted_text_shapes() {
+    for text in [
+        "2000-01-02 08:00",
+        "2000/01/02 08:00",
+        "02-Jan-2000 08:00",
+        "01/02/2000 08:00",
+    ] {
+        assert_eq!(
+            futures::executor::block_on(hour_builtin(
+                None,
+                Value::from(text),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap(),
+            Value::Num(8.0),
+        );
+    }
+    assert_eq!(
+        futures::executor::block_on(minute_builtin(
+            None,
+            Value::from("2024-03-14 09:26"),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+        Value::Num(26.0),
+    );
     let datetime = run_datetime(vec![Value::from("2024-03-14 09:26:53")]);
     assert_eq!(
         futures::executor::block_on(hour_builtin(

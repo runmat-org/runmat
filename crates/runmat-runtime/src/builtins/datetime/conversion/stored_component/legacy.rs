@@ -91,6 +91,13 @@ enum SelectedMode {
 }
 
 impl NumericMode {
+    fn date_only_format(self) -> bool {
+        match self {
+            Self::DayOfMonth | Self::DayOfWeek | Self::IsoDayOfWeek | Self::DayOfYear => true,
+            Self::YearIso | Self::YearGregorian | Self::Month | Self::Hour | Self::Minute => false,
+        }
+    }
+
     fn extract(self, naive: &NaiveDateTime) -> f64 {
         match self {
             Self::YearIso => f64::from(naive.year()),
@@ -181,9 +188,9 @@ fn text_scratch(value: &Value, label: &str) -> BuiltinResult<usize> {
     }
 }
 
-async fn serial_at(
+async fn component_at(
     source: &Source<'_>,
-    kind: ComponentKind,
+    mode: NumericMode,
     index: usize,
     runtime: &RuntimeContext,
     work: &mut Work<'_>,
@@ -191,7 +198,14 @@ async fn serial_at(
     row_scratch: Option<&mut [u8]>,
 ) -> BuiltinResult<f64> {
     let Source::Text(value) = source else {
-        return Ok(source.at(index));
+        let serial = source.at(index);
+        return if !source.stored() && !serial.is_finite() {
+            Ok(f64::NAN)
+        } else {
+            naive_from_datenum(serial)
+                .map(|naive| mode.extract(&naive))
+                .map_err(never_retry)
+        };
     };
     let text = match value {
         Value::String(text) => {
@@ -226,8 +240,9 @@ async fn serial_at(
         text,
         format,
         work.label,
-        matches!(kind, ComponentKind::Day),
+        mode.date_only_format(),
     )
+    .map(|parsed| mode.extract(&parsed))
     .map_err(never_retry)
 }
 
@@ -512,15 +527,15 @@ pub(in crate::builtins::datetime) async fn map_legacy_component(
             .transpose()?;
         work.check()?;
         work.charge(1).await?;
-        let serial = if let Some(scratch) = scratch.as_mut() {
+        let result = if let Some(scratch) = scratch.as_mut() {
             let (format_storage, row_storage) = scratch.as_mut_slice().split_at_mut(format_len);
             let format = option.map(|option| {
                 let len = convert_legacy_format(option, format_storage);
                 std::str::from_utf8(&format_storage[..len]).expect("format bytes preserve UTF-8")
             });
-            serial_at(
+            component_at(
                 &source,
-                kind,
+                mode,
                 0,
                 runtime,
                 &mut work,
@@ -529,12 +544,7 @@ pub(in crate::builtins::datetime) async fn map_legacy_component(
             )
             .await?
         } else {
-            serial_at(&source, kind, 0, runtime, &mut work, option, None).await?
-        };
-        let result = if !source.stored() && !serial.is_finite() {
-            f64::NAN
-        } else {
-            mode.extract(&naive_from_datenum(serial).map_err(never_retry)?)
+            component_at(&source, mode, 0, runtime, &mut work, option, None).await?
         };
         work.flush().await?;
         work.check()?;
@@ -566,15 +576,15 @@ pub(in crate::builtins::datetime) async fn map_legacy_component(
         output.check(&work)?;
         let count = work.capacity().min(len - start);
         for index in start..start + count {
-            let serial = if let Some(scratch) = scratch.as_mut() {
+            let result = if let Some(scratch) = scratch.as_mut() {
                 let (format_storage, row_storage) = scratch.as_mut_slice().split_at_mut(format_len);
                 let format = option.map(|_| {
                     std::str::from_utf8(&format_storage[..converted_format_len])
                         .expect("format bytes preserve UTF-8")
                 });
-                serial_at(
+                component_at(
                     &source,
-                    kind,
+                    mode,
                     index,
                     runtime,
                     &mut work,
@@ -583,12 +593,7 @@ pub(in crate::builtins::datetime) async fn map_legacy_component(
                 )
                 .await?
             } else {
-                serial_at(&source, kind, index, runtime, &mut work, option, None).await?
-            };
-            let result = if !source.stored() && !serial.is_finite() {
-                f64::NAN
-            } else {
-                mode.extract(&naive_from_datenum(serial).map_err(never_retry)?)
+                component_at(&source, mode, index, runtime, &mut work, option, None).await?
             };
             output.set(index, result);
         }

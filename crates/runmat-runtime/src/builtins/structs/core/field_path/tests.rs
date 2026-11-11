@@ -39,6 +39,37 @@ fn numeric_field_path_indices_preserve_scalar_and_vector_rank() {
 }
 
 #[test]
+fn logical_field_path_indices_keep_mask_shape_for_linear_selection() {
+    use runmat_value::{CellArray, LogicalArray, Tensor, Value};
+
+    for (source_shape, mask_shape, expected_shape) in [
+        (vec![1, 6], vec![1, 6], vec![1, 3]),
+        (vec![6, 1], vec![1, 6], vec![3, 1]),
+        (vec![1, 6], vec![2, 3], vec![3, 1]),
+    ] {
+        let source =
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], source_shape).unwrap());
+        let mask = LogicalArray::new(vec![1, 0, 1, 0, 1, 0], mask_shape.clone()).unwrap();
+        let cell = CellArray::new(vec![Value::LogicalArray(mask)], 1, 1).unwrap();
+        let path = super::parse::parse(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Cell(cell),
+                Value::from("values"),
+            ]),
+            "getfield",
+        )
+        .unwrap();
+        let selector = path.leading_index.expect("leading logical selector");
+        let plan = super::plan::build_plan(&source, &selector, false).unwrap();
+        assert_eq!(plan.output_shape, expected_shape);
+        let super::IndexComponent::Logical(parsed) = &selector.components[0] else {
+            unreachable!()
+        };
+        assert_eq!(parsed.shape, mask_shape);
+    }
+}
+
+#[test]
 fn rejects_float_indices_at_or_beyond_the_platform_limit() {
     assert!(parse_float(usize::MAX as f64).is_err());
     assert!(parse_float(usize::MAX as f64 + 1.0).is_err());

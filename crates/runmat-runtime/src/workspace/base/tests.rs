@@ -3,6 +3,8 @@ use crate::workspace::GlobalBindingTarget;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_value::HandleRef;
 use runmat_value::{CellArray, Tensor, TransientValueError, Value};
+#[cfg(not(target_arch = "wasm32"))]
+use std::rc::Rc;
 
 use super::values::RootedWorkspaceEntry;
 use super::*;
@@ -719,6 +721,7 @@ fn projection_clear_releases_its_capture_without_whole_workspace_reroot() {
 #[test]
 fn projection_service_publication_effect_releases_replaced_and_cleared_captures() {
     runmat_gc::gc_test_context(|| {
+        use crate::context::RuntimeWorkspaceService;
         let workspace = BaseWorkspaceOwner::new();
         let service = BaseWorkspaceProjectionService::new(workspace.begin_projection().unwrap());
 
@@ -745,6 +748,52 @@ fn projection_service_publication_effect_releases_replaced_and_cleared_captures(
             runmat_gc::gc_clone_value(&second_handle).is_err(),
             "a published clear releases the coalesced receipt root"
         );
+
+        // Interleaved executor aliases must retire before publication, while
+        // a real captured generation retains its original rooted values.
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let owner = BaseWorkspaceOwner::new();
+        let service = BaseWorkspaceProjectionService::new_for_context(
+            owner.begin_projection().unwrap(),
+            &context,
+        );
+        let (initial, handle, value) = rooted_handle("interleaved-aliases");
+        service
+            .assign_executor_slot_ref(&context, 0, "a", &value)
+            .unwrap();
+        service
+            .assign_executor_slot_ref(&context, 1, "b", &value)
+            .unwrap();
+        service
+            .assign_executor_slot_ref(&context, 2, "noise", &Value::Num(1.0))
+            .unwrap();
+        initial.unroot().unwrap();
+        let captured = service
+            .capture_workspace_generation_with_context(&context)
+            .unwrap()
+            .unwrap();
+        service.remove_with_context(&context, "a").unwrap();
+        service
+            .assign_executor_slot_ref(&context, 2, "noise", &Value::Num(2.0))
+            .unwrap();
+        service.remove_with_context(&context, "b").unwrap();
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(
+            runmat_gc::gc_clone_value(&handle).is_ok(),
+            "real snapshot remains rooted"
+        );
+        drop(captured);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(
+            runmat_gc::gc_clone_value(&handle).is_err(),
+            "hidden executor stores retire before publication"
+        );
+        service.publish_with_context(&context).unwrap();
+        assert!(owner.lookup("a").unwrap().is_none());
+        assert!(owner.lookup("b").unwrap().is_none());
+        assert_eq!(owner.lookup("noise").unwrap(), Some(Value::Num(2.0)));
     });
 }
 

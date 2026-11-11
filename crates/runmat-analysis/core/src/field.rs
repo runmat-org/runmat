@@ -154,7 +154,7 @@ impl AnalysisFieldLayout {
             * self.storage_width();
         if matches!(self.location, FieldLocation::Global | FieldLocation::Mode) {
             let total: usize = shape.iter().product();
-            return if total % components == 0 {
+            return if total.is_multiple_of(components) {
                 Ok(total / components)
             } else {
                 Err(format!(

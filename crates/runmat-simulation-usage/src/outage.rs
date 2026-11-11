@@ -48,9 +48,18 @@ mod tests {
     #[test]
     fn window_derives_from_the_renewal_interval_and_never_passes_expiry() {
         let thirty = Duration::from_secs(30);
-        assert_eq!(outage_window(thirty, Duration::from_secs(86_400)), Duration::from_secs(300));
-        assert_eq!(outage_window(thirty, Duration::from_secs(90)), Duration::from_secs(90));
-        assert_eq!(outage_window(Duration::from_secs(1), Duration::MAX), Duration::from_secs(10));
+        assert_eq!(
+            outage_window(thirty, Duration::from_secs(86_400)),
+            Duration::from_secs(300)
+        );
+        assert_eq!(
+            outage_window(thirty, Duration::from_secs(90)),
+            Duration::from_secs(90)
+        );
+        assert_eq!(
+            outage_window(Duration::from_secs(1), Duration::MAX),
+            Duration::from_secs(10)
+        );
         assert_eq!(forwarded_reply_timeout(thirty), Duration::from_secs(335));
         assert_eq!(
             outage_backoff(thirty),

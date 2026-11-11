@@ -1,0 +1,715 @@
+//! Drawing a schematic from the canvas: each tool's run is a small text edit to the
+//! `.circuit` file, made through `runmat_circuit::runtime::edit` as the Desktop makes it.
+//!
+//! A 3.3 V regulator (connector, LDO, input and output capacitors) starts with its parts
+//! placed and nothing wired, and is wired, labelled and marked until ERC is clean.
+
+use runmat_circuit::runtime::{self, CompileOptions, EditRequest, Files};
+use serde_json::{json, Value};
+
+const PATH: &str = "/p/reg.circuit";
+
+const BLANK: &str = r#"runmat 0.7
+std 1
+
+// A 3.3 V rail from a 5 V connector.
+circuit reg {
+    root = main
+    net_class power = { track_width = "0.50 mm" }
+
+    sheet main {
+        component J1 = { part = "CONN-SH-4P" }
+        component U1 = { part = "LDO-3V3-SOT23" }
+        // Input and output capacitors, beside the regulator.
+        component C1 = { part = "C0603-1U-50V" }
+        component C2 = { part = "C0402-1U" }
+    }
+}
+"#;
+
+fn files(text: &str) -> Files {
+    [(PATH.to_owned(), text.to_owned())].into_iter().collect()
+}
+
+fn index(text: &str) -> runmat_circuit::index::CircuitIndex {
+    let out = runtime::compile(PATH, text, &files(text), &CompileOptions::default());
+    assert!(out.diagnostics.is_empty(), "{:?}\n{text}", out.diagnostics);
+    out.index.expect("compiles")
+}
+
+/// The net a pin is on, as the canvas names it (`net:<name>`).
+fn net_of(text: &str, designator: &str, pin: &str) -> String {
+    let index = index(text);
+    let found = index
+        .schematic
+        .sheets
+        .iter()
+        .flat_map(|s| s.symbols.iter())
+        .filter(|s| s.designator == designator)
+        .flat_map(|s| s.pins.iter())
+        .find(|p| p.name == pin)
+        .and_then(|p| p.net.clone());
+    format!(
+        "net:{}",
+        found.unwrap_or_else(|| panic!("{designator}.{pin} is on no net"))
+    )
+}
+
+fn run(text: &str, command: &str, values: Value) -> Result<(String, String), String> {
+    let request = EditRequest {
+        command: command.into(),
+        values: values.as_object().cloned().unwrap_or_default(),
+        selection: Vec::new(),
+        options: CompileOptions::default(),
+    };
+    let out = runtime::edit(PATH, text, &files(text), &request).map_err(|e| e.message)?;
+    let next = out
+        .files
+        .iter()
+        .find(|f| f.path == PATH)
+        .map(|f| f.text.clone())
+        .unwrap_or_else(|| text.to_owned());
+    Ok((next, out.summary))
+}
+
+fn step(text: &str, command: &str, values: Value) -> String {
+    run(text, command, values)
+        .unwrap_or_else(|e| panic!("{command}: {e}\n{text}"))
+        .0
+}
+
+/// Lines added and removed between two texts (a minimal edit touches few lines).
+fn changed_lines(a: &str, b: &str) -> usize {
+    let (la, lb): (Vec<&str>, Vec<&str>) = (a.lines().collect(), b.lines().collect());
+    la.iter().filter(|l| !lb.contains(l)).count() + lb.iter().filter(|l| !la.contains(l)).count()
+}
+
+fn wired_regulator() -> String {
+    let mut t = BLANK.to_owned();
+    // Two free pins get a statement of their own.
+    t = step(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": ["pin:J1.1"], "to": ["pin:U1.VIN"] }),
+    );
+    assert!(t.contains(r#"connect = ["J1.1", U1.VIN]"#), "{t}");
+    // Continuing from the wire: the cap joins the same statement.
+    let vin = net_of(&t, "U1", "VIN");
+    let before = t.clone();
+    t = step(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": [vin], "to": ["pin:C1.1"] }),
+    );
+    assert_eq!(
+        changed_lines(&before, &t),
+        2,
+        "one statement rewritten:\n{t}"
+    );
+    assert!(t.contains(r#"connect = ["J1.1", U1.VIN, "C1.1"]"#), "{t}");
+    t = step(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": ["pin:U1.EN"], "to": ["pin:U1.VIN"] }),
+    );
+    // The label names the net; the name leads the statement.
+    t = step(
+        &t,
+        "schematic.net-label",
+        json!({ "name": "VIN", "on": ["pin:U1.VIN"] }),
+    );
+    assert!(
+        t.contains(r#"connect = [net.VIN, "J1.1", U1.VIN, "C1.1", U1.EN]"#),
+        "{t}"
+    );
+    // Power ports declare the rail once and join it.
+    // The connector brings the input and ground onto the board: their power ports carry a
+    // power flag, so ERC sees them driven.
+    t = step(
+        &t,
+        "schematic.power-port",
+        json!({ "net": "VIN", "on": ["pin:J1.1"], "power_flag": true }),
+    );
+    assert!(
+        t.contains("net VIN = { global = true, power_flag = true }"),
+        "{t}"
+    );
+    t = step(
+        &t,
+        "schematic.power-port",
+        json!({ "net": "GND", "on": ["pin:J1.2"], "power_flag": true }),
+    );
+    assert!(
+        t.contains("net GND = { global = true, power_flag = true }"),
+        "{t}"
+    );
+    for pin in ["pin:U1.GND", "pin:C1.2", "pin:C2.2"] {
+        t = step(
+            &t,
+            "schematic.power-port",
+            json!({ "net": "GND", "on": [pin] }),
+        );
+    }
+    assert_eq!(t.matches("net GND").count(), 1, "{t}");
+    assert!(
+        t.contains(r#"connect = [net.GND, "J1.2", U1.GND, "C1.2", "C2.2"]"#),
+        "{t}"
+    );
+    t = step(
+        &t,
+        "schematic.power-port",
+        json!({ "net": "+3V3", "on": ["pin:U1.VOUT"] }),
+    );
+    let out = net_of(&t, "U1", "VOUT");
+    t = step(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": ["pin:C2.1"], "to": [out] }),
+    );
+    for pin in ["pin:U1.NC", "pin:J1.3", "pin:J1.4"] {
+        t = step(&t, "schematic.no-erc", json!({ "pin": [pin] }));
+    }
+    t
+}
+
+#[test]
+fn a_regulator_is_drawn_from_blank_to_wired_and_erc_is_clean() {
+    let t = wired_regulator();
+    // Comments and the statements no tool touched keep their text.
+    assert!(t.contains("// A 3.3 V rail from a 5 V connector."));
+    assert!(t.contains("        // Input and output capacitors, beside the regulator.\n"));
+    assert!(t.contains(r#"no_erc = [U1.NC, "J1.3", "J1.4"]"#), "{t}");
+    let index = index(&t);
+    assert!(index.erc.is_empty(), "ERC: {:#?}\n{t}", index.erc);
+    // The drawing has the wires and the rails' power ports.
+    let page = &index.schematic.sheets[0];
+    assert!(
+        page.wires.iter().any(|w| w.net == "VIN"),
+        "{:?}",
+        page.wires
+    );
+    assert!(
+        page.labels
+            .iter()
+            .any(|l| l.kind == "power" && l.text == "GND"),
+        "{:?}",
+        page.labels
+    );
+}
+
+#[test]
+fn wires_refuse_what_a_drawing_cant_mean() {
+    let t = wired_regulator();
+    // Already on one net: nothing to write.
+    let (same, summary) = run(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": ["pin:U1.VIN"], "to": ["pin:C1.1"] }),
+    )
+    .unwrap();
+    assert_eq!(same, t);
+    assert!(summary.contains("already on"), "{summary}");
+    // A wire from a pin to itself, and to a pin that doesn't exist.
+    assert!(run(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": ["pin:U1.VIN"], "to": ["pin:U1.VIN"] })
+    )
+    .is_err());
+    let err = run(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": ["pin:U1.VIN"], "to": ["pin:U9.1"] }),
+    )
+    .unwrap_err();
+    assert!(err.contains("U9"), "{err}");
+    // Joining two named rails is the compiler's refusal, and nothing is written.
+    let err = run(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": ["pin:C1.1"], "to": ["pin:C2.1"] }),
+    )
+    .unwrap_err();
+    assert!(err.contains("VIN") && err.contains("+3V3"), "{err}");
+}
+
+#[test]
+fn disconnect_takes_a_pin_out_and_a_lone_pin_leaves_no_statement() {
+    let t = wired_regulator();
+    let t = step(&t, "schematic.disconnect", json!({ "pin": ["pin:C2.1"] }));
+    assert!(!t.contains("\"C2.1\""), "{t}");
+    // Re-wiring puts it back.
+    let out = net_of(&t, "U1", "VOUT");
+    let t = step(
+        &t,
+        "schematic.place-wire",
+        json!({ "from": [out], "to": ["pin:C2.1"] }),
+    );
+    assert!(t.contains("\"C2.1\""), "{t}");
+    // A two-pin statement with one pin out is removed whole.
+    let mut b = BLANK.to_owned();
+    b = step(
+        &b,
+        "schematic.place-wire",
+        json!({ "from": ["pin:C1.1"], "to": ["pin:C2.1"] }),
+    );
+    b = step(&b, "schematic.disconnect", json!({ "pin": ["pin:C2.1"] }));
+    assert!(!b.contains("connect ="), "{b}");
+    assert_eq!(b, BLANK);
+}
+
+#[test]
+fn a_net_label_renames_a_named_net_and_keeps_its_identity() {
+    let mut t = wired_regulator();
+    t = step(
+        &t,
+        "schematic.directive",
+        json!({ "type": "net_class", "nets": ["net:VIN"], "value": "power" }),
+    );
+    assert!(
+        t.contains("net VIN = { class = power, global = true, power_flag = true }"),
+        "{t}"
+    );
+    t = step(
+        &t,
+        "schematic.net-label",
+        json!({ "name": "VBUS", "on": ["net:VIN"] }),
+    );
+    assert!(t.contains("connect = [net.VBUS,"), "{t}");
+    assert!(
+        t.contains(
+            "net VBUS = { class = power, global = true, renamed_from = VIN, power_flag = true }"
+        ),
+        "{t}"
+    );
+    assert!(!t.contains("net.VIN"), "{t}");
+    index(&t);
+    let err = run(
+        &t,
+        "schematic.directive",
+        json!({ "type": "net_class", "nets": ["net:VBUS"], "value": "nope" }),
+    )
+    .unwrap_err();
+    assert!(err.contains("power"), "{err}");
+}
+
+#[test]
+fn a_parameter_set_directive_writes_the_nets_parameters() {
+    let t = wired_regulator();
+    let (t, summary) = run(&t, "schematic.directive", json!({ "type": "parameters", "nets": ["net:VIN"], "value": "max_length = 50 mm, current = 1.5 A" })).unwrap();
+    assert_eq!(summary, "current, max_length on 1 net(s)");
+    let line = t
+        .lines()
+        .find(|l| l.trim_start().starts_with("net VIN ="))
+        .unwrap_or_else(|| panic!("{t}"));
+    assert!(
+        line.contains("max_length = 50 mm")
+            && line.contains("current = 1.5 A")
+            && line.contains("global = true"),
+        "{line}"
+    );
+    index(&t);
+    for bad in ["50 mm", "class = power", "max_length ="] {
+        assert!(
+            run(
+                &t,
+                "schematic.directive",
+                json!({ "type": "parameters", "nets": ["net:VIN"], "value": bad })
+            )
+            .is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn a_blanket_sets_a_class_over_several_nets_and_is_drawn_round_them() {
+    let t = wired_regulator();
+    let (t, summary) = run(&t, "schematic.directive", json!({ "type": "blanket", "nets": ["net:VIN", "net:GND"], "value": "class = power, max_length = 50 mm" })).unwrap();
+    assert_eq!(summary, "Blanket blanket1 over 2 net(s)");
+    assert!(
+        t.contains(
+            "        blanket blanket1 = { nets = [VIN, GND], class = power, max_length = 50 mm }\n"
+        ),
+        "{t}"
+    );
+    let drawn = index(&t);
+    for net in ["VIN", "GND"] {
+        let row = drawn
+            .nets
+            .iter()
+            .find(|n| n.name == net)
+            .unwrap_or_else(|| panic!("{net}"));
+        assert_eq!(
+            row.class.as_deref(),
+            Some("power"),
+            "{net} takes the blanket's class"
+        );
+    }
+    assert_eq!(
+        drawn
+            .nets
+            .iter()
+            .find(|n| n.name == "+3V3")
+            .and_then(|n| n.class.clone()),
+        None
+    );
+    assert!(drawn.erc.is_empty(), "{:#?}", drawn.erc);
+    // The page draws one box round both nets' wires, labels and pins, captioned.
+    let page = &drawn.schematic.sheets[0];
+    let [b] = page.blankets.as_slice() else {
+        panic!("{:?}", page.blankets)
+    };
+    assert_eq!(
+        b.caption,
+        "blanket blanket1 · class power · max_length = 50 mm"
+    );
+    assert_eq!(b.nets, ["GND", "VIN"]);
+    for p in page
+        .symbols
+        .iter()
+        .flat_map(|s| &s.pins)
+        .filter(|p| matches!(p.net.as_deref(), Some("VIN" | "GND")))
+    {
+        assert!(
+            b.rect[0] < p.x_mm && p.x_mm < b.rect[2] && b.rect[1] < p.y_mm && p.y_mm < b.rect[3],
+            "{} at {:?} outside {:?}",
+            p.name,
+            (p.x_mm, p.y_mm),
+            b.rect
+        );
+    }
+
+    // A net's own class wins, and ERC says the blanket's doesn't apply there.
+    let t2 = t.replace("net_class power = { track_width = \"0.50 mm\" }", "net_class power = { track_width = \"0.50 mm\" }\n    net_class signal = { track_width = \"0.20 mm\" }");
+    let t2 = step(
+        &t2,
+        "schematic.directive",
+        json!({ "type": "net_class", "nets": ["net:GND"], "value": "signal" }),
+    );
+    let drawn = index(&t2);
+    assert_eq!(
+        drawn
+            .nets
+            .iter()
+            .find(|n| n.name == "GND")
+            .and_then(|n| n.class.clone())
+            .as_deref(),
+        Some("signal")
+    );
+    let kept = drawn
+        .erc
+        .iter()
+        .find(|r| r.code == "blanket-class-kept")
+        .unwrap_or_else(|| panic!("{:#?}", drawn.erc));
+    assert_eq!(
+        kept.message,
+        "net GND keeps its class `signal`; blanket blanket1 sets `power`"
+    );
+
+    // A class alone; an unknown class, nets on two sheets and an unknown net are refused or reported.
+    let (t3, _) = run(
+        &wired_regulator(),
+        "schematic.directive",
+        json!({ "type": "blanket", "nets": ["net:+3V3"], "value": "power" }),
+    )
+    .unwrap();
+    assert!(
+        t3.contains("blanket blanket1 = { nets = [\"+3V3\"], class = power }"),
+        "{t3}"
+    );
+    let err = run(
+        &t,
+        "schematic.directive",
+        json!({ "type": "blanket", "nets": ["net:VIN"], "value": "nope" }),
+    )
+    .unwrap_err();
+    assert!(err.contains("no net class `nope`"), "{err}");
+    let bad = t.replace("nets = [VIN, GND]", "nets = [VIN, VBAT]");
+    let out = runtime::compile(PATH, &bad, &files(&bad), &CompileOptions::default());
+    let named = |m: &str| m.contains("blanket blanket1 names net `VBAT`");
+    let erc = out
+        .index
+        .as_ref()
+        .map(|i| i.erc.clone())
+        .unwrap_or_default();
+    assert!(
+        out.diagnostics.iter().any(|d| named(&d.message)) || erc.iter().any(|r| named(&r.message)),
+        "{:?}\n{erc:?}",
+        out.diagnostics
+    );
+}
+
+#[test]
+fn repeated_channels_name_their_parts_from_the_template() {
+    let mut t = step(
+        &wired_regulator(),
+        "schematic.sheet-symbol",
+        json!({ "name": "led", "sheet": "indicator", "channels": 1 }),
+    );
+    t = t.replace("sheet indicator {\n    }", "sheet indicator {\n        port PWR : passive\n        component R1 = { part = \"R0402-10K\" }\n        component RX = { part = \"R0402-10K\" }\n        connect = [port.PWR, \"R1.1\", \"RX.1\"]\n        no_erc = [\"R1.2\", \"RX.2\"]\n    }");
+    let (t, summary) = run(
+        &t,
+        "schematic.repeat-channel",
+        json!({ "symbol": ["sheet:/led"], "channels": 3, "designators": "{prefix}{n}0{i}" }),
+    )
+    .unwrap();
+    assert_eq!(
+        summary,
+        "led repeats as 3 channel(s), parts named {prefix}{n}0{i}"
+    );
+    assert!(
+        t.contains(
+            r#"instance led = { sheet = indicator, repeat = 3, designators = "{prefix}{n}0{i}" }"#
+        ),
+        "{t}"
+    );
+    let drawn = index(&t);
+    let mut names: Vec<String> = drawn
+        .bom
+        .iter()
+        .flat_map(|r| r.designators.clone())
+        .filter(|d| d.starts_with('R'))
+        .collect();
+    names.sort();
+    // R1 keeps its number; RX, with none, takes the next free one (2).
+    assert_eq!(names, ["R101", "R102", "R103", "R201", "R202", "R203"]);
+    for bad in ["{prefix}{n}", "{prefix}{i}", "{part}{n}{i}"] {
+        assert!(
+            run(
+                &t,
+                "schematic.repeat-channel",
+                json!({ "symbol": ["sheet:/led"], "channels": 3, "designators": bad })
+            )
+            .is_err(),
+            "{bad}"
+        );
+    }
+    // Back to one channel: the template goes with the repeat.
+    let t = step(
+        &t,
+        "schematic.repeat-channel",
+        json!({ "symbol": ["sheet:/led"], "channels": 1 }),
+    );
+    assert!(t.contains("instance led = { sheet = indicator }"), "{t}");
+}
+
+#[test]
+fn hierarchy_sheet_symbols_entries_ports_and_channels() {
+    let mut t = wired_regulator();
+    t = step(
+        &t,
+        "schematic.sheet-symbol",
+        json!({ "name": "led", "sheet": "indicator", "channels": 1 }),
+    );
+    assert!(t.contains("instance led = { sheet = indicator }"), "{t}");
+    assert!(t.contains("sheet indicator {\n    }"), "{t}");
+    t = step(
+        &t,
+        "schematic.sheet-entry",
+        json!({ "symbol": ["sheet:/led"], "port": "PWR" }),
+    );
+    assert!(
+        t.contains("sheet indicator {\n        port PWR : passive\n    }"),
+        "{t}"
+    );
+    t = step(
+        &t,
+        "schematic.repeat-channel",
+        json!({ "symbol": ["sheet:/led"], "channels": 3 }),
+    );
+    assert!(
+        t.contains("instance led = { sheet = indicator, repeat = 3 }"),
+        "{t}"
+    );
+    let index = index(&t);
+    assert!(
+        index.schematic.sheets.iter().any(|s| s.path == "/led[2]"),
+        "{:?}",
+        index
+            .schematic
+            .sheets
+            .iter()
+            .map(|s| &s.path)
+            .collect::<Vec<_>>()
+    );
+    // A port on the root sheet, joined to the output rail's pin.
+    let t = step(
+        &t,
+        "schematic.port",
+        json!({ "name": "OUT", "direction": "output", "on": ["pin:C2.1"] }),
+    );
+    assert!(t.contains("port OUT : out"), "{t}");
+    assert!(t.contains("port.OUT"), "{t}");
+}
+
+#[test]
+fn a_sheet_entry_binds_to_a_pin_or_a_bus_from_the_canvas() {
+    let mut t = step(
+        &wired_regulator(),
+        "schematic.sheet-symbol",
+        json!({ "name": "led", "sheet": "indicator", "channels": 1 }),
+    );
+    // The child sheet draws a resistor on its PWR port, so the entry shows on the symbol.
+    t = t.replace("sheet indicator {\n    }", "sheet indicator {\n        port PWR : passive\n        component R1 = { part = \"R0402-10K\" }\n        connect = [port.PWR, \"R1.1\"]\n    }");
+    let (t, summary) = run(
+        &t,
+        "schematic.sheet-entry",
+        json!({ "symbol": ["sheet:/led"], "port": "PWR", "to": ["pin:J1.3"] }),
+    )
+    .unwrap();
+    assert_eq!(summary, "Entry PWR of led bound to \"J1.3\"");
+    assert!(
+        t.contains("instance led = { sheet = indicator, bind = { PWR = \"J1.3\" } }"),
+        "{t}"
+    );
+    assert_eq!(
+        t.matches("port PWR").count(),
+        1,
+        "the port is declared once: {t}"
+    );
+    let drawn = index(&t);
+    let entry = drawn
+        .schematic
+        .sheets
+        .iter()
+        .flat_map(|s| s.sheet_symbols.iter())
+        .flat_map(|s| s.pins.iter())
+        .find(|p| p.name == "PWR")
+        .expect("the PWR entry is drawn");
+    assert_eq!(
+        format!("net:{}", entry.net),
+        net_of(&t, "J1", "3"),
+        "the entry joins J1.3's net"
+    );
+
+    // Rebinding the port replaces its binding; a bus binds channel i to member offset + i.
+    let t = step(&t, "schematic.place-bus", json!({ "name": "D[0..7]" }));
+    let t = step(
+        &t,
+        "schematic.repeat-channel",
+        json!({ "symbol": ["sheet:/led"], "channels": 3 }),
+    );
+    let (t, summary) = run(
+        &t,
+        "schematic.sheet-entry",
+        json!({ "symbol": ["sheet:/led"], "port": "PWR", "bus": "D", "offset": 2 }),
+    )
+    .unwrap();
+    assert_eq!(summary, "Entry PWR of led bound to bus D from member 2");
+    assert!(t.contains("instance led = { sheet = indicator, repeat = 3, bind = { PWR = { bus = D, offset = 2 } } }"), "{t}");
+    index(&t);
+    // What can't be bound is refused.
+    assert!(run(
+        &t,
+        "schematic.sheet-entry",
+        json!({ "symbol": ["sheet:/led"], "port": "PWR", "bus": "Q" })
+    )
+    .unwrap_err()
+    .contains("no bus `Q`"));
+    assert!(run(
+        &t,
+        "schematic.sheet-entry",
+        json!({ "symbol": ["sheet:/led"], "port": "PWR", "bus": "D", "to": ["pin:J1.3"] })
+    )
+    .unwrap_err()
+    .contains("not both"));
+}
+
+#[test]
+fn buses_expand_their_members() {
+    let t = step(
+        &wired_regulator(),
+        "schematic.place-bus",
+        json!({ "name": "D[0..7]" }),
+    );
+    assert!(
+        t.contains("bus D = [D0, D1, D2, D3, D4, D5, D6, D7]"),
+        "{t}"
+    );
+    index(&t);
+    assert!(run(&t, "schematic.place-bus", json!({ "name": "D[0..7" })).is_err());
+}
+
+/// Symbols stay where the lock holds them while the sheet is wired: the drawing re-routes and
+/// nothing moves. With `SCHEMATIC_SHOTS_OUT` set, the blank regulator, its lock and every pin's
+/// page position are written there for the canvas pictures.
+#[test]
+fn wiring_keeps_every_recorded_place() {
+    let lock_path = "/p/reg.circuit.lock";
+    let compile = |text: &str, lock: &str| {
+        let files: Files = [
+            (PATH.to_owned(), text.to_owned()),
+            (lock_path.to_owned(), lock.to_owned()),
+        ]
+        .into_iter()
+        .collect();
+        let out = runtime::compile(PATH, text, &files, &CompileOptions::default());
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        out.index.expect("compiles")
+    };
+    let request = EditRequest {
+        command: "schematic.annotate".into(),
+        ..Default::default()
+    };
+    let out = runtime::edit(PATH, BLANK, &files(BLANK), &request).expect("annotates");
+    let lock = out
+        .files
+        .iter()
+        .find(|f| f.path == lock_path)
+        .expect("a lock")
+        .text
+        .clone();
+    let places = |index: &runmat_circuit::index::CircuitIndex| -> Vec<(String, f64, f64)> {
+        index.schematic.sheets[0]
+            .symbols
+            .iter()
+            .map(|s| (s.designator.clone(), s.x_mm, s.y_mm))
+            .collect()
+    };
+    let blank = compile(BLANK, &lock);
+    let wired = compile(&wired_regulator(), &lock);
+    assert_eq!(places(&blank), places(&wired));
+    if let Ok(dir) = std::env::var("SCHEMATIC_SHOTS_OUT") {
+        let pins: serde_json::Map<String, Value> = blank.schematic.sheets[0]
+            .symbols
+            .iter()
+            .flat_map(|s| {
+                s.pins.iter().map(move |p| {
+                    (
+                        format!("{}.{}", s.designator, p.name),
+                        json!([p.x_mm, p.y_mm]),
+                    )
+                })
+            })
+            .collect();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(format!("{dir}/reg.circuit"), BLANK).unwrap();
+        std::fs::write(format!("{dir}/reg.circuit.lock"), &lock).unwrap();
+        std::fs::write(format!("{dir}/reg-wired.circuit"), wired_regulator()).unwrap();
+        std::fs::write(
+            format!("{dir}/pins.json"),
+            serde_json::to_string_pretty(&pins).unwrap(),
+        )
+        .unwrap();
+    }
+}
+
+/// The Desktop's circuit worker edits through a kept `Session`: schematic commands reach the
+/// circuit file there too, with or without a board beside it.
+#[test]
+fn a_session_runs_the_schematic_tools() {
+    let mut session = runtime::Session::new();
+    let request = EditRequest {
+        command: "schematic.place-wire".into(),
+        values: json!({ "from": ["pin:J1.1"], "to": ["pin:U1.VIN"] })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        ..Default::default()
+    };
+    let out = session
+        .edit(PATH, BLANK, &files(BLANK), &request)
+        .expect("wires");
+    assert!(out.files[0].text.contains(r#"connect = ["J1.1", U1.VIN]"#));
+}

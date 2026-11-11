@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release",
+    "about",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "release": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "The release the design docs describe."
+    },
+    "about": {
+      "type": "string"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "area",
+          "status",
+          "acceptance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^design\\.[a-z0-9]+(?:[-_][a-z0-9]+)*(?:\\.[a-z0-9]+(?:[-_][a-z0-9]+)*)+$",
+            "description": "Stable dotted key, the id a docs flag names: [not yet in the current release](pending:<id>)."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": [
+              "language",
+              "feature",
+              "tooling",
+              "exchange",
+              "simulation"
+            ]
+          },
+          "area": {
+            "enum": [
+              "language",
+              "mcad",
+              "ecad",
+              "tooling"
+            ]
+          },
+          "status": {
+            "enum": [
+              "release",
+              "pending"
+            ],
+            "description": "pending: documented at full strength, not yet built; release: built (set landed_in)."
+          },
+          "landed_in": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+          },
+          "acceptance": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What must be true to set status release."
+          }
+        }
+      }
+    }
+  }
+}

@@ -80,7 +80,10 @@ pub(in crate::cdt::volume_sliver) fn record_changed_nodes(
         changed.extend(vertices.map(|vertex| nodes[vertex as usize].identity));
     };
     for index in &changes.added {
-        add(&candidate.nodes, candidate.tetrahedra[*index].vertex_indices);
+        add(
+            &candidate.nodes,
+            candidate.tetrahedra[*index].vertex_indices,
+        );
     }
     for index in &changes.removed {
         add(&current.nodes, current.tetrahedra[*index].vertex_indices);

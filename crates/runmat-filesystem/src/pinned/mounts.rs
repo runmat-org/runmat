@@ -2,6 +2,8 @@
 //! workspace names or run outputs, and never grants mutation authority.
 use super::{normalize, PinnedEntry};
 use crate::FsProvider;
+#[cfg(windows)]
+use std::path::Component;
 use std::{
     collections::BTreeMap,
     io,
@@ -19,6 +21,26 @@ impl ReadonlyMounts {
         inputs: &BTreeMap<PathBuf, PinnedEntry>,
         outputs: &super::output::OutputRegistry,
     ) -> io::Result<()> {
+        #[cfg(windows)]
+        let root = if matches!(root.components().next(), Some(Component::Prefix(_))) {
+            if provider.path_namespace() != crate::FsPathNamespace::NativeOs {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "native dependency paths require a native provider",
+                ));
+            }
+            let root = normalize_native(root)?;
+            if root.parent().is_none() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "dependency mounts require a package directory",
+                ));
+            }
+            root
+        } else {
+            normalize(root)?
+        };
+        #[cfg(not(windows))]
         let root = normalize(root)?;
         let overlaps = |path: &Path| path.starts_with(&root) || root.starts_with(path);
         if inputs.iter().any(|(path, entry)| {
@@ -68,4 +90,52 @@ impl ReadonlyMounts {
             .keys()
             .any(|root| path.starts_with(root) || root.starts_with(path))
     }
+
+    /// Native cache paths carry authority only after an explicit host mount.
+    /// Workspace manifest paths retain their separate rooted grammar.
+    #[cfg(windows)]
+    pub(super) fn native_access(
+        &self,
+        path: &Path,
+    ) -> io::Result<Option<(PathBuf, Arc<dyn FsProvider>)>> {
+        if !matches!(path.components().next(), Some(Component::Prefix(_))) {
+            return Ok(None);
+        }
+        let path = normalize_native(path)?;
+        let provider = self.provider(&path).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "native path is outside acquired dependency mounts",
+            )
+        })?;
+        Ok(Some((path, provider)))
+    }
+}
+
+#[cfg(windows)]
+fn normalize_native(path: &Path) -> io::Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "dependency cache paths require a qualified native root",
+        ));
+    }
+    let mut result = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::Prefix(prefix) => result.push(prefix.as_os_str()),
+            Component::RootDir => result.push(part.as_os_str()),
+            Component::Normal(name) => result.push(name),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !result.pop() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "dependency cache path escapes its native root",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(result)
 }

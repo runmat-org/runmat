@@ -21,7 +21,6 @@ pub(in crate::workspace::base) struct PreparedUnboundedProjectionMutation {
     pub(in crate::workspace::base) expected_revision: WorkspaceRevision,
     transition: PreparedUnboundedDeltaTransition,
     managed_storage: ManagedWorkspaceStorage,
-    coalesce_assignment: bool,
 }
 
 impl PreparedUnboundedProjectionMutation {
@@ -67,6 +66,11 @@ impl BaseWorkspaceProjection {
         coalesce_assignment: bool,
     ) -> Result<PreparedUnboundedProjectionMutation, BaseWorkspaceError> {
         let entry = entry.clone();
+        let origin = if coalesce_assignment {
+            WorkspaceMutationOrigin::Executor
+        } else {
+            WorkspaceMutationOrigin::Ordered
+        };
         let mut managed_storage = self
             .ordered_view()?
             .contents
@@ -115,12 +119,13 @@ impl BaseWorkspaceProjection {
                     .staged_in_managed_overlay(),
                     Some(assignment),
                     coalesce_assignment,
+                    origin,
                 )
         } else {
             self.ordered_view()?
                 .contents
                 .pending
-                .prepare_unbounded_transition(assignment, None, coalesce_assignment)
+                .prepare_unbounded_transition(assignment, None, coalesce_assignment, origin)
         }
         .map_err(BaseWorkspaceError::HostAllocation)?;
         Ok(PreparedUnboundedProjectionMutation {
@@ -131,8 +136,9 @@ impl BaseWorkspaceProjection {
             },
             expected_revision: self.revision,
             transition,
-            managed_storage,
-            coalesce_assignment,
+            managed_storage: managed_storage
+                .prepare_live(None)
+                .map_err(BaseWorkspaceError::HostAllocation)?,
         })
     }
 
@@ -141,6 +147,7 @@ impl BaseWorkspaceProjection {
         name: &str,
         action: WorkspaceNamespaceAction,
         target: Option<&GlobalBindingTarget>,
+        origin: WorkspaceMutationOrigin,
     ) -> Result<PreparedUnboundedProjectionMutation, BaseWorkspaceError> {
         let target = (action == WorkspaceNamespaceAction::BindGlobal).then(|| {
             target
@@ -185,7 +192,7 @@ impl BaseWorkspaceProjection {
             .ordered_view()?
             .contents
             .pending
-            .prepare_unbounded_transition(change, None, false)
+            .prepare_unbounded_transition(change, None, false, origin)
             .map_err(BaseWorkspaceError::HostAllocation)?;
         Ok(PreparedUnboundedProjectionMutation {
             action: UnboundedProjectionAction::Namespace {
@@ -195,13 +202,15 @@ impl BaseWorkspaceProjection {
             },
             expected_revision: self.revision,
             transition,
-            managed_storage,
-            coalesce_assignment: false,
+            managed_storage: managed_storage
+                .prepare_live(None)
+                .map_err(BaseWorkspaceError::HostAllocation)?,
         })
     }
 
     pub(in crate::workspace::base) fn prepare_unbounded_clear(
         &self,
+        origin: WorkspaceMutationOrigin,
     ) -> Result<PreparedUnboundedProjectionMutation, BaseWorkspaceError> {
         let mut managed_storage = self
             .ordered_view()?
@@ -221,14 +230,16 @@ impl BaseWorkspaceProjection {
                 WorkspaceChange::clear().staged_in_managed_overlay(),
                 None,
                 false,
+                origin,
             )
             .map_err(BaseWorkspaceError::HostAllocation)?;
         Ok(PreparedUnboundedProjectionMutation {
             action: UnboundedProjectionAction::Clear,
             expected_revision: self.revision,
             transition,
-            managed_storage,
-            coalesce_assignment: false,
+            managed_storage: managed_storage
+                .prepare_live(None)
+                .map_err(BaseWorkspaceError::HostAllocation)?,
         })
     }
 }
@@ -250,12 +261,7 @@ impl OrderedProjectionMut<'_> {
             )),
             ..ProjectionRetirements::default()
         };
-        if prepared.coalesce_assignment {
-            retired.overlay = ordered
-                .managed_storage
-                .coalesce_latest_unbounded_assignment();
-        }
-        retired.replaced_changes = ordered
+        (retired.replaced_changes, retired.pending) = ordered
             .pending
             .install_unbounded_transition(prepared.transition);
         retired

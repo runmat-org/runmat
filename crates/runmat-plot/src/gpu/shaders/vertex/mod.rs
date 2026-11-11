@@ -1,4 +1,5 @@
 pub mod annotation_stroke;
+pub mod edge_stroke;
 pub mod grid_plane;
 pub mod image_direct;
 pub mod line;

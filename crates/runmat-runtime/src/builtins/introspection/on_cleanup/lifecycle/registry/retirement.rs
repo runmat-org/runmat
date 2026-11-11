@@ -16,17 +16,22 @@ impl CleanupRegistry {
         {
             let index = self.index.borrow();
             for entry in index.retirement_retry.values() {
-                candidates.insert(entry.target, Rc::clone(entry));
+                if !entry.completion_retirement_pending() {
+                    candidates.insert(entry.target, Rc::clone(entry));
+                }
             }
             if new_collection {
                 for entry in index.terminal.values() {
-                    if !matches!(
+                    if entry.completion_retirement_pending() {
+                        continue;
+                    }
+                    let unreported_failure = matches!(
                         entry.receipt(),
                         Some(CleanupReceipt::Completed(Err(_)))
                             | Some(CleanupReceipt::DispatchFailed(_))
                             | Some(CleanupReceipt::Abandoned)
-                    ) || entry.reported.get()
-                    {
+                    ) || entry.submission_failure().is_some();
+                    if !unreported_failure || entry.reported.get() {
                         candidates.insert(entry.target, Rc::clone(entry));
                     }
                 }
@@ -93,12 +98,13 @@ impl CleanupRegistry {
         index.active.remove(&entry.target);
         index.pending.remove(&entry.target);
         index.terminal.insert(entry.target, Rc::clone(entry));
-        if matches!(
+        if (matches!(
             entry.receipt(),
             Some(CleanupReceipt::Completed(Err(_)))
                 | Some(CleanupReceipt::DispatchFailed(_))
                 | Some(CleanupReceipt::Abandoned)
-        ) && !entry.reported.get()
+        ) || entry.submission_failure().is_some())
+            && !entry.reported.get()
         {
             index
                 .unreported_errors
@@ -124,6 +130,9 @@ impl CleanupRegistry {
         let Some(exact) = exact else {
             return;
         };
+        if exact.completion_retirement_pending() {
+            return;
+        }
         match probe {
             Err(runmat_gc::GcError::InvalidPointer(_)) => {
                 index.retirement_retry.remove(&entry.target);

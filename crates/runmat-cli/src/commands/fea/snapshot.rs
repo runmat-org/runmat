@@ -186,8 +186,8 @@ pub(super) async fn capture(
     .await
     .map_err(anyhow::Error::msg)?;
     log::info!(
-        "snapshot solve finished; peak resident {} MiB",
-        views::peak_resident_mib()
+        "snapshot solve finished; peak resident {}",
+        views::peak_resident_memory()
     );
     let completed = match result {
         runmat_execution_runner_native::LocalFeaExecution::Study(completed) => {
@@ -237,8 +237,8 @@ pub(super) async fn capture(
     }
     drop(completed);
     log::info!(
-        "snapshot result metadata read; peak resident {} MiB",
-        views::peak_resident_mib()
+        "snapshot result metadata read; peak resident {}",
+        views::peak_resident_memory()
     );
     let parent = output
         .parent()

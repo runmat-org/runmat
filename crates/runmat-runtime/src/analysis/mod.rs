@@ -152,8 +152,8 @@ pub use study_publication::*;
 pub use study_result::*;
 pub use study_step_execution::{
     analysis_execute_study_step, analysis_execute_study_step_with_capacity,
-    analysis_execute_study_sweep_with_step_executor,
-    analysis_execute_study_with_step_executor, analysis_validate_study_step_transfer,
+    analysis_execute_study_sweep_with_step_executor, analysis_execute_study_with_step_executor,
+    analysis_merge_study_step_admission, analysis_validate_study_step_transfer,
     AnalysisStudyStepExecutor, AnalysisStudyStepFuture, AnalysisStudyStepHost,
     AnalysisStudyStepRequest, AnalysisStudyStepResult,
 };
@@ -276,7 +276,8 @@ pub use study_numerical_result::StructuralStudyNumericalResult;
 pub use frequency_result::{
     StructuralFrequencyArtifactRootIndex, StructuralFrequencyFinalizedHistoryArtifactRoots,
     StructuralFrequencyHistoryArtifactRoot, StructuralStudyFrequencyNumericalResult,
-    StructuralStudyModalFrequencyNumericalResult, StructuralStudyPrestressedFrequencyNumericalResult,
+    StructuralStudyModalFrequencyNumericalResult,
+    StructuralStudyPrestressedFrequencyNumericalResult,
     StructuralStudyPrestressedFrequencyReductionResult,
     StructuralStudyPrestressedModalFrequencyReductionResult,
 };
@@ -356,9 +357,8 @@ pub use contracts::{
     AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
-    AnalysisFieldStorage, AnalysisFieldStorageRef,
-    AnalysisImmutableValueSpec, AnalysisLineParametersRunOptions, AnalysisModalRunOptions,
-    AnalysisModelSourceEvidence,
+    AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisImmutableValueSpec,
+    AnalysisLineParametersRunOptions, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
     AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
     AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
     AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,

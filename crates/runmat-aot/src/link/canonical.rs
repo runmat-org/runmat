@@ -29,6 +29,7 @@ pub enum SelectedLinkOption {
     NoDefaultLibraries,
     MsvcMachine,
     MsvcNoDefaultLibraries,
+    MsvcStackReserve { bytes: u64 },
     RemoveUnusedSections,
     Output,
 }
@@ -141,6 +142,9 @@ pub(super) fn selected_link_plan(
                 vec![
                     SelectedLinkOption::MsvcMachine,
                     SelectedLinkOption::MsvcNoDefaultLibraries,
+                    SelectedLinkOption::MsvcStackReserve {
+                        bytes: super::plan::WINDOWS_STACK_RESERVE_BYTES,
+                    },
                 ],
             )
         }
@@ -313,6 +317,9 @@ mod tests {
             vec![
                 SelectedLinkOption::MsvcMachine,
                 SelectedLinkOption::MsvcNoDefaultLibraries,
+                SelectedLinkOption::MsvcStackReserve {
+                    bytes: super::super::plan::WINDOWS_STACK_RESERVE_BYTES,
+                },
                 SelectedLinkOption::RemoveUnusedSections,
                 SelectedLinkOption::Output,
             ],
@@ -342,6 +349,17 @@ mod tests {
         assert_ne!(first.identity().unwrap(), changed.identity().unwrap());
         changed = first.clone();
         changed.native_inputs.reverse();
+        assert_ne!(first.identity().unwrap(), changed.identity().unwrap());
+        changed = first.clone();
+        let stack = changed
+            .options
+            .iter_mut()
+            .find_map(|option| match option {
+                SelectedLinkOption::MsvcStackReserve { bytes } => Some(bytes),
+                _ => None,
+            })
+            .unwrap();
+        *stack /= 2;
         assert_ne!(first.identity().unwrap(), changed.identity().unwrap());
         changed = first.clone();
         changed

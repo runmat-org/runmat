@@ -598,6 +598,13 @@ fn choose_axes_bounds(
         max_x = 1.0;
         min_y = -1.0;
         max_y = 1.0;
+    } else {
+        let ((x0, x1), (y0, y1)) = figure.auto_axes_bounds_2d(
+            axes_index,
+            (f64::from(min_x), f64::from(max_x)),
+            (f64::from(min_y), f64::from(max_y)),
+        );
+        (min_x, max_x, min_y, max_y) = (x0 as f32, x1 as f32, y0 as f32, y1 as f32);
     }
 
     if let Some(meta) = figure.axes_metadata(axes_index) {
@@ -1560,11 +1567,30 @@ fn draw_3d_orientation_gizmo(canvas: &mut Canvas, axes: &AxesView) {
     let scale = ((axes.viewport.2.min(axes.viewport.3) as f32) / 720.0).clamp(0.8, 1.6);
     let gizmo_size =
         ((axes.viewport.2.min(axes.viewport.3) as f32) * 0.16).clamp(44.0, 110.0) * scale;
-    let pad = (30.0 * scale).round() as i32;
-    let origin = Vec2::new(
-        (axes.viewport.0 as i32 + pad) as f32,
-        ((axes.viewport.1 + axes.viewport.3) as i32 - pad) as f32,
+    let axis_len = gizmo_size * 0.65;
+    // Inset the origin so every arm and its label stays whole (see `core::triad`).
+    let dirs: Vec<[f32; 2]> = axis_items
+        .iter()
+        .filter_map(|a| {
+            let d = Vec2::new(a.dir_world.x, -a.dir_world.y);
+            let m = d.length();
+            (m.is_finite() && m >= 1e-4).then(|| [d.x / m, d.y / m])
+        })
+        .collect();
+    let (vx, vy, vw, vh) = (
+        axes.viewport.0 as f32,
+        axes.viewport.1 as f32,
+        axes.viewport.2 as f32,
+        axes.viewport.3 as f32,
     );
+    let [ox, oy] = crate::core::triad::triad_origin(
+        [vx, vy],
+        [vx + vw, vy + vh],
+        (30.0 * scale).round(),
+        axis_len + 24.0 * scale,
+        &dirs,
+    );
+    let origin = Vec2::new(ox.round(), oy.round());
     canvas.draw_disc(
         origin,
         (2.0 * scale).max(1.0),
@@ -1573,7 +1599,6 @@ fn draw_3d_orientation_gizmo(canvas: &mut Canvas, axes: &AxesView) {
         false,
     );
 
-    let axis_len = gizmo_size * 0.65;
     let head_len = (8.0 * scale).min(axis_len * 0.35);
     let head_w = 5.0 * scale;
     for a in &axis_items {
@@ -1695,23 +1720,31 @@ fn draw_legend_for_axes(canvas: &mut Canvas, figure: &Figure, axes: &AxesView) {
         let swatch_x0 = x + 10;
         let swatch_x1 = swatch_x0 + 18;
         let swatch_color = to_u8_rgba(entry.color.to_array());
-        canvas.draw_line(
-            ScreenVertex {
-                x: swatch_x0 as f32,
-                y: yy as f32,
-                z: 0.0,
-                color: swatch_color,
-            },
-            ScreenVertex {
-                x: swatch_x1 as f32,
-                y: yy as f32,
-                z: 0.0,
-                color: swatch_color,
-            },
-            2.0,
-            0,
-            false,
-        );
+        // The swatch repeats the series' dash pattern, as the interactive legend draws it.
+        for (a, b) in crate::plots::legend_swatch::legend_dashes(
+            entry.line_style,
+            swatch_x0 as f32,
+            swatch_x1 as f32,
+            1.0,
+        ) {
+            canvas.draw_line(
+                ScreenVertex {
+                    x: a,
+                    y: yy as f32,
+                    z: 0.0,
+                    color: swatch_color,
+                },
+                ScreenVertex {
+                    x: b,
+                    y: yy as f32,
+                    z: 0.0,
+                    color: swatch_color,
+                },
+                2.0,
+                0,
+                false,
+            );
+        }
 
         let label = if entry.label.is_empty() {
             "Series".to_string()
@@ -2000,6 +2033,22 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
                 a.color[3] = 255;
                 b.color[3] = 255;
                 canvas.draw_line(a, b, 2.8, style_code, false);
+            }
+        }
+        PipelineType::EdgeStroke | PipelineType::EdgeStrokeNoDepth => {
+            // Six vertices per segment; the first and third are its two endpoints, and
+            // tex_coords.y carries the stroke width in CSS px.
+            let depth_test =
+                axes.has_3d_content && render_data.pipeline_type == PipelineType::EdgeStroke;
+            for stroke in render_data.vertices.chunks_exact(6) {
+                let Some(a) = project_vertex(&stroke[0], axes) else {
+                    continue;
+                };
+                let Some(b) = project_vertex(&stroke[2], axes) else {
+                    continue;
+                };
+                let width = stroke[0].tex_coords[1].max(1.0);
+                canvas.draw_line(a, b, width, style_code, depth_test);
             }
         }
         PipelineType::Lines | PipelineType::LinesNoDepth => {

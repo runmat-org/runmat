@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { readJson, copyInput, collectDocuments } from "./documents.mjs";
 import { collectExamples } from "./examples.mjs";
 import { collectFea } from "./fea.mjs";
+import { collectDesign } from "./design.mjs";
 import { loadLedger, registerExport } from "./ledger.mjs";
 import { writeManifest } from "./manifest.mjs";
 import { collectGraphics } from "./graphics.mjs";
@@ -17,7 +18,7 @@ export function buildSourceDocs({ source, output, builtinDescriptorsPath, builti
         throw new Error("Docs export output must be inside the source target directory");
     const ajv = new Ajv({ allErrors: true });
     const schemas = new Map();
-    for (const name of ["document", "fea-manual", "evidence-index", "example-package", "ledger"])
+    for (const name of ["document", "fea-manual", "evidence-index", "example-package", "ledger", "design-manual", "design-ledger"])
         schemas.set(name, ajv.compile(readJson(join(source, `docs/schema/${name}.schema.json`))));
     const validate = (name, value) => { const check = schemas.get(name); if (!check(value))
         throw new Error(`${name}: ${ajv.errorsText(check.errors)}`); };
@@ -31,6 +32,8 @@ export function buildSourceDocs({ source, output, builtinDescriptorsPath, builti
         if (examples.some(example => example.playback)) collectGraphics(graphicsRoot, staging);
         collectDocuments(source, staging, validate, builtinDocumentationPath, verifiedBuiltinDocumentation);
         collectFea(source, staging, register, examples, evidencePath ? readJson(evidencePath) : { schema_version: 1, records: [] }, validate);
+        // The Design tab: design/manual.json, design/ledger.json and the pages under documents/docs/design.
+        collectDesign(source, staging, validate);
         mkdirSync(join(staging, "builtins"), { recursive: true });
         const descriptors = readJson(builtinDescriptorsPath);
         if (!Array.isArray(descriptors.builtins))

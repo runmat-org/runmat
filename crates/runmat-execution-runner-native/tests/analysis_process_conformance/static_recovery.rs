@@ -15,7 +15,6 @@ pub(super) async fn run() {
             _ => mixed_fixture(revision(), "static-recovery-process"),
         };
         let mut config = NativeExecutionConfig::for_current_executable().unwrap();
-        config.worker_arguments = vec!["--child".into()];
         config.max_workers = 1;
         config.store_root = directory.path().join("session");
         config.worker_capabilities = capabilities();

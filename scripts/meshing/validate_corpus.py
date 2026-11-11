@@ -168,12 +168,34 @@ def require_fixture_evidence_anchor(
     )
 
 
+def validate_integration_coverage(catalog_path: Path, integration_path: Path) -> int:
+    """Keep the native runner's fixture inventory aligned without meshing."""
+    catalog = read_document(catalog_path, "corpus manifest")
+    integration = read_document(integration_path, "integration manifest")
+    expected = {entry["id"] for entry in catalog["entries"]}
+    cases = integration.get("cases")
+    if not isinstance(cases, list):
+        raise CorpusError("integration manifest requires cases")
+    observed = [case.get("fixture_id") for case in cases if isinstance(case, dict)]
+    if (len(observed) != len(cases) or any(not isinstance(name, str) for name in observed)
+            or len(set(observed)) != len(observed) or set(observed) != expected):
+        raise CorpusError("integration manifest must cover each corpus fixture exactly once")
+    for case in cases:
+        if (not isinstance(case.get("admission_scenarios"), list)
+                or not case["admission_scenarios"]
+                or not isinstance(case.get("mesh_scenarios"), list)):
+            raise CorpusError(f"{case['fixture_id']}: integration admission/mesh scenarios are incomplete")
+    return len(cases)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", nargs="?", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument("--integration", type=Path, default=REPO_ROOT / "verification/meshing/integration.json")
     arguments = parser.parse_args(argv)
     try:
         count = validate_manifest(arguments.manifest)
+        validate_integration_coverage(arguments.manifest, arguments.integration)
     except CorpusError as error:
         print(f"meshing corpus validation failed: {error}", file=sys.stderr)
         return 1

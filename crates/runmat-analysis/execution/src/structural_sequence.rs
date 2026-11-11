@@ -334,21 +334,51 @@ impl StructuralSequenceCoordinator {
         self.phase == CoordinatorPhase::Complete
     }
 
-    pub fn prepare_next_solve_wave(&mut self) -> AnalysisBridgeResult<PreparedStructuralSolveWave> {
+    fn next_solve_level(&self) -> AnalysisBridgeResult<&[ProcedureStepId]> {
         if self.phase != CoordinatorPhase::ReadyForSolve {
             return Err(AnalysisBridgeError::Invalid(
                 "structural sequence is not ready to prepare a solve wave".into(),
             ));
         }
-        let level = self
-            .sequence
+        self.sequence
             .parallel_levels()
             .get(self.next_level)
+            .map(Vec::as_slice)
             .ok_or_else(|| {
                 AnalysisBridgeError::Invalid(
                     "structural sequence has no remaining solve wave".into(),
                 )
-            })?;
+            })
+    }
+
+    /// Shared metered topology work for each task in the next synchronous
+    /// preparation wave. The preparation kernels record completed work.
+    pub fn next_solve_wave_work_upper_bound(
+        &self,
+    ) -> AnalysisBridgeResult<runmat_simulation_usage::OperationCount> {
+        self.next_solve_level()?.iter().try_fold(
+            runmat_simulation_usage::OperationCount::ZERO,
+            |total, step_id| {
+                let workload = self.preparation.workloads.get(step_id).ok_or(
+                    AnalysisBridgeError::Identity(
+                        "validated sequence step has no exact solver workload",
+                    ),
+                )?;
+                let work = runmat_analysis_fea::structural_linear_preparation_work_upper_bound(
+                    &workload.model,
+                    self.preparation.mesh.as_ref(),
+                )?;
+                total.checked_add(work).map_err(|cause| {
+                    AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(
+                        cause.into(),
+                    ))
+                })
+            },
+        )
+    }
+
+    pub fn prepare_next_solve_wave(&mut self) -> AnalysisBridgeResult<PreparedStructuralSolveWave> {
+        let level = self.next_solve_level()?;
         let mut tasks = Vec::with_capacity(level.len());
         for step_id in level {
             let step = self

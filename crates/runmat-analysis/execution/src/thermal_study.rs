@@ -59,6 +59,8 @@ pub struct CompletedThermalStudy {
 }
 
 pub struct ThermalStudyPreparation {
+    /// Effective execution capacity, carried separately from the compiled study definition.
+    pub maximum_resident_bytes: Option<u64>,
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub scope: ThermalStudyScope,
     pub field_source: Option<runmat_analysis_fea::execution::RetainedJouleHeatSource>,
@@ -143,6 +145,7 @@ impl ThermalStudyCoordinator {
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedThermalTask> {
         self.require(ThermalStudyPhase::ReadyForSolve)?;
         let task = prepare_thermal_task(ThermalTaskPreparation {
+            maximum_resident_bytes: self.preparation.maximum_resident_bytes,
             local_execution: self.preparation.local_execution,
             field_source: self.preparation.field_source.clone(),
             authored_study_digest: self.definition_digest,
@@ -445,6 +448,7 @@ impl ThermalStudyCoordinator {
         self.require(ThermalStudyPhase::Complete)?;
         Ok(CompletedThermalStudy {
             replay: completion::ThermalStudyReplayContext {
+                maximum_resident_bytes: self.preparation.maximum_resident_bytes,
                 local_execution: self.preparation.local_execution,
                 field_source: self.preparation.field_source,
                 scope: self.preparation.scope,

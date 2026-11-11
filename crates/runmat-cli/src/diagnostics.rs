@@ -339,9 +339,10 @@ fn render_span(source: &str, span: &SourceSpan) -> (usize, usize, String, String
         .find('\n')
         .map(|relative| line_start + relative)
         .unwrap_or(source.len());
-    let line_text = source[line_start..line_end].to_string();
+    let text = &source[line_start..line_end];
+    let line_text = text.strip_suffix('\r').unwrap_or(text).to_string();
     let column = offset.saturating_sub(line_start) + 1;
-    let available = line_end.saturating_sub(offset).max(1);
+    let available = (line_start + line_text.len()).saturating_sub(offset).max(1);
     let caret_len = len.max(1).min(available);
     let caret = format!(
         "{}{}",
@@ -390,13 +391,14 @@ mod compat_tests {
             callstack_elided: 0,
         };
 
-        let rendered =
-            format_runtime_diagnostic(&diagnostic, Some("main.m"), Some("y = butter(4);"));
-
-        assert!(rendered.contains("error: Undefined function: butter"));
-        assert!(rendered.contains("id: RunMat:UndefinedFunction"));
-        assert!(rendered.contains("--> main.m:1:5"));
-        assert!(rendered.contains("callstack:\n  main"));
+        for source in ["y = butter(4);\n", "y = butter(4);\r\n"] {
+            let rendered = format_runtime_diagnostic(&diagnostic, Some("main.m"), Some(source));
+            assert!(rendered.contains("error: Undefined function: butter"));
+            assert!(rendered.contains("id: RunMat:UndefinedFunction"));
+            assert!(rendered.contains("--> main.m:1:5"));
+            assert!(rendered.contains("callstack:\n  main"));
+            assert!(!rendered.contains('\r'));
+        }
     }
 
     #[test]

@@ -17,8 +17,7 @@ const CODEC_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v4\0
 const CONTRACT_DOMAIN: &str = "delaunay-volume-mesh/v4";
 const LEGACY_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v3\0";
 const LEGACY_DOMAIN: &str = "delaunay-volume-mesh/v3";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::platform_content(1024 * 1024, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeMeshCodecErrorKind {

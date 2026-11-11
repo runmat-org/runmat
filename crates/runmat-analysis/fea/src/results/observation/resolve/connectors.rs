@@ -15,7 +15,15 @@ pub(super) fn compile_connector_observation_plan(
             mesh,
             constraint_plan.reference_points.len(),
         )
-        .map_err(|error| ObservationError::Invalid(error.to_string()))
+        .map_err(|error| match error {
+            crate::assembly::StructuralAssemblyError::Accounting(cause) => {
+                ObservationError::Accounting(cause)
+            }
+            crate::assembly::StructuralAssemblyError::Cancelled => {
+                ObservationError::Topology(crate::topology::AnalysisProjectionError::Cancelled)
+            }
+            other => ObservationError::Invalid(other.to_string()),
+        })
     }
 }
 

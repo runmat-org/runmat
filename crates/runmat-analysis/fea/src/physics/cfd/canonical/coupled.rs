@@ -244,7 +244,7 @@ fn pressure_schur(
     }
     // The viscous Schur term (also makes closed domains definite), weighted by
     // VISCOUS_SCHUR_WEIGHT unless convection dominates an open domain.
-    if !(convective && !outlets.is_empty()) {
+    if !convective || outlets.is_empty() {
         for (c, g) in geometric.iter().enumerate() {
             a.add(c, c, VISCOUS_SCHUR_WEIGHT * rau[c] * g);
         }
@@ -703,7 +703,8 @@ pub(super) fn solve_with_time(
                 p.policy.gmres_restart,
                 PreconditionerSide::Flexible,
             )?;
-            let load = |c: &std::sync::atomic::AtomicU64| c.load(std::sync::atomic::Ordering::Relaxed);
+            let load =
+                |c: &std::sync::atomic::AtomicU64| c.load(std::sync::atomic::Ordering::Relaxed);
             inner = [
                 load(&preconditioner.applications),
                 load(&preconditioner.momentum_iterations),

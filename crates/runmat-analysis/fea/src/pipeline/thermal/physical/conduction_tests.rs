@@ -44,7 +44,10 @@ fn preassembly(
 
 /// The whole preassembly reservations of `input` on `mesh` on the proving factor and on the
 /// conduction multigrid path. Both paths share every component besides the numerical reservation.
-fn reservations(input: &ThermalWorkload, mesh: &runmat_meshing_core::SolverMeshArtifact) -> (u64, u64) {
+fn reservations(
+    input: &ThermalWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> (u64, u64) {
     let schedule = input.solve_schedule().unwrap();
     let history =
         ThermalHistoryResourceFacts::derive(mesh, &schedule, &input.model.interfaces).unwrap();
@@ -56,7 +59,10 @@ fn reservations(input: &ThermalWorkload, mesh: &runmat_meshing_core::SolverMeshA
         .unwrap()
         .0;
     let preassembly = preassembly(input, mesh);
-    assert_eq!(preassembly.operators.path(), ThermalSolvePath::ProvingFactorization);
+    assert_eq!(
+        preassembly.operators.path(),
+        ThermalSolvePath::ProvingFactorization
+    );
     let factor = preassembly.reservation_bytes().unwrap().0;
     (factor, factor - factor_numerical + multigrid_numerical)
 }
@@ -73,7 +79,10 @@ fn below_factor_of(
     mesh: &runmat_meshing_core::SolverMeshArtifact,
 ) -> ThermalWorkload {
     let (factor, multigrid) = reservations(&input, mesh);
-    assert!(multigrid < factor, "multigrid {multigrid} vs factor {factor}");
+    assert!(
+        multigrid < factor,
+        "multigrid {multigrid} vs factor {factor}"
+    );
     input.model.sequence.steps[0]
         .accuracy
         .resources
@@ -114,7 +123,10 @@ fn conduction_multigrid_matches_the_proving_factorization() {
         .zip(iterative_t)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f64::max);
-    assert!(largest < 1e-6 * (HOT - COLD), "largest difference {largest} K");
+    assert!(
+        largest < 1e-6 * (HOT - COLD),
+        "largest difference {largest} K"
+    );
     for balance in &iterative.energy_balances {
         assert!(balance.relative_residual <= input.residual_target);
     }
@@ -139,10 +151,16 @@ fn conduction_multigrid_accounting_refusal_is_typed_usage() {
         .run_sync(|| input.execute(&mesh))
         .unwrap();
     let usage = measured.snapshot().unwrap().completed;
-    let total = [usage.meshing, usage.assembly, usage.factorization, usage.solve, usage.other]
-        .iter()
-        .map(|count| count.operations())
-        .sum::<u64>();
+    let total = [
+        usage.meshing,
+        usage.assembly,
+        usage.factorization,
+        usage.solve,
+        usage.other,
+    ]
+    .iter()
+    .map(|count| count.operations())
+    .sum::<u64>();
     let allowance = OperationCount::from_operations(total - usage.solve.operations() / 2);
     let ledger = Arc::new(UsageLedger::new(allowance, allowance).unwrap());
     let error = UsageContext::new(ledger)
@@ -163,23 +181,26 @@ fn conduction_multigrid_refuses_an_unanchored_body() {
     // anchor: the fixture has no convection, so the steady temperature is determined only up to
     // a constant.
     input.model.constraints.retain(|constraint| {
-        !matches!(constraint, runmat_analysis_core::AnalysisConstraint::Thermal(_))
+        !matches!(
+            constraint,
+            runmat_analysis_core::AnalysisConstraint::Thermal(_)
+        )
     });
-    input.model.boundaries.push(runmat_analysis_core::AnalysisBoundary {
-        boundary_id: "heated_floor".into(),
-        target: super::interface_tests::boundary(&mesh, "lower_y_min"),
-        operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
-            value: runmat_analysis_core::PrescribedValue::Constant(
-                runmat_analysis_core::HeatFlux::new(1.0),
-            ),
-        },
-    });
+    input
+        .model
+        .boundaries
+        .push(runmat_analysis_core::AnalysisBoundary {
+            boundary_id: "heated_floor".into(),
+            target: super::interface_tests::boundary(&mesh, "lower_y_min"),
+            operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    runmat_analysis_core::HeatFlux::new(1.0),
+                ),
+            },
+        });
     let input = below_factor_of(input, &mesh);
     let error = input.execute(&mesh).unwrap_err();
-    assert!(
-        error.to_string().contains("undetermined"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("undetermined"), "{error}");
 }
 
 // witness: FEA-THERMAL-SOLVE-001/support_derivation_memory_interface @ thermal_steady/tet4/numerical_kernel;
@@ -199,7 +220,10 @@ fn split_interface_support_derivation_fits_the_planning_law() {
 /// Requested-heap peak of a whole run of `input`, on a one-thread pool so every worker
 /// allocation lands on the measured thread.
 fn run_peak(input: &ThermalWorkload, mesh: &runmat_meshing_core::SolverMeshArtifact) -> usize {
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
     pool.install(|| {
         // The whole run: preassembly, the solve, then the publication phase (field and
         // partition identities, the manifest and its canonical header encoding).

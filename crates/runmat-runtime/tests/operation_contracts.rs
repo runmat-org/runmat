@@ -1,5 +1,7 @@
 #[path = "support/fea_admission.rs"]
 mod fea_admission_support;
+#[path = "support/nonlinear_solid.rs"]
+mod nonlinear_solid;
 use runmat_analysis_core::{
     AnalysisExcitation, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
     AnalysisSequence, CoordinateFrame, EvidenceConfidence, ExcitationAction, ExcitationCase,
@@ -197,41 +199,41 @@ fn sorted_object_keys(value: &Value) -> Vec<String> {
     keys
 }
 
-fn assert_static_gpu_admission_rejected(trace_id: &str) {
-    let error = analysis_run_linear_static_with_options(
+fn assert_static_gpu_cpu_fallback_is_truthful(trace_id: &str) {
+    let envelope = analysis_run_linear_static_with_options(
         &contract_linear_static_model(),
         ComputeBackend::Gpu,
         AnalysisRunOptions::default(),
         OperationContext::new(Some(trace_id.to_string()), None),
     )
-    .expect_err("unsupported static GPU admission must not produce a CPU result");
-    assert_eq!(error.operation, "fea.run_linear_static");
-    assert_eq!(error.op_version, "fea.run_linear_static/v1");
-    assert_eq!(error.error_code, "RM.FEA.RESOURCE_PLANNING_FAILED");
+    .expect("default accelerator policy permits a truthfully reported CPU fallback");
+    assert_eq!(envelope.operation, "fea.run_linear_static");
+    assert_eq!(envelope.op_version, "fea.run_linear_static/v1");
+    assert_eq!(envelope.trace_id.as_deref(), Some(trace_id));
+    let result = &envelope.data;
+    assert_eq!(result.provenance.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(result.provenance.execution_backend, ExecutionBackend::Cpu);
     assert_eq!(
-        error.error_type,
-        runmat_runtime::operations::OperationErrorType::Contract
+        result.run.solver_backend,
+        LinearAlgebraBackendKind::CpuReference
     );
+    assert!(result.run.accelerator_evidence.is_empty());
+    assert_eq!(result.provenance.solver_device_apply_k_ratio, 0.0);
+    assert_eq!(result.provenance.solver_host_sync_count, 0);
+    assert!(!result.provenance.fallback_events.is_empty());
+    assert!(result
+        .run
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "FEA_ACCELERATOR_ADMISSION_FALLBACK"));
+    assert!(result.numerically_acceptable);
+    let wire = serde_json::to_value(&envelope).expect("serialize typed fallback result");
     assert_eq!(
-        error.severity,
-        runmat_runtime::operations::OperationErrorSeverity::Error
-    );
-    assert!(!error.retryable);
-    assert_eq!(error.trace_id.as_deref(), Some(trace_id));
-    assert!(error.message.contains("accelerator-bound admission"));
-    assert!(error.message.contains("CPU fallback is not a GPU solve"));
-    assert_eq!(
-        error.context.get("analysis_model_id").map(String::as_str),
-        Some(contract_linear_static_model().model_id.0.as_str())
-    );
-    let wire = serde_json::to_value(&error).expect("serialize typed admission error");
-    assert!(wire.get("data").is_none());
-    assert!(wire.get("run_id").is_none());
-    assert!(wire.get("provenance").is_none());
-    assert_eq!(
-        serde_json::from_value::<runmat_runtime::operations::OperationErrorEnvelope>(wire)
-            .expect("error schema roundtrip"),
-        error
+        serde_json::from_value::<runmat_runtime::operations::OperationEnvelope<AnalysisRunResult>>(
+            wire
+        )
+        .expect("fallback schema roundtrip"),
+        envelope
     );
 }
 
@@ -1101,22 +1103,20 @@ fn analysis_run_contract_is_v1_and_numerically_accepted_for_fixture() {
 }
 
 #[test]
-fn convenience_run_requires_production_qualified_formulation() {
+fn convenience_run_accepts_production_qualified_beam_formulation() {
     let _fea_admission = fea_admission_support::guard();
     {
-        let error = analysis_run_linear_static_op(
+        let result = analysis_run_linear_static_op(
             &contract_linear_static_model(),
             ComputeBackend::Cpu,
             OperationContext::new(Some("trace-contract-production-gate".to_string()), None),
         )
-        .expect_err("the convenience entrypoint must default to production qualification");
+        .expect("the beam fixture has a production-qualified exact formulation");
 
-        assert_eq!(error.operation, "fea.run_linear_static");
-        assert_eq!(error.op_version, "fea.run_linear_static/v1");
-        assert_eq!(
-            error.error_code,
-            "RM.FEA.RUN_LINEAR_STATIC.FORMULATION_NOT_ADMITTED"
-        );
+        assert_eq!(result.operation, "fea.run_linear_static");
+        assert_eq!(result.op_version, "fea.run_linear_static/v1");
+        assert!(result.data.numerically_acceptable);
+        assert_eq!(result.data.run_status, RunStatus::Completed);
     }
 }
 
@@ -1597,11 +1597,11 @@ fn analysis_run_fsi_contract_requires_an_authored_study() {
 fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     let _fea_admission = fea_admission_support::guard();
     {
-        let model = fixture_model(FixtureId::NonlinearAssembly);
+        let (_mesh_root, model, options) = nonlinear_solid::fixture();
         let envelope = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            Default::default(),
+            options,
             OperationContext::new(Some("trace-contract-nonlinear-1".to_string()), None),
         )
         .expect("nonlinear run should succeed for nonlinear fixture");
@@ -1639,21 +1639,51 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
             nonlinear.residual_norm_snapshots[0].field_id,
             fea_nonlinear_residual_norm_field_id(0)
         );
-        assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
+        assert!(
+            nonlinear.max_line_search_backtracks_per_increment <= nonlinear.line_search_backtracks
+        );
         assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
-        assert!(nonlinear.backtrack_burst_count > 0);
+        assert_eq!(nonlinear.load_factors.last(), Some(&1.0));
+        // Independent uniaxial J2 solution for the canonical four-node solid:
+        // equivalent plastic strain = (stress - yield stress) / hardening.
+        let plastic_strain = (5.6 - 5.0) / 30.0;
+        let axial_strain = 5.6 / 1200.0 + plastic_strain;
+        let lateral_strain = -0.25 * 5.6 / 1200.0 - plastic_strain / 2.0;
+        let expected = [
+            0.0,
+            0.0,
+            0.0,
+            axial_strain,
+            0.0,
+            0.0,
+            0.0,
+            lateral_strain,
+            0.0,
+            0.0,
+            0.0,
+            lateral_strain,
+        ];
+        let actual = envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .expect("canonical nonlinear solid displacement")
+            .as_host_f64()
+            .unwrap();
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() < 1e-9,
+                "actual={actual}; expected={expected}"
+            );
+        }
         assert!(envelope
             .data
             .run
             .diagnostics
             .iter()
             .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
-        assert!(envelope
-            .data
-            .run
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "FEA_NONLINEAR_COST"));
+        assert!(nonlinear.tangent_rebuild_count > 0);
 
         let results = analysis_results_op(
             &envelope.data,
@@ -1713,11 +1743,11 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
 fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
     let _fea_admission = fea_admission_support::guard();
     {
-        let model = fixture_model(FixtureId::NonlinearLoadPathMix);
+        let (_mesh_root, model, options) = nonlinear_solid::fixture();
         let envelope = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            Default::default(),
+            options,
             OperationContext::new(
                 Some("trace-contract-nonlinear-diagnostics-1".to_string()),
                 None,
@@ -1766,11 +1796,11 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
 fn nonlinear_contract_snapshot_matches_expected_shape() {
     let _fea_admission = fea_admission_support::guard();
     {
-        let model = fixture_model(FixtureId::NonlinearLoadPathMix);
+        let (_mesh_root, model, options) = nonlinear_solid::fixture();
         let envelope = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            Default::default(),
+            options,
             OperationContext::new(
                 Some("trace-contract-nonlinear-snapshot-1".to_string()),
                 None,
@@ -1818,118 +1848,132 @@ fn nonlinear_contract_snapshot_matches_expected_shape() {
 }
 
 #[test]
-fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
+fn analysis_run_nonlinear_strict_iteration_cap_refuses_unconverged_publication() {
     let _fea_admission = fea_admission_support::guard();
     {
-        let model = fixture_model(FixtureId::NonlinearAssembly);
-        let envelope = analysis_run_nonlinear_with_options_op(
+        let (_mesh_root, model, options) = nonlinear_solid::fixture();
+        let published = storage::list_run_metadata().unwrap().len();
+        let error = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
             AnalysisNonlinearRunOptions {
                 quality_policy: QualityPolicy::Strict,
+                increment_count: 1,
                 max_newton_iters: 1,
+                max_load_cutbacks: 0,
                 line_search: false,
-                ..AnalysisNonlinearRunOptions::balanced()
+                ..options
             },
             OperationContext::new(
                 Some("trace-contract-nonlinear-strict-cap".to_string()),
                 None,
             ),
         )
-        .expect("nonlinear strict run should return envelope");
+        .expect_err("an exhausted physical solve must not publish a nonlinear result");
 
-        assert_eq!(envelope.operation, "fea.run_nonlinear");
-        assert_eq!(envelope.op_version, "fea.run_nonlinear/v1");
-        assert_registered_result_identity(
-            &envelope.data,
-            PhysicsFamily::Structural,
-            AnalysisProcedure::Nonlinear,
-        );
-        assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-        assert!(!envelope.data.numerically_acceptable);
-        assert!(envelope
-            .data
-            .quality_reasons
-            .iter()
-            .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+        assert_eq!(error.operation, "fea.run_nonlinear");
+        assert_eq!(error.op_version, "fea.run_nonlinear/v1");
+        assert_eq!(error.error_code, "RM.FEA.RUN_NONLINEAR.ASSEMBLY_FAILED");
+        assert!(!error.retryable);
+        assert_eq!(storage::list_run_metadata().unwrap().len(), published);
     }
 }
 
 #[test]
-fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
+fn analysis_run_nonlinear_quality_policy_cannot_publish_unconverged_physical_solid() {
     let _fea_admission = fea_admission_support::guard();
     {
-        let model = fixture_model(FixtureId::NonlinearAssembly);
+        let (_mesh_root, model, options) = nonlinear_solid::fixture();
+        let published = storage::list_run_metadata().unwrap().len();
         let run_with_policy = |policy| {
             analysis_run_nonlinear_with_options_op(
                 &model,
                 ComputeBackend::Cpu,
                 AnalysisNonlinearRunOptions {
                     quality_policy: policy,
+                    increment_count: 1,
                     max_newton_iters: 1,
+                    max_load_cutbacks: 0,
                     line_search: false,
                     max_line_search_backtracks: 0,
-                    ..AnalysisNonlinearRunOptions::balanced()
+                    ..options.clone()
                 },
                 OperationContext::new(
                     Some(format!("trace-contract-nonlinear-policy-{policy:?}")),
                     None,
                 ),
             )
-            .expect("nonlinear run should produce typed envelope")
+            .expect_err("quality policy cannot authorize an unconverged physical result")
         };
 
         let exploratory = run_with_policy(QualityPolicy::Exploratory);
         let balanced = run_with_policy(QualityPolicy::Balanced);
         let strict = run_with_policy(QualityPolicy::Strict);
 
-        assert!(exploratory.data.numerically_acceptable);
-        assert_eq!(exploratory.data.run_status, RunStatus::Completed);
-
-        for degraded in [balanced, strict] {
-            assert!(!degraded.data.numerically_acceptable);
-            assert_eq!(degraded.data.run_status, RunStatus::Degraded);
-            assert!(degraded
-                .data
-                .quality_reasons
-                .iter()
-                .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+        for error in [exploratory, balanced, strict] {
+            assert_eq!(error.operation, "fea.run_nonlinear");
+            assert_eq!(error.error_code, "RM.FEA.RUN_NONLINEAR.ASSEMBLY_FAILED");
+            assert!(!error.retryable);
         }
+        assert_eq!(storage::list_run_metadata().unwrap().len(), published);
     }
 }
 
 #[test]
-fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
+fn analysis_run_nonlinear_physical_solution_is_consistent_across_quality_policies() {
     let _fea_admission = fea_admission_support::guard();
     {
-        let model = fixture_model(FixtureId::NonlinearSofteningBenchmark);
+        let (_mesh_root, model, options) = nonlinear_solid::fixture();
         let run_with_policy = |policy| {
             analysis_run_nonlinear_with_options_op(
                 &model,
                 ComputeBackend::Cpu,
                 AnalysisNonlinearRunOptions {
                     quality_policy: policy,
-                    max_newton_iters: 3,
-                    ..AnalysisNonlinearRunOptions::solid_recommended()
+                    ..options.clone()
                 },
                 OperationContext::new(
                     Some(format!("trace-contract-nonlinear-hard-policy-{policy:?}")),
                     None,
                 ),
             )
-            .expect("hard nonlinear fixture should produce typed envelope")
+            .expect("canonical plastic solid should produce a physical nonlinear result")
         };
 
         let exploratory = run_with_policy(QualityPolicy::Exploratory);
         let balanced = run_with_policy(QualityPolicy::Balanced);
         let strict = run_with_policy(QualityPolicy::Strict);
 
-        assert!(exploratory.data.numerically_acceptable);
-        assert_eq!(exploratory.data.run_status, RunStatus::Completed);
-        assert!(!balanced.data.numerically_acceptable);
-        assert_eq!(balanced.data.run_status, RunStatus::Degraded);
-        assert!(!strict.data.numerically_acceptable);
-        assert_eq!(strict.data.run_status, RunStatus::Degraded);
+        let mut reference_displacement = None;
+        for result in [exploratory, balanced, strict] {
+            assert!(result.data.numerically_acceptable);
+            assert_eq!(result.data.run_status, RunStatus::Completed);
+            assert_eq!(
+                result
+                    .data
+                    .nonlinear_results
+                    .as_ref()
+                    .unwrap()
+                    .load_factors
+                    .last(),
+                Some(&1.0)
+            );
+            let field = result
+                .data
+                .run
+                .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+                .expect("physical nonlinear displacement");
+            assert!(field
+                .as_host_f64()
+                .unwrap()
+                .iter()
+                .all(|value| value.is_finite()));
+            if let Some(reference) = &reference_displacement {
+                assert_eq!(field, reference);
+            } else {
+                reference_displacement = Some(field.clone());
+            }
+        }
     }
 }
 
@@ -1938,18 +1982,18 @@ fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
     let _fea_admission = fea_admission_support::guard();
     {
         let _artifact_store_guard = study_artifact_env_guard();
-        let model = fixture_model(FixtureId::NonlinearAssembly);
+        let (_mesh_root, model, options) = nonlinear_solid::fixture();
         let baseline = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            Default::default(),
+            options.clone(),
             OperationContext::new(Some("trace-contract-compare-1".to_string()), None),
         )
         .expect("baseline nonlinear run should succeed");
         let candidate = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            Default::default(),
+            options,
             OperationContext::new(Some("trace-contract-compare-2".to_string()), None),
         )
         .expect("candidate nonlinear run should succeed");
@@ -1964,7 +2008,14 @@ fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
         .expect("compare should succeed");
         assert_eq!(compare.operation, "fea.results_compare");
         assert_eq!(compare.op_version, "fea.results_compare/v1");
-        assert!(compare.data.solve_ms_delta.is_some());
+        // The physical solid does not publish the retired proxy's timing diagnostic.
+        assert_eq!(compare.data.solve_ms_delta, None);
+        assert_eq!(compare.data.baseline_run_id, baseline.data.run_id);
+        assert_eq!(compare.data.candidate_run_id, candidate.data.run_id);
+        assert!(!compare.data.run_status_changed);
+        assert!(!compare.data.numerically_acceptable_changed);
+        assert_eq!(compare.data.failed_increment_delta, Some(0));
+        assert_eq!(compare.data.max_iteration_delta, Some(0));
 
         let missing = analysis_results_compare_op(
             AnalysisResultsCompareQuery {
@@ -1987,13 +2038,13 @@ fn analysis_trends_contract_is_v1_and_typed() {
         let _artifact_store_guard = study_artifact_env_guard();
         storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::InMemory)
             .expect("configure isolated in-memory artifact store");
-        let model = fixture_model(FixtureId::NonlinearAssembly);
+        let (_mesh_root, model, options) = nonlinear_solid::fixture();
         let mut seeded_identity = None;
         for idx in 0..3 {
             let run = analysis_run_nonlinear_with_options_op(
                 &model,
                 ComputeBackend::Cpu,
-                Default::default(),
+                options.clone(),
                 OperationContext::new(Some(format!("trace-contract-trends-{idx}")), None),
             )
             .expect("nonlinear run should succeed for trends");
@@ -2019,8 +2070,9 @@ fn analysis_trends_contract_is_v1_and_typed() {
             .find(|summary| summary.identity == seeded_identity)
             .expect("seeded structural nonlinear trend summary should be present");
         assert_eq!(nonlinear.sample_count, 2);
-        assert!(nonlinear.median_solve_ms.is_some());
-        assert!(nonlinear.p95_solve_ms.is_some());
+        // Missing timing stays absent rather than becoming a fabricated zero sample.
+        assert_eq!(nonlinear.median_solve_ms, None);
+        assert_eq!(nonlinear.p95_solve_ms, None);
         assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
         assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
         assert!(nonlinear.thermo_spread_breach_rate.is_none());
@@ -2639,20 +2691,20 @@ fn analysis_run_cpu_provenance_and_gpu_admission_are_truthful() {
             ));
         }
         assert!(cpu.data.run.field(FEA_FIELD_STRUCTURAL_VON_MISES).is_none());
-        assert_static_gpu_admission_rejected("trace-contract-7b");
+        assert_static_gpu_cpu_fallback_is_truthful("trace-contract-7b");
     }
 }
 
 #[test]
-fn analysis_run_gpu_without_provider_rejects_before_execution() {
+fn analysis_run_gpu_without_provider_reports_cpu_fallback() {
     let _fea_admission = fea_admission_support::guard();
     {
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
-        assert_static_gpu_admission_rejected("trace-contract-8");
+        assert_static_gpu_cpu_fallback_is_truthful("trace-contract-8");
     }
 }
 
-/// Counts device transfers; admission must reject GPU studies before any.
+/// Counts device transfers; a CPU fallback must leave the device untouched.
 struct AdmissionProbeProvider {
     uploads: AtomicU64,
     downloads: AtomicU64,
@@ -2684,7 +2736,7 @@ impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
 }
 
 #[test]
-fn analysis_run_gpu_with_provider_rejects_without_device_transfers() {
+fn analysis_run_gpu_with_provider_falls_back_without_device_transfers() {
     let _fea_admission = fea_admission_support::guard();
     {
         static PROVIDER: AdmissionProbeProvider = AdmissionProbeProvider {
@@ -2694,7 +2746,7 @@ fn analysis_run_gpu_with_provider_rejects_without_device_transfers() {
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
         PROVIDER.uploads.store(0, Ordering::Relaxed);
         PROVIDER.downloads.store(0, Ordering::Relaxed);
-        assert_static_gpu_admission_rejected("trace-contract-9");
+        assert_static_gpu_cpu_fallback_is_truthful("trace-contract-9");
         assert_eq!(PROVIDER.uploads.load(Ordering::Relaxed), 0);
         assert_eq!(PROVIDER.downloads.load(Ordering::Relaxed), 0);
     }
@@ -2711,7 +2763,7 @@ fn analysis_run_gpu_upload_failure_provider_is_not_reached() {
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
         PROVIDER.uploads.store(0, Ordering::Relaxed);
         PROVIDER.downloads.store(0, Ordering::Relaxed);
-        assert_static_gpu_admission_rejected("trace-contract-10");
+        assert_static_gpu_cpu_fallback_is_truthful("trace-contract-10");
         assert_eq!(PROVIDER.uploads.load(Ordering::Relaxed), 0);
         assert_eq!(PROVIDER.downloads.load(Ordering::Relaxed), 0);
     }

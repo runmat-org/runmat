@@ -11,7 +11,9 @@ use crate::{
     ObservationReductionPreparation, PreparedObservationAssembly, PreparedObservationFanout,
     PreparedObservationPartition, PreparedObservationReduction,
 };
-use crate::{AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, AnalysisOutputPolicy};
+use crate::{
+    AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, AnalysisOutputPolicy,
+};
 use runmat_analysis_core::ProcedureStep;
 use runmat_analysis_fea::{
     execution::{ObservationHistorySourceContext, StepIdentity},
@@ -130,7 +132,9 @@ impl SampledStudyObservations {
             .partitions
             .iter()
             .enumerate()
-            .filter(|(_, task)| task.partition_plan.observation_id == observation.spec.observation_id)
+            .filter(|(_, task)| {
+                task.partition_plan.observation_id == observation.spec.observation_id
+            })
             .collect::<Vec<_>>();
         let first = selected
             .first()

@@ -1644,7 +1644,7 @@ mod tests {
 
     #[wasm_bindgen_test(async)]
     async fn serial_fallback_schedules_through_the_portable_driver() {
-        let service = Rc::new(BrowserExecutionService::new(None).unwrap());
+        let service = BrowserExecutionService::new(None).unwrap();
         let runtime = runmat_runtime::context::RuntimeContext::new(service.clone());
         assert_eq!(service.capabilities.max_workers, 1);
         assert!(!service.capabilities.has_worker_isolation());

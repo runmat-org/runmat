@@ -92,7 +92,7 @@ fn streamed_uniform_contexts_preserve_every_original_cell_and_complete_quality()
         &request,
         options,
         MetricContexts::Indexed(original),
-        crate::cdt::volume_quality::stream::BoundaryProtection {
+        stream::BoundaryProtection {
             nodes: &boundary_node_identities(&provenance),
             facets: &protected_facet_identities(&provenance),
             provenance: &provenance,

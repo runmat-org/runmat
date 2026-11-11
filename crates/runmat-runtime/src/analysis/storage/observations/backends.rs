@@ -158,30 +158,36 @@ impl access::FilesystemAccess<'_> {
         &self,
         run: &AnalysisRunResult,
     ) -> Result<Option<ObservationAttachment>, AnalysisPublicationError> {
-        Ok(match self.read_stored_observation_attachment(run)? {
-            Some(StoredObservationAttachment::Current(attachment)) => Some(attachment),
-            Some(StoredObservationAttachment::Legacy) | None => None,
-        })
+        let mut attachment = None;
+        self.visit_stored_observation_attachment(run, |current| {
+            attachment = Some(current);
+            Ok(())
+        })?;
+        Ok(attachment)
     }
 
     /// The run's stored attachment. One that does not decode at the current schema and names
-    /// another schema version is [`StoredObservationAttachment::Legacy`]; one that names the
-    /// current version and still does not decode is an error.
-    pub(in crate::analysis::storage) fn read_stored_observation_attachment(
+    /// another schema version is [`ObservationAttachmentReadOutcome::Legacy`]; one that names
+    /// the current version and still does not decode is an error. A current attachment moves
+    /// directly into the visitor without a separate heap allocation for its envelope.
+    pub(in crate::analysis::storage) fn visit_stored_observation_attachment(
         &self,
         run: &AnalysisRunResult,
-    ) -> Result<Option<StoredObservationAttachment>, AnalysisPublicationError> {
+        current: impl FnOnce(ObservationAttachment) -> Result<(), AnalysisPublicationError>,
+    ) -> Result<ObservationAttachmentReadOutcome, AnalysisPublicationError> {
         let path = self.observation_path(&run.run_id)?;
         let parent = path.parent().ok_or("observation parent absent")?;
         if !self.owned_directory_exists(parent, "observation attachments")? {
-            return Ok(None);
+            return Ok(ObservationAttachmentReadOutcome::Missing);
         }
         let bytes = match self.fs_symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type() == FsFileType::File => {
                 self.fs_read(path).map_err(|error| error.to_string())?
             }
             Ok(_) => return Err("observation attachment must be a regular file".into()),
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Ok(ObservationAttachmentReadOutcome::Missing)
+            }
             Err(error) => return Err(error.to_string().into()),
         };
         let attachment: ObservationAttachment = match self.decode_metadata(&bytes) {
@@ -191,18 +197,20 @@ impl access::FilesystemAccess<'_> {
                     Ok(version)
                         if version.schema_version != OBSERVATION_ATTACHMENT_SCHEMA_VERSION =>
                     {
-                        Ok(Some(StoredObservationAttachment::Legacy))
+                        Ok(ObservationAttachmentReadOutcome::Legacy)
                     }
                     _ => Err(error),
                 }
             }
         };
         if attachment.schema_version != OBSERVATION_ATTACHMENT_SCHEMA_VERSION {
-            return Ok(Some(StoredObservationAttachment::Legacy));
+            return Ok(ObservationAttachmentReadOutcome::Legacy);
         }
         self.validate_bound_observation(&run.run_id, &attachment)?;
         attachment.validate(run, self.observation_run_digest(&run.run_id)?)?;
-        Ok(Some(StoredObservationAttachment::Current(attachment)))
+        drop(bytes);
+        current(attachment)?;
+        Ok(ObservationAttachmentReadOutcome::Current)
     }
     fn observation_path(&self, run_id: &str) -> Result<PathBuf, AnalysisPublicationError> {
         validate_run_id_token(run_id)?;

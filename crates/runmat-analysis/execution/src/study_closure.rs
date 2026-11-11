@@ -10,6 +10,8 @@ use runmat_execution_artifact::{
 use std::collections::BTreeMap;
 
 mod profiling;
+mod import;
+pub(crate) use import::CallerBoundedImport;
 pub(crate) use profiling::profile_import_workspace_phases;
 
 /// Codec limits for a study completion payload. The payload carries the study's mesh and result
@@ -124,7 +126,7 @@ pub(crate) fn read(
         return Err(invalid("study object byte limit exceeded"));
     }
     let bytes = source
-        .read_verified(reference.logical_digest)?
+        .read_verified_bounded(reference.logical_digest, reference.encoded_length)?
         .ok_or_else(|| invalid("study closure child is missing"))?;
     if bytes.len() as u64 != reference.encoded_length
         || Digest::sha256(&bytes) != reference.logical_digest

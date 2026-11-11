@@ -420,9 +420,9 @@ impl AuthoredOutputExpression {
                 })?;
                 let valid = *signal_conductors > 0
                     && match scope {
-                        crate::LineParameterScope::Conductor => {
-                            conductor.as_ref().is_some_and(|name| !name.trim().is_empty())
-                        }
+                        crate::LineParameterScope::Conductor => conductor
+                            .as_ref()
+                            .is_some_and(|name| !name.trim().is_empty()),
                         crate::LineParameterScope::Pair => {
                             conductor.is_none() && *signal_conductors == 2
                         }

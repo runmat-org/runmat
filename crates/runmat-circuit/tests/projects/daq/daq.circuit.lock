@@ -1,0 +1,290 @@
+entry 4afaadd3-a542-8024-b47a-cd737d87784d net /+1V2
+entry 9a480aa5-e766-86e4-b3c9-1bcaceabf8fa net /+3V3
+entry 1926327c-3140-8793-9382-e4d057f5390a net /+5V
+entry 753b5471-c7bd-82c0-a64b-34bf1e28eb24 net /AIN0
+entry b6fa216a-7e64-8df9-bdf0-b41ca77757fb net /AIN1
+entry 49888ebd-0c5b-8c3a-aaf6-f771a2ed1905 net /AIN2
+entry 41b230bd-15a9-81cf-9e0b-937bf0ace37b component /C101 designator=C101
+entry 255000f9-d8b3-84bb-8071-c74ab11466d2 component /C102 designator=C102
+entry a9bef076-884e-8d80-859c-9be9b2d57fde component /C103 designator=C103
+entry 87cc0b18-80a0-86ec-941d-072f1145ec5c component /C104 designator=C104
+entry 33f021d5-f92e-8407-ad04-6dc55cb39440 component /C105 designator=C105
+entry fde28671-0e22-82b3-bb57-fd5e833ed4cb component /C106 designator=C106
+entry d1a51528-ff4b-8f1c-82cb-539cf539f48a component /C107 designator=C107
+entry a864df41-0b5d-836c-bb1b-8257385d9303 component /C108 designator=C108
+entry 4d613112-ecff-8f96-8a54-67d5a4209ad2 component /C109 designator=C109
+entry 32e4f0ad-a075-80b4-9d9b-ace8c6580428 component /C110 designator=C110
+entry 5a855ef9-3371-8e94-96fd-133cefa6fc7f component /C111 designator=C111
+entry 76e78ebc-7067-8ba9-98c3-af0c135e6d16 component /C112 designator=C112
+entry 0964f669-d942-8574-9e9e-30f60d3d4f53 component /C113 designator=C113
+entry 6ee5cb66-fad0-8ced-9039-6177fc7bce95 component /C114 designator=C114
+entry 621273de-f2f6-8348-92fb-2d6e319daec9 component /C115 designator=C115
+entry 8405593c-faa4-89cd-95f0-a035719c5ba8 component /C116 designator=C116
+entry d7e1427f-8216-8cc2-93df-db9ef23ee474 component /C117 designator=C117
+entry 06b3e5a5-bf43-81f7-b3f6-b90f163523dc component /C118 designator=C118
+entry c671f698-03dc-8019-9a06-c23a1c5df1dd component /C119 designator=C119
+entry 1fde67af-562e-8ecb-9390-3c44352338c2 component /C120 designator=C120
+entry 17b3ee9f-02c9-8f92-837a-f40bc82919d1 net /CC1
+entry e1287511-4bc1-8f0d-8c9e-285416258e1b net /CC2
+entry 2a230fe7-cc3e-84d9-a9d8-a8bf0ae4c864 net /CONVST
+entry 7863c59a-1f97-88fc-a623-7c4c96c93ef7 component /D1 designator=D1
+entry bce14fc6-b1fa-8275-879e-94f45037129a net /FB1
+entry e484d3ab-f3d1-8d72-84f3-ce5f162f999e net /FB2
+entry bacfcc28-bbb4-8877-ba12-290986536541 net /GND
+entry debf56fb-6a3f-8b04-926f-4ec3921191fe component /H1 designator=H1
+entry 8ca70caf-5d75-8be5-b3d0-bc44043218ab component /H2 designator=H2
+entry 7e5127d7-4f8b-8f42-bc21-cf28c859aba6 component /H3 designator=H3
+entry 5923f48b-f1a1-8725-9e94-882b93bc875e component /H4 designator=H4
+entry cf244144-f7a3-8f16-8c9f-6e7e6f808595 component /J1 designator=J1
+entry 16500153-17e5-811e-8f10-9718c8152be5 component /J2 designator=J2
+entry a4dd4434-a0cf-839d-8f31-8da849bbc038 component /L1 designator=L1
+entry 0cfbb692-1bb1-8cac-b3d6-c0ce68e89d6e component /L2 designator=L2
+entry d33efaf7-76b7-82f4-b450-725327e73a29 net /LED
+entry fdd5288a-e73b-8545-8fd1-6e5eb1cfc91a net /NR
+entry 7777b23a-5dba-84f2-a29b-2d0fcfc31faf net /PG1
+entry a8e794a8-4852-8276-a9e1-c50d52be4cf5 component /R101 designator=R101
+entry 680be12e-8d30-82c1-9d77-f269aeccb0d9 component /R102 designator=R102
+entry f2cde390-cfa3-871a-a842-cd8840603337 component /R103 designator=R103
+entry f3ab1ddd-3dfa-881c-8287-3be9787e9bfe component /R104 designator=R104
+entry 38c0b03b-c8b1-824b-a605-33d341607458 component /R105 designator=R105
+entry 8c08f91e-c0a8-8080-b65a-9fff01cde100 component /R106 designator=R106
+entry 556c79eb-e483-8b91-8de4-21fbaa59f559 component /R107 designator=R107
+entry a3f39a56-c319-8288-90b7-30d1c93dc846 net /SCLK
+entry 17cccee0-1bdb-8b15-bbbe-a036ed6ef330 net /SDO0
+entry 23392318-a6fc-89b7-aee9-662718cf5e62 net /SDO1
+entry 1081a4ac-7475-8f88-bfa5-e3a7d695a337 net /SDO2
+entry 0ab05697-c158-8309-8a78-989f31f95d9c net /SS1
+entry c07f1eac-4455-82f4-aa95-8f773748ac7a net /SS2
+entry a3d3758d-c008-8300-bd84-310890b8e32b net /SW1
+entry c9991f92-14b7-816f-ab8e-9210209cd5a9 net /SW2
+entry 95695b71-05f8-8079-97c7-0d1808d215ac component /U1 designator=U1
+entry 6cd92729-58e1-8bdb-abe5-9939159c0b3c component /U2 designator=U2
+entry 56a39eb2-708f-869d-8ec0-365b13699a6a component /U3 designator=U3
+entry 759b0053-dbdc-8519-8ee4-c2b1b964c14f component /U4 designator=U4
+entry 6000ec4b-8142-8bca-872a-2b1240a31527 net /VREF
+entry c7545eab-efd7-8192-9484-d2671b821c5c sheet /ch[0]
+entry d46c3f9d-7811-8611-8919-06f1c5c00597 component /ch[0]/ADC designator=U5
+entry ec014dac-508b-8b61-9582-777437a9e8f9 net /ch[0]/AIN
+entry dd44b841-742b-8d7a-960a-5a9716d1d75e net /ch[0]/AMP
+entry e57adfd4-6b18-8977-9356-80b82affa030 component /ch[0]/CDA designator=C1
+entry 517fb648-b40d-8b9b-b2a2-99dec8c4f42b component /ch[0]/CDD designator=C2
+entry 767a4ce2-52f4-8006-82df-1b85ae18981f component /ch[0]/CDV designator=C3
+entry a5bc2523-8c2a-8f97-bd3f-ca1845efd647 component /ch[0]/CF designator=C4
+entry 75df6caa-716c-8daf-9373-02f9bfd8facc component /ch[0]/CO designator=C5
+entry 95776f07-c7ab-879f-8281-e49833d97f14 component /ch[0]/CREF designator=C6
+entry 39fd7571-ea41-8e47-8e58-510dd68c3cc2 net /ch[0]/FB
+entry 87681bb5-0f04-8d0c-9bbe-6144c7556412 net /ch[0]/INF
+entry 508ff8a5-ed7f-8fa6-9e82-8bb602b54dd6 component /ch[0]/RF designator=R1
+entry 60f186d2-2cb9-808c-bfac-92283d98f9e8 component /ch[0]/RG designator=R2
+entry b3c16f45-e965-86f6-973d-e5c880aadaf9 component /ch[0]/RO designator=R3
+entry 5b638532-ee82-8a7b-89f9-3087c7e852f4 component /ch[0]/RS designator=R4
+entry 4cf26f69-ce72-8640-ab5d-9fe77c5a22aa component /ch[0]/U designator=U6
+entry 782b3608-9f59-8bfd-bffd-a5a8af6cca95 sheet /ch[1]
+entry d6030225-56ec-841f-8509-b958153e9c22 component /ch[1]/ADC designator=U7
+entry 30b9e1b3-b069-8048-9994-22f3553aeb9b net /ch[1]/AIN
+entry 5b40071c-2aca-859c-9e6d-d687164ff7ea net /ch[1]/AMP
+entry b6d0cecf-a1e9-8c87-ba95-e29049c3c91e component /ch[1]/CDA designator=C7
+entry c540011a-2dd6-8c62-b875-3d8ddae78b2b component /ch[1]/CDD designator=C8
+entry b5d15077-b68b-8394-a2a9-ac435c974b38 component /ch[1]/CDV designator=C9
+entry e3603715-487b-82ef-92aa-b5e9397fa0fa component /ch[1]/CF designator=C10
+entry 1cb07511-de88-8a43-a2cd-b22ad31fb12c component /ch[1]/CO designator=C11
+entry fecdeae1-5e13-811f-bbaa-8ac60309b462 component /ch[1]/CREF designator=C12
+entry 040cc734-07ac-841c-94b4-ad0f3dfa5eb5 net /ch[1]/FB
+entry 88059e2e-598a-8a93-83f7-b7dca611acbd net /ch[1]/INF
+entry 7fee2c66-6c8e-8f20-9ddd-cbf7495df028 component /ch[1]/RF designator=R5
+entry a89d670a-4405-8b89-89cd-7085bdd5ae14 component /ch[1]/RG designator=R6
+entry 74e494e3-8bc4-8870-ac6c-d08b6c8c08e9 component /ch[1]/RO designator=R7
+entry fa423bbf-5001-8561-9a16-f7cdbc8ab1b9 component /ch[1]/RS designator=R8
+entry 4726eea2-d279-8ddd-b1e8-1c5b5fce90c3 component /ch[1]/U designator=U8
+entry 2cd1ad12-17eb-871d-a544-15e7360c8562 sheet /ch[2]
+entry 43d5c6d6-108c-8df6-9a92-dd5d3ce3342d component /ch[2]/ADC designator=U9
+entry 4d6f9998-4456-8a3d-a518-5e9eda9c7b80 net /ch[2]/AIN
+entry 7eb2fe7e-47d1-8ba5-99bb-bb386866bea2 net /ch[2]/AMP
+entry 241745a7-21bf-8b4e-aa32-6da18cf17b24 component /ch[2]/CDA designator=C13
+entry f90e3344-f20e-8175-a361-ba95f24e6c1a component /ch[2]/CDD designator=C14
+entry 16b87230-f5b9-803e-b337-6c46885a64a0 component /ch[2]/CDV designator=C15
+entry 19cbc588-4126-860e-ac5e-fe2eb3cc1e1a component /ch[2]/CF designator=C16
+entry 11b6a601-7796-8273-a74e-019e1749ff99 component /ch[2]/CO designator=C17
+entry 8ac5cb7f-0310-8eb7-bac6-e9f638bb3533 component /ch[2]/CREF designator=C18
+entry 4aa254e0-20dd-8a01-9fa8-797e4e2c6d8b net /ch[2]/FB
+entry 4c0536ff-e584-819d-9725-1dcaddfd1ac4 net /ch[2]/INF
+entry 0a0c3349-5512-889d-b395-916a12ccb1ef component /ch[2]/RF designator=R9
+entry ce2708d9-64de-8a68-bdf8-ff9072aa4e39 component /ch[2]/RG designator=R10
+entry ffc68570-93c1-8ab3-a1ed-93128fdc197d component /ch[2]/RO designator=R11
+entry 8cc9f120-4088-8600-9c0f-9ca10126f282 component /ch[2]/RS designator=R12
+entry 6b887bdc-bf72-82a1-bd58-7c4021f65af7 component /ch[2]/U designator=U10
+fp /+1V2 /C106.1,/C111.1,/C112.1,/C113.1,/C114.1,/C115.1,/L2.2,/R106.1,/U1.VCCINT,/U3.VOS
+fp /+3V3 /C102.1,/C103.1,/C116.1,/C117.1,/C118.1,/C119.1,/C120.1,/L1.2,/R101.1,/R104.1,/U1.VCCIO,/U2.VOS,/ch[0]/ADC.DIN,/ch[0]/ADC.DVDD,/ch[0]/CDD.1,/ch[1]/ADC.DIN,/ch[1]/ADC.DVDD,/ch[1]/CDD.1,/ch[2]/ADC.DIN,/ch[2]/ADC.DVDD,/ch[2]/CDD.1
+fp /+5V /C101.1,/C105.1,/C108.1,/J1.VBUS,/U2.EN,/U2.VIN,/U3.EN,/U3.VIN,/U4.VIN,/ch[0]/ADC.AVDD,/ch[0]/CDA.1,/ch[0]/CDV.1,/ch[0]/U.V+,/ch[1]/ADC.AVDD,/ch[1]/CDA.1,/ch[1]/CDV.1,/ch[1]/U.V+,/ch[2]/ADC.AVDD,/ch[2]/CDA.1,/ch[2]/CDV.1,/ch[2]/U.V+
+fp /AIN0 /J2.1,/ch[0]/RS.1
+fp /AIN1 /J2.3,/ch[1]/RS.1
+fp /AIN2 /J2.5,/ch[2]/RS.1
+fp /C101 bfcf2077-8a50-8ff8-81e5-260809f36405|+5V,GND
+fp /C102 bfcf2077-8a50-8ff8-81e5-260809f36405|+3V3,GND
+fp /C103 bfcf2077-8a50-8ff8-81e5-260809f36405|+3V3,GND
+fp /C104 5f5833d3-e018-84f4-833b-fdb6eabca620|GND,SS1
+fp /C105 bfcf2077-8a50-8ff8-81e5-260809f36405|+5V,GND
+fp /C106 bfcf2077-8a50-8ff8-81e5-260809f36405|+1V2,GND
+fp /C107 5f5833d3-e018-84f4-833b-fdb6eabca620|GND,SS2
+fp /C108 e3d262f6-5490-88d9-8503-ce27d2c7353b|+5V,GND
+fp /C109 bfcf2077-8a50-8ff8-81e5-260809f36405|GND,VREF
+fp /C110 e3d262f6-5490-88d9-8503-ce27d2c7353b|GND,NR
+fp /C111 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+1V2,GND
+fp /C112 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+1V2,GND
+fp /C113 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+1V2,GND
+fp /C114 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+1V2,GND
+fp /C115 bfcf2077-8a50-8ff8-81e5-260809f36405|+1V2,GND
+fp /C116 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /C117 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /C118 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /C119 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /C120 bfcf2077-8a50-8ff8-81e5-260809f36405|+3V3,GND
+fp /CC1 /J1.CC1,/R102.1
+fp /CC2 /J1.CC2,/R103.1
+fp /CONVST /U1.IO0,/ch[0]/ADC.CONVST,/ch[1]/ADC.CONVST,/ch[2]/ADC.CONVST
+fp /D1 2859cb87-a523-8b87-9a37-d891b91c04b9|LED,PG1
+fp /FB1 /R104.2,/R105.1,/U2.FB
+fp /FB2 /R106.2,/R107.1,/U3.FB
+fp /GND /C101.2,/C102.2,/C103.2,/C104.2,/C105.2,/C106.2,/C107.2,/C108.2,/C109.2,/C110.2,/C111.2,/C112.2,/C113.2,/C114.2,/C115.2,/C116.2,/C117.2,/C118.2,/C119.2,/C120.2,/H1.1,/H2.1,/H3.1,/H4.1,/J1.GND,/J1.SHIELD,/J2.10,/J2.2,/J2.4,/J2.6,/J2.8,/R102.2,/R103.2,/R105.2,/R107.2,/U1.GND,/U2.GND,/U3.GND,/U4.GND,/ch[0]/ADC.AINN,/ch[0]/ADC.GND,/ch[0]/CDA.2,/ch[0]/CDD.2,/ch[0]/CDV.2,/ch[0]/CF.2,/ch[0]/CO.2,/ch[0]/CREF.2,/ch[0]/RG.2,/ch[0]/U.V-,/ch[1]/ADC.AINN,/ch[1]/ADC.GND,/ch[1]/CDA.2,/ch[1]/CDD.2,/ch[1]/CDV.2,/ch[1]/CF.2,/ch[1]/CO.2,/ch[1]/CREF.2,/ch[1]/RG.2,/ch[1]/U.V-,/ch[2]/ADC.AINN,/ch[2]/ADC.GND,/ch[2]/CDA.2,/ch[2]/CDD.2,/ch[2]/CDV.2,/ch[2]/CF.2,/ch[2]/CO.2,/ch[2]/CREF.2,/ch[2]/RG.2,/ch[2]/U.V-
+fp /H1 59859214-7a2d-8056-85c2-c1622e6bf6a1|GND
+fp /H2 59859214-7a2d-8056-85c2-c1622e6bf6a1|GND
+fp /H3 59859214-7a2d-8056-85c2-c1622e6bf6a1|GND
+fp /H4 59859214-7a2d-8056-85c2-c1622e6bf6a1|GND
+fp /J1 e51f04d8-5406-8e43-9299-32eedda750a3|+5V,CC1,CC2,GND
+fp /J2 ea9321e3-6e65-859b-b3bb-f20234b4af8e|AIN0,AIN1,AIN2,GND
+fp /L1 7f8820c1-13c1-8b06-a357-498dffbef2ba|+3V3,SW1
+fp /L2 7f8820c1-13c1-8b06-a357-498dffbef2ba|+1V2,SW2
+fp /LED /D1.A,/R101.2
+fp /NR /C110.1,/U4.NR
+fp /PG1 /D1.K,/U2.PG
+fp /R101 5cad3456-7f51-8bcd-9bf4-5cf482812887|+3V3,LED
+fp /R102 f9f3252b-5119-8001-9d17-ab24998ffbb4|CC1,GND
+fp /R103 f9f3252b-5119-8001-9d17-ab24998ffbb4|CC2,GND
+fp /R104 4c1fba02-a319-8d52-bb34-c5a664ea31c5|+3V3,FB1
+fp /R105 76012b69-ae28-8390-9dc6-20e9c1852047|FB1,GND
+fp /R106 c522a597-9c92-8270-8757-e923b38f1f61|+1V2,FB2
+fp /R107 4c1fba02-a319-8d52-bb34-c5a664ea31c5|FB2,GND
+fp /SCLK /U1.IO1,/ch[0]/ADC.SCLK,/ch[1]/ADC.SCLK,/ch[2]/ADC.SCLK
+fp /SDO0 /U1.IO2,/ch[0]/ADC.DOUT
+fp /SDO1 /U1.IO3,/ch[1]/ADC.DOUT
+fp /SDO2 /U1.IO4,/ch[2]/ADC.DOUT
+fp /SS1 /C104.1,/U2.SS
+fp /SS2 /C107.1,/U3.SS
+fp /SW1 /L1.1,/U2.SW
+fp /SW2 /L2.1,/U3.SW
+fp /U1 1206fb49-e62f-8ea2-8688-404f0fbe19a6|+1V2,+3V3,CONVST,GND,SCLK,SDO0,SDO1,SDO2
+fp /U2 86f5be0d-c63b-8f9c-b7a6-69b97d63bda0|+3V3,+5V,FB1,GND,PG1,SS1,SW1
+fp /U3 86f5be0d-c63b-8f9c-b7a6-69b97d63bda0|+1V2,+5V,FB2,GND,SS2,SW2
+fp /U4 d28bf62f-46d5-89de-a6ae-ee541cbb99f5|+5V,GND,NR,VREF
+fp /VREF /C109.1,/U4.VOUT,/ch[0]/ADC.REF,/ch[0]/CREF.1,/ch[1]/ADC.REF,/ch[1]/CREF.1,/ch[2]/ADC.REF,/ch[2]/CREF.1
+fp /ch[0] channel
+fp /ch[0]/ADC e3a0a115-3a21-81c9-bf30-8a47de282d3f|+3V3,+5V,/ch[0]/AIN,CONVST,GND,SCLK,SDO0,VREF
+fp /ch[0]/AIN /ch[0]/ADC.AINP,/ch[0]/CO.1,/ch[0]/RO.2
+fp /ch[0]/AMP /ch[0]/RF.2,/ch[0]/RO.1,/ch[0]/U.OUT
+fp /ch[0]/CDA ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[0]/CDD ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /ch[0]/CDV ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[0]/CF 6a6b5029-926c-82cd-ae4c-8fd044e2f4ea|/ch[0]/INF,GND
+fp /ch[0]/CO 6a6b5029-926c-82cd-ae4c-8fd044e2f4ea|/ch[0]/AIN,GND
+fp /ch[0]/CREF bfcf2077-8a50-8ff8-81e5-260809f36405|GND,VREF
+fp /ch[0]/FB /ch[0]/RF.1,/ch[0]/RG.1,/ch[0]/U.IN-
+fp /ch[0]/INF /ch[0]/CF.1,/ch[0]/RS.2,/ch[0]/U.IN+
+fp /ch[0]/RF 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[0]/AMP,/ch[0]/FB
+fp /ch[0]/RG 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[0]/FB,GND
+fp /ch[0]/RO 2d897a1e-a763-8dec-9885-934db4b4fbd9|/ch[0]/AIN,/ch[0]/AMP
+fp /ch[0]/RS 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[0]/INF,AIN0
+fp /ch[0]/U 6322f084-76b3-8b73-99b9-88e3333a560f|+5V,/ch[0]/AMP,/ch[0]/FB,/ch[0]/INF,GND
+fp /ch[1] channel
+fp /ch[1]/ADC e3a0a115-3a21-81c9-bf30-8a47de282d3f|+3V3,+5V,/ch[1]/AIN,CONVST,GND,SCLK,SDO1,VREF
+fp /ch[1]/AIN /ch[1]/ADC.AINP,/ch[1]/CO.1,/ch[1]/RO.2
+fp /ch[1]/AMP /ch[1]/RF.2,/ch[1]/RO.1,/ch[1]/U.OUT
+fp /ch[1]/CDA ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[1]/CDD ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /ch[1]/CDV ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[1]/CF 6a6b5029-926c-82cd-ae4c-8fd044e2f4ea|/ch[1]/INF,GND
+fp /ch[1]/CO 6a6b5029-926c-82cd-ae4c-8fd044e2f4ea|/ch[1]/AIN,GND
+fp /ch[1]/CREF bfcf2077-8a50-8ff8-81e5-260809f36405|GND,VREF
+fp /ch[1]/FB /ch[1]/RF.1,/ch[1]/RG.1,/ch[1]/U.IN-
+fp /ch[1]/INF /ch[1]/CF.1,/ch[1]/RS.2,/ch[1]/U.IN+
+fp /ch[1]/RF 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[1]/AMP,/ch[1]/FB
+fp /ch[1]/RG 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[1]/FB,GND
+fp /ch[1]/RO 2d897a1e-a763-8dec-9885-934db4b4fbd9|/ch[1]/AIN,/ch[1]/AMP
+fp /ch[1]/RS 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[1]/INF,AIN1
+fp /ch[1]/U 6322f084-76b3-8b73-99b9-88e3333a560f|+5V,/ch[1]/AMP,/ch[1]/FB,/ch[1]/INF,GND
+fp /ch[2] channel
+fp /ch[2]/ADC e3a0a115-3a21-81c9-bf30-8a47de282d3f|+3V3,+5V,/ch[2]/AIN,CONVST,GND,SCLK,SDO2,VREF
+fp /ch[2]/AIN /ch[2]/ADC.AINP,/ch[2]/CO.1,/ch[2]/RO.2
+fp /ch[2]/AMP /ch[2]/RF.2,/ch[2]/RO.1,/ch[2]/U.OUT
+fp /ch[2]/CDA ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[2]/CDD ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /ch[2]/CDV ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[2]/CF 6a6b5029-926c-82cd-ae4c-8fd044e2f4ea|/ch[2]/INF,GND
+fp /ch[2]/CO 6a6b5029-926c-82cd-ae4c-8fd044e2f4ea|/ch[2]/AIN,GND
+fp /ch[2]/CREF bfcf2077-8a50-8ff8-81e5-260809f36405|GND,VREF
+fp /ch[2]/FB /ch[2]/RF.1,/ch[2]/RG.1,/ch[2]/U.IN-
+fp /ch[2]/INF /ch[2]/CF.1,/ch[2]/RS.2,/ch[2]/U.IN+
+fp /ch[2]/RF 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/AMP,/ch[2]/FB
+fp /ch[2]/RG 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/FB,GND
+fp /ch[2]/RO 2d897a1e-a763-8dec-9885-934db4b4fbd9|/ch[2]/AIN,/ch[2]/AMP
+fp /ch[2]/RS 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/INF,AIN2
+fp /ch[2]/U 6322f084-76b3-8b73-99b9-88e3333a560f|+5V,/ch[2]/AMP,/ch[2]/FB,/ch[2]/INF,GND
+place channel/ADC 218.44 102.87 0
+place channel/CDA 124.46 124.46 270
+place channel/CDD 218.44 134.62 270
+place channel/CDV 203.2 134.62 270
+place channel/CF 87.63 105.41 270
+place channel/CO 177.8 106.68 270
+place channel/CREF 233.68 134.62 270
+place channel/RF 124.46 72.39 0
+place channel/RG 100.33 107.95 270
+place channel/RO 154.94 97.79 0
+place channel/RS 63.5 96.52 0
+place channel/U 124.46 97.79 0
+place main/C101 294.64 109.22 270
+place main/C102 63.5 199.39 270
+place main/C103 78.74 199.39 270
+place main/C104 48.26 180.34 270
+place main/C105 93.98 199.39 270
+place main/C106 294.64 199.39 270
+place main/C107 271.78 180.34 270
+place main/C108 309.88 199.39 270
+place main/C109 361.95 186.69 270
+place main/C110 335.28 165.1 270
+place main/C111 171.45 184.15 270
+place main/C112 186.69 184.15 270
+place main/C113 201.93 184.15 270
+place main/C114 217.17 184.15 270
+place main/C115 232.41 184.15 270
+place main/C116 171.45 205.74 270
+place main/C117 186.69 205.74 270
+place main/C118 201.93 205.74 270
+place main/C119 217.17 205.74 270
+place main/C120 232.41 205.74 270
+place main/D1 121.92 168.91 180
+place main/H1 38.1 233.68 0
+place main/H2 46.99 233.68 0
+place main/H3 55.88 233.68 0
+place main/H4 64.77 233.68 0
+place main/J1 294.64 71.12 0
+place main/J2 52.07 67.31 0 mirror
+place main/L1 78.74 137.16 0
+place main/L2 302.26 137.16 0
+place main/R101 146.05 160.02 270
+place main/R102 335.28 72.39 270
+place main/R103 347.98 74.93 270
+place main/R104 35.56 157.48 270
+place main/R105 35.56 175.26 270
+place main/R106 259.08 157.48 270
+place main/R107 259.08 175.26 270
+place main/U1:A 247.65 88.9 0 mirror
+place main/U1:B 87.63 106.68 0 page=2
+place main/U1:C 125.73 106.68 0 page=2
+place main/U1:D 166.37 106.68 0 page=2
+place main/U1:E 207.01 106.68 0 page=2
+place main/U1:F 201.93 154.94 0
+place main/U2 78.74 167.64 0
+place main/U3 302.26 167.64 0
+place main/U4 361.95 156.21 0
+place main/ch[0] 87.63 58.42 0
+place main/ch[1] 140.97 63.5 0
+place main/ch[2] 194.31 68.58 0

@@ -37,7 +37,11 @@ fn target(name: &str) -> Result<RegionTarget, Box<dyn Error>> {
 }
 
 fn entity(name: &str) -> PersistentEntityId {
-    PersistentEntityId::new(PersistentEntityKind::Face, name.to_string(), vec!["root".into()])
+    PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        name.to_string(),
+        vec!["root".into()],
+    )
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -50,17 +54,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let lateral: usize = args.get(2).map_or(Ok(8), |a| a.parse())?;
     let threads: usize = args
         .get(3)
-        .map_or(Ok(std::thread::available_parallelism()?.get()), |a| a.parse())?;
+        .map_or(Ok(std::thread::available_parallelism()?.get()), |a| {
+            a.parse()
+        })?;
     let speed: f64 = args.get(4).map_or(Ok(0.2122), |a| a.parse())?;
 
     let mut mesh = fixtures::slab_bar_mesh(axial, lateral);
     for node in &mut mesh.topology.nodes {
         let [x, y, z] = node.coordinates_m.canonical_value();
-        node.coordinates_m = runmat_types::physical::Quantity::new([
-            x * LENGTH_M,
-            y * BORE_M,
-            z * BORE_M,
-        ]);
+        node.coordinates_m =
+            runmat_types::physical::Quantity::new([x * LENGTH_M, y * BORE_M, z * BORE_M]);
     }
     let coordinates = mesh
         .topology

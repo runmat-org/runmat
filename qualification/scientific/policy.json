@@ -30,12 +30,21 @@
     {
       "id": "driver-recovery-physics",
       "required_target": "linux-x86_64",
-      "expected_passed": 15,
+      "expected_passed": 18,
       "selected_filter": "remote::driver_replacement_tests::",
       "group": "tooling-distributed",
       "required": true,
       "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat-execution-runner-native", "--lib", "remote::driver_replacement_tests::", "--", "--test-threads=1"],
       "ordinary_skip": ["remote::driver_replacement_tests::"]
+    },
+    {
+      "id": "circuit-large-board-performance",
+      "expected_passed": 1,
+      "group": "geometry-analysis",
+      "required": true,
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat-circuit", "--test", "runtime_scale", "--", "--test-threads=1"],
+      "ordinary_skip": ["small_edits_on_a_large_board_stay_within_budget"],
+      "description": "Full 50k-plus primitive board edit, fresh-compile equivalence, delta and timing qualification. Preserve the 500 ms release budget; ordinary CI runs bounded functional regressions and verifies this receipt."
     },
     {
       "id": "extended-transient-rod",
@@ -46,12 +55,50 @@
       "ordinary_skip": ["pipeline::transient::rod_qualification::"]
     },
     {
+      "id": "coupled-full-model-witnesses",
+      "group": "tooling-distributed",
+      "required": false,
+      "exception": "Owner-approved manual scientific runs, 2026-11-09: full-model FSI wall-time and CHT wall-time/memory ceilings remain beta limitations.",
+      "expected_passed": 2,
+      "selected_filter": "example_runs_as_a_coupled_study",
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat", "--test", "check_cli", "example_runs_as_a_coupled_study", "--", "--test-threads=1"],
+      "ordinary_skip": ["fsi_compliant_tube_example_runs_as_a_coupled_study", "cht_plate_channel_example_runs_as_a_coupled_study"],
+      "description": "Full public coupled FSI and CHT model solves, publication and authored assessments. Preserve assertions and report actual manual outcomes; ordinary CI retains bounded coupling regressions."
+    },
+    {
+      "id": "induction-gear-full-model",
+      "group": "tooling-distributed",
+      "required": false,
+      "exception": "Owner-approved manual scientific routing, 2026-11-10. The current full gear model refuses a predicted 628552420949-byte numerical allocation after meshing; this is an outstanding beta resource limitation, not a successful solve.",
+      "expected_passed": 1,
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat", "--test", "check_cli", "induction_gear_example_runs_its_three_frequency_harmonic_study", "--", "--test-threads=1"],
+      "ordinary_skip": ["induction_gear_example_runs_its_three_frequency_harmonic_study"],
+      "description": "Full CAD meshing and three-frequency harmonic Maxwell study. Run explicitly on suitable hardware; retain numerical assertions and bounded Maxwell regressions in ordinary CI."
+    },
+    {
+      "id": "occt-boolean-step-corpus",
+      "group": "tooling-distributed",
+      "required": false,
+      "exception": "Governed meshing qualification is deferred under the owner's 2026-11-04 release disposition. Linux dev 2012f077cf ran the active cases in 1459 seconds: 3 passed, the arm/motor-pod case failed constrained-Delaunay facet recovery, and 2 were already ignored. Keep those outcomes and the existing assertions for explicit manual runs.",
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat-execution-runner-native", "--test", "occt_boolean_step_meshing", "--", "--include-ignored", "--test-threads=1"],
+      "ordinary_skip": [
+        "a_lofted_beam_alone_meshes",
+        "cylinders_joined_by_a_planar_beam_mesh",
+        "cylinders_unioned_with_a_lofted_beam_mesh",
+        "the_arm_and_its_motor_pod_mesh_with_a_shared_interface",
+        "the_docs_heat_sink_meshes",
+        "a_trimmed_and_cut_lofted_shell_with_its_board_meshes_with_a_shared_interface"
+      ],
+      "description": "Full boolean STEP part and shared-interface meshing corpus. Ordinary CI retains bounded exact-box geometry, volume, energy, partition and region-identity regressions. No successful receipt exists for the failing arm or ignored cases."
+    },
+    {
       "id": "meshing-release",
       "required_target": "linux-x86_64",
       "expected_passed": 12,
       "count_unit": "qualification commands",
       "command": ["bash", "scripts/qualification/meshing-release.sh"],
-      "required": true,
+      "required": false,
+      "exception": "Owner-approved 0.7.0 deferral, 2026-11-04",
       "ordinary_skip": [],
       "description": "Complete governed meshing corpus and stable performance/resource qualification; existing meshing policy and numerical assertions apply."
     }

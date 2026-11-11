@@ -1,8 +1,8 @@
 {
-  "crates/runmat-runtime/src/analysis/mod.rs": 4793,
+  "crates/runmat-runtime/src/analysis/mod.rs": 3806,
   "crates/runmat-analysis/fea/src/assembly/mod.rs": 4390,
-  "crates/runmat-runtime/src/analysis/figures.rs": 3741,
-  "crates/runmat-runtime/src/analysis/contracts.rs": 2828,
+  "crates/runmat-runtime/src/analysis/figures.rs": 3724,
+  "crates/runmat-runtime/src/analysis/contracts.rs": 2623,
   "crates/runmat-runtime/src/analysis/storage.rs": 869,
   "crates/runmat-analysis/fea/src/fixtures.rs": 1647,
   "crates/runmat-runtime/src/analysis/operations/query.rs": 1541,
@@ -10,13 +10,13 @@
   "crates/runmat-analysis/fea/src/execution/transient_segment.rs": 1125,
   "crates/runmat-analysis/fea/src/pipeline/electro_thermal.rs": 1108,
   "crates/runmat-analysis/fea/src/results/field/contract.rs": 809,
-  "crates/runmat-analysis/fea/src/results/accuracy/mod.rs": 680,
+  "crates/runmat-analysis/fea/src/results/accuracy/mod.rs": 665,
   "crates/runmat-runtime/src/analysis/value_admission.rs": 625,
   "crates/runmat-analysis/fea/src/results/observation/distributed_numeric.rs": 815,
   "crates/runmat-analysis/fea/src/execution/transient_result.rs": 833,
   "crates/runmat-analysis/core/src/study/sequence.rs": 726,
   "crates/runmat-analysis/fea/src/planning/resource/post_process.rs": 697,
-  "crates/runmat-runtime/src/analysis/structural_study/lifecycle/preparation.rs": 715,
+  "crates/runmat-runtime/src/analysis/structural_study/lifecycle/preparation.rs": 706,
   "crates/runmat-analysis/fea/src/constraints/result.rs": 763,
   "crates/runmat-analysis/fea/src/constraints/algebra.rs": 697
 }

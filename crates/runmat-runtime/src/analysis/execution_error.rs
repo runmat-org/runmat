@@ -27,10 +27,8 @@ pub(super) fn map_fea_run_error(
             ("geometry_id".to_string(), model.geometry_id.clone()),
         ])
     };
-    match err {
-        FeaRunError::Usage(cause) => super::fea_run_admission::FeaRunDenied::Accounting(cause)
-            .into_operation_error(operation.name(), operation.version(), context),
-        FeaRunError::Cancelled => operation_error(
+    let cancelled = || {
+        operation_error(
             operation.name(),
             operation.version(),
             context,
@@ -42,7 +40,12 @@ pub(super) fn map_fea_run_error(
             },
             "FEA run cancelled by user",
             model_details(),
-        ),
+        )
+    };
+    match err {
+        FeaRunError::Usage(cause) => super::fea_run_admission::FeaRunDenied::Accounting(cause)
+            .into_operation_error(operation.name(), operation.version(), context),
+        FeaRunError::Cancelled => cancelled(),
         FeaRunError::InvalidModel(message) | FeaRunError::Observation(message) => operation_error(
             operation.name(),
             operation.version(),
@@ -70,7 +73,12 @@ pub(super) fn map_fea_run_error(
             model_details(),
         ),
         FeaRunError::Resource(error) => {
-            let error_type = match &error {
+            let error_type = match error {
+                ResourcePlanningError::Cancelled => return cancelled(),
+                ResourcePlanningError::Accounting(cause) => {
+                    return super::fea_run_admission::FeaRunDenied::Accounting(cause)
+                        .into_operation_error(operation.name(), operation.version(), context);
+                }
                 ResourcePlanningError::CanonicalWireCapacity { .. }
                 | ResourcePlanningError::MemoryBudget { .. }
                 | ResourcePlanningError::AccuracyCeiling { .. }

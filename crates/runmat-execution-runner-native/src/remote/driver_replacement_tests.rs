@@ -475,7 +475,13 @@ impl DriverControlPlane for DurableControl {
                 .as_ref()
                 .map(|id| artifact_download(id, state.artifacts.get(id).unwrap())),
             cancellation_requested: false,
-            driver_resources: self.resources.clone(),
+            driver_resources: {
+                let mut resources = self.resources.clone();
+                resources.memory_bytes =
+                    runmat_execution::resource::remote_driver_memory_bytes(resources.memory_bytes)
+                        .unwrap();
+                resources
+            },
             driver_accelerator_devices: Vec::new(),
             desired_worker_count: 1,
             worker_resources: self.resources.clone(),
@@ -1697,10 +1703,11 @@ async fn actual_driver_replacement_case(
             matches!(&event.kind, DriverEventKind::DeadlineExpired { task_id: expired_id }
                 if *expired_id == task_id)
         }));
-        assert!(state
-            .transitions
-            .iter()
-            .any(|(fence, target, _)| { *fence == 2 && *target == DriverRunTarget::Cancelled }),
+        assert!(
+            state
+                .transitions
+                .iter()
+                .any(|(fence, target, _)| { *fence == 2 && *target == DriverRunTarget::Cancelled }),
             "expired restored deadline must cancel the run: transitions={:?}; diagnostics={:?}",
             state.transitions,
             decrypted_diagnostics(&control, &state)

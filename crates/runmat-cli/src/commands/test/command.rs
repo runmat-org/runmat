@@ -32,6 +32,46 @@ use super::exit::TestCommandError;
 use super::remote::{RemoteTestBackend, RemoteTestBackendConfig};
 
 pub async fn execute(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
+    // Circuit files named as targets run the circuit checks (ERC, review suites, DRC, simulation
+    // limits); the other targets go to the test runner, which is skipped when none are left.
+    let (circuits, rest): (Vec<_>, Vec<_>) = args
+        .targets
+        .iter()
+        .cloned()
+        .partition(|target| crate::commands::circuit_checks::is_circuit(target));
+    let mut circuits_failed = false;
+    if !circuits.is_empty() {
+        let mut reports = Vec::new();
+        for file in &circuits {
+            match crate::commands::circuit_checks::check_file(file, true) {
+                Ok(report) => reports.push(report),
+                Err(error) => {
+                    eprintln!("{}: {error:#}", presentation::stderr().error("Error"));
+                    return Err(TestCommandError::new(2).into());
+                }
+            }
+        }
+        circuits_failed = !crate::commands::circuit_checks::print_reports(&reports, false)?;
+        if rest.is_empty() {
+            return if circuits_failed {
+                Err(TestCommandError::new(1).into())
+            } else {
+                Ok(())
+            };
+        }
+    }
+    let args = TestArgs {
+        targets: rest,
+        ..args
+    };
+    let result = execute_runner(args, cli, runtime).await;
+    if circuits_failed && result.is_ok() {
+        return Err(TestCommandError::new(1).into());
+    }
+    result
+}
+
+async fn execute_runner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
     match execute_inner(args, cli, runtime).await {
         Ok(()) => Ok(()),
         Err(error) if error.downcast_ref::<TestCommandError>().is_some() => Err(error),

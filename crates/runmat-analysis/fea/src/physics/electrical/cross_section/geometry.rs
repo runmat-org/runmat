@@ -164,12 +164,19 @@ impl Geometry {
             .layers
             .iter()
             .position(|layer| &layer.name == layer_name)
-            .ok_or_else(|| invalid(format!("conductor layer `{layer_name}` is not in the stackup")))?;
+            .ok_or_else(|| {
+                invalid(format!(
+                    "conductor layer `{layer_name}` is not in the stackup"
+                ))
+            })?;
         let (fill_override, signal_thickness) = match section.layers[index].kind {
             StackLayerKind::Copper {
                 role: CopperRole::Signal,
                 fill_relative_permittivity,
-            } => (fill_relative_permittivity, section.layers[index].thickness_m),
+            } => (
+                fill_relative_permittivity,
+                section.layers[index].thickness_m,
+            ),
             _ => {
                 return Err(invalid(format!(
                     "conductor layer `{layer_name}` must be a signal copper layer"
@@ -216,9 +223,7 @@ impl Geometry {
         let outer_top = plane_above.is_none() && dielectric_count(&above) == 0;
         let outer_bottom = plane_below.is_none() && dielectric_count(&below) == 0;
         if outer_top && outer_bottom {
-            return Err(invalid(
-                "the signal layer has no dielectric on either side",
-            ));
+            return Err(invalid("the signal layer has no dielectric on either side"));
         }
         let mut bands = Vec::new();
         for &i in above.iter().chain(&below) {
@@ -311,7 +316,10 @@ impl Geometry {
             }
             let width = positive(conductor.width_m, &format!("{} width", conductor.name))?;
             if !conductor.center_m.is_finite() {
-                return Err(invalid(format!("{} position must be finite", conductor.name)));
+                return Err(invalid(format!(
+                    "{} position must be finite",
+                    conductor.name
+                )));
             }
             let angle = conductor.etch_angle_rad;
             if !(angle.is_finite() && angle > 0.0 && angle <= std::f64::consts::FRAC_PI_2 + 1e-12) {
@@ -359,7 +367,8 @@ impl Geometry {
             feature = feature.min(signal_thickness);
         }
         for pair in traces.windows(2) {
-            let gap = (pair[1].base_left - pair[0].base_right).min(pair[1].far_left - pair[0].far_right);
+            let gap =
+                (pair[1].base_left - pair[0].base_right).min(pair[1].far_left - pair[0].far_right);
             if gap <= 0.0 {
                 return Err(invalid(format!(
                     "conductors `{}` and `{}` overlap",
@@ -390,7 +399,11 @@ impl Geometry {
         }
         let height_above = plane_above.map(|p| bottom_of(p) - signal_band.1);
         let height_below = plane_below.map(|p| signal_band.0 - tops[p]);
-        let side_height = |ids: &[usize]| ids.iter().map(|&i| section.layers[i].thickness_m).sum::<f64>();
+        let side_height = |ids: &[usize]| {
+            ids.iter()
+                .map(|&i| section.layers[i].thickness_m)
+                .sum::<f64>()
+        };
         let height = match (height_above, height_below) {
             (Some(a), Some(b)) => a.max(b),
             (Some(a), None) => a,
@@ -398,8 +411,14 @@ impl Geometry {
             (None, None) => side_height(&above).max(side_height(&below)),
         };
         let span = (
-            traces.iter().map(|t| t.base_left.min(t.far_left)).fold(f64::INFINITY, f64::min),
-            traces.iter().map(|t| t.base_right.max(t.far_right)).fold(f64::NEG_INFINITY, f64::max),
+            traces
+                .iter()
+                .map(|t| t.base_left.min(t.far_left))
+                .fold(f64::INFINITY, f64::min),
+            traces
+                .iter()
+                .map(|t| t.base_right.max(t.far_right))
+                .fold(f64::NEG_INFINITY, f64::max),
         );
         let enclosure = match section.enclosure {
             Some(enclosure) => {
@@ -410,7 +429,9 @@ impl Geometry {
             None => Enclosure::default_for(height, span.1 - span.0),
         };
         let centre = 0.5 * (span.0 + span.1);
-        let half = enclosure.half_width_m.max(0.5 * (span.1 - span.0) + 2.0 * height);
+        let half = enclosure
+            .half_width_m
+            .max(0.5 * (span.1 - span.0) + 2.0 * height);
         let mask_reach = mask.as_ref().map_or(0.0, |m| m.thickness);
         let y_low = match plane_below {
             Some(p) => tops[p],
@@ -508,8 +529,16 @@ impl Geometry {
             let (lo, hi) = at(trace.base_y, trace.base_right, trace.far_right);
             keys.push(KeyColumn::slanted(lo, hi, band_lo, band_hi, true));
         }
-        keys.push(KeyColumn::slanted(self.x_low, self.x_low, band_lo, band_hi, false));
-        keys.push(KeyColumn::slanted(self.x_high, self.x_high, band_lo, band_hi, false));
+        keys.push(KeyColumn::slanted(
+            self.x_low, self.x_low, band_lo, band_hi, false,
+        ));
+        keys.push(KeyColumn::slanted(
+            self.x_high,
+            self.x_high,
+            band_lo,
+            band_hi,
+            false,
+        ));
         keys.sort_by(|a, b| a.low.total_cmp(&b.low));
         keys
     }

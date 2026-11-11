@@ -83,6 +83,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
         })),
     )
     .map_err(|error| protocol_error("failed to monitor coordinator", error))?;
+    replies.activate_reader();
     let mut output = ControlFrameWriter::new(control.writer, frame_limits)
         .map_err(|error| protocol_error("failed to open coordinator writer", error))?;
     let first = frames

@@ -1,7 +1,7 @@
 //! Lazy native FEA lease host shared by CLI and standalone native images.
 //! Construction captures only a typed selector. Each admitted root owns its transport thread.
-use std::sync::mpsc::{self, SyncSender};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, SyncSender};
 use std::sync::Mutex;
 
 use runmat_runtime::analysis::fea_run_admission::{
@@ -28,6 +28,7 @@ struct DriverLeaseAuthority {
     fencing_token: u64,
     credential: String,
 }
+
 impl NativeFeaAdmission {
     /// A typed host selector; this constructor performs no auth or transport work.
     pub fn from_selection(org: FeaLocalOrganization) -> Self {
@@ -99,7 +100,7 @@ struct Permit {
     commands: Mutex<tokio::sync::mpsc::Sender<Command>>,
     initial: FeaRunBudget,
     measurement_version: MeasurementVersion,
-    /// Grant from the latest server reply, for sizing the next request.
+    /// Highest grant observed from a server reply, for sizing the next request.
     granted: AtomicU64,
 }
 
@@ -120,8 +121,11 @@ impl Permit {
                 reply,
             )
         })?;
+        // Replies can complete before their callers publish this observation.
+        // Keep the cumulative grant monotonic across concurrent heartbeat and
+        // renewal callers even if an older caller resumes last.
         self.granted
-            .store(budget.granted_ops.operations(), Ordering::Release);
+            .fetch_max(budget.granted_ops.operations(), Ordering::AcqRel);
         Ok(budget)
     }
     /// The server adds what it can toward an absolute target within the
@@ -341,29 +345,42 @@ fn unreachable() -> Failure {
 
 /// The signed-in person's stored credentials (`runmat login`), read again for every request so
 /// a refresh by another RunMat process (which may rotate the refresh token) is seen here.
-struct StoredSignIn;
+struct StoredSignIn {
+    server: String,
+    config: auth::RemoteConfig,
+}
 
 impl StoredSignIn {
-    async fn token(force: bool) -> Result<String, Failure> {
+    async fn token(&mut self, force: bool) -> Result<String, Failure> {
         let mut config = auth::RemoteConfig::load().map_err(|_| FeaRunDenied::LicenseInvalid)?;
         let server =
             auth::resolve_server_url(&config, None).map_err(|_| FeaRunDenied::LicenseInvalid)?;
+        if server != self.server
+            || config.credential_store.unwrap_or_default()
+                != self.config.credential_store.unwrap_or_default()
+            || config.token_endpoint != self.config.token_endpoint
+            || config.token_client_id != self.config.token_client_id
+        {
+            return Err(FeaRunDenied::LicenseInvalid.into());
+        }
         let timeout = std::time::Duration::from_secs(10);
         let token = if force {
             tokio::time::timeout(timeout, auth::refresh_auth_token(&mut config, &server)).await
         } else {
             tokio::time::timeout(timeout, auth::resolve_auth_token(&mut config, &server)).await
         };
-        token.map_err(|_| unreachable())?.map_err(auth_failure)
+        let token = token.map_err(|_| unreachable())?.map_err(auth_failure)?;
+        self.config = config;
+        Ok(token)
     }
 }
 
 impl AccessTokens for StoredSignIn {
     fn current(&mut self) -> BoxFuture<'_, Result<String, Failure>> {
-        Box::pin(Self::token(false))
+        Box::pin(self.token(false))
     }
     fn refreshed(&mut self) -> BoxFuture<'_, Result<String, Failure>> {
-        Box::pin(Self::token(true))
+        Box::pin(self.token(true))
     }
 }
 
@@ -413,14 +430,31 @@ macro_rules! through_outage {
             $lease.expires_at,
         )
         .begin($operation);
+        let mut last_denial = None;
         loop {
-            match with_current_token!($session, |$client| $call) {
-                Err(failure) if failure.transient => {
+            let remaining = clock.remaining();
+            if remaining.is_zero() {
+                // Settlement of an expired lease still needs its initial request.
+                // A zero outage window disables retries, not durable settlement.
+                if clock.attempts() == 1 && last_denial.is_none() {
+                    break with_current_token!($session, |$client| $call)
+                        .map_err(FeaRunDenied::from);
+                }
+                break Err(last_denial.unwrap_or(FeaRunDenied::ServerUnreachable));
+            }
+            match tokio::time::timeout(remaining, async {
+                with_current_token!($session, |$client| $call)
+            })
+            .await
+            {
+                Err(_) => break Err(last_denial.unwrap_or(FeaRunDenied::ServerUnreachable)),
+                Ok(Err(failure)) if failure.transient => {
                     if !clock.retry(&failure.denied).await {
                         break Err(failure.denied);
                     }
+                    last_denial = Some(failure.denied);
                 }
-                other => {
+                Ok(other) => {
                     if other.is_ok() {
                         clock.recovered();
                     }
@@ -432,10 +466,7 @@ macro_rules! through_outage {
 }
 
 impl LeaseSession {
-    async fn person(
-        server: String,
-        mut tokens: Box<dyn AccessTokens>,
-    ) -> Result<Self, Failure> {
+    async fn person(server: String, mut tokens: Box<dyn AccessTokens>) -> Result<Self, Failure> {
         let token = tokens.current().await?;
         let client = SimulationLeaseClient::new(&server, &token).map_err(denial)?;
         Ok(Self {
@@ -524,7 +555,7 @@ fn unauthorized(error: &SimulationLeaseError) -> bool {
 }
 
 async fn open(
-    org: Option<Uuid>,
+    org_override: Option<Uuid>,
     driver: Option<DriverLeaseAuthority>,
     request: FeaRunRequest,
     client_kind: SimulationClientKind,
@@ -536,10 +567,11 @@ async fn open(
         let config = auth::RemoteConfig::load().map_err(|_| FeaRunDenied::LicenseInvalid)?;
         let server =
             auth::resolve_server_url(&config, None).map_err(|_| FeaRunDenied::LicenseInvalid)?;
-        let mut session = LeaseSession::person(server, Box::new(StoredSignIn)).await?;
-        let org = match auth::configured_public_org_id(&config, org)
-            .map_err(|_| FeaRunDenied::LicenseInvalid)?
-        {
+        let configured_org = auth::configured_public_org_id(&config, org_override)
+            .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+        let mut session =
+            LeaseSession::person(server.clone(), Box::new(StoredSignIn { server, config })).await?;
+        let org = match configured_org {
             Some(org) => org,
             None => with_current_token!(session, |client| client.sole_organization())?,
         };
@@ -629,6 +661,9 @@ impl FeaRunPermit for Permit {
 }
 
 #[cfg(test)]
+mod client_session_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use runmat_execution::resource::ResourceUsage;
@@ -659,18 +694,13 @@ mod tests {
             initial,
             measurement_version: MeasurementVersion::reference_v1(),
         };
-        // Within the current grant: exactly what is required.
         assert_eq!(permit.grant_target(ops(80)), ops(80));
-        // One element past the grant: ask for the grant again on top.
         assert_eq!(permit.grant_target(ops(110)), ops(210));
-        // A large jump asks for twice the jump.
         assert_eq!(permit.grant_target(ops(1_000)), ops(1_900));
-        // Never past the budget, and never below what is required.
         permit.granted.store(6_000, Ordering::Release);
         assert_eq!(permit.grant_target(ops(6_010)), ops(10_000));
         permit.granted.store(10_000, Ordering::Release);
         assert_eq!(permit.grant_target(ops(10_000)), ops(10_000));
-        // 60 per-element requests of 10 ops starting from no grant.
         permit.granted.store(0, Ordering::Release);
         let mut renewals = 0;
         for element in 1..=60u64 {

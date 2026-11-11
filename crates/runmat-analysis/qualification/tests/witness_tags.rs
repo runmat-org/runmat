@@ -1,9 +1,9 @@
 //! Every `// witness:` tag in the repository must name a real obligation, only required
 //! envelopes, and sit on a real test function. A stale or broken tag fails here.
 use runmat_analysis_qualification::{
+    checks,
     requirement::{Envelope, ExecutionEnvelope, Formulation, MeshOrder},
     requirements,
-    checks,
     witness::{parse_tag_text, repository_root, scan, split_checks, validate_tags},
 };
 
@@ -61,7 +61,8 @@ fn tag_text_parses_alternatives_and_rejects_unknown_names() {
 
 #[test]
 fn check_field_splits_out_and_names_ledger_checks() {
-    let (rest, ids) = split_checks("A/b @ thermal_steady/tet4/durable; check: one, two; boundary: x");
+    let (rest, ids) =
+        split_checks("A/b @ thermal_steady/tet4/durable; check: one, two; boundary: x");
     assert_eq!(ids, ["one", "two"]);
     assert_eq!(rest, "A/b @ thermal_steady/tet4/durable; boundary: x");
     assert!(parse_tag_text(&rest).is_ok());

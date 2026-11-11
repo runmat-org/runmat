@@ -647,7 +647,9 @@ pub use task::{
     build_resource_planned_task_submission_with_closure, AnalysisExecutionContext,
     PreparedAnalysisTaskClosure, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
 };
-pub use thermal_execution::execute_thermal_solver_result_objects;
+pub use thermal_execution::{
+    execute_thermal_solver_result_objects, execute_thermal_solver_result_objects_admitted,
+};
 pub use thermal_result_access::{
     decode_prepared_thermal_manifest, decode_prepared_thermal_state, import_thermal_state,
     prepare_thermal_solver_result_objects, thermal_receipt_from_prepared_result,

@@ -25,6 +25,7 @@ use super::{
     },
     structural_loads::{
         apply as apply_structural_load_plan, compile_mixed as compile_mixed_load_plan,
+        compile_mixed_with_owner, MixedLoadCapacityError, MixedLoadContext, MixedLoadPhase,
     },
     structural_source_implementations, validate_structural_inputs, AssemblySummary,
     LinearAssemblyError, StructuralAssemblyError, StructuralProjectionBasis,
@@ -52,6 +53,20 @@ use operators::{embed_solid_matrix, sparse_error, sum};
 pub(super) enum MixedCapacityPhase {
     Solid(SolidCapacityPhase),
     Explicit(ExplicitCapacityPhase),
+    ConnectorProjection,
+    SolidLoadProjection,
+    BodyLoadQuadrature,
+}
+
+fn projection_error(error: crate::topology::AnalysisProjectionError) -> LinearAssemblyError {
+    let structural = match error {
+        crate::topology::AnalysisProjectionError::Accounting(cause) => {
+            StructuralAssemblyError::Accounting(cause)
+        }
+        crate::topology::AnalysisProjectionError::Cancelled => StructuralAssemblyError::Cancelled,
+        other => StructuralAssemblyError::MixedTopology(other.to_string()),
+    };
+    LinearAssemblyError::Structural(structural)
 }
 
 pub(crate) fn mixed_dof_layout(
@@ -179,12 +194,21 @@ where
         OperatorRole::Damping,
         MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     );
-    let connector_projection =
-        crate::topology::AnalysisProjection::derive(mesh).map_err(|error| {
-            LinearAssemblyError::Structural(StructuralAssemblyError::MixedTopology(
-                error.to_string(),
-            ))
-        })?;
+    let connector_projection = if model.connectors.is_empty() {
+        None
+    } else {
+        if awaited_elements {
+            let work = super::explicit_connectors::connector_plan_projection_work_upper_bound(
+                model,
+                Some(mesh),
+            )
+            .map_err(projection_error)?;
+            if work > runmat_simulation_usage::OperationCount::ZERO {
+                before(MixedCapacityPhase::ConnectorProjection, work).await?;
+            }
+        }
+        Some(crate::topology::AnalysisProjection::derive(mesh).map_err(projection_error)?)
+    };
     let connector_coordinates_m = topology
         .nodes
         .iter()
@@ -219,9 +243,13 @@ where
                 }),
                 ConnectorTargetRole::Surface => match ownership {
                     MixedStructuralTargetOwnership::Solid { .. }
-                    | MixedStructuralTargetOwnership::Shared { .. } => {
-                        resolve_projected_surface(connector, target, &connector_projection)
-                    }
+                    | MixedStructuralTargetOwnership::Shared { .. } => resolve_projected_surface(
+                        connector,
+                        target,
+                        connector_projection
+                            .as_ref()
+                            .expect("nonempty connector plan owns a projection"),
+                    ),
                     MixedStructuralTargetOwnership::Explicit { .. } => {
                         resolve_explicit_surface(connector, target, structural, &topology)
                     }
@@ -320,18 +348,52 @@ where
     )
     .map_err(LinearAssemblyError::Structural)?;
     let mut direct_constraints = DirectConstraintAssignments::new(&layout);
-    let source_projection = compile_mixed_load_plan(
-        structural,
-        &solid_properties,
-        excitations,
-        mesh,
-        constraint_plan,
-        &topology,
-        &layout,
-    )
-    .map_err(|error| {
-        LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error.to_string()))
-    })?;
+    let source_projection = if awaited_elements {
+        compile_mixed_with_owner(
+            MixedLoadContext {
+                structural,
+                properties: &solid_properties,
+                excitations,
+                mesh,
+                constraint_plan,
+                topology: &topology,
+                layout: &layout,
+            },
+            true,
+            |phase, work| {
+                before(
+                    match phase {
+                        MixedLoadPhase::Projection => MixedCapacityPhase::SolidLoadProjection,
+                        MixedLoadPhase::BodyLoadQuadrature => {
+                            MixedCapacityPhase::BodyLoadQuadrature
+                        }
+                    },
+                    work,
+                )
+            },
+        )
+        .await
+        .map_err(|error| match error {
+            MixedLoadCapacityError::Admission(error) => error,
+            MixedLoadCapacityError::Projection(error) => A::from(projection_error(error)),
+            MixedLoadCapacityError::Plan(error) => A::from(LinearAssemblyError::from(error)),
+        })?
+    } else {
+        compile_mixed_load_plan(
+            structural,
+            &solid_properties,
+            excitations,
+            mesh,
+            constraint_plan,
+            &topology,
+            &layout,
+        )
+        .map_err(|error| match error {
+            MixedLoadCapacityError::Admission(never) => match never {},
+            MixedLoadCapacityError::Projection(error) => projection_error(error),
+            MixedLoadCapacityError::Plan(error) => LinearAssemblyError::from(error),
+        })?
+    };
     apply_structural_load_plan(
         &source_projection.plan,
         &topology,
@@ -339,9 +401,7 @@ where
         &layout,
         &mut rhs,
     )
-    .map_err(|error| {
-        LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error.to_string()))
-    })?;
+    .map_err(LinearAssemblyError::from)?;
     let spatial_projection_evidence = source_projection
         .plan
         .entries

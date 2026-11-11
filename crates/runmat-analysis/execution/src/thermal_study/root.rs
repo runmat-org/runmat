@@ -42,6 +42,7 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    maximum_resident_bytes: Option<u64>,
     #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
     local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     field_source: Option<FieldSourceWire>,
@@ -72,6 +73,7 @@ impl PreparationWire {
     fn new(preparation: ThermalStudyPreparation) -> Self {
         let limits = preparation.output_policy.inventory_limits();
         Self {
+            maximum_resident_bytes: preparation.maximum_resident_bytes,
             local_execution: preparation.local_execution,
             field_source: None,
             scope: preparation.scope,
@@ -122,6 +124,7 @@ impl PreparationWire {
             return Err(invalid("noncanonical thermal output chunk size"));
         }
         Ok(ThermalStudyPreparation {
+            maximum_resident_bytes: self.maximum_resident_bytes,
             local_execution: self.local_execution,
             field_source,
             scope: self.scope,
@@ -177,7 +180,7 @@ pub fn prepare_thermal_study_root(
         })
         .transpose()?;
     let wire = CompletionWire {
-        schema_version: 4,
+        schema_version: 5,
         preparation: preparation_wire,
         closures: completed.result_closures().to_vec(),
         descendants,
@@ -240,6 +243,8 @@ pub fn import_thermal_study_root(
         ANALYSIS_MANIFEST_MEDIA_TYPE,
         ANALYSIS_MANIFEST_VALUE_SCHEMA,
     )?;
+    let admitted_source = crate::study_closure::CallerBoundedImport::new(source, limits)?;
+    let source = &admitted_source;
     let manifest = AnalysisObjectManifest::from_canonical_bytes(&read(source, root, limits)?)?;
     let objects = import_analysis_objects(
         source,
@@ -260,16 +265,8 @@ pub fn import_thermal_study_root(
         &payload,
         completion_codec_limits(limits),
     )?;
-    if wire.schema_version != 4 {
+    if wire.schema_version != 5 {
         return Err(invalid("unsupported thermal completion schema"));
-    }
-    if wire.preparation.max_objects > limits.max_objects
-        || wire.preparation.max_object_bytes > limits.max_object_bytes
-        || wire.preparation.max_total_bytes > limits.max_total_bytes
-    {
-        return Err(invalid(
-            "thermal replay policy exceeds caller import limits",
-        ));
     }
     wire.descendants.validate()?;
     let mut all = wire.descendants.objects.clone();
@@ -302,6 +299,8 @@ pub fn import_thermal_study_root(
         }
     };
     let expected_descendants = wire.descendants;
+    let closed_source = admitted_source.close(&expected_descendants.objects, access)?;
+    let source = &closed_source;
     let preparation = wire
         .preparation
         .into_preparation_with_source(access.clone(), field_source)?;
@@ -429,7 +428,7 @@ fn read(
         return Err(invalid("thermal object byte limit exceeded"));
     }
     let bytes = source
-        .read_verified(reference.logical_digest)?
+        .read_verified_bounded(reference.logical_digest, reference.encoded_length)?
         .ok_or_else(|| invalid("thermal closure child is missing"))?;
     if bytes.len() as u64 != reference.encoded_length
         || Digest::sha256(&bytes) != reference.logical_digest

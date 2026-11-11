@@ -112,9 +112,11 @@ impl RunMatSession {
             requested_outputs,
             lexical_environment,
         } = call;
-        let published = self
-            .generic_native_cache
-            .resolve_or_compile(unit, preferred_function)?;
+        let published = self.generic_native_cache.resolve_or_compile(
+            unit,
+            preferred_function,
+            crate::generic_native::capture_liveness_admission(runtime)?,
+        )?;
         crate::generic_native::invoke(
             unit,
             crate::generic_native::NativeInvocation {
@@ -255,8 +257,12 @@ impl RunMatSession {
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
         {
-            self.generic_native_cache
-                .resolve_or_schedule_osr(unit, None, profile)?
+            self.generic_native_cache.resolve_or_schedule_osr(
+                unit,
+                None,
+                profile,
+                crate::generic_native::capture_liveness_admission(runtime)?,
+            )?
         } else {
             None
         };
@@ -376,8 +382,12 @@ impl RunMatSession {
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
         {
-            self.generic_native_cache
-                .resolve_or_schedule_osr(unit, None, profile.as_ref())?
+            self.generic_native_cache.resolve_or_schedule_osr(
+                unit,
+                None,
+                profile.as_ref(),
+                crate::generic_native::capture_liveness_admission(runtime)?,
+            )?
         } else {
             None
         };
@@ -546,8 +556,12 @@ impl RunMatSession {
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
         {
-            self.generic_native_cache
-                .resolve_or_schedule_osr(unit, Some(name), profile.as_ref())?
+            self.generic_native_cache.resolve_or_schedule_osr(
+                unit,
+                Some(name),
+                profile.as_ref(),
+                crate::generic_native::capture_liveness_admission(runtime)?,
+            )?
         } else {
             None
         };

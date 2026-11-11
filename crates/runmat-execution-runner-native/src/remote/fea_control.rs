@@ -184,10 +184,11 @@ impl WorkerPermit {
         if calls.active != Some(self.root) {
             return Err(FeaRunDenied::LicenseInvalid);
         }
-        match self
-            .control
-            .call(&mut calls, operation, parent_reply_timeout(Some(&self.budget)))?
-        {
+        match self.control.call(
+            &mut calls,
+            operation,
+            parent_reply_timeout(Some(&self.budget)),
+        )? {
             Reply::Budget { budget } => Ok(budget),
             _ => Err(FeaRunDenied::LicenseInvalid),
         }

@@ -1,0 +1,55 @@
+runmat 0.7
+std 1
+
+drawing standard {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [
+            { label = "Title", source = { source = literal, text = "Bracket" } },
+            { label = "Part number", source = { source = property, name = part_number } },
+            { label = "Material", source = { source = property, name = material } },
+            { label = "Scale", source = { source = scale } },
+            { label = "Sheet", source = { source = sheet_number } },
+            { label = "Rev", source = { source = revision } }
+        ]
+    }
+
+    sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
+
+    view front = standard(orientation = front, sheet = "1", model = { part = bracket }, at = [115, 85], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = bracket }, at = [115, 165], display = hidden_lines)
+    view right = projected(from = front, direction = right, sheet = "1", model = { part = bracket }, at = [275, 85], display = hidden_lines)
+    view a_a = section(
+        from = top,
+        plane = feature.h.face.wall(a),
+        label = A,
+        sheet = "1",
+        model = { part = bracket },
+        at = [300, 160],
+        display = hidden_lines
+    )
+    view b = detail(
+        from = right,
+        center = edges_between(feature.body.face.side(s1.l1), feature.body.face.end),
+        radius = 4 mm,
+        label = B,
+        sheet = "1",
+        model = { part = bracket },
+        at = [345, 235],
+        scale = [8, 1],
+        display = hidden_lines
+    )
+
+    annotation width = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l2)], view = front)
+    annotation thickness = dimension(style = linear, references = [feature.body.face.start, feature.body.face.end], view = front)
+    annotation depth = dimension(style = linear, references = [feature.body.face.side(s1.l1), feature.body.face.side(s1.l3)], view = top)
+    annotation cut_width = dimension(style = linear, references = [feature.cut.face.side(s_cut.c4), feature.cut.face.side(s_cut.c2)], view = top)
+    annotation cut_height = dimension(style = linear, references = [feature.cut.face.side(s_cut.c1), feature.cut.face.side(s_cut.c3)], view = top)
+    annotation cut_x = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.cut.face.side(s_cut.c4)], view = top)
+    annotation cut_y = dimension(style = linear, references = [feature.body.face.side(s1.l1), feature.cut.face.side(s_cut.c1)], view = top)
+    annotation hole_x = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.h.face.wall(a)], view = top)
+    annotation hole_y = dimension(style = linear, references = [feature.body.face.side(s1.l1), feature.h.face.wall(a)], view = top)
+    annotation hole = hole_callout(hole = feature.h.face.wall(a), view = top)
+    annotation parallel = gdt(tolerance = top_parallel, view = front)
+    annotation datum_a = datum_symbol(label = A, view = front)
+}

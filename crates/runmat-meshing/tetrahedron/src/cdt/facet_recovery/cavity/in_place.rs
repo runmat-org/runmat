@@ -65,30 +65,26 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity_in_place(
     let mut insertion_round = 0_u64;
     let mut steiner_insertions = Vec::new();
     loop {
-        let cavities = match plan_facet_cavity(
-            working.topology(),
-            facet,
-            &[facet],
-            constraint_index,
-            work,
-        )? {
-            CavityPlan::Refill { .. } => {
-                // The patch path recomputes the same plan and admits it locally.
-                return Ok(try_recover_facet_patch_in_place(
-                    working,
-                    facet,
-                    &cap,
-                    protected_facets,
-                    protected_edges,
-                    constraint_index,
-                    work,
-                )?
-                .then_some(steiner_insertions));
-            }
-            CavityPlan::Unavailable => return Ok(None),
-            CavityPlan::NeedsSteiner(cavities) => cavities,
-        };
-        let groups = steiner_candidate_groups(working.topology(), &cavities, constraint_index, work)?;
+        let cavities =
+            match plan_facet_cavity(working.topology(), facet, &[facet], constraint_index, work)? {
+                CavityPlan::Refill { .. } => {
+                    // The patch path recomputes the same plan and admits it locally.
+                    return Ok(try_recover_facet_patch_in_place(
+                        working,
+                        facet,
+                        &cap,
+                        protected_facets,
+                        protected_edges,
+                        constraint_index,
+                        work,
+                    )?
+                    .then_some(steiner_insertions));
+                }
+                CavityPlan::Unavailable => return Ok(None),
+                CavityPlan::NeedsSteiner(cavities) => cavities,
+            };
+        let groups =
+            steiner_candidate_groups(working.topology(), &cavities, constraint_index, work)?;
         let request = |inserted: Vec<DelaunayVolumeNode>, refill_options| SideRefill {
             inserted,
             facet,
@@ -260,7 +256,12 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity_in_place(
             let candidate_rank = exact_rank_offset + candidate_rank as u64;
             let Some(node) = candidate_node(
                 working.topology(),
-                explicit_candidate(coordinates_m, facet, insertion_round, candidate_rank as usize),
+                explicit_candidate(
+                    coordinates_m,
+                    facet,
+                    insertion_round,
+                    candidate_rank as usize,
+                ),
                 constraint_index,
                 work,
             )?
@@ -331,10 +332,10 @@ fn explicit_candidate(
     candidate_rank: usize,
 ) -> CandidateInsertion {
     CandidateInsertion {
-        coordinates_m: runmat_types::physical::Quantity::<
-            runmat_types::physical::kind::Position,
-            _,
-        >::new(coordinates_m),
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
         construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
         facet,
         insertion_round,
@@ -412,7 +413,14 @@ fn refill_sides_in_place(
                 .expect("cavity cells are active")
                 .vertex_indices
         })
-        .map(|node| (node, topology.nodes()[node as usize].coordinates_m.canonical_value()))
+        .map(|node| {
+            (
+                node,
+                topology.nodes()[node as usize]
+                    .coordinates_m
+                    .canonical_value(),
+            )
+        })
         .collect::<Vec<_>>();
     local.sort_unstable_by_key(|(node, _)| *node);
     local.dedup_by_key(|(node, _)| *node);
@@ -490,13 +498,12 @@ fn refill_sides_in_place(
             }
             match rejection {
                 Some(rejection) => Some(rejection),
-                None => match observed.replace_cavity(
-                    &removed,
-                    refills.iter().map(|cell| (*cell, None)).collect(),
-                ) {
-                    Err(failure) => {
-                        Some(format!("atomic facet cavity topology was invalid: {failure}"))
-                    }
+                None => match observed
+                    .replace_cavity(&removed, refills.iter().map(|cell| (*cell, None)).collect())
+                {
+                    Err(failure) => Some(format!(
+                        "atomic facet cavity topology was invalid: {failure}"
+                    )),
                     Ok(_) => admission(
                         &observed,
                         &[facet],
@@ -706,7 +713,9 @@ fn admission(
         insertion,
         cancellation,
     )
-    .map(|violation| violation.map(|violation| format!("the edit was not constrained-Delaunay: {violation}")))
+    .map(|violation| {
+        violation.map(|violation| format!("the edit was not constrained-Delaunay: {violation}"))
+    })
     .map_err(|failure| {
         resource_or_cancelled(
             if failure.kind == DelaunayInsertionErrorKind::Cancelled {

@@ -1,9 +1,6 @@
 use super::*;
 
 fn fixture_root(name: &str) -> PathBuf {
-    #[cfg(windows)]
-    let base = PathBuf::from(r"C:\runmat-authority");
-    #[cfg(not(windows))]
     let base = PathBuf::from("/runmat-authority");
     base.join(name)
 }

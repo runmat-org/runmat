@@ -23,10 +23,17 @@ mod symbolic;
 
 pub(crate) use symbolic::CoercivityWorkEnvelope;
 
-/// Capacity is acquired before this exact symbolic phase runs. The direct solver's
-/// own reservation remains the only completed-work owner.
+/// Capacity is acquired before the named numerical phase runs. The numerical
+/// kernel reserves and completes its work; the capacity callback records none.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NumericalCapacityPhase {
+    StaticPreassembly,
+    SolidLoadProjection,
+    ConstraintValidation,
+    BodyLoadQuadrature,
+    ThermoelasticLoadProjection,
+    ConnectorProjection,
+    StaticStorageVerification,
     SolidAssemblyBlock { elements: std::ops::Range<usize> },
     Tet4AssemblyElement { element: usize },
     Tet10AssemblyElement { element: usize },
@@ -43,6 +50,7 @@ pub enum NumericalCapacityPhase {
     StaticBalance,
     ConstraintRecovery,
     FieldRecovery,
+    StaticObservations,
     SolidRecoveryElement { element: usize },
     SolvePrimitive,
     DirectSolve(runmat_sparse_solvers::direct::DirectSolvePhase),
@@ -297,7 +305,6 @@ impl CoercivityCertificate {
         let symbolic =
             SymbolicFactorization::analyze::<f64>(arrays.view().into(), &options, control)
                 .map_err(|error| match error {
-                    // A cancelled ordering is a terminal cancellation, not an ordering defect.
                     runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
                     _ => CoercivityError::SymbolicOrdering,
                 })?;
@@ -307,7 +314,8 @@ impl CoercivityCertificate {
                 return Err(CoercivityError::AdmissionDimension {
                     required: dimension as u64,
                     admitted: admission.dimension.0,
-                }.into());
+                }
+                .into());
             }
             let updates = symbolic::flop_count(&estimate);
             if estimate.factor_entries > admission.factor_nonzero_upper_bound.0
@@ -319,18 +327,21 @@ impl CoercivityCertificate {
                     factor_nonzero_limit: admission.factor_nonzero_upper_bound.0,
                     update_count: updates,
                     update_limit: admission.update_count_upper_bound.0,
-                }.into());
+                }
+                .into());
             }
             if estimate.peak_bytes() > admission.resident_bytes_upper_bound.0 {
                 return Err(CoercivityError::FactorAdmission {
                     required_bytes: estimate.peak_bytes(),
                     budget_bytes: admission.resident_bytes_upper_bound.0,
-                }.into());
+                }
+                .into());
             }
         }
         let factor_work = symbolic.reference_work().map_err(|error| match error {
-            runmat_sparse_solvers::direct::ReferenceWorkError::Overflow(_) =>
-                CoercivityError::WorkOverflow,
+            runmat_sparse_solvers::direct::ReferenceWorkError::Overflow(_) => {
+                CoercivityError::WorkOverflow
+            }
             _ => CoercivityError::SymbolicOrdering,
         })?;
         before_factor(
@@ -429,8 +440,7 @@ impl CoercivityCertificate {
                 ..
             } => {
                 return components > 0
-                    && prescribed_components.checked_add(convection_components)
-                        == Some(components)
+                    && prescribed_components.checked_add(convection_components) == Some(components)
             }
             CoercivityProof::SparseCholesky {
                 minimum_scaled_pivot_bits,

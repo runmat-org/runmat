@@ -20,7 +20,8 @@ pub use selection::ObservationSelectionCoordinate;
 pub use volume_mesh::VolumeMeshObservationAuthority;
 
 const PREFIX: &[u8] = b"runmat-observation-field-catalog/v1\0";
-const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Producer metadata only: no recovered-field arrays or thermal snapshot arrays are retained.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -14,11 +14,11 @@ use crate::{
     import_observation_history_checkpoint_task, import_observation_history_finalization_task,
     prepare_analysis_objects, prepare_observation_history_checkpoint_task,
     prepare_observation_history_finalization_task, AnalysisBridgeResult, AnalysisHostWorkload,
-    ImportedObservationHistoryCheckpointTask,
-    ImportedObservationHistoryFinalization, ImportedReducedObservation,
-    ObservationHistoryCheckpointPreparation, ObservationHistoryFinalizationPreparation,
-    ObservationHistoryFinalizationSource, PreparedAnalysisObjects,
-    PreparedObservationHistoryCheckpointTask, PreparedObservationHistoryFinalizationTask,
+    ImportedObservationHistoryCheckpointTask, ImportedObservationHistoryFinalization,
+    ImportedReducedObservation, ObservationHistoryCheckpointPreparation,
+    ObservationHistoryFinalizationPreparation, ObservationHistoryFinalizationSource,
+    PreparedAnalysisObjects, PreparedObservationHistoryCheckpointTask,
+    PreparedObservationHistoryFinalizationTask,
 };
 use runmat_analysis_core::{ObservationId, ObservationRequest, ProcedureStep};
 use runmat_analysis_fea::{
@@ -191,7 +191,10 @@ impl EntryHistoryPhase {
 
     /// The prepared wave, in task order.
     pub fn pending(&self) -> Vec<SampledObservationTask<'_>> {
-        self.pending.iter().map(PendingEntryHistoryTask::view).collect()
+        self.pending
+            .iter()
+            .map(PendingEntryHistoryTask::view)
+            .collect()
     }
 
     /// Prepare the next wave of checkpoints or the finalization wave; an empty wave once every
@@ -273,7 +276,9 @@ impl EntryHistoryPhase {
         context: &EntryHistoryContext<'_>,
     ) -> AnalysisBridgeResult<()> {
         if self.pending.is_empty() || responses.len() != self.pending.len() {
-            return Err(invalid("entry-history responses differ from the prepared wave"));
+            return Err(invalid(
+                "entry-history responses differ from the prepared wave",
+            ));
         }
         let limits = context.inventory_limits;
         let finalizing = matches!(self.pending[0], PendingEntryHistoryTask::Finalization(_));

@@ -15,12 +15,17 @@ on:
       - "scripts/regenerate-wasm-registry.mjs"
       - "scripts/test-wasm-headless.sh"
       - "scripts/runtime/**"
+      - "scripts/metadata/**"
       - "scripts/distribution/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/wasm-bindings.yml"
   workflow_call:
     inputs:
+      headless_tests:
+        description: Run the extended headless Rust WASM suite before packaging
+        type: boolean
+        default: false
       ref:
         description: Git ref to publish from
         required: true
@@ -43,6 +48,10 @@ on:
         required: true
   workflow_dispatch:
     inputs:
+      headless_tests:
+        description: Run the extended headless Rust WASM suite before packaging
+        type: boolean
+        default: false
       ref:
         description: Git ref to publish from
         required: true
@@ -88,7 +97,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ inputs.ref || github.ref_name }}
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Install Rust and WASM toolchain
         uses: taiki-e/install-action@v2
@@ -116,8 +125,9 @@ jobs:
           # retain those artifacts as well as third-party dependencies. Bump
           # the namespace when changing cache policy because GitHub cache keys
           # are immutable.
-          shared-key: wasm-bindings-workspace-v1
+          shared-key: wasm-bindings-0.7-workspace-v2
           cache-workspace-crates: true
+          cache-on-failure: true
           cache-directories: target-exact-cad-wasm
 
       - name: Setup Node.js
@@ -125,6 +135,13 @@ jobs:
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify publication credentials before compiling
+        if: github.event_name == 'push' || inputs.publish
+        working-directory: bindings/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm whoami --registry=https://registry.npmjs.org > /dev/null
 
       - name: Setup Chrome and ChromeDriver
         id: setup_chrome
@@ -153,11 +170,19 @@ jobs:
         working-directory: bindings/ts
         run: npm ci
 
-      - name: Run wasm headless tests
+      - name: Check WASM test entrypoints
         env:
           RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
           RUNMAT_CHROMEDRIVER_BIN: ${{ steps.setup_chrome.outputs.chromedriver-path }}
           WASM_BINDGEN_TEST_TIMEOUT: "300"
+        run: cargo check -p runmat-wasm --target wasm32-unknown-unknown --tests --features occt-wasm-host
+
+      - name: Run extended headless WASM qualification
+        if: inputs.headless_tests
+        env:
+          RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
+          RUNMAT_CHROMEDRIVER_BIN: ${{ steps.setup_chrome.outputs.chromedriver-path }}
+          WASM_BINDGEN_TEST_TIMEOUT: '300'
         run: scripts/test-wasm-headless.sh
 
       - name: Determine publish settings
@@ -267,13 +292,18 @@ jobs:
                 const validPublished = publishedVersions.filter((version) => parse(version));
                 const latestPublished = validPublished.sort(compareVersions).at(-1) || currentVersion;
                 const latest = parse(latestPublished);
+                const current = parse(currentVersion);
 
-                if (!latest) {
-                  throw new Error("Could not determine latest published package version");
+                if (!latest || !current) {
+                  throw new Error("Could not determine package version");
                 }
 
                 let nextVersion;
-                if (latest.prerelease[0] === "dev" && /^\d+$/.test(latest.prerelease[1] || "")) {
+                const currentBase = `${current.major}.${current.minor}.${current.patch}`;
+                const latestBase = `${latest.major}.${latest.minor}.${latest.patch}`;
+                if (validPublished.length === 0 || compareVersions(currentBase, latestBase) > 0) {
+                  nextVersion = `${currentBase}-dev.0`;
+                } else if (latest.prerelease[0] === "dev" && /^\d+$/.test(latest.prerelease[1] || "")) {
                   nextVersion = `${latest.major}.${latest.minor}.${latest.patch}-dev.${Number(latest.prerelease[1]) + 1}`;
                 } else {
                   nextVersion = `${latest.major}.${latest.minor}.${latest.patch + 1}-dev.0`;
@@ -288,6 +318,7 @@ jobs:
           echo "version=${next_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build publishable bindings once
+        id: bindings_build
         working-directory: bindings/ts
         run: npm run build
 
@@ -306,45 +337,44 @@ jobs:
             --file wasm-binary=bindings/ts/dist/pkg-web/runmat_wasm_web_bg.wasm \
             --output bindings/ts/browser-product.artifacts.json
 
-      - name: Verify examples against exact browser publish bytes
+      - name: Test public SDK against the already-built package
+        working-directory: bindings/ts
+        run: |
+          npm run lint
+          npm test
+          npm run test:pinned-wasm
+          npm run test:fea-assessments:wasm
+
+      - name: Accept exact browser product in Chrome workers
         env:
           RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
-          RUNMAT_CHROMEDRIVER_BIN: ${{ steps.setup_chrome.outputs.chromedriver-path }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          root=bindings/ts/builtin-example-verification
-          mkdir -p "$root/results"
-          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/inventory.json"
-          node scripts/runtime/verify-builtin-examples.mjs plan \
-            --inventory "$root/inventory.json" --product browser-wasm \
-            --topology scripts/runtime/builtin-example-topology.c00.json --output "$root/plan.json"
-          set +e
-          node scripts/runtime/run-builtin-example-product.mjs \
-            --inventory "$root/inventory.json" --plan "$root/plan.json" \
-            --artifact-manifest bindings/ts/browser-product.artifacts.json \
-            --output-dir "$root/results"
-          execution_status=$?
-          set -e
-          node scripts/runtime/verify-builtin-examples.mjs reconcile \
-            --inventory "$root/inventory.json" --plan "$root/plan.json" \
-            --results-dir "$root/results" \
-            --artifact-manifest bindings/ts/browser-product.artifacts.json \
-            --report-dir "$root/report" --output "$root/reconciliation.json"
-          test "$execution_status" -eq 0
+        run: node scripts/runtime/accept-browser-product.mjs bindings/ts/browser-product.artifacts.json
 
-      - name: Retain browser product verification evidence
+      - name: Retain browser product identity
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: wasm-bindings-product-evidence-${{ github.run_attempt }}
           path: |
             bindings/ts/browser-product.artifacts.json
-            bindings/ts/builtin-example-verification/plan.json
-            bindings/ts/builtin-example-verification/reconciliation.json
-            bindings/ts/builtin-example-verification/report
-            bindings/ts/builtin-example-verification/results/*.shard-result.json
+            bindings/ts/browser-product.acceptance.json
           if-no-files-found: error
+
+      - name: Retain the built SDK candidate
+        if: ${{ !cancelled() && steps.bindings_build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-bindings-built-candidate-${{ github.run_attempt }}
+          path: |
+            bindings/ts/dist/
+            bindings/ts/package.json
+            bindings/ts/package-lock.json
+            bindings/ts/LICENSE.md
+            bindings/ts/FREE-USE.md
+            bindings/ts/browser-product.artifacts.json
+            bindings/ts/browser-product.acceptance.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Pack the already-built package without lifecycle rebuilds
         id: package_archive
@@ -353,8 +383,7 @@ jobs:
         run: |
           set -euo pipefail
           node ../../scripts/distribution/third-party-notices.cjs verify dist
-          archive_json="$(npm pack --ignore-scripts --json)"
-          archive="$(PACKAGE_ARCHIVE_JSON="$archive_json" node -e 'const value=JSON.parse(process.env.PACKAGE_ARCHIVE_JSON); if (!Array.isArray(value) || value.length !== 1 || typeof value[0].filename !== "string") throw new Error("npm pack returned no unique archive"); process.stdout.write(value[0].filename)')"
+          archive="$(npm pack --ignore-scripts --json | node -e 'const value=JSON.parse(require("node:fs").readFileSync(0, "utf8")); if (!Array.isArray(value) || value.length !== 1 || typeof value[0].filename !== "string") throw new Error("npm pack returned no unique archive"); process.stdout.write(value[0].filename)')"
           test -f "$archive"
           packed_root="${RUNNER_TEMP}/runmat-bindings-package"
           mkdir -p "$packed_root"

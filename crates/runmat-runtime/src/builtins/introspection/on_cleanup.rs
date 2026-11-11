@@ -187,7 +187,15 @@ pub(crate) async fn run_cleanup_after_detach(
     let Some(registry) = runtime.cleanup_registry() else {
         return Ok(());
     };
-    lifecycle::dispatch::drain_eligible(&runtime, &registry, &[detached.root_registration()]).await
+    let completion = registry.issue_completion()?;
+    lifecycle::dispatch::schedule_before_retirement(&runtime, &registry, &[])?;
+    lifecycle::dispatch::schedule_completion(
+        &runtime,
+        &registry,
+        &[detached.root_registration()],
+        completion,
+    )?;
+    lifecycle::dispatch::drain_completion(&runtime, &registry, completion).await
 }
 
 #[cfg(test)]
@@ -293,22 +301,24 @@ async fn run_on_cleanup_handle(
         )
     })?;
     if entry.phase() == lifecycle::registry::CleanupPhase::Active {
+        let completion = registry.issue_completion()?;
+        lifecycle::dispatch::schedule_before_retirement(runtime, &registry, &[])?;
         deactivate_handle(handle)?;
-        if registry.queue_explicit(&entry, runtime.command_profiling()) {
-            lifecycle::dispatch::start_queued(runtime, &registry, entry.clone())?;
+        if registry.queue_explicit_for_completion(
+            &entry,
+            runtime.command_profiling(),
+            Some(completion),
+        ) {
+            let _ = lifecycle::dispatch::start_queued(runtime, &registry, entry.clone());
             // A service may synchronously poll or destroy the submitted task
             // before returning its lease; report that exact terminal receipt.
-            return lifecycle::dispatch::wait_queued(&registry, &entry).await;
+            return lifecycle::dispatch::drain_completion(runtime, &registry, completion).await;
         }
     }
-    if matches!(
-        entry.phase(),
-        lifecycle::registry::CleanupPhase::Queued | lifecycle::registry::CleanupPhase::Running
-    ) {
-        lifecycle::dispatch::wait_queued(&registry, &entry).await
-    } else {
-        Ok(())
-    }
+    // This destructor has already been admitted. Repeated delete is a no-op,
+    // including self-delete and two callbacks deleting each other. Only the
+    // invocation that admitted it owns its completion wait.
+    Ok(())
 }
 
 fn cancel_on_cleanup_value(runtime: Option<&RuntimeContext>, value: &Value) -> BuiltinResult<()> {

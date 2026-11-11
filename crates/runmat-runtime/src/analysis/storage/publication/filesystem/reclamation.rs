@@ -28,18 +28,20 @@ pub(in crate::analysis::storage) fn sweep(
             reachable.insert(digest)
         })?;
         if let PersistedAnalysisArtifact::Standard(run) = &record {
-            match store.read_stored_observation_attachment(&run.metadata)? {
-                Some(observations::StoredObservationAttachment::Current(attachment)) => {
+            let outcome =
+                store.visit_stored_observation_attachment(&run.metadata, |attachment| {
                     let _attachment_reservation =
                         store.reserve_resident(store.retained_estimate(&attachment)?)?;
                     for digest in super::super::reclamation::attachment_digests(&attachment) {
                         reachable.insert(digest)?;
                     }
-                }
-                Some(observations::StoredObservationAttachment::Legacy) => {
-                    legacy_attachment.set(true)
-                }
-                None => {}
+                    Ok(())
+                })?;
+            if matches!(
+                outcome,
+                observations::ObservationAttachmentReadOutcome::Legacy
+            ) {
+                legacy_attachment.set(true);
             }
         }
         Ok(())

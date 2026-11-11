@@ -732,6 +732,10 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 })
             })
             .transpose()?;
+        // Bracket actual slot/operand retirement, including temporary drops
+        // inside a wholly-ready instruction. The registered frame follows the
+        // original slot/stack owners, so surviving aliases remain visible.
+        let cleanup = context.runtime.function_cleanup_scope()?;
         let dispatch_future = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[*pc],
@@ -775,6 +779,31 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 store_local_after_fallback_store: &mut store_local_after_fallback_store,
             },
         );
+        let cleanup_runtime = &catch_runtime;
+        let dispatch_future = async move {
+            // The cleanup owner releases completed dispatch captures before
+            // post-poll publication inspects surviving workspace aliases.
+            let (result, cleanup) = cleanup
+                .run_with_post_poll(cleanup_runtime, dispatch_future, |selected| {
+                    // Completed slot changes must release their canonical owners
+                    // before cleanup admission inspects surviving aliases. This
+                    // publication keeps the live frame and never snapshots it.
+                    // The selected completion must exist before its GC observers
+                    // can queue a callback.
+                    if selected.has_cleanup_candidates() {
+                        selected
+                            .service_ports()
+                            .workspace()
+                            .map_or(Ok(()), |workspace| {
+                                workspace.publish_admitted_mutations_with_context(selected)
+                            })
+                    } else {
+                        Ok(())
+                    }
+                })
+                .await?;
+            runmat_runtime::runtime_error::complete_with_cleanup(result, cleanup)
+        };
         let dispatch_result = if let Some(exception) = active_catch {
             catch_runtime
                 .scope_active_catch_unboxed_shared(Some(exception), dispatch_future)

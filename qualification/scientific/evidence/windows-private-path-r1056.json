@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "source_commit": "649997db598593504c36a6412b5c154f408dab50",
+  "target": "x86_64-pc-windows-msvc",
+  "toolchain": "rustc 1.90.0",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--release",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "-p",
+    "runmat-filesystem",
+    "--lib",
+    "native::private_windows::",
+    "--",
+    "--test-threads=1"
+  ],
+  "passed": 3,
+  "failed": 0,
+  "ignored": 0,
+  "filtered_out": 164,
+  "exit_code": 0,
+  "logs": {
+    "log": {
+      "sha256": "ab57fec9b661c7d7d7884b2062ecafdcda77881634937bac2914425f07f3274b",
+      "location": "gh-windows-20260330-204014:C:/Users/nallana/rm1293/logs/settings-windows-r1056-filesystem-r2.log"
+    },
+    "stderr.log": {
+      "sha256": "a6dafaac81a351ed38030737997bd970e11d4957795522b5169c2a9235d31ff4",
+      "location": "gh-windows-20260330-204014:C:/Users/nallana/rm1293/logs/settings-windows-r1056-filesystem-r2.stderr.log"
+    },
+    "presource.json": {
+      "sha256": "10b42a53790795bf48ae22feb462cdde36031f492c68dc4525351877dd25efd6",
+      "location": "gh-windows-20260330-204014:C:/Users/nallana/rm1293/logs/settings-windows-r1056-filesystem-r2.presource.json"
+    },
+    "postsource.json": {
+      "sha256": "77a02c0ac5e8fc10a98e9279030f03718f0733471544cd350914defc4dd6f49a",
+      "location": "gh-windows-20260330-204014:C:/Users/nallana/rm1293/logs/settings-windows-r1056-filesystem-r2.postsource.json"
+    }
+  },
+  "artifact": {
+    "sha256": "baf59ea663e3f46ebb82ee2d106f243205ed0709497be7acb0c8990b34d37d36",
+    "location": "gh-windows-20260330-204014:C:/Users/nallana/rm1293/targets/x86_64-pc-windows-msvc/release/deps/runmat_filesystem-61905941cc45f9d4.exe"
+  },
+  "scope": "Private Windows path conversion, ACL and immutable publication, including paths longer than260 characters. Full Windows product qualification is separate."
+}

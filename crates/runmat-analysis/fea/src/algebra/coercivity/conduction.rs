@@ -60,7 +60,9 @@ const RESIDENT_BYTES_PER_ROW: u64 = 17;
 impl ScalarConductionProof {
     /// Proof work: one union per stored entry, a find per entry, and the per-row anchor scan.
     pub(crate) fn operations_for(rows: u64, entries: u64) -> u64 {
-        entries.saturating_mul(2).saturating_add(rows.saturating_mul(4))
+        entries
+            .saturating_mul(2)
+            .saturating_add(rows.saturating_mul(4))
     }
 
     pub(crate) fn resident_bytes_for(rows: u64) -> u64 {
@@ -290,9 +292,8 @@ mod tests {
     #[test]
     fn nonpositive_conductivity_is_refused() {
         let matrix = chain(2, &[(0, 1)], &[0.0; 2]);
-        let error =
-            ScalarConductionProof::prove(&matrix, &[true, false], &[0.0; 2], &[1.0, -3.0])
-                .unwrap_err();
+        let error = ScalarConductionProof::prove(&matrix, &[true, false], &[0.0; 2], &[1.0, -3.0])
+            .unwrap_err();
         assert!(matches!(
             error,
             ScalarConductionError::NonPositiveConductivity { element: 1, .. }

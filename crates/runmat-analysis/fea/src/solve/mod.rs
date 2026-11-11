@@ -1,8 +1,9 @@
 pub mod accelerator;
 mod affine;
 pub(crate) use affine::{
-    affine_recovery_work, affine_scatter_work, affine_transpose_work, expand_linear as affine_expand_linear,
-    solve_affine_constraint_system_with_kind_owned, AffineOwnedSolveOptions,
+    affine_recovery_work, affine_scatter_work, affine_transpose_work,
+    expand_linear as affine_expand_linear, solve_affine_constraint_system_with_kind_owned,
+    AffineOwnedSolveOptions,
 };
 pub mod backend;
 pub mod buckling;

@@ -36,7 +36,6 @@ pub(super) async fn run_local() {
     for branch in 0..4 {
         let mut config = NativeExecutionConfig::for_current_executable().unwrap();
         config.executable = std::env::current_exe().unwrap();
-        config.worker_arguments = vec!["--child".into()];
         config.max_workers = 2;
         config.worker_capabilities = super::capabilities();
         config.store_root = directory.path().join(format!("coupled-{branch}"));
@@ -169,6 +168,7 @@ fn base(order: ElementOrder, scope: &str, revision: ProgramRevision) -> ThermalS
     .unwrap();
     let limits = NativeAnalysisHostLimits::default();
     ThermalStudyPreparation {
+        maximum_resident_bytes: None,
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         field_source: None,
         scope: ThermalStudyScope::Standalone,

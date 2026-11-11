@@ -61,17 +61,17 @@ pub(super) async fn execute(
     .await?
     {
         RemoteExactStructuralStudyComposition::Completed(response) => {
-            packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
+            packaged(response, pool).map(Ok)
         }
         RemoteExactStructuralStudyComposition::Failed(message) => {
             execution_failure_outcome(pool, message)
         }
-        RemoteExactStructuralStudyComposition::Cancelled => {
-            Ok(RemotePoolExecutionOutcome::Cancelled)
-        }
-        RemoteExactStructuralStudyComposition::Indeterminate(message) => {
-            Ok(RemotePoolExecutionOutcome::Indeterminate(message))
-        }
+        RemoteExactStructuralStudyComposition::Cancelled => Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+        )),
+        RemoteExactStructuralStudyComposition::Indeterminate(message) => Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message),
+        )),
     }
 }
 
@@ -390,14 +390,16 @@ pub(super) fn composition(
     outcome: RemotePoolExecutionOutcome,
 ) -> RemoteExactStructuralStudyComposition {
     match outcome {
-        RemotePoolExecutionOutcome::Completed(result) => match result.response {
+        Ok(result) => match result.response {
             ProgramExecutionResponse::Failure { message } => {
                 RemoteExactStructuralStudyComposition::Failed(message)
             }
             response => RemoteExactStructuralStudyComposition::Completed(response),
         },
-        RemotePoolExecutionOutcome::Cancelled => RemoteExactStructuralStudyComposition::Cancelled,
-        RemotePoolExecutionOutcome::Indeterminate(message) => {
+        Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled) => {
+            RemoteExactStructuralStudyComposition::Cancelled
+        }
+        Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message)) => {
             RemoteExactStructuralStudyComposition::Indeterminate(message)
         }
     }

@@ -481,8 +481,15 @@ fn segment_split_cavities_at(
         if !bounded || !grew {
             continue;
         }
-        if let Some(children) = fan(coordinates, &local, &cavity, &owners, split_edge, node, point)
-        {
+        if let Some(children) = fan(
+            coordinates,
+            &local,
+            &cavity,
+            &owners,
+            split_edge,
+            node,
+            point,
+        ) {
             cavities.push(SplitFacetCavity {
                 sources: cavity.iter().map(|index| local[*index]).collect(),
                 children,
@@ -692,7 +699,10 @@ mod tests {
         for child in &cavity.children {
             let [a, b, c] = child.node_identities.map(|node| lookup(node).unwrap());
             let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-            assert!(area > 0.0, "child does not keep the facet's counter-clockwise winding");
+            assert!(
+                area > 0.0,
+                "child does not keep the facet's counter-clockwise winding"
+            );
         }
         let small = segment_split_cavities_at(
             &lookup,

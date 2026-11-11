@@ -1,7 +1,9 @@
 pub mod support;
 
 use runmat_analysis_language::*;
-use runmat_geometry_core::{CrossSectionLayerRole, CrossSectionTraceRole, GeometryDefinitionSource};
+use runmat_geometry_core::{
+    CrossSectionLayerRole, CrossSectionTraceRole, GeometryDefinitionSource,
+};
 use support::{source_module, TestHost};
 
 const INLINE: &str = r#"
@@ -114,11 +116,25 @@ fn a_cross_section_reads_its_stackup_from_the_board_layout() {
     assert_eq!(
         roles,
         [
-            ("F.Mask", CrossSectionLayerRole::SolderMask { permittivity: 3.8 }),
-            ("F.Cu", CrossSectionLayerRole::Signal { fill_permittivity: None }),
-            ("dielectric 1", CrossSectionLayerRole::Dielectric { permittivity: 4.1 }),
+            (
+                "F.Mask",
+                CrossSectionLayerRole::SolderMask { permittivity: 3.8 }
+            ),
+            (
+                "F.Cu",
+                CrossSectionLayerRole::Signal {
+                    fill_permittivity: None
+                }
+            ),
+            (
+                "dielectric 1",
+                CrossSectionLayerRole::Dielectric { permittivity: 4.1 }
+            ),
             ("In1.Cu", CrossSectionLayerRole::Plane),
-            ("dielectric 2", CrossSectionLayerRole::Dielectric { permittivity: 4.3 }),
+            (
+                "dielectric 2",
+                CrossSectionLayerRole::Dielectric { permittivity: 4.3 }
+            ),
             ("B.Cu", CrossSectionLayerRole::Plane),
         ]
     );
@@ -145,7 +161,10 @@ fn cross_section_mistakes_are_named() {
 
     let role = INLINE.replace(": plane {", ": copper {");
     let messages = errors(&check(&TestHost::default(), &role)).join("\n");
-    assert!(messages.contains("`copper` is not a layer role"), "{messages}");
+    assert!(
+        messages.contains("`copper` is not a layer role"),
+        "{messages}"
+    );
 
     let mesh = INLINE.replace("growth = 1.05", "order = linear");
     let messages = errors(&check(&TestHost::default(), &mesh)).join("\n");
@@ -240,15 +259,24 @@ fn line_parameter_mistakes_are_named() {
     );
     for (source, expected) in [
         (
-            format!("{INLINE}{}", PAIR_STUDY.replace("impedance.p", "impedance.q")),
+            format!(
+                "{INLINE}{}",
+                PAIR_STUDY.replace("impedance.p", "impedance.q")
+            ),
             "`q` is not a signal trace of the study's cross-section",
         ),
         (
-            format!("{INLINE}{}", PAIR_STUDY.replace("impedance.p", "impedance.g")),
+            format!(
+                "{INLINE}{}",
+                PAIR_STUDY.replace("impedance.p", "impedance.g")
+            ),
             "`g` is not a signal trace",
         ),
         (
-            format!("{single}{}", PAIR_STUDY.replace("output z_p = analysis.lines.impedance.p\n", "")),
+            format!(
+                "{single}{}",
+                PAIR_STUDY.replace("output z_p = analysis.lines.impedance.p\n", "")
+            ),
             "needs exactly two signal traces, and it has 1",
         ),
     ] {
@@ -262,6 +290,9 @@ fn line_parameter_mistakes_are_named() {
     ] {
         let source = format!("{INLINE}{}", PAIR_STUDY.replace(from, to));
         let messages = errors(&check(&TestHost::default(), &source)).join("\n");
-        assert!(messages.contains("unresolved reference"), "{to}: {messages}");
+        assert!(
+            messages.contains("unresolved reference"),
+            "{to}: {messages}"
+        );
     }
 }

@@ -57,12 +57,10 @@ pub(super) fn lower(
         runmat_geometry_core::GeometryDefinitionSource::CrossSection(_)
     );
     let empty;
-    let bound_model = if section && values::assignment(&declaration.statements, "model").is_none()
-    {
+    let bound_model = if section && values::assignment(&declaration.statements, "model").is_none() {
         None
     } else {
-        let (model_key, model_expression) =
-            model_binding(context.bound, declaration, diagnostics)?;
+        let (model_key, model_expression) = model_binding(context.bound, declaration, diagnostics)?;
         // A model that failed to lower has already reported its own located diagnostics;
         // repeating that failure at every dependent study would only add cascade errors.
         Some((context.models.get(&model_key)?, model_expression))

@@ -57,7 +57,13 @@ impl AnalysisStudyStepExecutor for BrowserAnalysisService {
                 let json = serde_json::to_string(&payload)
                     .map_err(|error| crate::wire::errors::js_error(&error.to_string()))?;
                 super::fea_execution::validate_numerical_input(json.len(), (1u64 << 30) as f64)?;
-                let delegation = active.worker_context(&host, &json, super::fea_run_context::WorkerWorkClass::Numerical).await?;
+                let delegation = active
+                    .worker_context(
+                        &host,
+                        &json,
+                        super::fea_run_context::WorkerWorkClass::Numerical,
+                    )
+                    .await?;
                 let value = execute_step(&json, (1u64 << 30) as f64, delegation).await?;
                 active.retire_finished(&host).await?;
                 active

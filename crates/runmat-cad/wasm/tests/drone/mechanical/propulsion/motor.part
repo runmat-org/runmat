@@ -1,0 +1,18 @@
+runmat 0.7
+std 1
+
+// The brushless motor's bell and shaft: a 22 mm anodised bell with a chamfered cap, turning
+// on its shaft above the pod's rim. Its origin is the pod's origin (motor axis z).
+part motor {
+    sketch prof on origin.zx {
+        l0 = line(start = [5 mm, 1.2 mm], end = [5 mm, 11 mm])
+        l1 = line(start = [5 mm, 11 mm], end = [13.5 mm, 11 mm])
+        l2 = line(start = [13.5 mm, 11 mm], end = [15 mm, 9.6 mm])
+        l3 = line(start = [15 mm, 9.6 mm], end = [15.6 mm, 2.2 mm])
+        l4 = line(start = [15.6 mm, 2.2 mm], end = [17.5 mm, 1.6 mm])
+        l5 = line(start = [17.5 mm, 1.6 mm], end = [17.5 mm, 1.2 mm])
+        l6 = line(start = [17.5 mm, 1.2 mm], end = [5 mm, 1.2 mm])
+    }
+    feature bell = revolve(profile = sketch.prof, axis = origin.z, angle = 360 deg)
+    output motor = { body = feature.bell.body, part_number = "CD-MT-1505", material = "aluminum_7075", color = "#1E2024" }
+}

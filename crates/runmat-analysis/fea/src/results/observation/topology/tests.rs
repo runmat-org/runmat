@@ -2,6 +2,47 @@ use super::*;
 use crate::results::field::VolumeFieldSamplingRule;
 use runmat_meshing_core::fixtures::{canonical_tetrahedron_solver_mesh, slab_mesh};
 use runmat_meshing_core::ElementOrder;
+use runmat_simulation_usage::{OperationCount, UsageContext, UsageLedger};
+use std::sync::Arc;
+
+#[test]
+fn projection_and_observation_quotes_conserve_their_reference_batches() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let projection_quote = AnalysisProjection::derivation_work_upper_bound(&mesh).unwrap();
+        let projection_ledger =
+            Arc::new(UsageLedger::new(projection_quote, projection_quote).unwrap());
+        UsageContext::new(Arc::clone(&projection_ledger))
+            .run_sync(|| AnalysisProjection::derive(&mesh))
+            .unwrap();
+        assert_eq!(
+            projection_ledger.snapshot().unwrap().completed.assembly,
+            projection_quote
+        );
+
+        let observation_quote =
+            structural_observation_derivation_work_upper_bound(Some(&mesh)).unwrap();
+        let observation_ledger =
+            Arc::new(UsageLedger::new(observation_quote, observation_quote).unwrap());
+        let mut model =
+            crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+        model.structural = None;
+        UsageContext::new(Arc::clone(&observation_ledger))
+            .run_sync(|| ObservationTopology::derive(&model, Some(&mesh)))
+            .unwrap();
+        let snapshot = observation_ledger.snapshot().unwrap();
+        assert_eq!(snapshot.completed.assembly, observation_quote);
+        assert_eq!(snapshot.reserved, OperationCount::ZERO);
+        assert_eq!(
+            observation_quote.operations() - projection_quote.operations(),
+            if order == ElementOrder::Tet10 {
+                4 * 116
+            } else {
+                0
+            }
+        );
+    }
+}
 
 // witness: FEA-SHARED-OBSERVATIONS-001/quantity_location_and_cost_contract @
 //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;

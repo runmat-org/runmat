@@ -32,14 +32,16 @@ fn collect(statements: &[CheckedFeaStatement], units: &mut BTreeMap<String, Stri
         match &statement.kind {
             CheckedFeaStatementKind::AssessmentDefinition { name, statements } => {
                 let bound = |field: &str| {
-                    statements.iter().find_map(|statement| match &statement.kind {
-                        CheckedFeaStatementKind::Assignment { target, value, .. }
-                            if target.len() == 1 && target[0] == field =>
-                        {
-                            quantity_unit(value)
-                        }
-                        _ => None,
-                    })
+                    statements
+                        .iter()
+                        .find_map(|statement| match &statement.kind {
+                            CheckedFeaStatementKind::Assignment { target, value, .. }
+                                if target.len() == 1 && target[0] == field =>
+                            {
+                                quantity_unit(value)
+                            }
+                            _ => None,
+                        })
                 };
                 if let Some(unit) = bound("maximum").or_else(|| bound("minimum")) {
                     units.insert(name.clone(), unit);
@@ -127,9 +129,8 @@ pub(super) fn present(
     let (symbol, unit) = display
         .clone()
         .unwrap_or_else(|| (field_unit.to_string(), field));
-    let shown = |value: f64| -> Result<f64> {
-        Ok(unit.from_canonical(field.to_canonical(value)?)?)
-    };
+    let shown =
+        |value: f64| -> Result<f64> { Ok(unit.from_canonical(field.to_canonical(value)?)?) };
     legend.minimum = shown(legend.minimum)?;
     legend.maximum = shown(legend.maximum)?;
     legend.unit = symbol.clone();
@@ -144,11 +145,7 @@ pub(super) fn present(
     if let Some(bound) = tightest {
         let limit = unit.from_canonical(bound.canonical)?;
         legend.limit = Some(limit);
-        let stated = format!(
-            "{} {}",
-            format_stated(limit),
-            printed_unit(&symbol)
-        );
+        let stated = format!("{} {}", format_stated(limit), printed_unit(&symbol));
         let name = if bound.maximum { "limit" } else { "minimum" };
         legend.note = Some(match bound.margin {
             None => format!("{stated} {name}"),
@@ -206,9 +203,10 @@ mod tests {
                 measured: Some(kelvin(measured)),
                 issue: None,
             },
-            study_definition: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-                .parse()
-                .unwrap(),
+            study_definition:
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    .parse()
+                    .unwrap(),
             run_id: None,
             evidence: None,
             function_execution_identity: None,
@@ -244,16 +242,16 @@ mod tests {
         assert_eq!(precision.format(legend.maximum), "63.4");
         assert_eq!(legend.unit, "degC");
         assert!((legend.limit.unwrap() - 85.0).abs() < 1e-9);
-        assert_eq!(
-            legend.note.as_deref(),
-            Some("21.6 K under the 85 °C limit")
-        );
+        assert_eq!(legend.note.as_deref(), Some("21.6 K under the 85 °C limit"));
     }
 
     #[test]
     fn without_an_assessment_the_legend_keeps_the_field_unit() {
         let mut legend = busbar_legend();
-        assert_eq!(present(&mut legend, "K", &BTreeMap::new(), &[]).unwrap(), None);
+        assert_eq!(
+            present(&mut legend, "K", &BTreeMap::new(), &[]).unwrap(),
+            None
+        );
         assert_eq!(legend.unit, "K");
         assert_eq!(legend.minimum, 329.9642170922981);
         assert!(legend.note.is_none() && legend.limit.is_none());
@@ -270,7 +268,10 @@ mod tests {
         )];
         // The bound was written in kelvin: no display unit beyond the field's own.
         let units = BTreeMap::from([("stays_below_85_celsius".into(), "K".into())]);
-        assert_eq!(present(&mut legend, "K", &units, &assessed).unwrap(), Some("K".into()));
+        assert_eq!(
+            present(&mut legend, "K", &units, &assessed).unwrap(),
+            Some("K".into())
+        );
         assert_eq!(
             legend.note.as_deref(),
             Some("3.4 K over the 333.15 K limit")

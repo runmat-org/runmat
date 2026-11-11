@@ -1,0 +1,65 @@
+// The landing skid's touchdown study at demo speed: the half of the skid on one side of its
+// centre plane, held there by a symmetry constraint, on a coarser quadratic mesh. It solves in
+// about a minute where the full study (landing_skid.fea) takes about half an hour, and it is
+// checked against that study's 3.5 mm result (see DESIGN-NOTES.md).
+//
+// Geometry: ./geometry/landing_skid_half.step, exported from landing_skid_half.part, which cuts
+// the full skid's STEP at y = 34 mm. The half sole takes half of the 97 N touchdown load.
+// Load, material and limit are as in landing_skid.fea.
+
+geometry skid {
+    file = "./geometry/landing_skid_half.step"
+    units = mm
+    region body : solid { select name "landing_skid_half"; expect exactly_one }
+    region mount : face { select name "mount"; expect one_or_more }
+    region sole : face { select name "sole"; expect exactly_one }
+    region symmetry : face { select name "symmetry"; expect exactly_one }
+}
+
+mesh skid on geometry.skid {
+    tetrahedra {
+        order = quadratic
+        target_size = 3 mm
+        maximum_deviation = 0.2 mm
+        cells_across_gap = 2
+    }
+}
+
+material nylon_gf30 {
+    mass_density = 1360 kg/m^3
+    elastic {
+        youngs_modulus = 7.5 GPa
+        poisson_ratio = 0.35
+    }
+}
+
+model landing {
+    assign material.nylon_gf30 to geometry.skid.region.body
+    constraint belly {
+        structural.fixed { target = geometry.skid.region.mount }
+    }
+    constraint centre_plane {
+        structural.symmetry { target = geometry.skid.region.symmetry }
+    }
+    load ground {
+        force on geometry.skid.region.sole = [0, 0, 48.5] N
+    }
+    load_case touchdown { include load.ground }
+}
+
+study skid_landing_half {
+    geometry = geometry.skid
+    mesh = mesh.skid
+    model = model.landing
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+    output peak_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.skid.region.body)
+    output sole_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.skid.region.sole)
+    output peak_displacement = max(magnitude(analysis.static.field.node.displacement), over = geometry.skid.region.body)
+    assessment stays_below_55_mpa {
+        value = output.peak_stress
+        maximum = 55 MPa
+        evidence = authored_samples
+    }
+}

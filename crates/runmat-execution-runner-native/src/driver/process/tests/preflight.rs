@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 fn local_retirement_certificate_requires_physical_owner_evidence_not_an_error_or_root_exit() {
     let directory = tempfile::tempdir().unwrap();
     let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
-    config.store_root = directory.path().to_path_buf();
+    config.store_root = directory.path().join("session");
     config.max_workers = 1;
     let driver =
         LocalDriver::new(config, ExecutionScopeId::derive(&[b"retirement-proof"])).unwrap();
@@ -55,7 +55,7 @@ fn local_retirement_certificate_requires_physical_owner_evidence_not_an_error_or
 fn unreadable_program_preserves_known_prelaunch_consumption() {
     let directory = tempfile::tempdir().unwrap();
     let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
-    config.store_root = directory.path().to_path_buf();
+    config.store_root = directory.path().join("session");
     config.max_workers = 1;
     let driver = LocalDriver::new(config, ExecutionScopeId::derive(&[b"preflight"])).unwrap();
     let request = admit(&driver, ArtifactId::derive(&[b"missing-program"]));
@@ -153,7 +153,7 @@ fn foreign_stored_artifact_rejects_before_process_launch() {
     let foreign = true;
     let directory = tempfile::tempdir().unwrap();
     let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
-    config.store_root = directory.path().to_path_buf();
+    config.store_root = directory.path().join("session");
     config.max_workers = 1;
     // A launch would be both observable and erroneous. These are preflight failures.
     config.executable = directory.path().join("must-never-launch");
@@ -248,7 +248,7 @@ fn foreign_stored_artifact_rejects_before_process_launch() {
 async fn shared_provider_preserves_prelaunch_cancellation_in_an_existing_runtime() {
     let directory = tempfile::tempdir().unwrap();
     let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
-    config.store_root = directory.path().to_path_buf();
+    config.store_root = directory.path().join("session");
     config.max_workers = 1;
     config.executable = directory.path().join("must-never-launch");
     let driver =
@@ -319,7 +319,7 @@ fn provider_failure_and_cancellation_commit_the_original_observation_and_account
     for cancelled in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
-        config.store_root = directory.path().to_path_buf();
+        config.store_root = directory.path().join("session");
         config.max_workers = 1;
         config.executable = directory.path().join("must-never-launch");
         let driver = LocalDriver::new(

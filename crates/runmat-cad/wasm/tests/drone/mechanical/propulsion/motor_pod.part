@@ -1,0 +1,86 @@
+runmat 0.7
+std 1
+
+// The motor pod's cowl: a turned, filleted nacelle at the arm's tip that houses the motor's
+// stator and the arm's wiring; the bell turns above its rim. Its underside is pocketed
+// (R9.2, 7 mm deep) to fit over the arm's R9 pad, and the pocket's ceiling seats on the pad's
+// top face. Its origin is the motor axis (z) at the arm pad's top face.
+part motor_pod {
+    input arm_roll : angle = 0 deg
+    sketch prof on origin.zx {
+        c = spline(points = [[-7 mm, 12.5 mm], [-5.8 mm, 14.6 mm], [-3 mm, 15.3 mm], [2 mm, 15 mm], [4.4 mm, 13.8 mm], [5 mm, 12 mm]])
+        l1 = line(start = [5 mm, 12 mm], end = [5 mm, 1.2 mm])
+        l2 = line(start = [5 mm, 1.2 mm], end = [0 mm, 1.2 mm])
+        l3 = line(start = [0 mm, 1.2 mm], end = [0 mm, 9.2 mm])
+        l4 = line(start = [0 mm, 9.2 mm], end = [-7 mm, 9.2 mm])
+        l5 = line(start = [-7 mm, 9.2 mm], end = [-7 mm, 12.5 mm])
+    }
+    feature cowl = revolve(profile = sketch.prof, axis = origin.z, angle = 360 deg)
+    // The skirt's slot, where the arm runs in under the pocket (0.5 mm clear each side). On a
+    // tilted hinge the arm meets the level pod rolled by `arm_roll`, and the slot rolls with it.
+    feature slot_level = plane.offset(base = origin.xy, distance = -12 mm)
+    feature slot_base = plane.angle(base = plane.slot_level, axis = origin.x, angle = input.arm_roll)
+    sketch slot_s on plane.slot_base {
+        s1 = line(start = [-20 mm, -6.5 mm], end = [-5 mm, -6.5 mm])
+        s2 = line(start = [-5 mm, -6.5 mm], end = [-5 mm, 6.5 mm])
+        s3 = line(start = [-5 mm, 6.5 mm], end = [-20 mm, 6.5 mm])
+        s4 = line(start = [-20 mm, 6.5 mm], end = [-20 mm, -6.5 mm])
+    }
+    feature slot = extrude(profile = sketch.slot_s, distance = 12 mm, mode = cut)
+    // The motor's mount through the pod's floor: the stator's four M2 screws on a 12 mm bolt
+    // circle (in line with the arm pad's holes), a 5 mm bore for the shaft's circlip, and a
+    // slot for the three phase leads, between two screws on the arm's side. Fully defined.
+    sketch mount_s on origin.xy {
+        bore = circle(center = [0 mm, 0 mm], radius = 2.5 mm)
+        bc = circle(center = [0 mm, 0 mm], radius = 6 mm, construction)
+        h1 = circle(center = [6 mm, 0 mm], radius = 1.1 mm)
+        h2 = circle(center = [0 mm, 6 mm], radius = 1.1 mm)
+        h3 = circle(center = [-6 mm, 0 mm], radius = 1.1 mm)
+        h4 = circle(center = [0 mm, -6 mm], radius = 1.1 mm)
+        x_axis = line(start = [-6 mm, 0 mm], end = [6 mm, 0 mm], construction)
+        y_axis = line(start = [0 mm, -6 mm], end = [0 mm, 6 mm], construction)
+        s1 = line(start = [-4.384 mm, -2.687 mm], end = [-6.223 mm, -4.525 mm])
+        s2 = arc(center = [-5.374 mm, -5.374 mm], start = [-6.223 mm, -4.525 mm], end = [-4.525 mm, -6.223 mm])
+        s3 = line(start = [-4.525 mm, -6.223 mm], end = [-2.687 mm, -4.384 mm])
+        s4 = arc(center = [-3.536 mm, -3.536 mm], start = [-2.687 mm, -4.384 mm], end = [-4.384 mm, -2.687 mm])
+        slot_axis = line(start = [0 mm, 0 mm], end = [-3.536 mm, -3.536 mm], construction)
+        constrain fix(bore.center)
+        constrain coincident(bc.center, bore.center)
+        constrain diameter(bore) = 5 mm
+        constrain diameter(bc) = 12 mm
+        constrain coincident(x_axis.start, h3.center)
+        constrain coincident(x_axis.end, h1.center)
+        constrain coincident(y_axis.start, h4.center)
+        constrain coincident(y_axis.end, h2.center)
+        constrain horizontal(x_axis)
+        constrain vertical(y_axis)
+        constrain coincident(bore.center, x_axis)
+        constrain coincident(bore.center, y_axis)
+        constrain coincident(h1.center, bc)
+        constrain coincident(h2.center, bc)
+        constrain coincident(h3.center, bc)
+        constrain coincident(h4.center, bc)
+        constrain diameter(h1) = 2.2 mm
+        constrain equal(h2, h1)
+        constrain equal(h3, h1)
+        constrain equal(h4, h1)
+        constrain coincident(s1.end, s2.start)
+        constrain coincident(s2.end, s3.start)
+        constrain coincident(s3.end, s4.start)
+        constrain coincident(s4.end, s1.start)
+        constrain tangent(s1, s2)
+        constrain tangent(s3, s2)
+        constrain tangent(s3, s4)
+        constrain tangent(s1, s4)
+        constrain radius(s2) = 1.2 mm
+        constrain equal(s4, s2)
+        constrain coincident(slot_axis.start, bore.center)
+        constrain coincident(slot_axis.end, s4.center)
+        constrain parallel(slot_axis, s1)
+        constrain angle(slot_axis, x_axis) = 135 deg
+        constrain distance(bore.center, s4.center) = 5 mm
+        constrain distance(s4.center, s2.center) = 2.6 mm
+    }
+    feature mount = extrude(profile = sketch.mount_s, distance = 5 mm, mode = cut)
+    output motor_pod = { body = feature.cowl.body, part_number = "CD-AR-240", material = "glass_filled_nylon", color = "#4A4F57" }
+}

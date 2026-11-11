@@ -136,16 +136,20 @@ fn parse_groups(arguments: crate::call::BuiltinArguments) -> crate::BuiltinResul
     }
     let mut groups = Vec::new();
     for group in positional.chunks_exact(3) {
-        let color_property = if is_string_like(&group[2]) {
-            "FaceColor"
-        } else {
-            "CData"
-        };
         for (coordinates, color) in super::patch::split_coordinate_group_columns(
             &[group[0].clone(), group[1].clone()],
             &group[2],
             BUILTIN_NAME,
         )? {
+            // Classify the retained, gathered column rather than the original
+            // argument. RGB literals share patch/fill3 admission; indexed
+            // columns and scalar colors retain their CData representation.
+            let color_property =
+                if is_string_like(&color) || super::patch::is_color_literal(&color)? {
+                    "FaceColor"
+                } else {
+                    "CData"
+                };
             let mut patch_args = vec![
                 Value::String("XData".into()),
                 coordinates[0].clone(),
@@ -233,6 +237,54 @@ mod tests {
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer patch data"))
+    }
+
+    #[test]
+    fn fill_rgb_literal_and_indexed_colors_keep_distinct_patch_sources() {
+        let parse = |color| {
+            let args = crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![4, 1]).unwrap()),
+                Value::Tensor(Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]).unwrap()),
+                color,
+            ]);
+            let mut groups = parse_groups(args).unwrap();
+            assert_eq!(groups.len(), 1);
+            crate::builtins::plotting::patch::parse_patch_plot(groups.pop().unwrap()).unwrap()
+        };
+        let rgb = parse(Value::Tensor(
+            Tensor::new(vec![0.3, 0.6, 0.9], vec![1, 3]).unwrap(),
+        ));
+        assert_eq!(rgb.face_color(), glam::Vec4::new(0.3, 0.6, 0.9, 1.0));
+        assert_eq!(
+            rgb.face_color_mode(),
+            runmat_plot::plots::PatchFaceColorMode::Color
+        );
+        assert!(rgb.source_data().3.is_none());
+
+        let indexed = parse(integer_tensor(
+            IntegerStorage::U16(vec![1, 2, 3, 4]),
+            vec![4, 1],
+        ));
+        assert_eq!(
+            indexed.color_source_kind(),
+            runmat_plot::plots::PatchColorSourceKind::CoordinateGrid
+        );
+        let colors = indexed.source_data().3.unwrap();
+        assert_eq!(colors.shape(), [4, 1]);
+        assert_eq!(
+            colors.storage(),
+            &runmat_value::NumericStorage::U16(vec![1, 2, 3, 4])
+        );
+
+        let scalar = parse(Value::Int(IntValue::U8(2)));
+        assert_eq!(
+            scalar.color_source_kind(),
+            runmat_plot::plots::PatchColorSourceKind::FaceVertex
+        );
+        assert_eq!(
+            scalar.source_data().3.unwrap().storage(),
+            &runmat_value::NumericStorage::U8(vec![2])
+        );
     }
 
     #[test]

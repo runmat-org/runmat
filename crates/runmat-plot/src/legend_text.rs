@@ -29,7 +29,9 @@ impl LegendPrecision {
         let scientific = !(1e-3..1e5).contains(&magnitude);
         let base = if scientific {
             let exponent = magnitude.log10().floor() as i32;
-            Self::Scientific((exponent - resolution.log10().floor() as i32 + 1).clamp(0, 12) as usize)
+            Self::Scientific(
+                (exponent - resolution.log10().floor() as i32 + 1).clamp(0, 12) as usize,
+            )
         } else {
             Self::Fixed((1 - resolution.log10().floor() as i32).clamp(0, 12) as usize)
         };
@@ -60,7 +62,11 @@ impl LegendPrecision {
             Self::Scientific(decimals) => format!("{value:.decimals$e}"),
         };
         // Rounding can leave "-0.0"; the sign of a printed zero means nothing.
-        if text.trim_start_matches('-').chars().all(|c| c == '0' || c == '.') {
+        if text
+            .trim_start_matches('-')
+            .chars()
+            .all(|c| c == '0' || c == '.')
+        {
             text.trim_start_matches('-').to_string()
         } else {
             text
@@ -132,7 +138,10 @@ mod tests {
         assert_eq!(ends(8.6996, 1171.548), ("9".into(), "1172".into()));
         assert_eq!(ends(0.0, 0.25), ("0".into(), "0.25".into()));
         // A narrow band far from zero still prints two different ends.
-        assert_eq!(ends(300.001, 300.004), ("300.0010".into(), "300.0040".into()));
+        assert_eq!(
+            ends(300.001, 300.004),
+            ("300.0010".into(), "300.0040".into())
+        );
         assert_eq!(ends(0.0, 1.234e-5), ("0".into(), "1.2e-5".into()));
         assert_eq!(ends(2.1e7, 3.38e8), ("2.1e7".into(), "3.4e8".into()));
         assert_eq!(ends(0.0, 1.0), ("0".into(), "1.0".into()));

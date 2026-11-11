@@ -5,6 +5,7 @@ use runmat_analysis_core::*;
 fn preparation() -> ThermalTaskPreparation {
     let p = crate::thermal_study::tests::preparation();
     ThermalTaskPreparation {
+        maximum_resident_bytes: None,
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: p.product.compiled.definition_digest().unwrap(),
         frozen_project_digest: p.frozen_project_digest,
@@ -16,6 +17,43 @@ fn preparation() -> ThermalTaskPreparation {
         output_policy: p.output_policy,
         required_capabilities: p.required_capabilities,
     }
+}
+
+#[test]
+fn placement_budget_changes_resource_identity_without_rewriting_thermal_intent() {
+    let mut plans = Vec::new();
+    for maximum in [64 * 1024 * 1024, 128 * 1024 * 1024] {
+        let mut input = preparation();
+        let original = input.workload.clone();
+        input.maximum_resident_bytes = Some(maximum);
+        let mesh = input.mesh.clone();
+        let task = prepare_thermal_task(input).unwrap();
+        assert_eq!(
+            task.resource_plan
+                .input
+                .accuracy_ceiling
+                .resident_byte_budget(),
+            maximum
+        );
+        assert!(task.resource_plan.request.memory_bytes <= maximum);
+        let stored = task
+            .inputs
+            .iter()
+            .find(|objects| objects.manifest.kind == AnalysisNumericalObjectKind::ThermalWorkload)
+            .unwrap();
+        let restored = ThermalWorkload::from_canonical_bytes(&stored.payload()).unwrap();
+        assert_eq!(restored, original);
+        assert_eq!(
+            rederive_thermal_resource_plan(&restored, &mesh, &task.inputs, task.output_policy)
+                .unwrap(),
+            task.resource_plan
+        );
+        plans.push(task.resource_plan.identity);
+    }
+    assert_ne!(plans[0], plans[1]);
+    let mut refused = preparation();
+    refused.maximum_resident_bytes = Some(1);
+    assert!(prepare_thermal_task(refused).is_err());
 }
 
 fn heat_field(p: &mut ThermalTaskPreparation, provenance: SignalProvenance) {

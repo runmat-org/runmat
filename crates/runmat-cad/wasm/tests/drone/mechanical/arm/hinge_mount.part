@@ -1,0 +1,73 @@
+runmat 0.7
+std 1
+
+// The hinge mount: an aluminium clevis moulded into the body at each arm root. Two lugs hold
+// the steel hinge pin (z) above and below the arm's knuckle; the back block sits in the shell
+// and takes two M2 screws. Each lug's sketch is fully defined (0 degrees of freedom) and carries
+// the pin bore. Its origin is the pin axis at the knuckle's mid-height, and the
+// arm leaves along +x when unfolded.
+part hinge_mount {
+    feature upper_base = plane.offset(base = origin.xy, distance = 6.7 mm)
+    sketch upper_s on plane.upper_base {
+        l1 = line(start = [-14 mm, -7.5 mm], end = [0 mm, -7.5 mm])
+        a1 = arc(center = [0 mm, 0 mm], start = [0 mm, -7.5 mm], end = [0 mm, 7.5 mm])
+        l2 = line(start = [0 mm, 7.5 mm], end = [-14 mm, 7.5 mm])
+        l3 = line(start = [-14 mm, 7.5 mm], end = [-14 mm, -7.5 mm])
+        pin = circle(center = [0 mm, 0 mm], radius = 2 mm)
+        constrain fix(a1.center)
+        constrain coincident(l1.end, a1.start)
+        constrain coincident(a1.end, l2.start)
+        constrain coincident(l2.end, l3.start)
+        constrain coincident(l3.end, l1.start)
+        constrain coincident(pin.center, a1.center)
+        constrain horizontal(l1)
+        constrain horizontal(l2)
+        constrain vertical(l3)
+        constrain tangent(l1, a1)
+        constrain tangent(l2, a1)
+        constrain radius(a1) = 7.5 mm
+        constrain length(l1) = 14 mm
+        constrain radius(pin) = 2 mm
+    }
+    feature upper = extrude(profile = sketch.upper_s, distance = 3.4 mm)
+    feature lower_base = plane.offset(base = origin.xy, distance = -10.1 mm)
+    sketch lower_s on plane.lower_base {
+        l1 = line(start = [-14 mm, -7.5 mm], end = [0 mm, -7.5 mm])
+        a1 = arc(center = [0 mm, 0 mm], start = [0 mm, -7.5 mm], end = [0 mm, 7.5 mm])
+        l2 = line(start = [0 mm, 7.5 mm], end = [-14 mm, 7.5 mm])
+        l3 = line(start = [-14 mm, 7.5 mm], end = [-14 mm, -7.5 mm])
+        pin = circle(center = [0 mm, 0 mm], radius = 2 mm)
+        constrain fix(a1.center)
+        constrain coincident(l1.end, a1.start)
+        constrain coincident(a1.end, l2.start)
+        constrain coincident(l2.end, l3.start)
+        constrain coincident(l3.end, l1.start)
+        constrain coincident(pin.center, a1.center)
+        constrain horizontal(l1)
+        constrain horizontal(l2)
+        constrain vertical(l3)
+        constrain tangent(l1, a1)
+        constrain tangent(l2, a1)
+        constrain radius(a1) = 7.5 mm
+        constrain length(l1) = 14 mm
+        constrain radius(pin) = 2 mm
+    }
+    feature lower = extrude(profile = sketch.lower_s, distance = 3.4 mm, mode = add)
+    feature back_base = plane.offset(base = origin.xy, distance = -10.1 mm)
+    sketch back_s on plane.back_base {
+        k1 = line(start = [-20 mm, -7.5 mm], end = [-12 mm, -7.5 mm])
+        k2 = line(start = [-12 mm, -7.5 mm], end = [-12 mm, 7.5 mm])
+        k3 = line(start = [-12 mm, 7.5 mm], end = [-20 mm, 7.5 mm])
+        k4 = line(start = [-20 mm, 7.5 mm], end = [-20 mm, -7.5 mm])
+    }
+    feature back = extrude(profile = sketch.back_s, distance = 20.2 mm, mode = add)
+    feature bore_base = plane.offset(base = origin.xy, distance = -10.5 mm)
+    sketch bore_s on plane.bore_base {
+        s1 = circle(center = [-16 mm, -3.5 mm], radius = 1.1 mm)
+        s2 = circle(center = [-16 mm, 3.5 mm], radius = 1.1 mm)
+    }
+    feature bores = extrude(profile = sketch.bore_s, through_all, mode = cut)
+    region pin_bore : face = { select = [feature.upper.face.side(upper_s.pin), feature.lower.face.side(lower_s.pin)], expect = at_least_one }
+    region mount : face = { select = [feature.back.face.side(back_s.k4)], expect = exactly_one }
+    output hinge_mount = { body = feature.upper.body, part_number = "CD-AR-220", material = "aluminum_6061", color = "#9AA1AA" }
+}

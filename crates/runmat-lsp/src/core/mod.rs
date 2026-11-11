@@ -1,6 +1,7 @@
 /// Transport-agnostic LSP core
 pub mod analysis;
 pub mod builtins_json;
+pub mod design;
 pub mod docs;
 pub mod fea;
 pub mod formatting;

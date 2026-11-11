@@ -12,7 +12,9 @@ use crate::bsr::BsrMatrix;
 use crate::control::{Progress, ProgressPhase, SolveControl};
 use crate::csr::{CsrMatrix, CsrRef};
 use crate::dense::{cholesky_in_place, cholesky_solve};
-use crate::direct::{DirectOptions, DirectSolver, FactorKind, SymbolicFactorization};
+use crate::direct::{
+    DirectOptions, DirectSolver, DirectWorkspacePolicy, FactorKind, SymbolicFactorization,
+};
 use crate::error::{SolverError, SolverResult};
 use crate::operator::Preconditioner;
 use crate::par;
@@ -850,7 +852,10 @@ async fn build_coarse_solver_with_capacity<E>(
         }
         return Ok(CoarseSolver::Smoothing);
     }
-    let options = DirectOptions::new(FactorKind::Cholesky);
+    let mut options = DirectOptions::new(FactorKind::Cholesky);
+    // The hierarchy's admission covers explicit factor storage and scratch.
+    // Backend-managed packing is outside that reservation.
+    options.workspace = DirectWorkspacePolicy::CallerOwned;
     let symbolic =
         SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE)?;
     let work = symbolic

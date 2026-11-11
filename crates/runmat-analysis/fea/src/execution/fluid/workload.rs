@@ -364,7 +364,9 @@ impl FluidSteadyWorkload {
             return Err(invalid(admission::FLUID_STRUCTURE_INTERFACE.message));
         }
         if !self.model.initial_conditions.is_empty() {
-            return Err(invalid(admission::FLUID_STRUCTURE_INITIAL_CONDITION.message));
+            return Err(invalid(
+                admission::FLUID_STRUCTURE_INITIAL_CONDITION.message,
+            ));
         }
         let timing = match (step.procedure, &step.independent_domain) {
             (AnalysisProcedure::Static, IndependentDomain::Static) => true,

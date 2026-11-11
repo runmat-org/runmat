@@ -114,10 +114,12 @@ fn validate_histories(
     use runmat_analysis_fea::results::observation::{
         ObservationFieldCatalogSource, ObservationPublicationEntry, ObservationPublicationScope,
     };
-    let declared = step
-        .observations
-        .iter()
-        .any(|request| matches!(request, runmat_analysis_core::ObservationRequest::History(_)));
+    let declared = step.observations.iter().any(|request| {
+        matches!(
+            request,
+            runmat_analysis_core::ObservationRequest::History(_)
+        )
+    });
     let catalog = match &completed.history_catalog {
         None if !declared && completed.series_reductions.is_empty() => return Ok(()),
         Some(catalog) if declared => catalog,

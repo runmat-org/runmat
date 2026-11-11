@@ -34,9 +34,10 @@ pub(super) struct ObservationAttachmentVersion {
     pub schema_version: u16,
 }
 
-/// A stored attachment as read from the filesystem store.
-pub(super) enum StoredObservationAttachment {
-    Current(ObservationAttachment),
+/// Outcome of visiting a filesystem observation attachment.
+pub(super) enum ObservationAttachmentReadOutcome {
+    Missing,
+    Current,
     /// Written at another schema version; its closure is unknown to this reader.
     Legacy,
 }

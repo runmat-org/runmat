@@ -1,0 +1,36 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    sketch s2 on origin.xy {
+        n1 = line(start = [20 mm, 20 mm], end = [40 mm, 20 mm])
+        n2 = line(start = [40 mm, 20 mm], end = [40 mm, 30 mm])
+        n3 = line(start = [40 mm, 30 mm], end = [20 mm, 30 mm])
+        n4 = line(start = [20 mm, 30 mm], end = [20 mm, 20 mm])
+    }
+    feature pocket_tool = extrude(profile = sketch.s2, distance = 30 mm)
+    feature pocket = boolean.subtract(target = feature.body.body, tools = [feature.pocket_tool.body])
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+
+    region top : face = { select = [feature.body.face.end], expect = exactly_one }
+    region front : face = { select = [feature.body.face.side(s1.l1)], expect = exactly_one }
+    region right : face = { select = [feature.body.face.side(s1.l2)], expect = exactly_one }
+    region front_top : edge = {
+        select = [edges_between(feature.body.face.side(s1.l1), feature.body.face.end)],
+        expect = at_least_one
+    }
+    region tool : body = { select = [feature.pocket_tool.body], expect = exactly_one }
+    region wall : face = { select = [feature.pocket_tool.face.side(s2.n1)], expect = exactly_one }
+}

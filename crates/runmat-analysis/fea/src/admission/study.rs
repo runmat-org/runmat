@@ -304,16 +304,23 @@ fn admit_initial_conditions(
         return;
     }
     let rule = match family {
-        AdmittedFamily::Fluid => conditions
-            .iter()
-            .any(|condition| {
-                !matches!(
-                    condition.kind,
-                    AuthoredInitialConditionKind::FluidVelocity(_)
-                        | AuthoredInitialConditionKind::FluidPressure(_)
-                )
-            })
-            .then_some(FLUID_INITIAL_CONDITION),
+        AdmittedFamily::Fluid => {
+            // Conjugate heat transfer also starts its solid and fluid temperatures here.
+            let conjugate = realized.sequence.steps.iter().any(|step| {
+                step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+            });
+            conditions
+                .iter()
+                .any(|condition| {
+                    !(matches!(
+                        condition.kind,
+                        AuthoredInitialConditionKind::FluidVelocity(_)
+                            | AuthoredInitialConditionKind::FluidPressure(_)
+                    ) || conjugate
+                        && matches!(condition.kind, AuthoredInitialConditionKind::Temperature(_)))
+                })
+                .then_some(FLUID_INITIAL_CONDITION)
+        }
         AdmittedFamily::AcousticResponse
             if realized
                 .sequence

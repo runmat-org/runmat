@@ -1,7 +1,7 @@
 //! Publication of a solved cross-section: its line parameters as observation results, on the
 //! canonical triangle mesh the potential solves ran on. No re-solve and no proxy values.
-use crate::analysis::{AnalysisLineParametersRunOptions, AnalysisStudyCompletionIdentity};
 use crate::analysis::*;
+use crate::analysis::{AnalysisLineParametersRunOptions, AnalysisStudyCompletionIdentity};
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use runmat_analysis_fea::{
     contracts::{ExecutionBackend, SolverMethod, SolverPreconditioner},
@@ -78,11 +78,10 @@ pub fn prepare_line_parameters_study_publication(
         })?;
         validate(completed, step, mesh, meshing_evidence, options).map_err(invalid)?;
     }
-    let sequence =
-        runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
-            &completed.compiled.model.sequence,
-        )
-        .map_err(|error| invalid(error.to_string()))?;
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
+        &completed.compiled.model.sequence,
+    )
+    .map_err(|error| invalid(error.to_string()))?;
     let step_identity =
         runmat_analysis_fea::execution::StepIdentity::from_solver_contract(sequence, step)
             .map_err(|error| invalid(error.to_string()))?;
@@ -140,7 +139,9 @@ pub fn prepare_line_parameters_study_publication(
         step_id: step.step_id.clone(),
         solver_result_identity,
         run: crate::analysis::structural_study::CompletedStudyStepRun::Standard(Box::new(run)),
-        resolved_solver_options: crate::analysis::AnalysisSolverOptions::LineParameters(options.clone()),
+        resolved_solver_options: crate::analysis::AnalysisSolverOptions::LineParameters(
+            options.clone(),
+        ),
     };
     let mut published =
         crate::analysis::structural_study::publication::complete_study_run_prepared(
@@ -155,9 +156,8 @@ pub fn prepare_line_parameters_study_publication(
         section_digest: completed.section_digest,
         options: options.clone(),
     };
-    let workload_digest = Digest::sha256(
-        serde_json::to_vec(&workload).map_err(|error| invalid(error.to_string()))?,
-    );
+    let workload_digest =
+        Digest::sha256(serde_json::to_vec(&workload).map_err(|error| invalid(error.to_string()))?);
     let manifest = crate::analysis::study_result_manifest::StudyResultManifest::new(
         study,
         workload_digest,
@@ -201,7 +201,13 @@ fn validate(
     if options.precision_mode != PrecisionMode::Fp64 {
         return Err("line parameters are solved in f64".into());
     }
-    if !(completed.parameters.relative_residual <= options.residual_target) {
+    if !matches!(
+        completed
+            .parameters
+            .relative_residual
+            .partial_cmp(&options.residual_target),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    ) {
         return Err(format!(
             "the section's potential solves reached a relative residual of {:.3e}, above the target {:.3e}",
             completed.parameters.relative_residual, options.residual_target

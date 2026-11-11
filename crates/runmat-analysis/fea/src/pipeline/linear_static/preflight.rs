@@ -13,8 +13,8 @@ use crate::{
     },
     post::fields::structural_static_observable_field_definitions,
     results::observation::{
-        resolve_structural_observation_plan_with_connectors, ObservationExecutionPolicy,
-        ObservationLimits,
+        resolve_structural_observation_plan_with_connectors, ObservationError,
+        ObservationExecutionPolicy, ObservationLimits,
     },
 };
 
@@ -94,7 +94,7 @@ pub(super) fn prepare_static_preassembly(
         options.solver_mesh.as_ref(),
         constraints.reference_points.len(),
     )
-    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    .map_err(FeaRunError::from)?;
     let fields = structural_static_observable_field_definitions()
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let observations = resolve_structural_observation_plan_with_connectors(
@@ -106,7 +106,10 @@ pub(super) fn prepare_static_preassembly(
         &fields,
         ObservationLimits::default(),
     )
-    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    .map_err(|error| match error {
+        ObservationError::Accounting(cause) => FeaRunError::Usage(cause),
+        other => FeaRunError::Assembly(other.to_string()),
+    })?;
     // An admitted plan fixes the path; a direct run selects it within the authored ceiling and
     // the memory a single solve may use on this host.
     let selection = match admitted.as_ref() {

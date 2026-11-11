@@ -237,8 +237,7 @@ async fn constructed_geometry_reaches_a_terminal_mesh_over_encrypted_quic() {
         .await
         .expect("remote geometry meshing root timed out")
         .unwrap();
-        let crate::remote::pool_execution::RemotePoolExecutionOutcome::Completed(result) = outcome
-        else {
+        let Ok(result) = outcome else {
             panic!("remote geometry meshing root did not complete")
         };
         let runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {

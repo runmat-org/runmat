@@ -266,7 +266,9 @@ pub struct SymbolicFactorization {
 }
 
 mod reference_work;
-pub use reference_work::{DirectReferenceWork, ReferenceWorkError};
+pub use reference_work::{
+    DirectMeasurementCoverage, DirectReferenceWork, ExcludedDirectKernel, ReferenceWorkError,
+};
 
 impl std::fmt::Debug for SymbolicFactorization {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -349,7 +351,9 @@ impl SymbolicFactorization {
         if options.workspace != DirectWorkspacePolicy::CallerOwned
             || !matches!(options.kind, FactorKind::Cholesky | FactorKind::Ldlt)
         {
-            return Ok(Self::analyze_pattern::<T>(n, row_ptr, col_idx, options, control)?.estimate());
+            return Ok(
+                Self::analyze_pattern::<T>(n, row_ptr, col_idx, options, control)?.estimate(),
+            );
         }
         let values = try_vec(col_idx.len(), T::zero())?;
         let matrix: SparseInput<'_, T> = CsrRef::try_new(n, n, row_ptr, col_idx, &values)?.into();
@@ -481,19 +485,16 @@ impl<T: FactorScalar> DirectSolver<T> {
             residual: 0.0,
             converged: 0,
         });
-        let (numeric, regularized) = match symbolic.kind {
-            FactorKind::Cholesky | FactorKind::Ldlt => reference_work::with_direct_usage(
-                &symbolic,
-                reference_work::DirectPhase::Factorization,
-                || cholesky::factorize::<T>(&symbolic, matrix, &options, None),
-            )?,
-            FactorKind::Lu => reference_work::with_direct_usage(
-                &symbolic,
-                reference_work::DirectPhase::Factorization,
-                || Ok((lu::factorize::<T>(&symbolic, matrix, None)?, 0)),
-            )?,
-            _ => cholesky::factorize::<T>(&symbolic, matrix, &options, None)?,
-        };
+        let (numeric, regularized) = reference_work::with_direct_usage(
+            &symbolic,
+            reference_work::DirectPhase::Factorization,
+            || match symbolic.kind {
+                FactorKind::Lu => Ok((lu::factorize::<T>(&symbolic, matrix, None)?, 0)),
+                FactorKind::Cholesky | FactorKind::Ldlt | FactorKind::BunchKaufman => {
+                    cholesky::factorize::<T>(&symbolic, matrix, &options, None)
+                }
+            },
+        )?;
         control.check()?;
         Ok(Self {
             symbolic,
@@ -517,18 +518,12 @@ impl<T: FactorScalar> DirectSolver<T> {
             residual: 0.0,
             converged: 0,
         });
-        if matches!(
-            self.symbolic.kind,
-            FactorKind::Cholesky | FactorKind::Ldlt | FactorKind::Lu
-        ) {
-            let symbolic = Arc::clone(&self.symbolic);
-            return reference_work::with_direct_usage(
-                &symbolic,
-                reference_work::DirectPhase::Factorization,
-                || self.refactorize_numeric(matrix),
-            );
-        }
-        self.refactorize_numeric(matrix)
+        let symbolic = Arc::clone(&self.symbolic);
+        reference_work::with_direct_usage(
+            &symbolic,
+            reference_work::DirectPhase::Factorization,
+            || self.refactorize_numeric(matrix),
+        )
     }
 
     fn refactorize_numeric(&mut self, matrix: SparseInput<'_, T>) -> SolverResult<()> {
@@ -596,17 +591,26 @@ impl<T: FactorScalar> DirectSolver<T> {
                     },
                 )?
             }
-            NumericInner::Lu(numeric) => reference_work::with_direct_usage(
-                &self.symbolic,
-                reference_work::DirectPhase::Solve { rhs_columns: k },
-                || {
-                    initialize(rhs);
-                    lu::solve(&self.symbolic, numeric, rhs, k)
-                },
-            )?,
+            NumericInner::Lu(numeric) => {
+                reference_work::with_direct_usage(
+                    &self.symbolic,
+                    reference_work::DirectPhase::Solve { rhs_columns: k },
+                    || {
+                        initialize(rhs);
+                        lu::solve(&self.symbolic, numeric, rhs, k)
+                    },
+                )?;
+            }
             numeric => {
-                initialize(rhs);
-                cholesky::solve(&self.symbolic, numeric, rhs, k);
+                reference_work::with_direct_usage(
+                    &self.symbolic,
+                    reference_work::DirectPhase::Solve { rhs_columns: k },
+                    || {
+                        initialize(rhs);
+                        cholesky::solve(&self.symbolic, numeric, rhs, k);
+                        Ok(())
+                    },
+                )?;
             }
         }
         Ok(())
@@ -762,21 +766,24 @@ impl<T: FactorScalar> DirectSolver<T> {
         let substitution_work = if before_batch.is_some()
             || runmat_simulation_usage::UsageContext::capture().is_some()
         {
-            let reference_work = self
+            let coverage = self
                 .symbolic
-                .reference_work()
+                .measurement_coverage()
                 .map_err(|error| match error {
                     ReferenceWorkError::Overflow(error) => SolverError::Usage(error.into()),
                     other => SolverError::Unsupported(other.to_string()),
                 })?;
-            Some((
-                reference_work
-                    .solve_operations(u64::try_from(k).map_err(|_| SolverError::IndexOverflow)?)
-                    .map_err(|error| SolverError::Usage(error.into()))?,
-                reference_work
-                    .solve_operations(1)
-                    .map_err(|error| SolverError::Usage(error.into()))?,
-            ))
+            match coverage {
+                DirectMeasurementCoverage::Measured(reference_work) => Some((
+                    reference_work
+                        .solve_operations(u64::try_from(k).map_err(|_| SolverError::IndexOverflow)?)
+                        .map_err(|error| SolverError::Usage(error.into()))?,
+                    reference_work
+                        .solve_operations(1)
+                        .map_err(|error| SolverError::Usage(error.into()))?,
+                )),
+                DirectMeasurementCoverage::Excluded(_) => None,
+            }
         } else {
             None
         };

@@ -1,0 +1,19 @@
+runmat 0.7
+std 1
+
+part chute {
+    sketch s0 on origin.xy {
+        a = line(start = [0 mm, 0 mm], end = [20 mm, 0 mm])
+        b = line(start = [20 mm, 0 mm], end = [20 mm, 20 mm])
+        c = line(start = [20 mm, 20 mm], end = [0 mm, 20 mm])
+        e = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])
+    }
+    feature slope = plane.three_point(a = point(0 mm, 0 mm, 30 mm), b = point(20 mm, 0 mm, 40 mm), c = point(0 mm, 20 mm, 30 mm))
+    sketch s1 on plane.slope {
+        a = line(start = [0 mm, 0 mm], end = [22.360679774997898 mm, 0 mm])
+        b = line(start = [22.360679774997898 mm, 0 mm], end = [22.360679774997898 mm, 20 mm])
+        c = line(start = [22.360679774997898 mm, 20 mm], end = [0 mm, 20 mm])
+        e = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])
+    }
+    feature body = loft(profiles = [sketch.s0, sketch.s1])
+}

@@ -311,7 +311,7 @@ impl BaseWorkspaceProjectionService {
                 .pending_publication()
                 .map_err(base_workspace_error_to_runtime)?,
         );
-        let (commit, projection_retired) = match projection.publish_with_effect(effect) {
+        let (commit, projection_retired) = match projection.publish_with_effect(effect, context) {
             Ok(result) => result,
             Err((error, effect)) => {
                 state.published_effect.restore_canonical_effect(effect);
@@ -635,7 +635,12 @@ impl BaseWorkspaceProjectionService {
             self.prepare_unbounded_published_effect(publication_upper_bound)?;
             let prepared = self
                 .borrow()?
-                .prepare_unbounded_namespace(name, action, target)
+                .prepare_unbounded_namespace(
+                    name,
+                    action,
+                    target,
+                    super::delta::WorkspaceMutationOrigin::Executor,
+                )
                 .map_err(base_workspace_error_to_runtime)?;
             return self.install_unbounded_observed_mutation(context, prepared);
         };
@@ -658,10 +663,17 @@ impl BaseWorkspaceProjectionService {
             .map_err(|cause| workspace_admission_error(context, cause))?;
         let prepared = self
             .borrow()?
-            .prepare_namespace_mutation(plan, prepared_name, action, prepared_target, &permit)
+            .prepare_namespace_mutation(
+                context,
+                plan,
+                prepared_name,
+                action,
+                prepared_target,
+                &permit,
+            )
             .map_err(base_workspace_error_to_runtime)?;
         self.install_published_effect(publication)?;
-        self.install_observed_mutation(context, prepared, &permit)
+        self.install_observed_mutation(context, prepared)
     }
 
     fn stage_clear_with_context(&self, context: &RuntimeContext) -> Result<(), RuntimeError> {
@@ -686,7 +698,7 @@ impl BaseWorkspaceProjectionService {
             self.prepare_unbounded_published_effect(publication_upper_bound)?;
             let prepared = self
                 .borrow()?
-                .prepare_unbounded_clear()
+                .prepare_unbounded_clear(super::delta::WorkspaceMutationOrigin::Executor)
                 .map_err(base_workspace_error_to_runtime)?;
             return self.install_unbounded_observed_mutation(context, prepared);
         };
@@ -703,7 +715,7 @@ impl BaseWorkspaceProjectionService {
             .prepare_clear_mutation(&permit)
             .map_err(base_workspace_error_to_runtime)?;
         self.install_published_effect(publication)?;
-        self.install_observed_mutation(context, prepared, &permit)
+        self.install_observed_mutation(context, prepared)
     }
 
     fn published_effect_retained_bytes(
@@ -917,7 +929,7 @@ impl BaseWorkspaceProjectionService {
             .map_err(base_workspace_error_to_runtime)?;
         let installed_retired = ordered.install_completion(completion);
         let effect = published_effect.take_canonical_effect(ordered.pending());
-        let (commit, publication_retired) = match ordered.publish_with_effect(effect) {
+        let (commit, publication_retired) = match ordered.publish_with_effect(effect, context) {
             Ok(result) => result,
             Err((error, effect)) => {
                 published_effect.restore_canonical_effect(effect);
@@ -1189,7 +1201,7 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
         let state = self.borrow()?;
         validate_identity(&state)?;
         let completion = state
-            .prepare_completion(source, &permit)
+            .prepare_completion(context, source, &permit)
             .map_err(base_workspace_error_to_runtime)?;
         drop(state);
         let publication =
@@ -1364,6 +1376,17 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
     ) -> Result<(), RuntimeError> {
         self.ensure_mutation_context(context)?;
         self.ensure_mutation_authority()
+    }
+
+    fn publish_admitted_mutations_with_context(
+        &self,
+        context: &RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_mutation_authority_with_context(context)?;
+        if !self.is_private()? && self.has_pending_changes()? {
+            self.publish_with_context(context)?;
+        }
+        Ok(())
     }
 
     fn workspace_revision(&self) -> Result<Option<WorkspaceRevision>, RuntimeError> {
@@ -1569,10 +1592,10 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
             .map_err(|cause| workspace_admission_error(context, cause))?;
         let prepared = self
             .borrow()?
-            .prepare_assignment(plan, &prepared, &permit, false)
+            .prepare_assignment(context, plan, &prepared, &permit, false)
             .map_err(base_workspace_error_to_runtime)?;
         self.install_published_effect(publication)?;
-        self.install_observed_mutation(context, prepared, &permit)
+        self.install_observed_mutation(context, prepared)
     }
 
     fn assign_executor_slot(
@@ -1653,10 +1676,10 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
             .map_err(|cause| workspace_admission_error(context, cause))?;
         let prepared = self
             .borrow()?
-            .prepare_assignment(plan, &prepared, &permit, true)
+            .prepare_assignment(context, plan, &prepared, &permit, true)
             .map_err(base_workspace_error_to_runtime)?;
         self.install_published_effect(publication)?;
-        self.install_observed_mutation(context, prepared, &permit)
+        self.install_observed_mutation(context, prepared)
     }
 
     fn assign_executor_slot_lease_with_context(
@@ -1736,10 +1759,10 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
             .map_err(|cause| workspace_admission_error(context, cause))?;
         let prepared = self
             .borrow()?
-            .prepare_assignment(plan, &prepared, &permit, true)
+            .prepare_assignment(context, plan, &prepared, &permit, true)
             .map_err(base_workspace_error_to_runtime)?;
         self.install_published_effect(publication)?;
-        self.install_observed_mutation(context, prepared, &permit)
+        self.install_observed_mutation(context, prepared)
     }
 
     fn declare_global_binding_with_context(

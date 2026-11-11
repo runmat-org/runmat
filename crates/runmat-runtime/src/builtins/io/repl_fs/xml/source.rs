@@ -97,11 +97,7 @@ mod tests {
     use super::*;
 
     fn test_dir(name: &str) -> PathBuf {
-        if cfg!(windows) {
-            PathBuf::from(format!(r"C:\{name}"))
-        } else {
-            PathBuf::from(format!("/{name}"))
-        }
+        PathBuf::from(format!("/{name}"))
     }
 
     #[cfg(not(windows))]

@@ -1,0 +1,185 @@
+runmat 0.7
+std 1
+
+// The body's lower shell: the same loft below the split line, closed at the tail by a lofted
+// cap, with the battery bay's lower half mid-body and a window in the belly for the ESC's heatsink, which carries the ESC and the
+// flight controller on the 30.5 mm stack pattern and puts its fins in the downwash.
+part body_bottom {
+    feature outer_st0 = plane.offset(base = origin.yz, distance = -94 mm)
+    sketch outer_s0 on plane.outer_st0 {
+        c = spline(points = [[0 mm, 48 mm], [14.09 mm, 47.535 mm], [22.552 mm, 46.145 mm], [28.886 mm, 43.833 mm], [33.387 mm, 40.581 mm], [36.095 mm, 36.235 mm], [37 mm, 29 mm], [36.095 mm, 21.765 mm], [33.387 mm, 17.419 mm], [28.886 mm, 14.167 mm], [22.552 mm, 11.855 mm], [14.09 mm, 10.465 mm], [0 mm, 10 mm], [-14.09 mm, 10.465 mm], [-22.552 mm, 11.855 mm], [-28.886 mm, 14.167 mm], [-33.387 mm, 17.419 mm], [-36.095 mm, 21.765 mm], [-37 mm, 29 mm], [-36.095 mm, 36.235 mm], [-33.387 mm, 40.581 mm], [-28.886 mm, 43.833 mm], [-22.552 mm, 46.145 mm], [-14.09 mm, 47.535 mm]], closed)
+    }
+    feature outer_st1 = plane.offset(base = origin.yz, distance = -80 mm)
+    sketch outer_s1 on plane.outer_st1 {
+        c = spline(points = [[0 mm, 53 mm], [15.613 mm, 52.425 mm], [24.99 mm, 50.705 mm], [32.009 mm, 47.847 mm], [36.997 mm, 43.823 mm], [39.997 mm, 38.449 mm], [41 mm, 29.5 mm], [39.997 mm, 20.551 mm], [36.997 mm, 15.177 mm], [32.009 mm, 11.153 mm], [24.99 mm, 8.295 mm], [15.613 mm, 6.575 mm], [0 mm, 6 mm], [-15.613 mm, 6.575 mm], [-24.99 mm, 8.295 mm], [-32.009 mm, 11.153 mm], [-36.997 mm, 15.177 mm], [-39.997 mm, 20.551 mm], [-41 mm, 29.5 mm], [-39.997 mm, 38.449 mm], [-36.997 mm, 43.823 mm], [-32.009 mm, 47.847 mm], [-24.99 mm, 50.705 mm], [-15.613 mm, 52.425 mm]], closed)
+    }
+    feature outer_st2 = plane.offset(base = origin.yz, distance = -50 mm)
+    sketch outer_s2 on plane.outer_st2 {
+        c = spline(points = [[0 mm, 57 mm], [17.137 mm, 56.34 mm], [27.428 mm, 54.364 mm], [35.132 mm, 51.079 mm], [40.606 mm, 46.457 mm], [43.899 mm, 40.282 mm], [45 mm, 30 mm], [43.899 mm, 19.718 mm], [40.606 mm, 13.543 mm], [35.132 mm, 8.921 mm], [27.428 mm, 5.636 mm], [17.137 mm, 3.66 mm], [0 mm, 3 mm], [-17.137 mm, 3.66 mm], [-27.428 mm, 5.636 mm], [-35.132 mm, 8.921 mm], [-40.606 mm, 13.543 mm], [-43.899 mm, 19.718 mm], [-45 mm, 30 mm], [-43.899 mm, 40.282 mm], [-40.606 mm, 46.457 mm], [-35.132 mm, 51.079 mm], [-27.428 mm, 54.364 mm], [-17.137 mm, 56.34 mm]], closed)
+    }
+    feature outer_st3 = plane.offset(base = origin.yz, distance = -10 mm)
+    sketch outer_s3 on plane.outer_st3 {
+        c = spline(points = [[0 mm, 58 mm], [17.517 mm, 57.315 mm], [28.037 mm, 55.266 mm], [35.913 mm, 51.86 mm], [41.508 mm, 47.066 mm], [44.875 mm, 40.663 mm], [46 mm, 30 mm], [44.875 mm, 19.337 mm], [41.508 mm, 12.934 mm], [35.913 mm, 8.14 mm], [28.037 mm, 4.734 mm], [17.517 mm, 2.685 mm], [0 mm, 2 mm], [-17.517 mm, 2.685 mm], [-28.037 mm, 4.734 mm], [-35.913 mm, 8.14 mm], [-41.508 mm, 12.934 mm], [-44.875 mm, 19.337 mm], [-46 mm, 30 mm], [-44.875 mm, 40.663 mm], [-41.508 mm, 47.066 mm], [-35.913 mm, 51.86 mm], [-28.037 mm, 55.266 mm], [-17.517 mm, 57.315 mm]], closed)
+    }
+    feature outer_st4 = plane.offset(base = origin.yz, distance = 30 mm)
+    sketch outer_s4 on plane.outer_st4 {
+        c = spline(points = [[0 mm, 57 mm], [16.756 mm, 56.34 mm], [26.818 mm, 54.364 mm], [34.351 mm, 51.079 mm], [39.704 mm, 46.457 mm], [42.924 mm, 40.282 mm], [44 mm, 30 mm], [42.924 mm, 19.718 mm], [39.704 mm, 13.543 mm], [34.351 mm, 8.921 mm], [26.818 mm, 5.636 mm], [16.756 mm, 3.66 mm], [0 mm, 3 mm], [-16.756 mm, 3.66 mm], [-26.818 mm, 5.636 mm], [-34.351 mm, 8.921 mm], [-39.704 mm, 13.543 mm], [-42.924 mm, 19.718 mm], [-44 mm, 30 mm], [-42.924 mm, 40.282 mm], [-39.704 mm, 46.457 mm], [-34.351 mm, 51.079 mm], [-26.818 mm, 54.364 mm], [-16.756 mm, 56.34 mm]], closed)
+    }
+    feature outer_st5 = plane.offset(base = origin.yz, distance = 60 mm)
+    sketch outer_s5 on plane.outer_st5 {
+        c = spline(points = [[0 mm, 53 mm], [14.471 mm, 52.437 mm], [23.161 mm, 50.754 mm], [29.667 mm, 47.956 mm], [34.29 mm, 44.019 mm], [37.071 mm, 38.759 mm], [38 mm, 30 mm], [37.071 mm, 21.241 mm], [34.29 mm, 15.981 mm], [29.667 mm, 12.044 mm], [23.161 mm, 9.246 mm], [14.471 mm, 7.563 mm], [0 mm, 7 mm], [-14.471 mm, 7.563 mm], [-23.161 mm, 9.246 mm], [-29.667 mm, 12.044 mm], [-34.29 mm, 15.981 mm], [-37.071 mm, 21.241 mm], [-38 mm, 30 mm], [-37.071 mm, 38.759 mm], [-34.29 mm, 44.019 mm], [-29.667 mm, 47.956 mm], [-23.161 mm, 50.754 mm], [-14.471 mm, 52.437 mm]], closed)
+    }
+    feature outer_st6 = plane.offset(base = origin.yz, distance = 82 mm)
+    sketch outer_s6 on plane.outer_st6 {
+        c = spline(points = [[0 mm, 47 mm], [10.663 mm, 46.584 mm], [17.066 mm, 45.34 mm], [21.86 mm, 43.272 mm], [25.266 mm, 40.362 mm], [27.315 mm, 36.474 mm], [28 mm, 30 mm], [27.315 mm, 23.526 mm], [25.266 mm, 19.638 mm], [21.86 mm, 16.728 mm], [17.066 mm, 14.66 mm], [10.663 mm, 13.416 mm], [0 mm, 13 mm], [-10.663 mm, 13.416 mm], [-17.066 mm, 14.66 mm], [-21.86 mm, 16.728 mm], [-25.266 mm, 19.638 mm], [-27.315 mm, 23.526 mm], [-28 mm, 30 mm], [-27.315 mm, 36.474 mm], [-25.266 mm, 40.362 mm], [-21.86 mm, 43.272 mm], [-17.066 mm, 45.34 mm], [-10.663 mm, 46.584 mm]], closed)
+    }
+    feature outer_st7 = plane.offset(base = origin.yz, distance = 95 mm)
+    sketch outer_s7 on plane.outer_st7 {
+        c = spline(points = [[0 mm, 40 mm], [6.093 mm, 39.755 mm], [9.752 mm, 39.024 mm], [12.491 mm, 37.807 mm], [14.438 mm, 36.095 mm], [15.609 mm, 33.808 mm], [16 mm, 30 mm], [15.609 mm, 26.192 mm], [14.438 mm, 23.905 mm], [12.491 mm, 22.193 mm], [9.752 mm, 20.976 mm], [6.093 mm, 20.245 mm], [0 mm, 20 mm], [-6.093 mm, 20.245 mm], [-9.752 mm, 20.976 mm], [-12.491 mm, 22.193 mm], [-14.438 mm, 23.905 mm], [-15.609 mm, 26.192 mm], [-16 mm, 30 mm], [-15.609 mm, 33.808 mm], [-14.438 mm, 36.095 mm], [-12.491 mm, 37.807 mm], [-9.752 mm, 39.024 mm], [-6.093 mm, 39.755 mm]], closed)
+    }
+    feature outer_st8 = plane.offset(base = origin.yz, distance = 99 mm)
+    sketch outer_s8 on plane.outer_st8 {
+        c = spline(points = [[0 mm, 35 mm], [3.047 mm, 34.878 mm], [4.876 mm, 34.512 mm], [6.246 mm, 33.904 mm], [7.219 mm, 33.048 mm], [7.804 mm, 31.904 mm], [8 mm, 30 mm], [7.804 mm, 28.096 mm], [7.219 mm, 26.952 mm], [6.246 mm, 26.096 mm], [4.876 mm, 25.488 mm], [3.047 mm, 25.122 mm], [0 mm, 25 mm], [-3.047 mm, 25.122 mm], [-4.876 mm, 25.488 mm], [-6.246 mm, 26.096 mm], [-7.219 mm, 26.952 mm], [-7.804 mm, 28.096 mm], [-8 mm, 30 mm], [-7.804 mm, 31.904 mm], [-7.219 mm, 33.048 mm], [-6.246 mm, 33.904 mm], [-4.876 mm, 34.512 mm], [-3.047 mm, 34.878 mm]], closed)
+    }
+    feature outer = loft(profiles = [sketch.outer_s0, sketch.outer_s1, sketch.outer_s2, sketch.outer_s3, sketch.outer_s4, sketch.outer_s5, sketch.outer_s6, sketch.outer_s7, sketch.outer_s8])
+    // The tail cap, lofted through the body's last sections; the hollow stops short of it.
+    feature tail_st0 = plane.offset(base = origin.yz, distance = -100 mm)
+    sketch tail_s0 on plane.tail_st0 {
+        c = spline(points = [[0 mm, 44.5 mm], [12.567 mm, 44.121 mm], [20.114 mm, 42.987 mm], [25.763 mm, 41.101 mm], [29.778 mm, 38.447 mm], [32.193 mm, 34.903 mm], [33 mm, 29 mm], [32.193 mm, 23.097 mm], [29.778 mm, 19.553 mm], [25.763 mm, 16.899 mm], [20.114 mm, 15.013 mm], [12.567 mm, 13.879 mm], [0 mm, 13.5 mm], [-12.567 mm, 13.879 mm], [-20.114 mm, 15.013 mm], [-25.763 mm, 16.899 mm], [-29.778 mm, 19.553 mm], [-32.193 mm, 23.097 mm], [-33 mm, 29 mm], [-32.193 mm, 34.903 mm], [-29.778 mm, 38.447 mm], [-25.763 mm, 41.101 mm], [-20.114 mm, 42.987 mm], [-12.567 mm, 44.121 mm]], closed)
+    }
+    feature tail_st1 = plane.offset(base = origin.yz, distance = -97 mm)
+    sketch tail_s1 on plane.tail_st1 {
+        c = spline(points = [[0 mm, 46.4 mm], [13.481 mm, 45.974 mm], [21.577 mm, 44.701 mm], [27.637 mm, 42.584 mm], [31.943 mm, 39.605 mm], [34.534 mm, 35.626 mm], [35.4 mm, 29 mm], [34.534 mm, 22.374 mm], [31.943 mm, 18.395 mm], [27.637 mm, 15.416 mm], [21.577 mm, 13.299 mm], [13.481 mm, 12.026 mm], [0 mm, 11.6 mm], [-13.481 mm, 12.026 mm], [-21.577 mm, 13.299 mm], [-27.637 mm, 15.416 mm], [-31.943 mm, 18.395 mm], [-34.534 mm, 22.374 mm], [-35.4 mm, 29 mm], [-34.534 mm, 35.626 mm], [-31.943 mm, 39.605 mm], [-27.637 mm, 42.584 mm], [-21.577 mm, 44.701 mm], [-13.481 mm, 45.974 mm]], closed)
+    }
+    feature tail_st2 = plane.offset(base = origin.yz, distance = -94 mm)
+    sketch tail_s2 on plane.tail_st2 {
+        c = spline(points = [[0 mm, 48 mm], [14.09 mm, 47.535 mm], [22.552 mm, 46.145 mm], [28.886 mm, 43.833 mm], [33.387 mm, 40.581 mm], [36.095 mm, 36.235 mm], [37 mm, 29 mm], [36.095 mm, 21.765 mm], [33.387 mm, 17.419 mm], [28.886 mm, 14.167 mm], [22.552 mm, 11.855 mm], [14.09 mm, 10.465 mm], [0 mm, 10 mm], [-14.09 mm, 10.465 mm], [-22.552 mm, 11.855 mm], [-28.886 mm, 14.167 mm], [-33.387 mm, 17.419 mm], [-36.095 mm, 21.765 mm], [-37 mm, 29 mm], [-36.095 mm, 36.235 mm], [-33.387 mm, 40.581 mm], [-28.886 mm, 43.833 mm], [-22.552 mm, 46.145 mm], [-14.09 mm, 47.535 mm]], closed)
+    }
+    feature tail = loft(profiles = [sketch.tail_s0, sketch.tail_s1, sketch.tail_s2], mode = add)
+    feature hollow_st0 = plane.offset(base = origin.yz, distance = -94.5 mm)
+    sketch hollow_s0 on plane.hollow_st0 {
+        c = spline(points = [[0 mm, 46.2 mm], [13.405 mm, 45.779 mm], [21.455 mm, 44.521 mm], [27.481 mm, 42.428 mm], [31.763 mm, 39.484 mm], [34.339 mm, 35.55 mm], [35.2 mm, 29 mm], [34.339 mm, 22.45 mm], [31.763 mm, 18.516 mm], [27.481 mm, 15.572 mm], [21.455 mm, 13.479 mm], [13.405 mm, 12.221 mm], [0 mm, 11.8 mm], [-13.405 mm, 12.221 mm], [-21.455 mm, 13.479 mm], [-27.481 mm, 15.572 mm], [-31.763 mm, 18.516 mm], [-34.339 mm, 22.45 mm], [-35.2 mm, 29 mm], [-34.339 mm, 35.55 mm], [-31.763 mm, 39.484 mm], [-27.481 mm, 42.428 mm], [-21.455 mm, 44.521 mm], [-13.405 mm, 45.779 mm]], closed)
+    }
+    feature hollow_st1 = plane.offset(base = origin.yz, distance = -80 mm)
+    sketch hollow_s1 on plane.hollow_st1 {
+        c = spline(points = [[0 mm, 51.2 mm], [14.928 mm, 50.669 mm], [23.893 mm, 49.081 mm], [30.604 mm, 46.441 mm], [35.372 mm, 42.726 mm], [38.241 mm, 37.764 mm], [39.2 mm, 29.5 mm], [38.241 mm, 21.236 mm], [35.372 mm, 16.274 mm], [30.604 mm, 12.559 mm], [23.893 mm, 9.919 mm], [14.928 mm, 8.331 mm], [0 mm, 7.8 mm], [-14.928 mm, 8.331 mm], [-23.893 mm, 9.919 mm], [-30.604 mm, 12.559 mm], [-35.372 mm, 16.274 mm], [-38.241 mm, 21.236 mm], [-39.2 mm, 29.5 mm], [-38.241 mm, 37.764 mm], [-35.372 mm, 42.726 mm], [-30.604 mm, 46.441 mm], [-23.893 mm, 49.081 mm], [-14.928 mm, 50.669 mm]], closed)
+    }
+    feature hollow_st2 = plane.offset(base = origin.yz, distance = -50 mm)
+    sketch hollow_s2 on plane.hollow_st2 {
+        c = spline(points = [[0 mm, 55.2 mm], [16.451 mm, 54.584 mm], [26.331 mm, 52.739 mm], [33.727 mm, 49.674 mm], [38.982 mm, 45.36 mm], [42.143 mm, 39.596 mm], [43.2 mm, 30 mm], [42.143 mm, 20.404 mm], [38.982 mm, 14.64 mm], [33.727 mm, 10.326 mm], [26.331 mm, 7.261 mm], [16.451 mm, 5.416 mm], [0 mm, 4.8 mm], [-16.451 mm, 5.416 mm], [-26.331 mm, 7.261 mm], [-33.727 mm, 10.326 mm], [-38.982 mm, 14.64 mm], [-42.143 mm, 20.404 mm], [-43.2 mm, 30 mm], [-42.143 mm, 39.596 mm], [-38.982 mm, 45.36 mm], [-33.727 mm, 49.674 mm], [-26.331 mm, 52.739 mm], [-16.451 mm, 54.584 mm]], closed)
+    }
+    feature hollow_st3 = plane.offset(base = origin.yz, distance = -10 mm)
+    sketch hollow_s3 on plane.hollow_st3 {
+        c = spline(points = [[0 mm, 56.2 mm], [16.832 mm, 55.559 mm], [26.94 mm, 53.642 mm], [34.507 mm, 50.455 mm], [39.884 mm, 45.969 mm], [43.119 mm, 39.977 mm], [44.2 mm, 30 mm], [43.119 mm, 20.023 mm], [39.884 mm, 14.031 mm], [34.507 mm, 9.545 mm], [26.94 mm, 6.358 mm], [16.832 mm, 4.441 mm], [0 mm, 3.8 mm], [-16.832 mm, 4.441 mm], [-26.94 mm, 6.358 mm], [-34.507 mm, 9.545 mm], [-39.884 mm, 14.031 mm], [-43.119 mm, 20.023 mm], [-44.2 mm, 30 mm], [-43.119 mm, 39.977 mm], [-39.884 mm, 45.969 mm], [-34.507 mm, 50.455 mm], [-26.94 mm, 53.642 mm], [-16.832 mm, 55.559 mm]], closed)
+    }
+    feature hollow_st4 = plane.offset(base = origin.yz, distance = 30 mm)
+    sketch hollow_s4 on plane.hollow_st4 {
+        c = spline(points = [[0 mm, 55.2 mm], [16.07 mm, 54.584 mm], [25.721 mm, 52.739 mm], [32.946 mm, 49.674 mm], [38.08 mm, 45.36 mm], [41.168 mm, 39.596 mm], [42.2 mm, 30 mm], [41.168 mm, 20.404 mm], [38.08 mm, 14.64 mm], [32.946 mm, 10.326 mm], [25.721 mm, 7.261 mm], [16.07 mm, 5.416 mm], [0 mm, 4.8 mm], [-16.07 mm, 5.416 mm], [-25.721 mm, 7.261 mm], [-32.946 mm, 10.326 mm], [-38.08 mm, 14.64 mm], [-41.168 mm, 20.404 mm], [-42.2 mm, 30 mm], [-41.168 mm, 39.596 mm], [-38.08 mm, 45.36 mm], [-32.946 mm, 49.674 mm], [-25.721 mm, 52.739 mm], [-16.07 mm, 54.584 mm]], closed)
+    }
+    feature hollow_st5 = plane.offset(base = origin.yz, distance = 60 mm)
+    sketch hollow_s5 on plane.hollow_st5 {
+        c = spline(points = [[0 mm, 51.2 mm], [13.785 mm, 50.681 mm], [22.064 mm, 49.13 mm], [28.262 mm, 46.551 mm], [32.665 mm, 42.922 mm], [35.315 mm, 38.073 mm], [36.2 mm, 30 mm], [35.315 mm, 21.927 mm], [32.665 mm, 17.078 mm], [28.262 mm, 13.449 mm], [22.064 mm, 10.87 mm], [13.785 mm, 9.319 mm], [0 mm, 8.8 mm], [-13.785 mm, 9.319 mm], [-22.064 mm, 10.87 mm], [-28.262 mm, 13.449 mm], [-32.665 mm, 17.078 mm], [-35.315 mm, 21.927 mm], [-36.2 mm, 30 mm], [-35.315 mm, 38.073 mm], [-32.665 mm, 42.922 mm], [-28.262 mm, 46.551 mm], [-22.064 mm, 49.13 mm], [-13.785 mm, 50.681 mm]], closed)
+    }
+    feature hollow_st6 = plane.offset(base = origin.yz, distance = 82 mm)
+    sketch hollow_s6 on plane.hollow_st6 {
+        c = spline(points = [[0 mm, 45.2 mm], [9.977 mm, 44.828 mm], [15.969 mm, 43.716 mm], [20.455 mm, 41.867 mm], [23.642 mm, 39.265 mm], [25.559 mm, 35.788 mm], [26.2 mm, 30 mm], [25.559 mm, 24.212 mm], [23.642 mm, 20.735 mm], [20.455 mm, 18.133 mm], [15.969 mm, 16.284 mm], [9.977 mm, 15.172 mm], [0 mm, 14.8 mm], [-9.977 mm, 15.172 mm], [-15.969 mm, 16.284 mm], [-20.455 mm, 18.133 mm], [-23.642 mm, 20.735 mm], [-25.559 mm, 24.212 mm], [-26.2 mm, 30 mm], [-25.559 mm, 35.788 mm], [-23.642 mm, 39.265 mm], [-20.455 mm, 41.867 mm], [-15.969 mm, 43.716 mm], [-9.977 mm, 44.828 mm]], closed)
+    }
+    feature hollow_st7 = plane.offset(base = origin.yz, distance = 93 mm)
+    sketch hollow_s7 on plane.hollow_st7 {
+        c = spline(points = [[0 mm, 38.2 mm], [5.408 mm, 37.999 mm], [8.655 mm, 37.399 mm], [11.086 mm, 36.402 mm], [12.813 mm, 34.998 mm], [13.853 mm, 33.123 mm], [14.2 mm, 30 mm], [13.853 mm, 26.877 mm], [12.813 mm, 25.002 mm], [11.086 mm, 23.598 mm], [8.655 mm, 22.601 mm], [5.408 mm, 22.001 mm], [0 mm, 21.8 mm], [-5.408 mm, 22.001 mm], [-8.655 mm, 22.601 mm], [-11.086 mm, 23.598 mm], [-12.813 mm, 25.002 mm], [-13.853 mm, 26.877 mm], [-14.2 mm, 30 mm], [-13.853 mm, 33.123 mm], [-12.813 mm, 34.998 mm], [-11.086 mm, 36.402 mm], [-8.655 mm, 37.399 mm], [-5.408 mm, 37.999 mm]], closed)
+    }
+    feature hollow = loft(profiles = [sketch.hollow_s0, sketch.hollow_s1, sketch.hollow_s2, sketch.hollow_s3, sketch.hollow_s4, sketch.hollow_s5, sketch.hollow_s6, sketch.hollow_s7], mode = cut)
+    // The hinges' recesses: each hinge mount's envelope in its own frame (pin axis z), so the
+    // clevis seats in the wall 0.05 mm clear all round.
+    feature front_left_seat_plane = plane.three_point(a = point(41.125 mm, 53.915 mm, 14.509 mm), b = point(46.67 mm, 62.237 mm, 14.509 mm), c = point(33.305 mm, 59.126 mm, 17.929 mm))
+    sketch front_left_seat_s on plane.front_left_seat_plane {
+        s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
+        s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
+        s3 = line(start = [8 mm, 7.55 mm], end = [-20.05 mm, 7.55 mm])
+        s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
+    }
+    feature front_left_seat = extrude(profile = sketch.front_left_seat_s, distance = 20.2 mm, mode = cut)
+    feature front_right_seat_plane = plane.three_point(a = point(41.125 mm, -53.915 mm, 14.509 mm), b = point(46.67 mm, -62.237 mm, 14.509 mm), c = point(48.945 mm, -48.705 mm, 11.089 mm))
+    sketch front_right_seat_s on plane.front_right_seat_plane {
+        s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
+        s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
+        s3 = line(start = [8 mm, 7.55 mm], end = [-20.05 mm, 7.55 mm])
+        s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
+    }
+    feature front_right_seat = extrude(profile = sketch.front_right_seat_s, distance = 20.2 mm, mode = cut)
+    feature rear_left_seat_plane = plane.three_point(a = point(-69.923 mm, 41.337 mm, 4.082 mm), b = point(-75.539 mm, 49.611 mm, 4.082 mm), c = point(-77.229 mm, 36.378 mm, 8.777 mm))
+    sketch rear_left_seat_s on plane.rear_left_seat_plane {
+        s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
+        s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
+        s3 = line(start = [8 mm, 7.55 mm], end = [-20.05 mm, 7.55 mm])
+        s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
+    }
+    feature rear_left_seat = extrude(profile = sketch.rear_left_seat_s, distance = 20.2 mm, mode = cut)
+    feature rear_right_seat_plane = plane.three_point(a = point(-69.923 mm, -41.337 mm, 4.082 mm), b = point(-75.539 mm, -49.611 mm, 4.082 mm), c = point(-62.618 mm, -46.296 mm, -0.612 mm))
+    sketch rear_right_seat_s on plane.rear_right_seat_plane {
+        s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
+        s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
+        s3 = line(start = [8 mm, 7.55 mm], end = [-20.05 mm, 7.55 mm])
+        s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
+    }
+    feature rear_right_seat = extrude(profile = sketch.rear_right_seat_s, distance = 20.2 mm, mode = cut)
+    // Fold reliefs beside the rear hinges: the rear arm's root swings through here as it folds
+    // forward under the body.
+    sketch rear_left_relief_s on plane.rear_left_seat_plane {
+        r1 = line(start = [-16 mm, -14 mm], end = [0 mm, -14 mm])
+        r2 = line(start = [0 mm, -14 mm], end = [0 mm, -7.55 mm])
+        r3 = line(start = [0 mm, -7.55 mm], end = [-16 mm, -7.55 mm])
+        r4 = line(start = [-16 mm, -7.55 mm], end = [-16 mm, -14 mm])
+    }
+    feature rear_left_relief = extrude(profile = sketch.rear_left_relief_s, distance = 20.2 mm, mode = cut)
+    sketch rear_right_relief_s on plane.rear_right_seat_plane {
+        r1 = line(start = [-16 mm, 7.55 mm], end = [0 mm, 7.55 mm])
+        r2 = line(start = [0 mm, 7.55 mm], end = [0 mm, 14 mm])
+        r3 = line(start = [0 mm, 14 mm], end = [-16 mm, 14 mm])
+        r4 = line(start = [-16 mm, 14 mm], end = [-16 mm, 7.55 mm])
+    }
+    feature rear_right_relief = extrude(profile = sketch.rear_right_relief_s, distance = 20.2 mm, mode = cut)
+    feature split_plane = plane.offset(base = origin.xy, distance = 27 mm)
+    sketch above_s on plane.split_plane {
+        b1 = line(start = [-120 mm, -70 mm], end = [120 mm, -70 mm])
+        b2 = line(start = [120 mm, -70 mm], end = [120 mm, 70 mm])
+        b3 = line(start = [120 mm, 70 mm], end = [-120 mm, 70 mm])
+        b4 = line(start = [-120 mm, 70 mm], end = [-120 mm, -70 mm])
+    }
+    feature trim = extrude(profile = sketch.above_s, distance = 60 mm, mode = cut)
+    feature bay_plane = plane.offset(base = origin.yz, distance = -62.5 mm)
+    sketch bay_s on plane.bay_plane {
+        e1 = line(start = [-31.5 mm, 13.5 mm], end = [31.5 mm, 13.5 mm])
+        e2 = line(start = [31.5 mm, 13.5 mm], end = [31.5 mm, 49.5 mm])
+        e3 = line(start = [31.5 mm, 49.5 mm], end = [-31.5 mm, 49.5 mm])
+        e4 = line(start = [-31.5 mm, 49.5 mm], end = [-31.5 mm, 13.5 mm])
+    }
+    feature bay = extrude(profile = sketch.bay_s, distance = 59.5 mm, mode = cut)
+    sketch window_s on origin.xy {
+        w1 = line(start = [-3.3 mm, -28.3 mm], end = [53.3 mm, -28.3 mm])
+        w2 = line(start = [53.3 mm, -28.3 mm], end = [53.3 mm, 28.3 mm])
+        w3 = line(start = [53.3 mm, 28.3 mm], end = [-3.3 mm, 28.3 mm])
+        w4 = line(start = [-3.3 mm, 28.3 mm], end = [-3.3 mm, -28.3 mm])
+    }
+    feature belly_window = extrude(profile = sketch.window_s, distance = 3.6 mm, mode = cut)
+    feature pocket_plane = plane.offset(base = origin.xy, distance = 3.6 mm)
+    sketch pocket_s on plane.pocket_plane {
+        q1 = line(start = [5.7 mm, -19.3 mm], end = [44.3 mm, -19.3 mm])
+        q2 = line(start = [44.3 mm, -19.3 mm], end = [44.3 mm, 19.3 mm])
+        q3 = line(start = [44.3 mm, 19.3 mm], end = [5.7 mm, 19.3 mm])
+        q4 = line(start = [5.7 mm, 19.3 mm], end = [5.7 mm, -19.3 mm])
+    }
+    feature pocket = extrude(profile = sketch.pocket_s, distance = 10 mm, mode = cut)
+    // The downward vision pair's windows behind the heatsink (R4.1 bores for the R4 bezels) and
+    // the gimbal's opening under the nose, where the yaw motor (R10) stands through the belly
+    // 0.5 mm clear all round and screws to the shell from inside.
+    feature belly_cut_plane = plane.offset(base = origin.xy, distance = -1 mm)
+    sketch belly_cut_s on plane.belly_cut_plane {
+        down_left = circle(center = [-28 mm, 11 mm], radius = 4.1 mm)
+        down_right = circle(center = [-28 mm, -11 mm], radius = 4.1 mm)
+        yaw = circle(center = [74 mm, 0 mm], radius = 10.5 mm)
+    }
+    feature belly_openings = extrude(profile = sketch.belly_cut_s, distance = 15 mm, mode = cut)
+    region skin : face = { select = [feature.outer.face.side(outer_s0.c)], expect = at_least_one }
+    output body_bottom = { body = feature.outer.body, part_number = "CD-BD-120", material = "polycarbonate", color = "#3A3E44" }
+}

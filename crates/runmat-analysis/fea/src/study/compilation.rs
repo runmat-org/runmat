@@ -227,10 +227,14 @@ pub fn compile_cross_section_study(
 ) -> Result<CompiledAnalysisStudy, AnalysisStudyCompilationError> {
     mesh.validate_canonical()
         .map_err(|error| AnalysisStudyCompilationError::InvalidMesh(error.to_string()))?;
-    if !matches!(study.geometry.source, GeometryDefinitionSource::CrossSection(_))
-        || study.sequence.steps.iter().any(|step| {
-            step.procedure != runmat_analysis_core::AnalysisProcedure::LineParameters
-        })
+    if !matches!(
+        study.geometry.source,
+        GeometryDefinitionSource::CrossSection(_)
+    ) || study
+        .sequence
+        .steps
+        .iter()
+        .any(|step| step.procedure != runmat_analysis_core::AnalysisProcedure::LineParameters)
     {
         return Err(AnalysisStudyCompilationError::InvalidGeometry(
             "a cross-section study is one or more line-parameter steps on a cross_section geometry"

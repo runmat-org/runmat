@@ -63,9 +63,16 @@ impl crate::context::RuntimeHostService for DialogProvider {
 }
 
 fn rooted_tmp_path() -> PathBuf {
-    let mut path = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
-    path.push("tmp");
-    path
+    #[cfg(windows)]
+    {
+        std::env::temp_dir()
+    }
+    #[cfg(not(windows))]
+    {
+        let mut path = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+        path.push("tmp");
+        path
+    }
 }
 
 fn rooted_tmp_path_text() -> String {

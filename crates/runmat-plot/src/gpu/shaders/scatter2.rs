@@ -1,3 +1,5 @@
+// Dynamic corner indexing uses explicit function storage. Pinned Naga 24's
+// SPIR-V backend emits undefined temporary pointers for the value-array form.
 pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
@@ -12,6 +14,7 @@ struct ScatterParams {
     has_sizes: u32,
     has_colors: u32,
     color_stride: u32,
+    attribute_layout: u32,
 };
 
 struct IndirectArgs {
@@ -58,13 +61,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var v_color = params.color;
     if (params.has_colors != 0u) {
-        let base = idx * params.color_stride;
+        let is_column_layout = (params.attribute_layout & 2u) != 0u;
+        let base = select(idx * params.color_stride, idx, is_column_layout);
+        let step = select(1u, params.count, is_column_layout);
         let r = buf_colors[base];
-        let g = buf_colors[base + 1u];
-        let b = buf_colors[base + 2u];
+        let g = buf_colors[base + step];
+        let b = buf_colors[base + 2u * step];
         var a = 1.0;
         if (params.color_stride > 3u) {
-            a = buf_colors[base + 3u];
+            a = buf_colors[base + 3u * step];
         }
         v_color = vec4<f32>(r, g, b, a);
     }
@@ -72,9 +77,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var marker_size = params.point_size;
     if (params.has_sizes != 0u) {
         marker_size = buf_sizes[idx];
+        if ((params.attribute_layout & 1u) != 0u) {
+            marker_size = max(sqrt(max(marker_size, 0.1)) * (96.0 / 72.0), 1.0);
+        }
     }
 
-    let corners = array<vec2<f32>, 6u>(
+    var corners = array<vec2<f32>, 6u>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
         vec2<f32>( 1.0,  1.0),
@@ -116,6 +124,7 @@ struct ScatterParams {
     has_sizes: u32,
     has_colors: u32,
     color_stride: u32,
+    attribute_layout: u32,
 };
 
 struct IndirectArgs {
@@ -162,13 +171,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var v_color = params.color;
     if (params.has_colors != 0u) {
-        let base = idx * params.color_stride;
+        let is_column_layout = (params.attribute_layout & 2u) != 0u;
+        let base = select(idx * params.color_stride, idx, is_column_layout);
+        let step = select(1u, params.count, is_column_layout);
         let r = buf_colors[base];
-        let g = buf_colors[base + 1u];
-        let b = buf_colors[base + 2u];
+        let g = buf_colors[base + step];
+        let b = buf_colors[base + 2u * step];
         var a = 1.0;
         if (params.color_stride > 3u) {
-            a = buf_colors[base + 3u];
+            a = buf_colors[base + 3u * step];
         }
         v_color = vec4<f32>(r, g, b, a);
     }
@@ -176,9 +187,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var marker_size = params.point_size;
     if (params.has_sizes != 0u) {
         marker_size = buf_sizes[idx];
+        if ((params.attribute_layout & 1u) != 0u) {
+            marker_size = max(sqrt(max(marker_size, 0.1)) * (96.0 / 72.0), 1.0);
+        }
     }
 
-    let corners = array<vec2<f32>, 6u>(
+    var corners = array<vec2<f32>, 6u>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
         vec2<f32>( 1.0,  1.0),

@@ -66,8 +66,8 @@ mod fea_preflight;
 pub use fea_preflight::FeaExecutionPreflight;
 mod fea_execution;
 pub use fea_execution::{
-    FeaGeometryExecutionHost, FeaStudyPreparationError, PreparedSerialFeaStudy,
-    PreparedSerialFeaExecutionError,
+    FeaGeometryExecutionHost, FeaStudyPreparationError, PreparedSerialFeaExecutionError,
+    PreparedSerialFeaStudy,
 };
 pub use fea_source::CheckedFeaSessionSource;
 mod fea_changes;

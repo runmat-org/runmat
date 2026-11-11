@@ -46,6 +46,20 @@ The session prevents concurrent execution on a single `RunMatSession`. Hosts tha
 
 Execution placement follows the same session boundary. Each `RunMatSession` owns its guarded decision cache and bounded aggregate feedback; separate sessions cannot change one another's placement state. The runtime exposes one executor-neutral graph, signature, feedback, invalidation, and resource contract so VM, JIT, and AOT execution paths can share policy without moving provider scheduling into the runtime. A host scheduler remains authoritative for its allocation and can install that allocation as the CPU/memory budget placement must obey. Profile snapshot and restore are explicit host operations and use a portable data-only format suitable for native and WebAssembly hosts.
 
+## Managed-memory limits and plot properties
+
+A managed execution limit covers allocations admitted through RunMat's allocation
+owners. Temporary host buffers used by `get` and `set` on existing plot handles
+are outside that accounting in 0.7.0. This includes property snapshots, source
+readback and prepared property updates. New chart construction is refused in a
+finite-managed context, but an existing handle can still reach these property
+operations. Handle validity and revision checks remain enforced.
+
+Do not use the managed limit as a bound on the total memory consumed by plot
+property operations. Hosts that require a process-wide bound need an operating
+system or container limit. GPU compiler and driver allocations have a separate
+[memory-budget boundary](../gpu/wgpu.md#memory-budget-boundary).
+
 ## Outcome Contract
 
 `ExecutionOutcome` is the host-facing result of a request.

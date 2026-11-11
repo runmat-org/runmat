@@ -193,10 +193,13 @@ struct SlowKernel;
 impl MeshingStageKernel for SlowKernel {
     fn execute(
         &self,
-        invocation: MeshingStageInvocation<'_, '_>,
+        _invocation: MeshingStageInvocation<'_, '_>,
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
-        std::thread::sleep(Duration::from_secs(5));
-        AdmissionKernel.execute(invocation)
+        // Keep the worker active until its driver retires it. A fixed sleep
+        // can finish before the parent requests cancellation on a busy host.
+        loop {
+            std::thread::park();
+        }
     }
 }
 
@@ -261,12 +264,19 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
     }
 }
 
+#[path = "support/native_host.rs"]
+mod native_host;
+
 // witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
 //   shared_infrastructure/canonical_mixed_topology/native_process; coverage: partial;
 //   boundary: The whole harness-less meshing process-conformance target (worker child processes,
 //   progress, cancellation, remote conformance and remote recovery) exits successfully; it is one
 //   witness, so the individual claims are not separated.
 fn main() {
+    native_host::run(run);
+}
+
+fn run() {
     let arguments = std::env::args_os().collect::<Vec<_>>();
     if let Some(mode) = arguments.get(1).and_then(|mode| mode.to_str()) {
         if matches!(
@@ -304,37 +314,39 @@ fn main() {
                 .block_on(curve_pipeline::run_durable_driver());
             return;
         }
-        let root = std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV)
-            .expect("child object-store root from native driver");
+        let root = || {
+            std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV)
+                .expect("child object-store root from native driver")
+        };
         if mode == "--child" {
-            run_child(AdmissionKernel, Path::new(&root));
+            run_child(AdmissionKernel, Path::new(&root()));
             return;
         }
         if mode == "--paid-child" {
-            run_child(PaidAdmissionKernel, Path::new(&root));
+            run_child(PaidAdmissionKernel, Path::new(&root()));
             return;
         }
         if mode == "--slow-child" {
-            run_child(SlowKernel, Path::new(&root));
+            run_child(SlowKernel, Path::new(&root()));
             return;
         }
         if mode == "--exact-child" {
-            run_child(ExactInputKernel, Path::new(&root));
+            run_child(ExactInputKernel, Path::new(&root()));
             return;
         }
         if mode == "--faceted-child" {
-            run_child(FacetedInputKernel, Path::new(&root));
+            run_child(FacetedInputKernel, Path::new(&root()));
             return;
         }
         if mode == "--curve-child" {
             run_child(
                 curve_pipeline::CurvePipelineKernel::default(),
-                Path::new(&root),
+                Path::new(&root()),
             );
             return;
         }
         if mode == "--exact-dag-child" {
-            run_child(native_meshing_kernel_dispatcher(), Path::new(&root));
+            run_child(native_meshing_kernel_dispatcher(), Path::new(&root()));
             return;
         }
     }
@@ -516,13 +528,20 @@ async fn parent() {
     })
     .await
     .unwrap();
-    assert!(matches!(
-        cancelled,
-        Err(runmat_execution_runner_native::NativeProgramFailure::Cancelled)
-    ));
+    assert!(
+        matches!(
+            &cancelled,
+            Err(runmat_execution_runner_native::NativeProgramFailure::Cancelled)
+        ),
+        "cancelled result: {cancelled:?}"
+    );
     drop(cancel_task);
     drop(cancel_session);
     assert!(!cancel_store_root.exists());
+
+    if std::env::args().any(|argument| argument == "--cancellation-only") {
+        return;
+    }
 
     remote_conformance().await;
     remote_recovery::run().await;

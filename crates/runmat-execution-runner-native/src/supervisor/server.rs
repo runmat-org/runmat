@@ -24,7 +24,10 @@ pub async fn run_local_supervisor(config: LocalSupervisorConfig) -> NativeExecut
     supervisor.reconcile().await?;
     let background = Arc::clone(&supervisor);
     let reconciliation = async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(250));
+        // Startup already reconciled the recovered journal. Serve readiness
+        // before starting the next background pass over those same records.
+        let period = Duration::from_millis(250);
+        let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         let mut was_failing = false;
         loop {
             interval.tick().await;

@@ -12,6 +12,8 @@ use text_input::{ValidatedStylePairs, ValidatedStyleValue};
 
 #[path = "properties/async_readback.rs"]
 mod async_readback;
+#[path = "properties/scatter3_data.rs"]
+mod scatter3_data;
 pub use async_readback::get_properties_async;
 pub(crate) use async_readback::set_properties_async_with_runtime;
 #[path = "properties/read_source.rs"]
@@ -1270,6 +1272,23 @@ fn apply_text_property(
                 plotting_error(builtin, format!("{builtin}: Visible must be logical"))
             })?
         }
+        // MATLAB's text anchors: where the point sits on the text's box.
+        "horizontalalignment" => {
+            style.horizontal_alignment = Some(text_alignment(
+                &text_input,
+                builtin,
+                "HorizontalAlignment",
+                &["left", "center", "right"],
+            )?)
+        }
+        "verticalalignment" => {
+            style.vertical_alignment = Some(text_alignment(
+                &text_input,
+                builtin,
+                "VerticalAlignment",
+                &["middle", "top", "bottom", "baseline", "cap"],
+            )?)
+        }
         other => {
             return Err(plotting_error(
                 builtin,
@@ -1278,6 +1297,23 @@ fn apply_text_property(
         }
     }
     Ok(())
+}
+
+/// A text alignment value, lowercased, from MATLAB's set for `name`.
+fn text_alignment(
+    input: &ValidatedStyleValue<'_>,
+    builtin: &'static str,
+    name: &str,
+    allowed: &[&str],
+) -> BuiltinResult<String> {
+    let value = input.text().map(|t| t.trim().to_ascii_lowercase());
+    match value {
+        Some(v) if allowed.contains(&v.as_str()) => Ok(v),
+        _ => Err(plotting_error(
+            builtin,
+            format!("{builtin}: {name} must be one of {}", allowed.join(", ")),
+        )),
+    }
 }
 
 fn apply_legend_property(
@@ -2549,6 +2585,9 @@ fn apply_plot_child_properties(
         }
         super::state::PlotChildHandleState::Scatter(plot) => {
             apply_scatter_properties(authority, plot, &pairs, builtin)
+        }
+        super::state::PlotChildHandleState::Scatter3(plot) => {
+            scatter3_data::apply(authority, plot, &pairs, builtin)
         }
         _ => {
             for (key, value) in pairs {
@@ -3913,79 +3952,7 @@ fn get_scatter3_property(
     builtin: &'static str,
     source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot_from_source(scatter_handle, builtin, source)?;
-    let runmat_plot::plots::figure::PlotElement::Scatter3(scatter) = plot.as_ref() else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid scatter3 handle"),
-        ));
-    };
-    let (x, y, z) = if let Some((x, y, z)) = scatter.source_data() {
-        (
-            numeric_plot_data_value(x),
-            numeric_plot_data_value(y),
-            numeric_plot_data_value(z),
-        )
-    } else {
-        let (x, y, z): (Vec<f64>, Vec<f64>, Vec<f64>) = scatter
-            .points
-            .iter()
-            .map(|p| (p.x as f64, p.y as f64, p.z as f64))
-            .unzip_n_vec();
-        (tensor_from_vec(x), tensor_from_vec(y), tensor_from_vec(z))
-    };
-    match property.map(canonical_property_name).as_deref() {
-        None => {
-            let mut st =
-                child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
-            st.insert("XData", x.clone());
-            st.insert("YData", y.clone());
-            st.insert("ZData", z.clone());
-            st.insert(
-                "Marker",
-                Value::String(marker_style_name(scatter.marker_style).into()),
-            );
-            st.insert(
-                "SizeData",
-                Value::Num(marker_diameter_px_to_area_points2(scatter.point_size)),
-            );
-            st.insert(
-                "MarkerFaceColor",
-                rgb_triplet_value(scatter.colors.first().copied().unwrap_or_default()),
-            );
-            st.insert("MarkerEdgeColor", rgb_triplet_value(scatter.edge_color));
-            st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
-            if let Some(label) = scatter.label.clone() {
-                st.insert("DisplayName", Value::string(label));
-            }
-            Ok(Value::Struct(st.finish()))
-        }
-        Some("type") => Ok(Value::String("scatter".into())),
-        Some("parent") => Ok(child_parent_handle(
-            scatter_handle.figure,
-            scatter_handle.axes_index,
-        )),
-        Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(x),
-        Some("ydata") => Ok(y),
-        Some("zdata") => Ok(z),
-        Some("marker") => Ok(Value::String(
-            marker_style_name(scatter.marker_style).into(),
-        )),
-        Some("sizedata") => Ok(Value::Num(marker_diameter_px_to_area_points2(
-            scatter.point_size,
-        ))),
-        Some("markerfacecolor") => Ok(rgb_triplet_value(
-            scatter.colors.first().copied().unwrap_or_default(),
-        )),
-        Some("markeredgecolor") => Ok(rgb_triplet_value(scatter.edge_color)),
-        Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
-        Some("displayname") => Ok(Value::string(scatter.label.clone().unwrap_or_default())),
-        Some(other) => Err(plotting_error(
-            builtin,
-            format!("{builtin}: unsupported scatter3 property `{other}`"),
-        )),
-    }
+    scatter3_data::get(scatter_handle, property, builtin, source)
 }
 
 fn get_pie_property(
@@ -7187,55 +7154,12 @@ fn apply_scatter3_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let text_input = ValidatedStyleValue::new(value, builtin)?;
-    super::state::update_plot_element_for_property(
+    scatter3_data::apply(
         authority,
-        scatter_handle.figure,
-        scatter_handle.plot_index,
-        |plot| {
-            if let runmat_plot::plots::figure::PlotElement::Scatter3(scatter) = plot {
-                match key {
-                    "sizedata" => {
-                        if let Some(v) = value_as_f64(value) {
-                            scatter.point_size = marker_area_points2_to_diameter_px(v);
-                        }
-                    }
-                    "marker" => {
-                        if let Some(s) = text_input.text() {
-                            scatter.marker_style =
-                                scatter_marker_from_name(&s, scatter.marker_style);
-                        }
-                    }
-                    "markerfacecolor" => {
-                        if let Ok(c) =
-                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                        {
-                            let count = scatter.points.len().max(1);
-                            scatter.colors = vec![c; count];
-                        }
-                    }
-                    "markeredgecolor" => {
-                        if let Ok(c) =
-                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                        {
-                            scatter.edge_color = c;
-                        }
-                    }
-                    "linewidth" => {
-                        if let Some(v) = value_as_f64(value) {
-                            scatter.edge_thickness = v as f32;
-                        }
-                    }
-                    "displayname" => {
-                        scatter.label = text_input.text();
-                    }
-                    _ => {}
-                }
-            }
-        },
+        scatter_handle,
+        &[(key.to_owned(), value)],
+        builtin,
     )
-    .map_err(|err| map_figure_error(builtin, err))?;
-    Ok(())
 }
 
 fn apply_pie_property(
@@ -7482,8 +7406,7 @@ enum TickMode {
 }
 
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
-    let tensor = runmat_value::Tensor::try_from(value)
-        .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+    let tensor = super::axis_ticks::tick_tensor_from_value(value, builtin)?;
     let ticks = tensor::tensor_values_f64(&tensor);
     if ticks.iter().any(|value| !value.is_finite()) {
         return Err(plotting_error(
@@ -8581,27 +8504,6 @@ fn scatter_marker_from_name(
         "*" => runmat_plot::plots::scatter::MarkerStyle::Star,
         "h" => runmat_plot::plots::scatter::MarkerStyle::Hexagon,
         _ => current,
-    }
-}
-
-trait Unzip3Vec<A, B, C> {
-    fn unzip_n_vec(self) -> (Vec<A>, Vec<B>, Vec<C>);
-}
-
-impl<I, A, B, C> Unzip3Vec<A, B, C> for I
-where
-    I: Iterator<Item = (A, B, C)>,
-{
-    fn unzip_n_vec(self) -> (Vec<A>, Vec<B>, Vec<C>) {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        let mut c = Vec::new();
-        for (va, vb, vc) in self {
-            a.push(va);
-            b.push(vb);
-            c.push(vc);
-        }
-        (a, b, c)
     }
 }
 

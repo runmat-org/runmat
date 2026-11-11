@@ -129,19 +129,11 @@ fn poll_once<F: std::future::Future>(future: std::pin::Pin<&mut F>) -> Poll<F::O
 }
 
 fn selected_dir() -> &'static str {
-    if cfg!(windows) {
-        r"C:\selected"
-    } else {
-        "/selected"
-    }
+    "/selected"
 }
 
 fn replacement_dir() -> &'static str {
-    if cfg!(windows) {
-        r"C:\replacement"
-    } else {
-        "/replacement"
-    }
+    "/replacement"
 }
 
 fn selected_path(name: &str) -> PathBuf {
@@ -251,6 +243,10 @@ fn unsupported() -> std::io::Error {
 
 #[async_trait::async_trait(?Send)]
 impl runmat_filesystem::FsProvider for RevocableProvider {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.memory.path_namespace()
+    }
+
     fn resource_lease(&self) -> Option<Arc<dyn runmat_filesystem::FsResourceLease>> {
         Some(Arc::new(RevocableLease(self.valid.clone())))
     }

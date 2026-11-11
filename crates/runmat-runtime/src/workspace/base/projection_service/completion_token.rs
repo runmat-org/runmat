@@ -118,7 +118,7 @@ impl PreparedWorkspaceCompletion {
                 .output_permit(context)
                 .map_err(|cause| workspace_admission_error(context, cause))?;
             let completion = projection
-                .prepare_completion(source, &permit)
+                .prepare_completion(context, source, &permit)
                 .map_err(base_workspace_error_to_runtime)?;
             let effect = completion
                 .prepare_effect(&permit)
@@ -139,7 +139,7 @@ impl PreparedWorkspaceCompletion {
             .candidate_from_completion(completion)
             .map_err(base_workspace_error_to_runtime)?;
         let canonical = candidate
-            .prepare_terminal_commit(effect)
+            .prepare_terminal_commit(effect, Some(context))
             .map_err(|(error, _effect)| base_workspace_error_to_runtime(error))?;
         Ok(Self {
             owner: owner.clone(),
@@ -227,7 +227,7 @@ impl PreparedWorkspaceCompletion {
             let state = service.borrow()?;
             validate()?;
             let completion = state
-                .prepare_completion(source, &permit)
+                .prepare_completion(context, source, &permit)
                 .map_err(base_workspace_error_to_runtime)?;
             let effect = completion
                 .prepare_effect(&permit)
@@ -312,7 +312,7 @@ impl PreparedWorkspaceCompletion {
                 .map_err(base_workspace_error_to_runtime)?;
             drop(projection);
             let canonical = candidate
-                .prepare_terminal_commit(effect)
+                .prepare_terminal_commit(effect, Some(context))
                 .map_err(|(error, _effect)| base_workspace_error_to_runtime(error))?;
             Ok::<_, RuntimeError>((candidate, canonical))
         })();

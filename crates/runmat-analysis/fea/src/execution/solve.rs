@@ -22,7 +22,8 @@ use result_identity::ResultIdentitySource;
 pub use state_input::StructuralLinearStateInput;
 
 const SOLVE_PREFIX: &[u8] = b"runmat-analysis-solve/v1\0";
-const SOLVE_LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
+const SOLVE_LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 fn content_limits(encoded_bytes: usize) -> CanonicalLimits {
     CanonicalLimits::new(encoded_bytes, encoded_bytes, 65_536, 64)

@@ -6,6 +6,7 @@ use faer::linalg::{householder, qr::no_pivoting::factor as qr};
 use faer::mat::{MatMut, MatRef};
 use faer::{c64, Conj, Par, Spec};
 
+use super::balance::balance_extended_pencil;
 use super::managed_workspace::{RiccatiScratch, RiccatiWorkspacePlan};
 use super::RiccatiTimeDomain;
 use crate::builtins::math::linalg::factor::qz::algorithm::{complex_qz_in_place, ComplexQzView};
@@ -34,6 +35,7 @@ pub(super) fn solve(
         rhs,
         labels,
         solution,
+        state_scales,
         qr_scratch,
         qz_scratch,
     } = scratch;
@@ -57,6 +59,7 @@ pub(super) fn solve(
         || lu.len() != plan.subspace_len
         || rhs.len() != plan.subspace_len
         || solution.len() != plan.subspace_len
+        || state_scales.len() != n
     {
         return Err("Riccati pencil dimensions are invalid");
     }
@@ -112,6 +115,11 @@ pub(super) fn solve(
                 h[(doubled + row, doubled + col)] = c64::new(r[col * m + row], 0.0);
             }
         }
+        // One reciprocal state/costate similarity covers both the continuous
+        // Hamiltonian and discrete symplectic pencils, including cross weights.
+        // The original physical inputs remain untouched for the independent
+        // residual and closed-loop stability publication checks.
+        balance_extended_pencil(&mut h, &mut j, n, state_scales)?;
         deflate_into(
             h.as_mut(),
             j.as_mut(),
@@ -169,7 +177,7 @@ pub(super) fn solve(
         return Err("Riccati pencil has no n-dimensional stable subspace");
     }
     reorder_clusters_in_place(&mut form, labels, ClusterOrder::SelectedFirst)?;
-    subspace_into(form.right.as_ref(), n, lu, rhs, solution)
+    subspace_into(form.right.as_ref(), n, lu, rhs, solution, state_scales)
 }
 
 fn deflate_into(
@@ -234,9 +242,14 @@ pub(super) fn subspace_into(
     lu: &mut [c64],
     rhs: &mut [c64],
     solution: &mut [f64],
+    state_scales: &[f64],
 ) -> Result<(), &'static str> {
     let extent = n.checked_mul(n).ok_or("Riccati subspace extent overflow")?;
-    if lu.len() != extent || rhs.len() != extent || solution.len() != extent {
+    if lu.len() != extent
+        || rhs.len() != extent
+        || solution.len() != extent
+        || state_scales.len() != n
+    {
         return Err("Riccati subspace workspace dimensions are invalid");
     }
     for col in 0..n {
@@ -287,6 +300,25 @@ pub(super) fn subspace_into(
                 value -= lu[k * n + row] * rhs[col * n + k];
             }
             rhs[col * n + row] = value / lu[row * n + row];
+        }
+    }
+    // S = diag(D, D^-1, I) acted by S (H,J) S^-1. Its balanced graph is
+    // D^-1 X D^-1, so recover the physical graph before the unchanged
+    // real/symmetry acceptance gate. Both triangular solves share this RHS.
+    for col in 0..n {
+        for row in 0..n {
+            let value = rhs[col * n + row];
+            let factor = state_scales[row] * state_scales[col];
+            let real = value.re * factor;
+            let imaginary = value.im * factor;
+            if !real.is_finite()
+                || !imaginary.is_finite()
+                || (value.re != 0.0 && real == 0.0)
+                || (value.im != 0.0 && imaginary == 0.0)
+            {
+                return Err("Riccati balanced subspace cannot be restored finitely");
+            }
+            rhs[col * n + row] = c64::new(real, imaginary);
         }
     }
     let value_scale = rhs.iter().fold(1.0_f64, |max, value| max.max(value.norm()));

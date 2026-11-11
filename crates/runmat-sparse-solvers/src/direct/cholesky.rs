@@ -467,10 +467,7 @@ pub(super) fn simplicial_estimate<T: FactorScalar>(
         for j in 0..n {
             for &i in a.row_idx_of_col_raw(j) {
                 if i >= j {
-                    let (row, column) = (
-                        inverse[i].min(inverse[j]),
-                        inverse[i].max(inverse[j]),
-                    );
+                    let (row, column) = (inverse[i].min(inverse[j]), inverse[i].max(inverse[j]));
                     row_idx[next[column]] = row;
                     next[column] += 1;
                 }
@@ -504,8 +501,18 @@ pub(super) fn simplicial_estimate<T: FactorScalar>(
     use faer::dyn_stack::StackReq;
     let a_nnz = a.compute_nnz();
     let factor = match kind {
-        FactorKind::Ldlt => faer::sparse::linalg::cholesky::simplicial::factorize_simplicial_numeric_ldlt_scratch::<usize, T>(n),
-        _ => faer::sparse::linalg::cholesky::simplicial::factorize_simplicial_numeric_llt_scratch::<usize, T>(n),
+        FactorKind::Ldlt => {
+            faer::sparse::linalg::cholesky::simplicial::factorize_simplicial_numeric_ldlt_scratch::<
+                usize,
+                T,
+            >(n)
+        }
+        _ => {
+            faer::sparse::linalg::cholesky::simplicial::factorize_simplicial_numeric_llt_scratch::<
+                usize,
+                T,
+            >(n)
+        }
     };
     let signs = if kind == FactorKind::Ldlt {
         StackReq::new::<i8>(n)

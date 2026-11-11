@@ -129,9 +129,15 @@ fn residency_thermal_camera_chain() {
     let mask =
         runmat_runtime::call_builtin("ge", &[shifted.value().clone(), Value::Num(0.0)]).unwrap();
     assert!(matches!(mask.value(), Value::GpuTensor(_)));
-    let clamped =
-        runmat_runtime::call_builtin("times", &[shifted.value().clone(), mask.value().clone()])
-            .unwrap();
+    // Arithmetic consumes numerical device views. Convert the predicate via
+    // the public class-conversion path before multiplying the image.
+    let numeric_mask = runmat_runtime::call_builtin("double", &[mask.value().clone()]).unwrap();
+    assert!(matches!(numeric_mask.value(), Value::GpuTensor(_)));
+    let clamped = runmat_runtime::call_builtin(
+        "times",
+        &[shifted.value().clone(), numeric_mask.value().clone()],
+    )
+    .unwrap();
     assert!(matches!(clamped.value(), Value::GpuTensor(_)));
     // log1p via log(1 + x)
     let one_plus =

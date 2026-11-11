@@ -196,8 +196,10 @@ pub(crate) fn combine_observation_partitions(
             }
             let [first_sum, first_measure, second_sum, second_measure] =
                 sums.map(CompensatedSum::total);
-            if !(first_measure.is_finite() && first_measure > 0.0)
-                || !(second_measure.is_finite() && second_measure > 0.0)
+            if !(first_measure.is_finite()
+                && first_measure > 0.0
+                && second_measure.is_finite()
+                && second_measure > 0.0)
             {
                 return Err(ObservationError::Invalid(
                     "a paired reduction needs both regions to have a positive area".into(),

@@ -30,6 +30,7 @@ pub enum FeaStudyPreparationError {
     RequiresDesktop(&'static str),
     Invalid(String),
     Meshing(Box<runmat_meshing_core::MeshingFailure>),
+    Admission(runmat_runtime::analysis::fea_run_admission::FeaRunDenied),
 }
 impl std::fmt::Display for FeaStudyPreparationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -37,6 +38,7 @@ impl std::fmt::Display for FeaStudyPreparationError {
             Self::RequiresDesktop(reason) => f.write_str(reason),
             Self::Invalid(reason) => f.write_str(reason),
             Self::Meshing(failure) => write!(f, "Mesh preparation failed: {failure}"),
+            Self::Admission(denied) => denied.fmt(f),
         }
     }
 }
@@ -48,6 +50,11 @@ impl FeaStudyPreparationError {
             value["identifier"] = "RM.FEA.PREPARATION.MESH_FAILED".into();
             value["meshingFailure"] =
                 serde_json::to_value(failure).expect("canonical meshing failure is serializable");
+        }
+        if let Self::Admission(denied) = self {
+            value["identifier"] = denied.error_code().into();
+            value["admissionDenial"] =
+                serde_json::to_value(denied).expect("typed admission denial is serializable");
         }
         value
     }
@@ -73,6 +80,10 @@ impl From<&str> for FeaStudyPreparationError {
 }
 
 pub trait FeaGeometryExecutionHost {
+    fn ensure_preparation_capacity(
+        &self,
+        additional: runmat_simulation_usage::OperationCount,
+    ) -> impl Future<Output = Result<(), runmat_runtime::analysis::fea_run_admission::FeaRunDenied>>;
     fn provider_profile(&self) -> impl Future<Output = Result<GeometryProviderProfile, String>>;
     fn materialize_and_mesh(
         &self,
@@ -244,9 +255,15 @@ impl CheckedFeaSessionSource {
         let mut coordinator =
             runmat_analysis_execution::StructuralSequenceCoordinator::new(preparation)
                 .map_err(|e| e.to_string())?;
+        let work = coordinator
+            .next_solve_wave_work_upper_bound()
+            .map_err(preparation_bridge_error)?;
+        host.ensure_preparation_capacity(work)
+            .await
+            .map_err(FeaStudyPreparationError::Admission)?;
         let wave = coordinator
             .prepare_next_solve_wave()
-            .map_err(|e| e.to_string())?;
+            .map_err(preparation_bridge_error)?;
         let [task] = wave.tasks.as_slice() else {
             return Err("This execution host requires one admitted solve.".into());
         };
@@ -262,6 +279,16 @@ impl CheckedFeaSessionSource {
             frozen_project_digest,
             artifact_access: access,
         })
+    }
+}
+fn preparation_bridge_error(
+    error: runmat_analysis_execution::AnalysisBridgeError,
+) -> FeaStudyPreparationError {
+    match error.accounting_cause() {
+        Some(cause) => FeaStudyPreparationError::Admission(
+            runmat_runtime::analysis::fea_run_admission::FeaRunDenied::Accounting(*cause),
+        ),
+        None => FeaStudyPreparationError::Invalid(error.to_string()),
     }
 }
 fn sequence_preparation(

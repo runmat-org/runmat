@@ -1,0 +1,12 @@
+runmat 0.7
+std 1
+
+part skin {
+    sketch a on origin.xy {
+        edge = line(start = [0 mm, 0 mm], end = [30 mm, 0 mm])
+    }
+    sketch b on origin.zx {
+        edge = line(start = [20 mm, 0 mm], end = [25 mm, 30 mm])
+    }
+    feature skin = surface.loft(profiles = [sketch.a, sketch.b])
+}

@@ -1,0 +1,15 @@
+runmat 0.7
+std 1
+
+// The camera drone stowed for carrying: the rear arms folded forward and down under the body on
+// their tilted hinges, the front arms swung back and up over them, and each prop's blades folded
+// back along its arm: the front blades fold 125 deg, so their roots stand clear of the hub's
+// plates, and the rear blades splay 12 deg outboard, so they clear the shell and the other arm. The
+// same assembly as drone.assembly at its folded inputs.
+assembly drone_folded {
+    use assembly drone as drone {
+        configuration = { select = inputs, values = { fold_front = 114 deg, fold_rear = 114 deg, blade_a = 125 deg, blade_b = 125 deg, rear_blade_a = 78 deg, rear_blade_b = 78 deg, pitch = 0 deg } }
+    }
+
+    view hero = { from = [0.78, 0.62, 0.42], up = [0, 0, 1], default = true }
+}

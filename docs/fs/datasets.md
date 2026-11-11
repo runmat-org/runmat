@@ -176,10 +176,16 @@ Path-level operations manage whole datasets.
 | `data.copy(fromPath, toPath)` | Copy a dataset directory. |
 | `data.move(fromPath, toPath)` | Rename a dataset directory. |
 | `data.delete(path)` | Remove a dataset directory. |
-| `data.import(path, "data", sourcePath)` | Copy another RunMat dataset into `path`. |
+| `feval("data.import", path, "data", sourcePath)` | Copy another RunMat dataset into `path`. |
 | `data.export(path, "data", targetPath)` | Copy a dataset to another path. |
 
-`data.import` and `data.export` currently support RunMat's `"data"` format.
+`data.import` and `data.export` support RunMat's `"data"` format. Call
+`data.import` through `feval`, because `import` is a reserved keyword.
+
+Dataset moves and deletion require a provider that permits directory namespace
+changes. Perform those operations in an ordinary request. Pinned execution
+rejects directory renames and removal while preserving its captured inputs and
+conditionally published outputs.
 
 These namespace functions use exactly the positional signatures shown above; they do not reserve trailing name-value arguments. Their path and format arguments are textual rather than numeric, while copying, moving, importing, and exporting a dataset preserves its stored integer payload bytes and declared dtype. Dataset lifecycle work is filesystem-provider I/O and does not dispatch through an acceleration provider.
 

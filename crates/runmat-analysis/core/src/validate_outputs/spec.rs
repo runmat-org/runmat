@@ -70,7 +70,10 @@ fn validate_line_parameter(
     let conductor_target = matches!(spec.target, ObservationTarget::Conductor { .. });
     let Some(scope) = scope else {
         return if conductor_target {
-            observation_error(request, "a conductor target is read only by a line parameter")
+            observation_error(
+                request,
+                "a conductor target is read only by a line parameter",
+            )
         } else {
             Ok(())
         };

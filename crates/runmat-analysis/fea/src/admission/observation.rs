@@ -5,7 +5,8 @@
 //! `runmat check` and run preparation reject an unbound observation before meshing.
 
 use runmat_analysis_core::{
-    CoupledPhysicsFamily, ElectromagneticDomain, IndependentDomain, PhysicsFamily, ProcedureStep, RealizedStudy,
+    CoupledPhysicsFamily, ElectromagneticDomain, IndependentDomain, PhysicsFamily, ProcedureStep,
+    RealizedStudy,
 };
 
 use super::study::{AdmissionIssue, AdmittedFamily, OBSERVATION_CODE};
@@ -27,8 +28,12 @@ fn declared_fields(
             }
             _ => None,
         },
-        AdmittedFamily::Magnetic => crate::execution::magnetic_native_field_definition_inventory().ok(),
-        AdmittedFamily::Maxwell => crate::execution::maxwell_native_field_definition_inventory().ok(),
+        AdmittedFamily::Magnetic => {
+            crate::execution::magnetic_native_field_definition_inventory().ok()
+        }
+        AdmittedFamily::Maxwell => {
+            crate::execution::maxwell_native_field_definition_inventory().ok()
+        }
         AdmittedFamily::Fluid => {
             let coupling = match step.family {
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => {

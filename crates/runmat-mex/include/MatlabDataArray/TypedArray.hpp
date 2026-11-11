@@ -135,6 +135,12 @@ public:
     TypedIterator() : pointer_(nullptr) {}
     explicit TypedIterator(typename std::conditional<Constant, const Storage *, Storage *>::type pointer)
         : pointer_(pointer) {}
+    TypedIterator(const TypedIterator &other) noexcept : pointer_(other.pointer_) {}
+    TypedIterator &operator=(const TypedIterator &other) noexcept {
+        // Copy the position without assigning through the cached element proxy.
+        pointer_ = other.pointer_;
+        return *this;
+    }
 
     reference operator*() const {
         if constexpr (Constant) {

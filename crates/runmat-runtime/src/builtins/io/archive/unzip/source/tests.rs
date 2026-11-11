@@ -60,7 +60,8 @@ fn captured_relative_input_and_default_output_survive_provider_and_cwd_swap() {
     let files =
         futures::executor::block_on(invocation).expect("local extraction through selected owner");
 
-    assert_eq!(files, vec!["/selected-cwd/owner.txt"]);
+    let expected = Path::new("/selected-cwd").join("owner.txt");
+    assert_eq!(files, vec![expected.to_str().expect("UTF-8 fixture path")]);
     assert_eq!(
         selected
             .read_project_path("/selected-cwd/owner.txt")

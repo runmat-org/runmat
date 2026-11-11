@@ -15,6 +15,19 @@ impl CacheImport for MemoryObjects {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.0.get(&digest).cloned())
     }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        runmat_execution_artifact::cache::copy_verified_bounded_with_admission(
+            digest,
+            self.0.get(&digest).map(Vec::as_slice),
+            maximum,
+            &mut |_| Ok(()),
+        )
+    }
 }
 impl CacheExport for MemoryObjects {
     fn write_verified(&mut self, object: &LogicalObject) -> ArtifactResult<()> {

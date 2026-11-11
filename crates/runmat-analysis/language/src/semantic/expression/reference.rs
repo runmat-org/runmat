@@ -1,4 +1,4 @@
-use runmat_fea_syntax::FeaReference;
+use runmat_design_syntax::FeaReference;
 
 use super::{CheckedExpression, CheckedExpressionKind};
 use crate::{FeaFieldType, FeaType};

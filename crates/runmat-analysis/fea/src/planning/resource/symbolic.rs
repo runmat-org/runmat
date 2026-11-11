@@ -25,6 +25,16 @@ const SYMBOLIC_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 64, 6
 const TRANSLATIONAL_DOF_COUNT: usize = 3;
 const REFERENCE_POINT_DOF_COUNT: usize = 6;
 
+fn connector_plan_error(error: crate::assembly::StructuralAssemblyError) -> ResourcePlanningError {
+    match error {
+        crate::assembly::StructuralAssemblyError::Accounting(cause) => {
+            ResourcePlanningError::Accounting(cause)
+        }
+        crate::assembly::StructuralAssemblyError::Cancelled => ResourcePlanningError::Cancelled,
+        other => ResourcePlanningError::Invalid(other.to_string()),
+    }
+}
+
 /// Material-independent sparse storage bounds for a structural solve.
 ///
 /// The stiffness pattern contains every coupling that element assembly may emit, including
@@ -105,7 +115,7 @@ impl StructuralSymbolicOperators {
             }
             let plan =
                 compile_model_connector_plan(model, Some(mesh), constraints.reference_points.len())
-                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+                    .map_err(connector_plan_error)?;
             let cliques = connector_dof_cliques(&plan, constraints.topology, &layout)?;
             Some(CliqueAdjacency::derive(
                 total_dofs,
@@ -166,7 +176,7 @@ impl StructuralSymbolicOperators {
         if !model.connectors.is_empty() {
             let plan =
                 compile_model_connector_plan(model, None, constraints.reference_points.len())
-                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+                    .map_err(connector_plan_error)?;
             cliques.extend(connector_dof_cliques(&plan, constraints.topology, &layout)?);
         }
         let stiffness_upper_bound = dof_clique_pattern(total_dofs, &cliques)?;
@@ -243,7 +253,7 @@ impl StructuralSymbolicOperators {
         if !model.connectors.is_empty() {
             let plan =
                 compile_model_connector_plan(model, Some(mesh), constraints.reference_points.len())
-                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+                    .map_err(connector_plan_error)?;
             cliques.extend(connector_dof_cliques(&plan, constraints.topology, &layout)?);
         }
         let stiffness_upper_bound = dof_clique_pattern(total_dofs, &cliques)?;

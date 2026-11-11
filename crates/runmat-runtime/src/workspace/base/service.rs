@@ -271,6 +271,16 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
             .map_err(base_workspace_error_to_runtime)
     }
 
+    fn publish_admitted_mutations_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        match &self.invocation_projection {
+            Some(projection) => projection.publish_admitted_mutations_with_context(context),
+            None => self.ensure_mutation_authority_with_context(context),
+        }
+    }
+
     fn workspace_revision(&self) -> Result<Option<super::WorkspaceRevision>, RuntimeError> {
         self.owner
             .revision()

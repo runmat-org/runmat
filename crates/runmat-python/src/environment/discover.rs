@@ -183,23 +183,32 @@ fn executable_candidates(request: &PythonDiscoveryRequest) -> Vec<PathBuf> {
     #[cfg(windows)]
     names.push("python.exe".into());
 
-    let mut resolved = BTreeSet::new();
+    resolve_executables(names, std::env::var_os("PATH").as_deref())
+}
+
+fn resolve_executables(names: Vec<OsString>, paths: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
+    // Follow PATH precedence, including an activated virtual environment.
+    // Sorting candidate paths can silently select a different installation.
+    let mut seen = BTreeSet::new();
+    let mut resolved = Vec::new();
     for name in names {
         let path = PathBuf::from(&name);
         if path.components().count() > 1 {
-            resolved.insert(path);
+            if seen.insert(path.clone()) {
+                resolved.push(path);
+            }
             continue;
         }
-        if let Some(paths) = std::env::var_os("PATH") {
-            for directory in std::env::split_paths(&paths) {
+        if let Some(paths) = paths {
+            for directory in std::env::split_paths(paths) {
                 let candidate = directory.join(&name);
-                if candidate.is_file() {
-                    resolved.insert(candidate);
+                if candidate.is_file() && seen.insert(candidate.clone()) {
+                    resolved.push(candidate);
                 }
             }
         }
     }
-    resolved.into_iter().collect()
+    resolved
 }
 
 fn inspect_candidate(executable: &Path) -> Result<PythonInstallation, PythonError> {
@@ -282,6 +291,18 @@ fn installation_matches(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovery_keeps_path_precedence_and_deduplicates_candidates() {
+        let preferred = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let fallback = preferred.parent().unwrap().parent().unwrap().to_path_buf();
+        let paths = std::env::join_paths([&preferred, &fallback, &preferred]).unwrap();
+        let candidates = resolve_executables(vec!["Cargo.toml".into()], Some(&paths));
+        assert_eq!(
+            candidates,
+            vec![preferred.join("Cargo.toml"), fallback.join("Cargo.toml")]
+        );
+    }
 
     #[test]
     fn rejects_an_impossible_version_range_without_launching_a_process() {

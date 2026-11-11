@@ -170,8 +170,10 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
             cancellation_check_interval: 1,
         },
         &NeverCancelled,
-        &Storage(None),
-        &mut work,
+        ValidationWork {
+            storage: Storage(None),
+            counter: &mut work,
+        },
         &mut 0,
     )
     .unwrap();

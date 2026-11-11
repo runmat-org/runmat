@@ -13,6 +13,8 @@ mod argument_stage_tests;
 mod arguments;
 #[cfg(test)]
 mod catch_scope_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod retirement_prefix_tests;
 pub(super) mod numeric_region;
 pub(super) mod payload;
 mod prepared;
@@ -68,6 +70,64 @@ pub(super) type PendingCompletionFuture = runmat_runtime::execution::RuntimeCont
     NativeExecutorError,
 >;
 
+pub(super) fn take_completed_retirement(
+    state: &mut HostState,
+    request: NativeSiteRequest,
+) -> NativeExecutorResult<Option<runmat_runtime::native::NativeSiteOutcome>> {
+    let Some(completed) = state.completed_call.as_ref() else {
+        return Ok(None);
+    };
+    let CompletedPayload::ValueRetirement(outcome) = &completed.payload else {
+        return Ok(None);
+    };
+    if completed.request != request || completed.embedded.is_some() {
+        return Err(NativeExecutorError::Host(
+            "value retirement resumed at a different native site".into(),
+        ));
+    }
+    let outcome = *outcome;
+    state.completed_call = None;
+    Ok(Some(outcome))
+}
+
+pub(super) fn begin_retirement(
+    state: &mut HostState,
+    request: NativeSiteRequest,
+    cleanup: runmat_runtime::context::RuntimeFunctionCleanup,
+    result: NativeExecutorResult<runmat_runtime::native::NativeSiteOutcome>,
+) -> NativeExecutorResult<()> {
+    let (continuation, generation) = state.next_suspension_identity()?;
+    let outcome = match result {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            state.retirement_failure = Some(error);
+            runmat_runtime::native::NativeSiteOutcome::continue_execution()
+        }
+    };
+    let admitted = admit_completion_with(state, move || async move {
+        cleanup.finish().await?;
+        Ok(CallCompletion::ValueRetirement(outcome))
+    });
+    let future = match admitted {
+        Ok(future) => future,
+        Err(secondary) => {
+            return Err(match state.retirement_failure.take() {
+                Some(original) => original.with_secondary(secondary),
+                None => secondary,
+            })
+        }
+    };
+    state.pending_call = Some(PendingCall {
+        continuation,
+        generation,
+        request,
+        embedded: None,
+        retained_roots: Vec::new(),
+        future,
+    });
+    Ok(())
+}
+
 /// The selected concrete body and its catch scope share the original single
 /// continuation allocation. No already-erased child is admitted as its pointer.
 pub(super) fn admit_completion_with<F>(
@@ -98,6 +158,7 @@ where
 }
 
 pub(super) enum CallCompletion {
+    ValueRetirement(runmat_runtime::native::NativeSiteOutcome),
     OriginalRegionObserved,
     NumericRegion(numeric_region::NumericRegionCompletionOwner),
     RootedSequence {
@@ -156,6 +217,7 @@ pub(super) enum SemanticOperationOutput {
 }
 
 pub(super) enum CompletedPayload {
+    ValueRetirement(runmat_runtime::native::NativeSiteOutcome),
     OriginalRegionObserved,
     NumericRegion(numeric_region::NumericRegionCompletionOwner),
     Values(Vec<NativeValueRef>),
@@ -317,7 +379,9 @@ pub(super) fn completed_roots_from(
     completed
         .into_iter()
         .flat_map(|completed| match &completed.payload {
-            CompletedPayload::OriginalRegionObserved => &[][..],
+            CompletedPayload::OriginalRegionObserved | CompletedPayload::ValueRetirement(_) => {
+                &[][..]
+            }
             CompletedPayload::NumericRegion(completed) => &completed.completion().inputs[..],
             CompletedPayload::Values(outputs) => outputs.as_slice(),
             CompletedPayload::ExpandedCallArguments(arguments) => arguments.as_slice(),
@@ -380,6 +444,11 @@ pub(super) async fn complete(
             Ok(completion) => completion,
             Err(error) => Err(NativeExecutorError::from(error)),
         };
+    let completion = match (state.retirement_failure.take(), completion) {
+        (Some(original), Err(secondary)) => Err(original.with_secondary(secondary)),
+        (Some(original), Ok(_)) => Err(original),
+        (None, completion) => completion,
+    };
     // A For iterator is moved into the owned future to avoid borrowing
     // HostState across await. Restore that exact record even if workspace
     // reconciliation or column materialization fails.
@@ -405,6 +474,9 @@ pub(super) async fn complete(
             let completion =
                 super::operation_completion::CompletedOperation::new(completion).finish(state)?;
             match completion {
+                CallCompletion::ValueRetirement(outcome) => {
+                    CompletedPayload::ValueRetirement(outcome)
+                }
                 CallCompletion::OriginalRegionObserved => CompletedPayload::OriginalRegionObserved,
                 CallCompletion::NumericRegion(completed) => {
                     CompletedPayload::NumericRegion(completed)

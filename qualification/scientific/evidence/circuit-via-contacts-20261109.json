@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "source_revision": "add4230236543befd90e43057d0023d411df5b9a",
+  "target": "aarch64-apple-darwin",
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "scope": "ECAD via-contact repair and dependency conservation; cross-platform integration CI remains required",
+  "checks": [
+    {
+      "command": ["cargo", "test", "--locked", "--offline", "-p", "runmat-circuit", "--lib", "--test", "high_speed", "--test", "deep_stackup", "--test", "library"],
+      "exit_code": 0,
+      "passed": 108,
+      "failed": 0,
+      "ignored": 0,
+      "harness_counts": [87, 3, 13, 5],
+      "log": "Main:.tmp-rm1064/integration-circuit-contacts-final.log",
+      "sha256": "e6ea4db82c9e70200e468895d47dc2cbcc508b3c07f596d17daf3cc8f0963e64"
+    },
+    {
+      "command": ["cargo", "clippy", "--locked", "--offline", "--all-features", "--all-targets", "--keep-going", "-p", "runmat-circuit", "--", "-D", "warnings"],
+      "exit_code": 0,
+      "log": "Main:.tmp-rm1064/integration-circuit-clippy.log",
+      "sha256": "4e19d007bc2318080d5effa561cbf8c06dadc1586ae26726bdb5c5a91a4bc9d7"
+    },
+    {
+      "command": ["cargo", "test", "--locked", "--offline", "--release", "-p", "runmat-circuit", "--test", "runtime_scale", "--", "--nocapture"],
+      "exit_code": 0,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "duration_seconds": 74.89,
+      "primitives": 71727,
+      "edit_budget_seconds": 0.5,
+      "move_seconds": 0.326148,
+      "delete_seconds": 0.482133583,
+      "package_recompile_seconds": 0.273140583,
+      "log": "Main:.tmp-rm1064/integration-circuit-runtime-scale-final.log",
+      "sha256": "b6e22059b7dae1554a097207100a46c0fb99d98396148b5fb5975b9b00d0788d",
+      "artifact_sha256": "3683c527e5024f0a2669215e042f80dcfbd6a4a79cf019a0464051a465ff1de9"
+    }
+  ],
+  "scientific_dependency_observations": [
+    {
+      "source_revision": "878baa910e7806296fee33c672272f90af5d3d24",
+      "command": ["cargo", "tree", "--locked", "--offline", "--all-features", "-p", "runmat", "-i", "runmat-circuit"],
+      "exit_code": 0,
+      "result": "The CLI links circuit through design tools. The authored FEA scientific target exercises FEA execution, assessment and cold publication; it does not dispatch the ECAD high-speed analysis functions changed here.",
+      "log": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-878baa910e-cli-circuit-dependencies.log",
+      "sha256": "80f0545ba0318ce0a09885207f25e56a1d0c8fa36f6b2bd72b4f9b7f46b717c2"
+    },
+    {
+      "source_revision": "878baa910e7806296fee33c672272f90af5d3d24",
+      "command": ["cargo", "tree", "--locked", "--offline", "--all-features", "-p", "runmat-execution-runner-native", "--format", "{p}", "--prefix", "none", "-e", "normal,build,dev"],
+      "exit_code": 0,
+      "result": "The recovery driver's normal, build and dev dependency graph excludes runmat-circuit.",
+      "log": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-878baa910e-driver-dependencies.log",
+      "sha256": "7b8b6e441561e7ee722a389229c29851cb56ad39e064739b960ed318e4524d24"
+    }
+  ],
+  "contract_review": "A single-call spatial broad phase reuses canonical pad and track geometry for all via queries. Exact gap, net, layer-span and pour-outline predicates are conserved. The scan-equivalence test covers 8- and 80-layer fixtures and wide/reversed query spans. Existing high-speed, deep-stack and scale assertions remain unchanged. There is no persistent cache or changed FEA solver, admission or publication path."
+}

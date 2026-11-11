@@ -23,9 +23,9 @@ mod partition;
 mod publication;
 mod publish;
 pub use publication::{
-    ObservationHistoryPublication, ObservationPublicationCatalog, ObservationPublicationScope,
+    ObservationHistoryPublication, ObservationPublicationCatalog,
     ObservationPublicationCatalogIdentity, ObservationPublicationEntry,
-    ObservationSamplePublication, SeriesReductionPublication,
+    ObservationPublicationScope, ObservationSamplePublication, SeriesReductionPublication,
     SeriesReductionPublicationContribution,
 };
 mod resolve;
@@ -41,6 +41,7 @@ mod topology;
 pub use topology::resources::{
     solid_observation_topology_resident_bytes, solid_observation_topology_resident_bytes_for_mesh,
 };
+pub use topology::structural_observation_derivation_work_upper_bound;
 
 pub use source::{
     thermal_source_validation_resident_bytes, ObservationFieldSelection,
@@ -98,11 +99,11 @@ pub use partition::{
     ObservationPartitionTarget, DEFAULT_MAXIMUM_OBSERVATION_PARTITIONS,
 };
 pub use publish::publish_observation;
+pub(crate) use resolve::bind_request_field;
 pub use resolve::{
     resolve_observation_plan, resolve_structural_observation_plan,
     resolve_structural_observation_plan_with_connectors,
 };
-pub(crate) use resolve::bind_request_field;
 pub(crate) use topology::ObservationTopology;
 
 #[cfg(test)]

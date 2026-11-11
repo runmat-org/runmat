@@ -213,8 +213,8 @@ pub(super) fn derive_proximity_contributions(
                 )
                 .for_edge(&left.edge_id));
             }
-            let narrow_face = source == MetricSourceKind::Proximity
-                && is_narrow_face(left, right, closest);
+            let narrow_face =
+                source == MetricSourceKind::Proximity && is_narrow_face(left, right, closest);
             let metric = if narrow_face {
                 if minimum * narrow_face_aspect >= base_length_m {
                     continue;
@@ -805,7 +805,8 @@ mod tests {
             edge.points_m = (0..9).map(|i| [x, i as f64 * 35.0e-3 / 8.0, 0.0]).collect();
             edge.face_ids.insert(chamfer.clone());
             edge.face_ids.insert(other.clone());
-            edge.face_normals.insert(chamfer.clone(), vec![[-0.7, 0.0, 0.7]; 9]);
+            edge.face_normals
+                .insert(chamfer.clone(), vec![[-0.7, 0.0, 0.7]; 9]);
             edge.face_normals.insert(other.clone(), vec![normal; 9]);
         }
         let size = |left: EdgeWitness, right: EdgeWitness| {
@@ -833,7 +834,9 @@ mod tests {
         // plate's two faces, which face each other, so the width is a thickness with
         // cells_across_gap cells across it.
         let mut strip = right.clone();
-        strip.face_normals.insert(side.clone(), vec![[0.0, 0.0, -1.0]; 9]);
+        strip
+            .face_normals
+            .insert(side.clone(), vec![[0.0, 0.0, -1.0]; 9]);
         let thickness = size(left.clone(), strip);
         assert_eq!(thickness.len(), 2);
         let across = thickness[0].metric.xx;

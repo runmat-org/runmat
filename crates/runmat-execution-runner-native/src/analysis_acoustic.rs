@@ -167,9 +167,7 @@ pub(crate) async fn execute_with_pool(
             wave.push((executed.response, attempt));
         }
         drop(tasks);
-        coordinator
-            .complete_history(pool, wave)
-            .map_err(protocol)?;
+        coordinator.complete_history(pool, wave).map_err(protocol)?;
         terminal = dependencies;
     }
     let assembly = coordinator.prepare_assembly().map_err(protocol)?;

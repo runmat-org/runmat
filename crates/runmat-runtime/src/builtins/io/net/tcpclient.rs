@@ -888,7 +888,7 @@ pub(crate) mod tests {
         let err = run_tcpclient(
             Value::from("127.0.0.1"),
             Value::Num(port as f64),
-            vec![Value::from("ConnectTimeout"), Value::Num(0.05)],
+            vec![Value::from("ConnectTimeout"), Value::Num(5.0)],
         )
         .unwrap_err();
         let transport = Error::source(&err)

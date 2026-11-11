@@ -14,35 +14,35 @@ pub(super) fn h_flux(
     // the compact pressure action must cancel this original Rhie-Chow term.
     let gu = velocity_gradients(p, u)?;
     indexed(p.topology.faces.len(), |i| {
-            let f = &p.topology.faces[i];
-            if let Some(n) = f.neighbor {
-                let (_, _, w) = face_geometry(p, f)?;
-                Ok(dot(
+        let f = &p.topology.faces[i];
+        if let Some(n) = f.neighbor {
+            let (_, _, w) = face_geometry(p, f)?;
+            Ok(dot(
+                add(
+                    interpolate(
+                        face_velocity_trace(p, i, f.owner, u, &gu),
+                        face_velocity_trace(p, i, n, u, &gu),
+                        w,
+                    ),
+                    interpolate(pressure_term[f.owner], pressure_term[n], w),
+                ),
+                f.owner_area_vector_m2,
+            ))
+        } else {
+            match p.boundaries[i] {
+                FaceBoundary::Velocity { value, .. } => Ok(dot(value, f.owner_area_vector_m2)),
+                FaceBoundary::Symmetry { .. } => Ok(0.0),
+                FaceBoundary::PressureOutlet { .. } => Ok(dot(
                     add(
-                        interpolate(
-                            face_velocity_trace(p, i, f.owner, u, &gu),
-                            face_velocity_trace(p, i, n, u, &gu),
-                            w,
-                        ),
-                        interpolate(pressure_term[f.owner], pressure_term[n], w),
+                        face_velocity_trace(p, i, f.owner, u, &gu),
+                        pressure_term[f.owner],
                     ),
                     f.owner_area_vector_m2,
-                ))
-            } else {
-                match p.boundaries[i] {
-                    FaceBoundary::Velocity { value, .. } => Ok(dot(value, f.owner_area_vector_m2)),
-                    FaceBoundary::Symmetry { .. } => Ok(0.0),
-                    FaceBoundary::PressureOutlet { .. } => Ok(dot(
-                        add(
-                            face_velocity_trace(p, i, f.owner, u, &gu),
-                            pressure_term[f.owner],
-                        ),
-                        f.owner_area_vector_m2,
-                    )),
-                    _ => Err(Error::Invalid("missing face law")),
-                }
+                )),
+                _ => Err(Error::Invalid("missing face law")),
             }
-        })
+        }
+    })
 }
 
 pub(super) fn coefficients(p: &CanonicalFluidProblem<'_>, rau: &[f64]) -> Result<Vec<f64>, Error> {
@@ -72,31 +72,29 @@ pub(super) fn corrected_flux_with(
     gp: &[V],
 ) -> Result<Vec<f64>, Error> {
     indexed(p.topology.faces.len(), |i| {
-            let f = &p.topology.faces[i];
-            let (alpha, tangent, w) = face_geometry(p, f)?;
-            let action = if let Some(n) = f.neighbor {
-                alpha * (pressure[n] - pressure[f.owner])
-                    + dot(interpolate(gp[f.owner], gp[n], w), tangent)
-            } else {
-                match p.boundaries[i] {
-                    FaceBoundary::Velocity { .. } | FaceBoundary::Symmetry { .. } => {
-                        return Ok(qh[i])
-                    }
-                    FaceBoundary::PressureOutlet { pressure: pb, .. } => {
-                        alpha
-                            * ((pb - p.pressure_reference_pa.canonical_values()[f.owner])
-                                - pressure[f.owner])
-                            + dot(gp[f.owner], tangent)
-                    }
-                    _ => return Err(Error::Invalid("missing face law")),
+        let f = &p.topology.faces[i];
+        let (alpha, tangent, w) = face_geometry(p, f)?;
+        let action = if let Some(n) = f.neighbor {
+            alpha * (pressure[n] - pressure[f.owner])
+                + dot(interpolate(gp[f.owner], gp[n], w), tangent)
+        } else {
+            match p.boundaries[i] {
+                FaceBoundary::Velocity { .. } | FaceBoundary::Symmetry { .. } => return Ok(qh[i]),
+                FaceBoundary::PressureOutlet { pressure: pb, .. } => {
+                    alpha
+                        * ((pb - p.pressure_reference_pa.canonical_values()[f.owner])
+                            - pressure[f.owner])
+                        + dot(gp[f.owner], tangent)
                 }
-            };
-            let flux = qh[i] - rf[i] * action;
-            if !flux.is_finite() {
-                return Err(Error::Invalid("nonfinite pressure face flux"));
+                _ => return Err(Error::Invalid("missing face law")),
             }
-            Ok(flux)
-        })
+        };
+        let flux = qh[i] - rf[i] * action;
+        if !flux.is_finite() {
+            return Err(Error::Invalid("nonfinite pressure face flux"));
+        }
+        Ok(flux)
+    })
 }
 
 pub(super) fn solve(

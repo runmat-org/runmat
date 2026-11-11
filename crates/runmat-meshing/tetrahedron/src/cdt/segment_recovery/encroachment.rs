@@ -201,7 +201,10 @@ fn retained_segment_parameter(
         if endpoints == [context.first_coordinates, context.last_coordinates] {
             (parameter_numerator, parameter_exponent)
         } else if endpoints == [context.last_coordinates, context.first_coordinates] {
-            ((1_u64 << parameter_exponent) - parameter_numerator, parameter_exponent)
+            (
+                (1_u64 << parameter_exponent) - parameter_numerator,
+                parameter_exponent,
+            )
         } else {
             return None;
         };

@@ -129,10 +129,7 @@ pub(in crate::builtins::io::data) fn make_rel_data_path(
     root: &std::path::Path,
     payload_path: &std::path::Path,
 ) -> BuiltinResult<String> {
-    let rel = payload_path
-        .strip_prefix(root)
-        .map_err(|err| data_error(format!("failed to compute relative data path: {err}")))?;
-    Ok(rel.to_string_lossy().to_string())
+    crate::data::relative_storage_path(root, payload_path)
 }
 
 #[async_recursion::async_recursion(?Send)]

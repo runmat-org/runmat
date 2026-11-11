@@ -38,7 +38,6 @@ def validate_workflow(path: Path = DEFAULT_WORKFLOW) -> None:
     required = (
         "needs: [validate-release-state]",
         "Validate governed meshing evidence catalogs",
-        "python3 scripts/qualification/scientific.py verify --cohort meshing-release",
         "qualification/scientific/.",
         "actions/attest@v4",
         "subject-path: target/runmat-meshing-release-evidence/*",
@@ -48,6 +47,12 @@ def validate_workflow(path: Path = DEFAULT_WORKFLOW) -> None:
     for anchor in required:
         if anchor not in evidence:
             raise ReleaseEvidenceError(f"meshing release evidence is missing: {anchor}")
+
+    # The full verifier validates every required receipt and the policy's
+    # explicit exceptions. A deferred-cohort selector verifies no required group.
+    command = "run: python3 scripts/qualification/scientific.py verify"
+    if not any(line.strip() == command for line in evidence.splitlines()):
+        raise ReleaseEvidenceError("release evidence must verify all required scientific receipts")
 
     for anchor in ("continue-on-error:", "if: false", "if-no-files-found: warn"):
         if anchor in evidence:
@@ -70,7 +75,7 @@ def main() -> int:
     except ReleaseEvidenceError as error:
         print(f"meshing release-evidence validation failed: {error}", file=sys.stderr)
         return 1
-    print("validated blocking, mandatory, attested meshing release evidence")
+    print("validated blocking scientific receipts, approved dispositions and attested meshing catalogs")
     return 0
 
 

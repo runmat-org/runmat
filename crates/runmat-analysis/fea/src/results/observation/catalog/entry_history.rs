@@ -75,7 +75,9 @@ impl ObservationFieldCatalog {
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
         let ObservationFieldCatalogSource::EntryHistory { samples } = self.source() else {
-            return Err(invalid("entry history requires the complete source catalog"));
+            return Err(invalid(
+                "entry history requires the complete source catalog",
+            ));
         };
         for sample in samples {
             let ObservationFieldCatalogSource::VolumeMeshRecovery {
@@ -84,7 +86,9 @@ impl ObservationFieldCatalog {
                 ..
             } = sample.source()
             else {
-                return Err(invalid("volume-mesh entry history contains another source kind"));
+                return Err(invalid(
+                    "volume-mesh entry history contains another source kind",
+                ));
             };
             if recovery_request.producer != producer || producing_step.as_ref() != step {
                 return Err(invalid(
@@ -123,7 +127,12 @@ fn entry_sample(
             return Err(invalid("entry history source has no ordered sample"))
         }
     };
-    if !key.is_finite() || manifest.fields.iter().any(|field| field.sample != coordinate) {
+    if !key.is_finite()
+        || manifest
+            .fields
+            .iter()
+            .any(|field| field.sample != coordinate)
+    {
         return Err(invalid("entry history source mixes sample coordinates"));
     }
     Ok((coordinate, key))
@@ -189,7 +198,9 @@ pub(super) fn validate_samples(samples: &[ObservationFieldCatalog]) -> AnalysisE
         if previous.is_some_and(|(prior, value)| {
             std::mem::discriminant(&prior) != std::mem::discriminant(&coordinate) || key <= value
         }) {
-            return Err(invalid("entry history samples are inconsistent or unordered"));
+            return Err(invalid(
+                "entry history samples are inconsistent or unordered",
+            ));
         }
         if sample_kind != kind
             || recovery_request.producer != request.producer

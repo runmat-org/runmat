@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use super::super::delta::RetiredWorkspaceDeltaMutation;
-use super::super::storage::{ManagedWorkspaceStorage, WorkspaceOverlay};
+use super::super::storage::ManagedWorkspaceStorage;
 use super::super::values::{RootedWorkspaceEntries, RootedWorkspaceEntry};
 use super::super::{WorkspaceChange, WorkspaceDelta};
 use crate::workspace::GlobalBindingTarget;
@@ -23,5 +23,4 @@ pub(in crate::workspace::base) struct ProjectionRetirements {
     pub(in crate::workspace::base) pending: Option<WorkspaceDelta>,
     pub(in crate::workspace::base) delta_mutation: Option<RetiredWorkspaceDeltaMutation>,
     pub(in crate::workspace::base) replaced_changes: [Option<WorkspaceChange>; 2],
-    pub(in crate::workspace::base) overlay: Option<WorkspaceOverlay>,
 }

@@ -125,6 +125,9 @@ pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 /// Complete explicit runtime authority for one session/invocation tree.
 #[derive(Clone)]
 pub struct RuntimeContext {
+    cleanup_completion: Option<
+        crate::builtins::introspection::on_cleanup::lifecycle::registry::CleanupCompletionId,
+    >,
     acceleration_policy: Option<super::RuntimeAccelerationPolicy>,
     graphics_callback_mutation: Option<super::GraphicsCallbackMutationScope>,
     execution: Rc<dyn RuntimeExecutionServices>,
@@ -306,6 +309,7 @@ impl RuntimeContext {
         let state = Rc::new(RuntimeContextState::new(RuntimeContextLocalId::next()));
         crate::class_registry::register_context_state(&state);
         let context = Self {
+            cleanup_completion: None,
             graphics_callback_mutation: None,
             execution,
             environment: Rc::new(std::cell::RefCell::new(environment)),
@@ -771,6 +775,23 @@ impl RuntimeContext {
     ) -> Self {
         self.command_profiling = origin;
         self
+    }
+
+    pub(crate) fn with_cleanup_completion(
+        mut self,
+        completion: Option<
+            crate::builtins::introspection::on_cleanup::lifecycle::registry::CleanupCompletionId,
+        >,
+    ) -> Self {
+        self.cleanup_completion = completion;
+        self
+    }
+
+    pub(crate) fn cleanup_completion(
+        &self,
+    ) -> Option<crate::builtins::introspection::on_cleanup::lifecycle::registry::CleanupCompletionId>
+    {
+        self.cleanup_completion
     }
 
     pub fn command_profiling(&self) -> Option<&CommandProfilingReceipt> {

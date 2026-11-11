@@ -7,8 +7,9 @@
 //! single gated cargo command. Default: `cargo`.
 use runmat_analysis_qualification::{
     catalog::{cells, Cell, TestResult, Totals, Verdict},
+    checks,
     requirement::Requirement,
-    checks, requirements,
+    requirements,
     witness::{repository_root, scan, validate_tags, Tag, Target, TestLocator},
 };
 use std::{
@@ -90,7 +91,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let all = cells(&registry, &tags, results.as_ref());
     fs::create_dir_all(out_dir.join("requirements"))?;
     write_markdown(&out_dir, &registry, &all)?;
-    write_json(&out_dir, &registry, &all, &tags, results.as_ref(), &dates, run)?;
+    write_json(
+        &out_dir,
+        &registry,
+        &all,
+        &tags,
+        results.as_ref(),
+        &dates,
+        run,
+    )?;
     write_scope(&out_dir, &all)?;
     let mut totals = Totals::default();
     for c in &all {

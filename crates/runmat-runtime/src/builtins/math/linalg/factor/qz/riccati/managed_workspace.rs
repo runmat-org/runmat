@@ -107,6 +107,9 @@ impl RiccatiWorkspacePlan {
             .checked_add(HostTypedWorkspace::<f64>::quoted_bytes(self.subspace_len)?)
             .ok_or(HostAllocationError::Overflow)?;
         total = total
+            .checked_add(HostTypedWorkspace::<f64>::quoted_bytes(self.n)?)
+            .ok_or(HostAllocationError::Overflow)?;
+        total = total
             .checked_add(HostTypedWorkspace::<c64>::quoted_bytes(self.n)?)
             .ok_or(HostAllocationError::Overflow)?;
         for request in [self.qr_scratch, self.qz_scratch] {
@@ -145,6 +148,7 @@ pub(crate) struct ManagedRiccatiWorkspace {
     pub(super) rhs: HostTypedWorkspace<c64>,
     pub(super) labels: HostTypedWorkspace<u64>,
     pub(super) solution: HostTypedWorkspace<f64>,
+    pub(super) state_scales: HostTypedWorkspace<f64>,
     pub(super) poles: HostTypedWorkspace<c64>,
     pub(super) qr_scratch: AlignedHostWorkspace,
     pub(super) qz_scratch: AlignedHostWorkspace,
@@ -166,6 +170,7 @@ pub(super) struct RiccatiScratch<'a> {
     pub(super) rhs: &'a mut [c64],
     pub(super) labels: &'a mut [u64],
     pub(super) solution: &'a mut [f64],
+    pub(super) state_scales: &'a mut [f64],
     pub(super) qr_scratch: &'a mut [MaybeUninit<u8>],
     pub(super) qz_scratch: &'a mut [MaybeUninit<u8>],
 }
@@ -185,6 +190,7 @@ impl ManagedRiccatiWorkspace {
             rhs: self.rhs.as_mut_slice(),
             labels: self.labels.as_mut_slice(),
             solution: self.solution.as_mut_slice(),
+            state_scales: self.state_scales.as_mut_slice(),
             qr_scratch: self.qr_scratch.as_mut_uninit(),
             qz_scratch: self.qz_scratch.as_mut_uninit(),
         }
@@ -208,6 +214,7 @@ impl ManagedRiccatiWorkspace {
         let rhs = complex(plan.subspace_len)?;
         let labels = receipt.temporary_typed::<u64>(context, plan.doubled)?;
         let solution = receipt.temporary_typed::<f64>(context, plan.subspace_len)?;
+        let state_scales = receipt.temporary_typed::<f64>(context, plan.n)?;
         let poles = complex(plan.n)?;
         let qr_scratch = AlignedHostWorkspace::new(
             plan.qr_scratch
@@ -237,6 +244,7 @@ impl ManagedRiccatiWorkspace {
             rhs,
             labels,
             solution,
+            state_scales,
             poles,
             qr_scratch,
             qz_scratch,

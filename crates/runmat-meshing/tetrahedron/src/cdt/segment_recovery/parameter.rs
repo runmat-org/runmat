@@ -103,7 +103,10 @@ impl DyadicNode {
             return None;
         }
         let ranges = [
-            ((lower + width / 4).max(lower + 1), (upper - width / 4).min(upper - 1)),
+            (
+                (lower + width / 4).max(lower + 1),
+                (upper - width / 4).min(upper - 1),
+            ),
             (lower + 1, upper - 1),
         ];
         for (from, to) in ranges {

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "scope": "Corpus metadata validation and scientific source conservation; no numerical execution result is asserted here",
+  "measured_scientific_source": "878baa910e7806296fee33c672272f90af5d3d24",
+  "changed_files": ["verification/meshing/corpus.json", "verification/meshing/integration.json"],
+  "conserved_inputs": "All Rust/C++ source, build configuration, geometry bytes, numerical fixtures and scientific test commands are unchanged. The two geometry regression files already existed in the measured source. Neither required scientific cohort loads the corpus inventory or meshing integration recipe.",
+  "checks": [
+    { "command": ["python3", "scripts/meshing/validate_corpus.py"], "exit_code": 0, "entries": 41 },
+    { "command": ["python3", "scripts/meshing/validate_conformance.py"], "exit_code": 0, "cases": 15, "required_features": 16 },
+    { "command": ["python3", "scripts/meshing/validate_differential.py"], "exit_code": 0, "cases": 1 },
+    { "command": ["python3", "scripts/meshing/validate_reliability.py"], "exit_code": 0, "cases": 24, "required_controls": 26 },
+    { "command": ["python3", "scripts/meshing/validate_release_evidence.py"], "exit_code": 0 },
+    { "command": ["python3", "-m", "unittest", "discover", "-s", "scripts/meshing/tests", "-p", "test_*.py"], "exit_code": 0, "passed": 35, "failed": 0 }
+  ],
+  "qualification_limit": "The required scientific receipts must retain their actual successful source revision, artifact hashes and test results. This record supplies metadata conservation only. The extended meshing release workload remains subject to its existing disposition."
+}

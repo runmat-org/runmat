@@ -217,7 +217,11 @@ fn an_edge_local_source_refines_its_neighbors_only_near_its_support() {
             .into_iter()
             .flatten()
             .any(|vertex| neighbor.start_vertex_id.as_ref() == Some(vertex));
-        let (near, far) = if shared_at_start { (0.0, 1.0) } else { (1.0, 0.0) };
+        let (near, far) = if shared_at_start {
+            (0.0, 1.0)
+        } else {
+            (1.0, 0.0)
+        };
         assert!(size(neighbor, near).0 <= fine * (1. + 1e-6));
         let (far_size, far_point) = size(neighbor, far);
         let distance = (0..=64)
@@ -229,7 +233,10 @@ fn an_edge_local_source_refines_its_neighbors_only_near_its_support() {
                     .sqrt()
             })
             .fold(f64::INFINITY, f64::min);
-        assert!(distance > 10. * fine, "fixture far vertex is near the source");
+        assert!(
+            distance > 10. * fine,
+            "fixture far vertex is near the source"
+        );
         assert!(
             far_size >= fine + 0.3 * (distance - fine) * 0.9,
             "{:?} is refined at {far_size} far from the source",

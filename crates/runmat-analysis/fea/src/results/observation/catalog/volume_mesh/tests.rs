@@ -441,9 +441,13 @@ fn entry_scoped_catalogs_leave_histories_to_the_entry_history_catalog() {
         .iter()
         .map(|entry| entry.definition.clone())
         .collect::<Vec<_>>();
-    let plan =
-        resolve_observation_plan(&step, &projection, &definitions, ObservationLimits::default())
-            .unwrap();
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        &definitions,
+        ObservationLimits::default(),
+    )
+    .unwrap();
     let producer = entries[0].request.producer;
     let context = ObservationHistorySourceContext::VolumeMesh { mesh: &mesh };
     let scoped = |scope, catalog: &ObservationFieldCatalog| {
@@ -470,8 +474,7 @@ fn entry_scoped_catalogs_leave_histories_to_the_entry_history_catalog() {
         .validate_volume_mesh_history_plan(&plan, producer, &step, &mesh)
         .unwrap();
     assert_eq!(
-        ObservationFieldCatalog::from_canonical_bytes(&history.canonical_bytes().unwrap())
-            .unwrap(),
+        ObservationFieldCatalog::from_canonical_bytes(&history.canonical_bytes().unwrap()).unwrap(),
         history
     );
     let mut reversed = catalogs.clone();

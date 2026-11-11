@@ -12,7 +12,8 @@ use runmat_analysis_core::AuthoredStudyInputBinding;
 use runmat_analysis_fea::admission::{admit_accelerator_policy, admit_study, AdmissionIssue};
 use runmat_analysis_language::{
     CheckedFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
-    FeaDiagnosticSeverity, GeometryInspection, FeaSymbolKey, FeaSymbolKind, LogicalSourcePath, ResolvedAnalysisStudy,
+    FeaDiagnosticSeverity, FeaSymbolKey, FeaSymbolKind, GeometryInspection, LogicalSourcePath,
+    ResolvedAnalysisStudy,
 };
 
 /// Sweep cases admitted per sweep. Admission depends on the authored shape, which inputs rarely
@@ -138,7 +139,8 @@ fn admit_resolved(
             .collect(),
             Err(found) => found,
         };
-        let faces = super::fluid_solid_faces::fluid_solid_face_issues(resolved, &realized, inspection);
+        let faces =
+            super::fluid_solid_faces::fluid_solid_face_issues(resolved, &realized, inspection);
         for issue in found.into_iter().chain(faces) {
             if !issues.contains(&issue) {
                 issues.push(issue);

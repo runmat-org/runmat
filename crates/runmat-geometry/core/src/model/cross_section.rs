@@ -120,7 +120,10 @@ impl CrossSectionDefinition {
                 return Err(invalid("cross-section layer name", "must not be empty"));
             }
             if !names.insert(layer.name.as_str()) {
-                return Err(invalid("cross-section layers", "layer names must be unique"));
+                return Err(invalid(
+                    "cross-section layers",
+                    "layer names must be unique",
+                ));
             }
             if !layer.thickness_m.is_finite() || layer.thickness_m < 0.0 {
                 return Err(invalid(
@@ -142,7 +145,10 @@ impl CrossSectionDefinition {
             }
         }
         if self.signal_traces().next().is_none() {
-            return Err(invalid("cross-section traces", "need at least one signal trace"));
+            return Err(invalid(
+                "cross-section traces",
+                "need at least one signal trace",
+            ));
         }
         let mut traces = std::collections::BTreeSet::new();
         for trace in &self.traces {
@@ -150,7 +156,10 @@ impl CrossSectionDefinition {
                 return Err(invalid("cross-section trace name", "must not be empty"));
             }
             if !traces.insert(trace.name.as_str()) {
-                return Err(invalid("cross-section traces", "trace names must be unique"));
+                return Err(invalid(
+                    "cross-section traces",
+                    "trace names must be unique",
+                ));
             }
             let Some(layer) = self.layers.iter().find(|layer| layer.name == trace.layer) else {
                 return Err(invalid(
@@ -164,8 +173,7 @@ impl CrossSectionDefinition {
                     "must name a `signal` copper layer",
                 ));
             }
-            if !(trace.center_m.is_finite() && trace.width_m.is_finite() && trace.width_m > 0.0)
-            {
+            if !(trace.center_m.is_finite() && trace.width_m.is_finite() && trace.width_m > 0.0) {
                 return Err(invalid(
                     "cross-section trace",
                     "center must be finite and width positive",

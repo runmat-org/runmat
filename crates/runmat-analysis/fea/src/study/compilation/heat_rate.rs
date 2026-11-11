@@ -149,8 +149,8 @@ fn density_signal(
             SignalRepresentation::Tabulated(runmat_analysis_core::TabulatedSignal {
                 domain: table.domain.clone(),
                 knots,
-                interpolation: table.interpolation.clone(),
-                extrapolation: table.extrapolation.clone(),
+                interpolation: table.interpolation,
+                extrapolation: table.extrapolation,
             })
         }
         _ => return Err("a total heat rate must be a constant or tabulated signal"),

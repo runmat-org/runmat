@@ -103,12 +103,16 @@ fn parse_datetime_text_trimmed(trimmed: &str) -> Option<(NaiveDateTime, bool)> {
 
     for (pattern, has_time) in [
         ("%Y-%m-%d %H:%M:%S", true),
+        ("%Y-%m-%d %H:%M", true),
         ("%Y/%m/%d %H:%M:%S%.f", true),
         ("%Y/%m/%d %H:%M:%S", true),
+        ("%Y/%m/%d %H:%M", true),
         ("%Y-%m-%d", false),
         ("%d-%b-%Y %H:%M:%S", true),
+        ("%d-%b-%Y %H:%M", true),
         ("%d-%b-%Y", false),
         ("%m/%d/%Y %H:%M:%S", true),
+        ("%m/%d/%Y %H:%M", true),
         ("%m/%d/%Y", false),
     ] {
         if has_time {
@@ -420,11 +424,12 @@ pub(super) fn legacy_date_format_to_strftime(format: &str) -> String {
     out
 }
 
-pub(super) fn parse_legacy_component_text(
+pub(super) fn map_legacy_component_text(
     runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     input_format: Option<&str>,
     label: &str,
+    extractor: impl Fn(&NaiveDateTime) -> f64,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
     let (texts, shape): (Vec<Cow<'_, str>>, Vec<usize>) = match &value {
         Value::String(text) => (
@@ -458,28 +463,18 @@ pub(super) fn parse_legacy_component_text(
         }
     };
     let legacy_format = input_format.map(legacy_date_format_to_strftime);
-    let mut serials = Vec::with_capacity(texts.len());
+    let mut components = Vec::with_capacity(texts.len());
     for text in texts {
-        let parsed = if let Some(format) = legacy_format.as_deref() {
-            NaiveDateTime::parse_from_str(text.trim(), format)
-                .ok()
-                .or_else(|| {
-                    NaiveDate::parse_from_str(text.trim(), format)
-                        .ok()
-                        .map(|date| date.and_hms_opt(0, 0, 0).unwrap())
-                })
-        } else {
-            relative_datetime(text.trim(), runtime)?
-                .or(parse_calendar_text(&text, None, runtime)?.map(|(value, _)| value))
-        }
-        .ok_or_else(|| {
-            datetime_error(format!(
-                "{label}: unable to parse legacy date text '{text}'"
-            ))
-        })?;
-        serials.push(datenum_from_naive(parsed));
+        let parsed = parse_legacy_component_text_borrowed(
+            runtime,
+            &text,
+            legacy_format.as_deref(),
+            label,
+            false,
+        )?;
+        components.push(extractor(&parsed));
     }
-    Ok((serials, shape))
+    Ok((components, shape))
 }
 
 /// Parse one borrowed legacy component element. The owning route supplies any
@@ -490,7 +485,7 @@ pub(super) fn parse_legacy_component_text_borrowed(
     format: Option<&str>,
     label: &str,
     date_only_format: bool,
-) -> BuiltinResult<f64> {
+) -> BuiltinResult<NaiveDateTime> {
     let parsed = if let Some(format) = format {
         if date_only_format {
             NaiveDate::parse_from_str(text.trim(), format)
@@ -514,7 +509,7 @@ pub(super) fn parse_legacy_component_text_borrowed(
             "{label}: unable to parse legacy date text '{text}'"
         ))
     })?;
-    Ok(datenum_from_naive(parsed))
+    Ok(parsed)
 }
 
 pub(super) fn parse_legacy_day_text(

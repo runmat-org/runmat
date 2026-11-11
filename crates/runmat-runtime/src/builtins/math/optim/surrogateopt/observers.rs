@@ -130,6 +130,8 @@ impl Observers {
         #[cfg_attr(not(feature = "plot-core"), allow(unused_variables))] c: &ScalarCooperation,
     ) -> BuiltinResult<Self> {
         #[cfg(not(feature = "plot-core"))]
+        let _ = c;
+        #[cfg(not(feature = "plot-core"))]
         if !plots.is_empty() {
             return Err(invalid("PlotFcn requires the actual plot-core UI owner"));
         }

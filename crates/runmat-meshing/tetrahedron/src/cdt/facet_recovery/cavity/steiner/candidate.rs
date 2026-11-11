@@ -70,8 +70,7 @@ pub(in crate::cdt::facet_recovery) fn facet_edges_exist(
     ]
     .into_iter()
     .all(|edge| {
-        let [Some(first), Some(second)] = edge.map(|identity| topology.node_index(identity))
-        else {
+        let [Some(first), Some(second)] = edge.map(|identity| topology.node_index(identity)) else {
             return false;
         };
         topology.has_edge([first, second])

@@ -444,12 +444,13 @@ async fn execute_histories(
             workload: ObservationWorkloadSource::Frequency(execution.workload.clone()),
             mesh: Some(execution.mesh.clone()),
         },
-        history_context: runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
-            source: runmat_analysis_fea::execution::StructuralObservationSource::Frequency(
-                &workload,
-            ),
-            mesh: Some(&mesh),
-        },
+        history_context:
+            runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
+                source: runmat_analysis_fea::execution::StructuralObservationSource::Frequency(
+                    &workload,
+                ),
+                mesh: Some(&mesh),
+            },
         program_revision: &execution.program_revision,
         chunk_bytes: execution.chunk_bytes,
         inventory_limits: execution.inventory_limits,

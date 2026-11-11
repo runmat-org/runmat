@@ -3,11 +3,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_runtime as _;
 
-mod backend;
-mod core;
-mod native;
-
 use log::LevelFilter;
+use runmat_lsp::native;
 use tokio::io::{stdin, stdout};
 use tower_lsp::Server;
 

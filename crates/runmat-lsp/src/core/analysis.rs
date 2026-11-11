@@ -851,22 +851,14 @@ pub fn signature_help_at(
     })
 }
 
-pub fn document_symbols(_text: &str, _analysis: &DocumentAnalysis) -> Vec<DocumentSymbol> {
-    let semantic = match &_analysis.semantic {
-        Some(s) => s,
-        None => return vec![],
-    };
-    let mut symbols = Vec::new();
-    for func in &semantic.functions {
-        symbols.push(make_document_symbol(
-            func.signature.name.clone(),
-            Some(func.signature.display()),
-            lsp_types::SymbolKind::FUNCTION,
-            func.range.to_lsp_range(_text),
-            func.selection.to_lsp_range(_text),
-        ));
-    }
-    symbols
+/// The `.m` outline: `%%` sections, script variables with their inferred types, functions with
+/// inputs and outputs, and classes ([`crate::core::semantic::outline`]).
+pub fn document_symbols(text: &str, analysis: &DocumentAnalysis) -> Vec<DocumentSymbol> {
+    crate::core::semantic::outline::document_outline(
+        text,
+        analysis.lowering.as_ref(),
+        analysis.semantic.as_ref(),
+    )
 }
 
 pub(crate) fn make_document_symbol(

@@ -8,8 +8,7 @@ use super::{
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-face-batch-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "exact-face-mesh-batch/v1";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::platform_content(1024 * 1024, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 pub fn encode_exact_face_mesh_batch(
     batch: &ExactFaceMeshBatch,

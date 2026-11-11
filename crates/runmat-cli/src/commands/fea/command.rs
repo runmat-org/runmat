@@ -40,17 +40,30 @@ pub(crate) async fn run(
 }
 
 /// `runmat snapshot <file>.fea --out <metadata>`
+pub struct SnapshotRequest {
+    pub file: PathBuf,
+    pub study: Option<String>,
+    pub step: Option<String>,
+    pub case: Option<String>,
+    pub views: Vec<String>,
+    pub out: PathBuf,
+    pub presentation: crate::cli::SnapshotPresentationArgs,
+}
+
 pub async fn snapshot(
-    file: PathBuf,
-    study: Option<String>,
-    step: Option<String>,
-    case: Option<String>,
-    views: Vec<String>,
-    out: PathBuf,
-    presentation: crate::cli::SnapshotPresentationArgs,
+    request: SnapshotRequest,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
+    let SnapshotRequest {
+        file,
+        study,
+        step,
+        case,
+        views,
+        out,
+        presentation,
+    } = request;
     let file = resolve_script_input(file)?;
     let checked = super::source::check_source(&file, cli, config).await?;
     require_valid(&checked, &file, true)?;

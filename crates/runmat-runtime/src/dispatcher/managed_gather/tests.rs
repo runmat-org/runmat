@@ -375,6 +375,11 @@ fn real_builtin_policy_decline_retries_only_automatic_valid_owner_inputs() {
     let missing = missing_owner
         .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
+    let sibling_owner = self::provider();
+    let sibling = sibling_owner
+        .owner
+        .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_acceleration_policy(RuntimeAccelerationPolicy {
             enabled: false,
@@ -384,18 +389,24 @@ fn real_builtin_policy_decline_retries_only_automatic_valid_owner_inputs() {
             calibrate: false,
         });
     let _scope = runtime.enter();
+    enum ExpectedCause {
+        Policy,
+        InvalidSource,
+        DifferentOwner,
+    }
     for (sources, expected) in [
-        (
-            [&valid.handle, &valid.handle],
-            crate::GpuGatherRetry::Requested,
-        ),
+        ([&valid.handle, &valid.handle], ExpectedCause::Policy),
         (
             [&valid.handle, &missing.handle],
-            crate::GpuGatherRetry::Never,
+            ExpectedCause::InvalidSource,
         ),
         (
             [&missing.handle, &valid.handle],
-            crate::GpuGatherRetry::Never,
+            ExpectedCause::InvalidSource,
+        ),
+        (
+            [&valid.handle, &sibling.handle],
+            ExpectedCause::DifferentOwner,
         ),
     ] {
         let error = gpu_helpers::require_resident_compute_owners(&sources, true, || {
@@ -405,13 +416,21 @@ fn real_builtin_policy_decline_retries_only_automatic_valid_owner_inputs() {
         })
         .unwrap_err();
         assert_eq!(error.message(), "original domain diagnostic");
-        assert_eq!(error.gpu_gather_retry, expected);
         let source = error.source.as_deref().unwrap();
-        if expected == crate::GpuGatherRetry::Requested {
-            assert!(source.is::<gpu_helpers::ResidentComputePolicyDenied>());
-            assert!(source.source().unwrap().is::<std::io::Error>());
-        } else {
-            assert!(source.is::<std::io::Error>());
+        match expected {
+            ExpectedCause::Policy => {
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Requested);
+                assert!(source.is::<gpu_helpers::ResidentComputePolicyDenied>());
+                assert!(source.source().unwrap().is::<std::io::Error>());
+            }
+            ExpectedCause::InvalidSource => {
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                assert!(source.is::<runmat_accelerate_api::ProviderExecutionError>());
+            }
+            ExpectedCause::DifferentOwner => {
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                assert!(source.is::<std::io::Error>());
+            }
         }
     }
 }

@@ -316,22 +316,18 @@ fn surface_midpoint(
         );
         // On a concave trim the parametric interpolant of two trimmed points can leave the
         // trim; the surface point closest to the chord point is the fallback, if it is inside.
-        let candidate = match evaluate_surface_candidate(
-            surface_use,
-            parametric_uv,
-            evaluation,
-            options,
-        )? {
-            Some(point) => Some((parametric_uv, point)),
-            None => closest_trimmed_chord_point(
-                input,
-                surface_use,
-                [left_uv, right_uv],
-                request.fraction,
-                evaluation,
-                options,
-            )?,
-        };
+        let candidate =
+            match evaluate_surface_candidate(surface_use, parametric_uv, evaluation, options)? {
+                Some(point) => Some((parametric_uv, point)),
+                None => closest_trimmed_chord_point(
+                    input,
+                    surface_use,
+                    [left_uv, right_uv],
+                    request.fraction,
+                    evaluation,
+                    options,
+                )?,
+            };
         // A surface edge whose ends both lie on a concave trim boundary (a hole's rim) can
         // leave the trim by up to the chordal deviation the linear surface mesh admitted.
         // The untrimmed surface point within that deviation of the chord point keeps the
@@ -657,7 +653,11 @@ pub(super) fn require_matching_curve_points(
             edge.id.source_topology_id,
             squared_point_distance(curve, surface).sqrt(),
             edge.tolerance_m.canonical_value(),
-            input.request.tolerance.requested_deviation_m.canonical_value()
+            input
+                .request
+                .tolerance
+                .requested_deviation_m
+                .canonical_value()
         )));
     }
     Ok(())
@@ -721,7 +721,10 @@ pub(super) fn require_node_near_curve(
     Ok(())
 }
 
-fn curve_match_tolerance_m(input: &ProjectionInput<'_>, edge: &runmat_geometry_core::ExactEdge) -> f64 {
+fn curve_match_tolerance_m(
+    input: &ProjectionInput<'_>,
+    edge: &runmat_geometry_core::ExactEdge,
+) -> f64 {
     match_tolerance_m(input).max(edge.tolerance_m.canonical_value())
 }
 

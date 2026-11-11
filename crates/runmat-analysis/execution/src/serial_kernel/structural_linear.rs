@@ -90,6 +90,15 @@ pub(crate) async fn execute_with_capacity(
     // Validate from the unchanged authored constraints; solver_model only rewrites sequence
     // execution controls. Release the fresh validation result before copying that model.
     drop(phase);
+    if let Some(capacity) = capacity {
+        let work = runmat_analysis_fea::structural_linear_preparation_work_upper_bound(
+            &solve.model,
+            mesh.as_ref(),
+        )?;
+        capacity.ensure_capacity(work).await.map_err(|cause| {
+            AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(cause))
+        })?;
+    }
     let phase =
         runmat_analysis_fea::progress::phase_timer("structural_kernel.constraint_compilation");
     let compiled = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
@@ -117,7 +126,7 @@ pub(crate) async fn execute_with_capacity(
             &field_definitions,
             ObservationLimits::default(),
         )
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        .map_err(AnalysisBridgeError::from)?;
     let accelerator_requests = resource_plan.request.accelerators.clone();
     let local_execution =
         runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(

@@ -85,11 +85,16 @@ fn malformed_saved_edges_are_rejected() {
         .push(runmat_plot::event::GeometryLines {
             positions: vec![[0.0; 3]],
             colors: vec![[1.0; 4]],
+            packed_positions: None,
+            color: None,
             indices: Some(vec![0, 4]),
             mesh_id: None,
             label: None,
             visible: true,
             wireframe_only: false,
+            segment_regions: Vec::new(),
+            instances: Vec::new(),
+            lod_pixels: None,
         });
     assert!(saved.into_geometry_scene("invalid", 1).is_err());
 }

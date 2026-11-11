@@ -93,11 +93,22 @@ impl CheckedFeaSource {
 
     pub fn root_selectors(&self) -> Vec<FeaRootSelector> {
         let module = self.root_module.as_str();
+        // A sweep owns execution of its referenced study. Keep that study
+        // available to explicit selectors, but do not offer it as a second
+        // independent default root beside the sweep.
+        let swept_studies: std::collections::BTreeSet<_> = self
+            .program
+            .sweeps
+            .values()
+            .filter(|sweep| sweep.module_path == module)
+            .map(|sweep| (&sweep.study.module_path, &sweep.study.study_id))
+            .collect();
         let studies = self
             .program
             .studies
             .values()
             .filter(|study| study.module_path == module)
+            .filter(|study| !swept_studies.contains(&(&study.module_path, &study.study_id)))
             .map(|study| FeaRootSelector::Study {
                 id: study.study_id.clone(),
             });

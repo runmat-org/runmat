@@ -15,6 +15,7 @@ mod capture_arguments;
 mod runtime_services;
 
 pub struct NativeExecutor {
+    liveness: runmat_execution::resource::ExactShared<runmat_native_codegen::NativeProgramLiveness>,
     functions: Arc<Vec<runmat_native_codegen::NativeFunction>>,
     class_declarations: Arc<[runmat_native_codegen::NativeClassDeclaration]>,
     program_revision: runmat_execution::ProgramRevision,
@@ -140,6 +141,28 @@ impl NativeExecutor {
         runtime: RuntimeContext,
         lexical_environment: Option<runmat_value::LexicalEnvironment>,
     ) -> NativeExecutorResult<RootedNativeExecution> {
+        let selected = runtime.clone();
+        Self::with_cleanup(
+            &selected,
+            self.invoke_rooted_function_arguments_inner(
+                function,
+                arguments,
+                requested_outputs,
+                runtime,
+                lexical_environment,
+            ),
+        )
+        .await
+    }
+
+    async fn invoke_rooted_function_arguments_inner(
+        &self,
+        function: FunctionId,
+        arguments: runmat_runtime::call::RootedFunctionArguments,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+        lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    ) -> NativeExecutorResult<RootedNativeExecution> {
         let invocation = self
             .begin_rooted_function_arguments_async(
                 function,
@@ -245,8 +268,16 @@ impl NativeExecutor {
         assembly: runmat_native_codegen::NativeAssembly,
         executable: NativeExecutable,
         options: NativeExecutorOptions,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> NativeExecutorResult<Self> {
-        Self::bind_with_selected_service(assembly, executable, options, Vec::new(), false)
+        Self::bind_with_selected_service(
+            assembly,
+            executable,
+            options,
+            Vec::new(),
+            false,
+            liveness_admission,
+        )
     }
 
     /// Selected entry requires the already verified target-pack product, never
@@ -256,6 +287,7 @@ impl NativeExecutor {
         executable: NativeExecutable,
         options: NativeExecutorOptions,
         selected: &runmat_native_codegen::aot::SelectedNativeProduct<'_>,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> NativeExecutorResult<Self> {
         selected.validate_assembly(&assembly)?;
         let issuers = selected.service_issuers()?;
@@ -265,7 +297,14 @@ impl NativeExecutor {
             .expect("selected product")
             .profile
             == runmat_execution::host::NativeDeploymentProfile::DeterministicDeployed;
-        Self::bind_with_selected_service(assembly, executable, options, issuers, deterministic)
+        Self::bind_with_selected_service(
+            assembly,
+            executable,
+            options,
+            issuers,
+            deterministic,
+            liveness_admission,
+        )
     }
 
     /// Bound only by the generated standalone linked-image entry.
@@ -275,6 +314,7 @@ impl NativeExecutor {
         options: NativeExecutorOptions,
         linked: &runmat_native_codegen::aot::LinkedNativeProduct,
         services: Vec<runmat_execution::host::VerifiedNativeServiceIssuer>,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> NativeExecutorResult<Self> {
         linked.validate_assembly(&assembly)?;
         let product = linked
@@ -293,7 +333,14 @@ impl NativeExecutor {
         }
         let deterministic = linked.binding().profile
             == runmat_execution::host::NativeDeploymentProfile::DeterministicDeployed;
-        Self::bind_with_selected_service(assembly, executable, options, services, deterministic)
+        Self::bind_with_selected_service(
+            assembly,
+            executable,
+            options,
+            services,
+            deterministic,
+            liveness_admission,
+        )
     }
 
     fn bind_with_selected_service(
@@ -302,8 +349,11 @@ impl NativeExecutor {
         options: NativeExecutorOptions,
         selected_services: Vec<runmat_execution::host::VerifiedNativeServiceIssuer>,
         selected_deterministic: bool,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> NativeExecutorResult<Self> {
-        assembly.verify()?;
+        // Analysis verifies the immutable assembly before constructing its
+        // admitted metadata. Reuse that verification at the bind boundary.
+        let liveness = runmat_native_codegen::analyze_liveness(&assembly, liveness_admission)?;
         if selected_services.iter().any(|issuer| {
             let kind = issuer.binding().kind;
             !kind.is_local_effect_service()
@@ -347,6 +397,7 @@ impl NativeExecutor {
             Vec::new()
         };
         Ok(Self {
+            liveness,
             functions: Arc::new(assembly.functions),
             class_declarations: Arc::from(assembly.class_declarations),
             program_revision: assembly.program,
@@ -483,11 +534,50 @@ impl NativeExecutor {
         request: NativeInvocationRequest,
         lexical_environment: Option<runmat_value::LexicalEnvironment>,
     ) -> NativeExecutorResult<RootedNativeExecution> {
-        let invocation = self.begin_request_with_environment(request, lexical_environment)?;
-        Self::drive_invocation(invocation).await
+        let runtime = request.runtime.clone();
+        Self::with_cleanup(&runtime, async move {
+            let invocation = self.begin_request_with_environment(request, lexical_environment)?;
+            Self::drive_invocation(invocation).await
+        })
+        .await
     }
 
     async fn drive_invocation(
+        invocation: NativeInvocation,
+    ) -> NativeExecutorResult<RootedNativeExecution> {
+        let runtime = invocation.cleanup_runtime()?;
+        Self::with_cleanup(&runtime, Self::drive_invocation_inner(invocation)).await
+    }
+
+    async fn with_cleanup<F>(
+        runtime: &RuntimeContext,
+        future: F,
+    ) -> NativeExecutorResult<RootedNativeExecution>
+    where
+        F: std::future::Future<Output = NativeExecutorResult<RootedNativeExecution>>,
+    {
+        let cleanup = runtime.function_cleanup_scope()?;
+        let (result, cleanup) = cleanup.run(runtime, future).await?;
+        match (result, cleanup) {
+            (result, Ok(())) => result,
+            (Ok(_), Err(error)) => Err(error.into()),
+            (Err(NativeExecutorError::Runtime(error)), cleanup) => {
+                runmat_runtime::runtime_error::complete_with_cleanup(Err(*error), cleanup)
+                    .map_err(Into::into)
+            }
+            (Err(error), Err(cleanup)) => {
+                // Preserve canonical control/error identity and both typed
+                // causes through the existing RuntimeError owner container.
+                runmat_runtime::runtime_error::complete_with_cleanup(
+                    Err(error.into_runtime_error()),
+                    Err(cleanup),
+                )
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn drive_invocation_inner(
         mut invocation: NativeInvocation,
     ) -> NativeExecutorResult<RootedNativeExecution> {
         loop {
@@ -521,6 +611,21 @@ impl NativeExecutor {
     }
 
     pub async fn invoke_workspace_async(
+        &self,
+        function: FunctionId,
+        workspace: super::workspace::NativeWorkspaceInput,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+    ) -> NativeExecutorResult<RootedNativeExecution> {
+        let selected = runtime.clone();
+        Self::with_cleanup(
+            &selected,
+            self.invoke_workspace_inner(function, workspace, requested_outputs, runtime),
+        )
+        .await
+    }
+
+    async fn invoke_workspace_inner(
         &self,
         function: FunctionId,
         workspace: super::workspace::NativeWorkspaceInput,
@@ -770,7 +875,8 @@ impl NativeExecutor {
             osr_target,
             _admission_roots,
         } = prepared;
-        let (state, argument_refs) = HostState::new(input)?;
+        let (mut state, argument_refs) = HostState::new(input)?;
+        state.liveness = Some(self.liveness.clone());
         let resume = runmat_runtime::native::NativeResumeState {
             function: state.function.portable_id.0,
             block: state.function.entry.0,

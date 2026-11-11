@@ -1,6 +1,6 @@
 [package]
 name = "runmat-core"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -13,6 +13,7 @@ runmat-analysis-core = { workspace = true }
 runmat-analysis-fea = { workspace = true }
 runmat-analysis-execution = { workspace = true }
 runmat-meshing-core = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 runmat-geometry-core = { workspace = true }
 
 runmat-fea-source = { workspace = true }
@@ -86,6 +87,7 @@ runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 futures = "0.3"
 wasm-bindgen-test = "0.3"
 tempfile = "3"
+toml = "0.8"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 runmat-runtime = { workspace = true, features = ["interaction-test-hooks", "plot-core"] }

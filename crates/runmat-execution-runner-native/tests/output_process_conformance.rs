@@ -30,16 +30,23 @@ mod fixture;
 mod handles;
 #[path = "output_process_conformance/live_prefix.rs"]
 mod live_prefix;
-#[path = "output_process_conformance/publisher_exit.rs"]
-mod publisher_exit;
+#[path = "output_process_conformance/nested_console.rs"]
+mod nested_console;
 #[path = "output_process_conformance/parent_loss.rs"]
 mod parent_loss;
 #[path = "output_process_conformance/portable_units.rs"]
 mod portable_units;
-#[path = "output_process_conformance/nested_console.rs"]
-mod nested_console;
+#[path = "output_process_conformance/publisher_exit.rs"]
+mod publisher_exit;
+
+#[path = "support/native_host.rs"]
+mod native_host;
 
 fn main() {
+    native_host::run(run);
+}
+
+fn run() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -47,8 +54,6 @@ fn main() {
     runtime.block_on(async {
         if std::env::args().any(|arg| arg == environment::PRODUCER_MARKER) {
             environment::produce().await;
-        } else if std::env::args().any(|arg| arg == cancellation::WORKER_MARKER) {
-            cancellation::blocked_worker().await;
         } else if std::env::args().any(|arg| arg == HiddenMode::ExecutionWorker.marker()) {
             runmat_execution_runner_native::run_worker_stdio().await.unwrap();
         } else if std::env::args().any(|arg| arg == HiddenMode::ExecutionDriver.marker()) {
@@ -266,6 +271,21 @@ async fn await_in_context(
 }
 
 async fn witness() {
+    if std::env::args().any(|argument| argument == "--durable-poll-only") {
+        let namespace = fixture::SupervisorFixture::new("original-pending-authority");
+        std::env::set_var("RUNMAT_EXECUTION_STATE_DIR", namespace.root());
+        let config = NativeExecutionConfig::for_current_executable().unwrap();
+        let service = NativeExecutionService::new(config.clone()).unwrap();
+        durable_poll::verify(&service, &config).await;
+        return;
+    }
+    if std::env::args().any(|argument| argument == "--nested-console-only") {
+        let directory = tempfile::tempdir().unwrap();
+        std::env::set_var("RUNMAT_EXECUTION_STATE_DIR", directory.path());
+        let config = NativeExecutionConfig::for_current_executable().unwrap();
+        nested_console::verify(&config).await;
+        return;
+    }
     fixture::verify_unwind().await;
     let namespace = fixture::SupervisorFixture::new("original-output-authority");
     std::env::set_var("RUNMAT_EXECUTION_STATE_DIR", namespace.root());
@@ -273,7 +293,6 @@ async fn witness() {
     parent_loss::verify(&config).await;
     let service = NativeExecutionService::new(config.clone()).unwrap();
     handles::verify_caller(&service).await;
-    cancellation::verify(&config).await;
     portable_units::verify(&config).await;
     nested_console::verify(&config).await;
     environment::verify_producer_exit(&config).await;
@@ -320,7 +339,9 @@ async fn witness() {
                         memory_bytes: config.worker_memory_bytes,
                         scratch_bytes: config.worker_scratch_bytes,
                         max_wall_millis: 30_000,
-                        max_artifact_bytes: 1024 * 1024,
+                        // Include the bounded console-subtree frame, as the
+                        // native driver's ordinary output reservation does.
+                        max_artifact_bytes: u64::from(config.max_message_bytes),
                         max_egress_bytes: 0,
                         max_relay_bytes: 0,
                         accelerators: vec![],

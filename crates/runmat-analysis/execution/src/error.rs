@@ -23,6 +23,8 @@ pub enum AnalysisBridgeError {
     RetentionCapacity(#[from] CoordinatorRetentionLimit),
     #[error("invalid analysis execution bridge contract: {0}")]
     Invalid(String),
+    #[error(transparent)]
+    Observation(#[from] runmat_analysis_fea::results::observation::ObservationError),
     #[error("analysis execution bridge identity mismatch: {0}")]
     Identity(&'static str),
     #[error("analysis execution bridge artifact failure: {0}")]
@@ -58,7 +60,16 @@ impl AnalysisBridgeError {
             FeaRunError,
         };
         match self {
+            Self::Observation(
+                runmat_analysis_fea::results::observation::ObservationError::Accounting(cause),
+            ) => Some(cause),
             Self::FeaRun(FeaRunError::Usage(cause))
+            | Self::FeaRun(FeaRunError::Resource(
+                runmat_analysis_fea::planning::resource::ResourcePlanningError::Accounting(cause),
+            ))
+            | Self::Resource(
+                runmat_analysis_fea::planning::resource::ResourcePlanningError::Accounting(cause),
+            )
             | Self::Analysis(runmat_analysis_fea::execution::AnalysisExecutionError::Usage(
                 cause,
             ))

@@ -8,11 +8,7 @@ use runmat_value::StructValue;
 use std::{rc::Rc, sync::Arc};
 
 fn fixture_root() -> std::path::PathBuf {
-    #[cfg(windows)]
-    let root = std::path::PathBuf::from(r"C:\runmat-selected");
-    #[cfg(not(windows))]
-    let root = std::path::PathBuf::from("/runmat-selected");
-    root
+    std::path::PathBuf::from("/runmat-selected")
 }
 
 struct Finite(crate::context::host_effect::ManagedHostEffectLedger);

@@ -187,7 +187,6 @@ pub(super) async fn run_block(
     let directory = tempfile::tempdir().unwrap();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.store_root = directory.path().join("scheduled-fluid");
-    config.worker_arguments = vec!["--child".into()];
     config.max_workers = 1;
     config.worker_cpu_millicores = 1000;
     config.worker_memory_bytes = workload.model.sequence.steps[0]

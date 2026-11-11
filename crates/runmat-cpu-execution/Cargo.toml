@@ -1,6 +1,6 @@
 [package]
 name = "runmat-cpu-execution"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 license-file = "../../LICENSE.md"
 description = "Bounded reusable shared-memory CPU execution for RunMat"

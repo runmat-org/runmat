@@ -60,9 +60,9 @@ pub use geometry_scene::{
     GeometrySceneAnnotationKind, GeometrySceneAssemblyNode, GeometrySceneCacheKey,
     GeometrySceneChunk, GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
     GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest,
-    GeometryScenePickResult, GeometryScenePresentation, GeometrySceneRegion,
-    GeometrySceneRegionAnnotation, GeometrySceneRegionSummary, GeometrySceneTopologySelection,
-    GeometrySceneTriangleRange,
+    GeometryScenePickResult, GeometryScenePresentation, GeometrySceneProjection,
+    GeometrySceneRegion, GeometrySceneRegionAnnotation, GeometrySceneRegionColor,
+    GeometrySceneRegionSummary, GeometrySceneTopologySelection, GeometrySceneTriangleRange,
 };
 pub use plots::{
     project_figure_for_persistence, AreaPlot, AxesGridCell, ContourFillPlot, ContourPlot, Figure,

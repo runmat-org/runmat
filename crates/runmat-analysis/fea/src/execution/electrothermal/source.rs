@@ -7,7 +7,8 @@ use runmat_canonical_codec::{
 use serde::{Deserialize, Serialize};
 
 const PREFIX: &[u8] = b"runmat-retained-joule-source\0";
-const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// The enclosing immutable task/root authenticates this source object's identity.
 /// Its expected result is the original retained producer result, never a new solve.

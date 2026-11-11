@@ -91,6 +91,8 @@ pub const RESIDENT_SELECT_OPERATION_IDENTITY: &str = "provider.resident_select";
 mod numerical_domain;
 pub mod reduction;
 pub use reduction::ProviderDoubleSumPreflight;
+#[cfg(feature = "wgpu")]
+pub mod native_wgpu_f64;
 pub mod scalar_program;
 #[cfg(feature = "wgpu")]
 mod wgpu_access;

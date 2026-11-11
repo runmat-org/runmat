@@ -2672,8 +2672,7 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         ObservationLimits::default(),
     )
     .unwrap();
-    let complete =
-        ObservationFieldCatalog::entry_history(frequency_catalogs.clone()).unwrap();
+    let complete = ObservationFieldCatalog::entry_history(frequency_catalogs.clone()).unwrap();
     complete
         .validate_frequency_history_plan(&observation_plan, &workload, Some(&mesh))
         .unwrap();
@@ -2683,8 +2682,7 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         complete
     );
     let omitted =
-        ObservationFieldCatalog::entry_history(vec![frequency_catalogs[0].clone()])
-            .unwrap();
+        ObservationFieldCatalog::entry_history(vec![frequency_catalogs[0].clone()]).unwrap();
     assert!(omitted
         .validate_frequency_history_plan(&observation_plan, &workload, Some(&mesh))
         .is_err());

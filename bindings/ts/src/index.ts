@@ -49,6 +49,10 @@ export {
   sameProgramAssignment,
   isRetiredProgramTerminal,
 } from "./execution/program-terminal.js";
+export {
+  remoteDriverMemoryBytes,
+  REMOTE_DRIVER_COMPLETION_CONTROL_BYTES,
+} from "./execution/remote-driver-resources.js";
 import type { InputManifest } from "./generated/collaboration-contracts.js";
 export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
 export { MAX_WORKSPACE_PUBLICATION_EDITS, MAX_WORKSPACE_PUBLICATION_BYTES } from "./generated/fea-workspace-contracts.js";
@@ -750,6 +754,10 @@ export interface GeometrySceneImageVisibilityState {
 
 export interface GeometrySceneImageSectionState {
   plane: GeometrySceneImageSectionPlane;
+  /** A second cutting plane: only what lies on the removed side of both planes is cut away. */
+  secondPlane?: GeometrySceneImageSectionPlane | null;
+  /** Fill the solid's cut faces (the default). False leaves the cut open. */
+  cap?: boolean;
 }
 
 export interface GeometrySceneImageSectionPlane {
@@ -1542,8 +1550,14 @@ export interface GeometryScenePresentationState {
   showGrid?: boolean;
   hiddenOwnerNodeIds?: string[] | null;
   isolatedOwnerNodeIds?: string[] | null;
+  /** Regions left out of the view; picks pass through them. */
+  hiddenRegionIds?: string[];
   section?: GeometrySceneImageSectionState | null;
   viewPreset?: GeometrySceneViewPreset | null;
+  /** Edge and wireframe line width in CSS px; above 1 px edges draw as screen-space strokes. */
+  edgeWidthPx?: number | null;
+  /** The 3D view's projection: with perspective, or parallel (orthographic). Unset keeps it. */
+  projection?: "perspective" | "orthographic" | null;
 }
 
 export type GeometrySceneTopologySelectionState =
@@ -1563,6 +1577,8 @@ export interface GeometryScenePickResult {
   vertexIndices?: [number, number, number];
   barycentricCoordinates?: [number, number, number];
   topologySelection?: GeometrySceneTopologySelectionState;
+  /** The owner nodes (bodies, assembly components) of what was hit, outermost first. */
+  ownerNodeIds?: string[];
 }
 
 

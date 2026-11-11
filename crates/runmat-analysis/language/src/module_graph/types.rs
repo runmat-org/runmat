@@ -2,7 +2,7 @@ use crate::{
     resolve_logical_path, FeaDiagnostic, FunctionRequest, LogicalPathError, LogicalSourcePath,
     SourceDigest, SourceIdentityError, SourceModule, SourceSymbol,
 };
-use runmat_fea_syntax::{FeaImportKind, FeaModuleItem, FeaSyntaxModule};
+use runmat_design_syntax::{FeaImportKind, FeaModuleItem, FeaSyntaxModule};
 use runmat_types::Span;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,7 +41,11 @@ impl FeaModuleGraph {
         let mut paths = self.modules.keys().cloned().collect::<BTreeSet<_>>();
         for (module_path, module) in &self.modules {
             for (relative, _) in module.syntax.iter().flat_map(stackup_references) {
-                paths.insert(resolve_logical_path(&self.source_root, module_path, &relative)?);
+                paths.insert(resolve_logical_path(
+                    &self.source_root,
+                    module_path,
+                    &relative,
+                )?);
             }
         }
         paths.extend(self.edges.iter().map(|edge| edge.target.clone()));
@@ -55,19 +59,21 @@ impl FeaModuleGraph {
                 let FeaModuleItem::Declaration(decl) = item else {
                     continue;
                 };
-                if decl.kind != runmat_fea_syntax::FeaDeclarationKind::Geometry {
+                if decl.kind != runmat_design_syntax::FeaDeclarationKind::Geometry {
                     continue;
                 }
                 for statement in &decl.body.statements {
-                    let runmat_fea_syntax::FeaStatementKind::Assignment { target, value, .. } =
-                        &statement.kind
+                    let runmat_design_syntax::FeaStatementKind::Assignment {
+                        target, value, ..
+                    } = &statement.kind
                     else {
                         continue;
                     };
                     if target.segments.len() != 1 || target.segments[0].text != "file" {
                         continue;
                     }
-                    let runmat_fea_syntax::FeaExpressionKind::String(relative) = &value.kind else {
+                    let runmat_design_syntax::FeaExpressionKind::String(relative) = &value.kind
+                    else {
                         continue;
                     };
                     let cad = resolve_logical_path(&self.source_root, module_path, relative)?;
@@ -150,7 +156,7 @@ pub struct CheckRequest {
 /// The `stackup = "<file>"` paths of a module's `cross_section` geometry blocks, as authored,
 /// with the span of each path.
 pub fn stackup_references(syntax: &FeaSyntaxModule) -> Vec<(String, Span)> {
-    use runmat_fea_syntax::{FeaDeclarationKind, FeaExpressionKind, FeaStatementKind};
+    use runmat_design_syntax::{FeaDeclarationKind, FeaExpressionKind, FeaStatementKind};
     let mut found = Vec::new();
     for item in &syntax.items {
         let FeaModuleItem::Declaration(declaration) = item else {

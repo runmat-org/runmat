@@ -267,7 +267,7 @@ async fn remote_driver_commits_verified_externalized_results() {
             artifacts: Vec::new(),
             checkpoint: None,
             cancellation_requested: false,
-            driver_resources: resource_request(),
+            driver_resources: driver_resource_request(),
             desired_worker_count: 0,
             worker_resources: resource_request(),
         },
@@ -289,7 +289,8 @@ async fn remote_driver_commits_verified_externalized_results() {
         },
         endpoint_identity_file: PathBuf::from("unused"),
     };
-    super::driver::commit_response(&control, &config, &run_key, result)
+    let (grant, _) = super::completion::RemoteCompletionGrant::admit(4096).unwrap();
+    super::driver::commit_response(&control, &config, &run_key, grant.retain(result).unwrap())
         .await
         .unwrap();
     let state = control.state.lock().unwrap();
@@ -316,6 +317,69 @@ async fn remote_driver_commits_verified_externalized_results() {
     committed.validate().unwrap();
     assert_eq!(committed.objects.len(), 1);
     assert_eq!(committed.objects[0].artifact_id, "stored-1");
+}
+
+#[tokio::test]
+async fn cancelled_console_free_completion_does_not_publish_a_result() {
+    let run_id = "run-cancelled-completion";
+    let config = RemoteDriverConfig {
+        ready_v1: false,
+        clock_parent: None,
+        authority: DriverAuthority {
+            server_url: "https://control.invalid".into(),
+            run_id: run_id.into(),
+            org_id: test_org_id(),
+            project_id: "project-1".into(),
+            allocation_lease_id: "allocation-1".into(),
+            driver_lease_id: test_driver_lease_id(1),
+            fencing_token: 1,
+            credential: "driver-secret".into(),
+        },
+        endpoint_identity_file: PathBuf::from("unused"),
+    };
+    let run_key = RunKeyMaterial::from_entropy([42; 32]).unwrap();
+    let responses = [
+        ProgramExecutionResponse::Failure {
+            message: "remote attempt was cancelled".into(),
+        },
+        ProgramExecutionResponse::GraphSuccess {
+            graph: runmat_execution::value::PayloadGraph {
+                roots: Vec::new(),
+                nodes: Vec::new(),
+            },
+        },
+    ];
+    for response in responses {
+        let control = FakeControl {
+            bootstrap: DriverBootstrap {
+                driver_accelerator_devices: Vec::new(),
+                project_revision: "unused".into(),
+                endpoint_fingerprint: "unused".into(),
+                run_key_envelope: Vec::new(),
+                artifacts: Vec::new(),
+                checkpoint: None,
+                cancellation_requested: false,
+                driver_resources: driver_resource_request(),
+                desired_worker_count: 0,
+                worker_resources: resource_request(),
+            },
+            state: Mutex::new(FakeState::default()),
+        };
+        let mut result =
+            super::pool_execution::RemotePoolExecutionResult::without_objects(response);
+        result.cancelled = true;
+        let (grant, _) = super::completion::RemoteCompletionGrant::admit(4096).unwrap();
+        super::driver::commit_response(&control, &config, &run_key, grant.retain(result).unwrap())
+            .await
+            .unwrap();
+        let state = control.state.lock().unwrap();
+        assert_eq!(state.transitions, vec![(DriverRunTarget::Cancelled, None)]);
+        assert_eq!(
+            state.diagnostics,
+            vec![(Some("cancelled-during-execution".into()), None)]
+        );
+        assert!(state.stored.is_empty());
+    }
 }
 
 #[tokio::test]
@@ -978,7 +1042,7 @@ async fn run_encrypted_remote_request_with_prior_sequence(
                 .as_ref()
                 .map(|(download, _)| download.clone()),
             cancellation_requested: false,
-            driver_resources: resource_request(),
+            driver_resources: driver_resource_request(),
             driver_accelerator_devices: Vec::new(),
             desired_worker_count: 0,
             worker_resources: resource_request(),
@@ -1100,6 +1164,13 @@ fn resource_request() -> runmat_execution_transport_native::control::ResourceReq
         accelerators: Vec::new(),
         maximum_wall_millis: 60_000,
     }
+}
+
+fn driver_resource_request() -> runmat_execution_transport_native::control::ResourceRequest {
+    let mut resources = resource_request();
+    resources.memory_bytes =
+        runmat_execution::resource::remote_driver_memory_bytes(resources.memory_bytes).unwrap();
+    resources
 }
 
 fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
@@ -1226,7 +1297,7 @@ fn unused_bootstrap() -> DriverBootstrap {
         artifacts: Vec::new(),
         checkpoint: None,
         cancellation_requested: false,
-        driver_resources: resource_request(),
+        driver_resources: driver_resource_request(),
         desired_worker_count: 0,
         worker_resources: resource_request(),
     }

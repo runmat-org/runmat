@@ -720,12 +720,12 @@ impl<'a> RunFields<'a> {
                     run.instant = state_key(at);
                     run.instant_label = match run.instant {
                         Some(StateKey::Time(time)) => Some(time_label(time)),
-                        Some(StateKey::Step(index)) => Some(
-                            match values.state_time(run_id, at, index)? {
+                        Some(StateKey::Step(index)) => {
+                            Some(match values.state_time(run_id, at, index)? {
                                 Some(time) => time_label(time),
                                 None => format!("step {index}"),
-                            },
-                        ),
+                            })
+                        }
                         None => None,
                     };
                 }
@@ -757,7 +757,11 @@ impl<'a> RunFields<'a> {
             descriptor.layout.quantity == quantity
                 && matches!(
                     descriptor.layout.representation,
-                    R::Complex | R::Imaginary | R::Magnitude | R::PhaseRadians | R::SoundPressureLevel
+                    R::Complex
+                        | R::Imaginary
+                        | R::Magnitude
+                        | R::PhaseRadians
+                        | R::SoundPressureLevel
                 )
         })
     }
@@ -1816,8 +1820,12 @@ pub(super) mod tests {
                 vec![2, 3],
             ),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
-        for (id, field) in [("temperature", "thermal.temperature"), ("heat-flux", "thermal.heat_flux")] {
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        for (id, field) in [
+            ("temperature", "thermal.temperature"),
+            ("heat-flux", "thermal.heat_flux"),
+        ] {
             let shown = view(&profile, id);
             assert_eq!(field_of(shown), field);
             assert!(shown.deformation.is_none());
@@ -1846,7 +1854,8 @@ pub(super) mod tests {
             ));
         }
         // The final-state rule reads no peaks.
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         let temperature = view(&profile, "temperature");
         assert_eq!(field_of(temperature), "thermal.transient.temperature.2");
         assert_eq!(temperature.label, "Temperature · t = 60 s");
@@ -1862,8 +1871,16 @@ pub(super) mod tests {
         let mut fields = Vec::new();
         for (index, hertz) in [50.0, 1000.0, 10000.0].into_iter().enumerate() {
             for (name, quantity, peak) in [
-                ("current_density", Q::ElectricCurrentDensity, [1.0, 4.0, 2.0][index]),
-                ("magnetic_flux_density", Q::MagneticFluxDensity, [3.0, 2.0, 1.0][index]),
+                (
+                    "current_density",
+                    Q::ElectricCurrentDensity,
+                    [1.0, 4.0, 2.0][index],
+                ),
+                (
+                    "magnetic_flux_density",
+                    Q::MagneticFluxDensity,
+                    [3.0, 2.0, 1.0][index],
+                ),
             ] {
                 let id = format!("electromagnetic.{name}.{index}");
                 values.peaks.insert(id.clone(), peak);
@@ -1908,7 +1925,10 @@ pub(super) mod tests {
         let profile = CaptureProfile::from_published(&[("run", &fields)], &values).unwrap();
         let pressure = view(&profile, "acoustic-pressure");
         assert_eq!(field_of(pressure), "acoustic.pressure.1");
-        assert_eq!(pressure.label, "Acoustic pressure amplitude |p| · 343.00 Hz");
+        assert_eq!(
+            pressure.label,
+            "Acoustic pressure amplitude |p| · 343.00 Hz"
+        );
         assert_eq!(pressure.shape, "undeformed");
     }
 
@@ -1924,7 +1944,8 @@ pub(super) mod tests {
                 values.peaks.insert(id.clone(), peak);
                 sampled(
                     &id,
-                    AnalysisFieldLayout::scalar(Q::AcousticPressure, FieldLocation::Node).step(step),
+                    AnalysisFieldLayout::scalar(Q::AcousticPressure, FieldLocation::Node)
+                        .step(step),
                     vec![4],
                     RecoveredFieldSample::TimeSeconds(time),
                 )

@@ -1,8 +1,11 @@
 //! A real non-yielding worker must end when its original request pipe disappears.
 use super::*;
-use runmat_execution::console::{ConsoleLimits, ConsoleStream};
+use runmat_execution::console::{ConsoleBudget, ConsoleLimits, ConsoleStream};
+use runmat_execution::identity::{AttemptId, WorkerId};
+use runmat_execution::{PoolBackend, PoolId, ProgramExecutionAssignment, TaskId};
 use runmat_execution_runner_native::WorkerProcessMessage;
 use runmat_process_host::{
+    environment::{EnvironmentAllowlist, EnvironmentPolicy},
     ipc::{private_control::PrivateControlListener, read_payload, write_payload, FrameLimits},
     HostCommand, StdioPolicy,
 };
@@ -23,20 +26,18 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
         0,
     )
     .await;
-    let controls = ConsoleLimits {
+    let console = ConsoleLimits {
         max_records: 4,
         max_text_bytes: 100,
     };
-    program.console = Some(controls);
-    // A placed attempt carries its assignment; the worker scopes captured console
-    // records to it, as the native provider's launches do.
-    program.assignment = Some(runmat_execution::ProgramExecutionAssignment {
-        scope_id: ExecutionScopeId::derive(&[b"original-parent-loss"]),
-        pool_id: runmat_execution::PoolId::derive(&[b"original-parent-loss"]),
-        task_id: runmat_execution::TaskId::derive(&[b"original-parent-loss"]),
-        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"original-parent-loss"]),
-        worker_id: runmat_execution::identity::WorkerId::derive(&[b"original-parent-loss"]),
-        backend: runmat_execution::PoolBackend::LocalProcesses,
+    program.console = Some(console);
+    program.assignment = Some(ProgramExecutionAssignment {
+        scope_id: ExecutionScopeId::derive(&[b"parent-loss-scope"]),
+        pool_id: PoolId::derive(&[b"parent-loss-pool"]),
+        task_id: TaskId::derive(&[b"parent-loss-task"]),
+        attempt_id: AttemptId::derive(&[b"parent-loss-attempt"]),
+        worker_id: WorkerId::derive(&[b"parent-loss-worker"]),
+        backend: PoolBackend::LocalProcesses,
         resources: Default::default(),
     });
     let resources = ResourceRequest {
@@ -50,13 +51,13 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
         accelerators: vec![],
         required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
     };
-    let request = runmat_execution_artifact::ReservedProgramExecutionRequest::new(
-        program,
-        resources.clone(),
-    )
-    .unwrap();
+    let request =
+        runmat_execution_artifact::ReservedProgramExecutionRequest::new(program, resources.clone())
+            .unwrap();
     let mut command = HostCommand::new(&config.executable);
     command.arguments = config.worker_arguments.clone();
+    // The test executable needs its parent's native loader/bootstrap paths.
+    command.environment_policy = EnvironmentPolicy::Allow(EnvironmentAllowlist::platform_runtime());
     command.max_stderr_bytes = config.max_stderr_bytes;
     let listener = PrivateControlListener::bind().unwrap();
     command.stdio = StdioPolicy::PrivateControl(listener.endpoint().clone());
@@ -73,14 +74,19 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     let limits = FrameLimits {
         max_message_bytes: config.max_message_bytes,
     };
-    // Console capture travels with its delegated subtree grant, as the native
-    // provider launches it: the ReservedConsole envelope.
-    let console_budget =
-        runmat_execution_runner_native::console_source_subgrant(&resources, controls).unwrap();
-    let launch = serde_json::json!({
-        "request": request,
-        "console_budget": console_budget,
-    });
+    // Match the production reserved-console wire envelope and its finite grant.
+    #[derive(serde::Serialize)]
+    struct ConsoleLaunch<'a> {
+        request: &'a runmat_execution_artifact::ReservedProgramExecutionRequest,
+        console_budget: ConsoleBudget,
+    }
+    let launch = ConsoleLaunch {
+        request: &request,
+        console_budget: runmat_execution_runner_native::console_source_subgrant(
+            &resources, console,
+        )
+        .unwrap(),
+    };
     write_payload(&mut writer, &serde_json::to_vec(&launch).unwrap(), limits)
         .await
         .unwrap();

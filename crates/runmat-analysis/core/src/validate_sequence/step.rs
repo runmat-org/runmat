@@ -91,7 +91,12 @@ fn validate_residual_vector_directions(
     }
     let mut unit = Vec::with_capacity(directions.len());
     for direction in directions {
-        let norm = direction.vector.iter().map(|value| value * value).sum::<f64>().sqrt();
+        let norm = direction
+            .vector
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
         if direction.frame != crate::CoordinateFrame::Global
             || !norm.is_finite()
             || norm <= f64::EPSILON

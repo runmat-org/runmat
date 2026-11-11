@@ -8,9 +8,9 @@ use std::sync::Arc;
 fn dataset_receiver_retains_session_and_original_filesystem_across_evaluations() {
     runmat_gc::gc_test_context(|| {
         let _serial = fs::provider_override_lock();
-        let selected_root = tempfile::tempdir().expect("selected data workspace");
-        let replacement_root = tempfile::tempdir().expect("replacement data workspace");
-        let original = Arc::new(fs::MemoryFsProvider::with_current_dir(selected_root.path()));
+        let selected_root = std::path::Path::new("/selected-data-workspace");
+        let replacement_root = std::path::Path::new("/replacement-data-workspace");
+        let original = Arc::new(fs::MemoryFsProvider::with_current_dir(selected_root));
         let _original = fs::replace_provider(original.clone() as Arc<dyn FsProvider>);
         let mut session = RunMatSession::with_options(false, false).expect("Core session");
         let first = execute_text_request_for_testing(
@@ -20,9 +20,7 @@ fn dataset_receiver_retains_session_and_original_filesystem_across_evaluations()
         .expect("first evaluation");
         assert!(first.error.is_none(), "{:?}", first.error);
 
-        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir(
-            replacement_root.path(),
-        ));
+        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir(replacement_root));
         let _replacement = fs::replace_provider(replacement.clone() as Arc<dyn FsProvider>);
         let second = execute_text_request_for_testing(
             &mut session,
@@ -31,10 +29,10 @@ fn dataset_receiver_retains_session_and_original_filesystem_across_evaluations()
         .expect("later evaluation through same session");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert!(original
-            .read_project_path(selected_root.path().join("session.data/manifest.json"))
+            .read_project_path(selected_root.join("session.data/manifest.json"))
             .is_ok());
         assert!(replacement
-            .read_project_path(replacement_root.path().join("session.data/manifest.json"))
+            .read_project_path(replacement_root.join("session.data/manifest.json"))
             .is_err());
     });
 }

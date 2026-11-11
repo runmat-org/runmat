@@ -78,13 +78,14 @@ impl AdmissionServer {
             let mut leases = HashMap::<String, Lease>::new();
             let mut outage = outage;
             while !stopping.load(Ordering::Acquire) {
-                if let Some(planned) =
-                    outage.filter(|o| {
+                if let Some(planned) = outage.filter(|o| {
                     let journal = recorded.lock().unwrap();
                     let leases = journal.requests.iter();
-                    leases.filter(|(path, _)| path.contains("/simulation/")).count() >= o.after
-                })
-                {
+                    leases
+                        .filter(|(path, _)| path.contains("/simulation/"))
+                        .count()
+                        >= o.after
+                }) {
                     outage = None;
                     drop(listener);
                     let closed = Instant::now();

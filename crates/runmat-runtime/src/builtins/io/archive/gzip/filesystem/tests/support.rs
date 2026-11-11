@@ -76,6 +76,36 @@ struct AmbientReplacement {
     restoration: Arc<Mutex<Option<runmat_filesystem::ProviderGuard>>>,
 }
 
+pub(super) struct AmbientSwapRestoration<'a> {
+    _selected: &'a runmat_filesystem::ProviderGuard,
+    restoration: Arc<Mutex<Option<runmat_filesystem::ProviderGuard>>>,
+}
+
+impl<'a> AmbientSwapRestoration<'a> {
+    pub(super) fn new(
+        selected: &'a runmat_filesystem::ProviderGuard,
+        restoration: Arc<Mutex<Option<runmat_filesystem::ProviderGuard>>>,
+    ) -> Self {
+        Self {
+            _selected: selected,
+            restoration,
+        }
+    }
+}
+
+impl Drop for AmbientSwapRestoration<'_> {
+    fn drop(&mut self) {
+        // Restore the callback's nested swap before the selected scope, even
+        // when an assertion unwinds. Release the cell lock before its guard.
+        let nested = self
+            .restoration
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take();
+        drop(nested);
+    }
+}
+
 pub(super) struct RecordingProvider {
     pub(super) memory: MemoryFsProvider,
     pub(super) valid: Arc<AtomicBool>,

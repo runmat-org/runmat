@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_revision": 6,
+  "corpus_revision": 7,
   "fixture_root": "crates/runmat-geometry/io/tests/fixtures",
   "entries": [
     {
@@ -470,6 +470,30 @@
       "features": ["assembly", "conformal-interface", "edge-names", "vertex-names"],
       "expected": { "outcome": "success", "topology": "plate and block; authored edge and vertex labels survive both shared and independent interface import", "mass_properties": "same bodies as touching_parts_assembly.step; this witness checks selector positions, not independent mass integration", "regions": 2, "mesh_error_bounds": "selector/import regression only; meshing error bounds are not established by this witness" },
       "test": { "source": "crates/runmat-geometry/io/tests/step_edge_vertex_names.rs", "name": "edge_and_vertex_names_survive_placement_and_the_shared_interface_join" }
+    },
+    {
+      "id": "battery-pack-perimeter-cable",
+      "path": "battery_pack_perimeter_cable.step",
+      "sha256": "30a9f2484d4e996a2105126d9b627bda5d45c24a48fe4f41e251489f94253cac",
+      "tier": "extended",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository EV battery-pack export, single perimeter cable solid", "exporter": "SolidCraft STEP AP242", "exporter_version": "not recorded in STEP header", "license": "RunMat repository license" },
+      "features": ["solid", "bspline-pcurves", "edge-tolerance-admission"],
+      "expected": { "outcome": "success", "topology": "one cable solid; recorded pcurve-gap admissions and no remaining edge-tolerance defects", "mass_properties": "not independently asserted by the import witness", "regions": 1, "mesh_error_bounds": "import tolerance regression only; volume-meshing error bounds are not established by this witness" },
+      "test": { "source": "crates/runmat-geometry/io/tests/external_cad_corpus.rs", "name": "exported_pack_cable_with_nanometre_pcurve_gaps_imports" }
+    },
+    {
+      "id": "drone-arm-study",
+      "path": "drone_arm_study.step",
+      "sha256": "ff113c431077b3fe56f2356e83d4ccccb0c4c834ef0d07f469f6895dfa8eecf5",
+      "tier": "extended",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository drone arm and motor-pod study export, 2026-11-05", "exporter": "Open CASCADE STEP processor", "exporter_version": "7.8", "license": "RunMat repository license" },
+      "features": ["assembly", "shared-interface", "edge-tolerance-admission"],
+      "expected": { "outcome": "success", "topology": "two authored solids; pcurve gaps within a 0.1 mm request are admitted and recorded", "mass_properties": "not independently asserted by the import witness", "regions": 2, "mesh_error_bounds": "import tolerance regression only; the separate over-bound witness preserves defects beyond a 0.1 micrometre request" },
+      "test": { "source": "crates/runmat-geometry/io/tests/edge_tolerance_admission.rs", "name": "gaps_within_the_request_tolerance_are_admitted_and_recorded" }
     }
   ]
 }

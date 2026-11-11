@@ -59,7 +59,39 @@ fn plotting_shader_sources_parse_and_validate_for_every_declared_variant() {
         validate(name, source, &mut failures);
         variants += 1;
     }
-    assert_eq!(variants, 72, "the declared shader inventory changed");
+    for (depth_tested, reversed_z) in [(true, true), (true, false), (false, true)] {
+        validate(
+            &format!("vertex/edge-stroke depth={depth_tested} reversed={reversed_z}"),
+            &vertex::edge_stroke::source(depth_tested, reversed_z),
+            &mut failures,
+        );
+        variants += 1;
+    }
+    validate(
+        "vertex/triangle-instanced",
+        &vertex::triangle::instanced(),
+        &mut failures,
+    );
+    variants += 1;
+    for instanced in [false, true] {
+        for depth_probe in [None, Some(false), Some(true)] {
+            for reversed_z in [true, false] {
+                let shader = vertex::edge_stroke::EdgeStrokeShader {
+                    depth_tested: true,
+                    reversed_z,
+                    instanced,
+                    depth_probe,
+                };
+                validate(
+                    &format!("vertex/edge-stroke {shader:?}"),
+                    &vertex::edge_stroke::source_for(shader),
+                    &mut failures,
+                );
+                variants += 1;
+            }
+        }
+    }
+    assert_eq!(variants, 88, "the declared shader inventory changed");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
@@ -71,12 +103,65 @@ fn validate(name: &str, source: &str, failures: &mut Vec<String>) {
             return;
         }
     };
-    if let Err(error) = naga::valid::Validator::new(
+    let info = match naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
     )
     .validate(&module)
     {
-        failures.push(format!("{name}: {}", error.emit_to_string(source)));
+        Ok(info) => info,
+        Err(error) => {
+            failures.push(format!("{name}: {}", error.emit_to_string(source)));
+            return;
+        }
+    };
+    // Linux qualification validates the actual SPIR-V backend as well as
+    // Naga IR. The ordinary unit lane needs no external executable.
+    #[cfg(target_os = "linux")]
+    if let Some(validator) = std::env::var_os("RUNMAT_QUALIFY_SPIRV_VALIDATOR") {
+        match naga::back::spv::write_vec(&module, &info, &naga::back::spv::Options::default(), None)
+        {
+            Ok(words) => {
+                if let Err(error) = validate_spirv(&validator, &words) {
+                    failures.push(format!("{name}: {error}"));
+                }
+            }
+            Err(error) => failures.push(format!("{name}: SPIR-V emission failed: {error}")),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = info;
+}
+
+#[cfg(target_os = "linux")]
+fn validate_spirv(validator: &std::ffi::OsStr, words: &[u32]) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(validator)
+        .args(["--target-env", "vulkan1.1"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("cannot start SPIR-V validator: {error}"))?;
+    let submitted = (|| -> std::io::Result<()> {
+        let mut input = std::io::BufWriter::new(child.stdin.take().expect("piped validator input"));
+        for word in words {
+            input.write_all(&word.to_le_bytes())?;
+        }
+        input.flush()
+    })();
+    let result = child
+        .wait_with_output()
+        .map_err(|error| format!("cannot collect SPIR-V validator result: {error}"))?;
+    submitted.map_err(|error| format!("cannot submit SPIR-V: {error}"))?;
+    if result.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "SPIR-V validator {}: {}",
+            result.status,
+            String::from_utf8_lossy(&result.stderr)
+        ))
     }
 }

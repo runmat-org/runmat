@@ -142,10 +142,10 @@ pub(super) fn numeric_component_from_modern_or_legacy(
     }
     let serials = match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            let (serials, shape) =
-                parse_legacy_component_text(runtime, value, legacy_format, builtin)?;
-            Tensor::new(serials, shape)
-                .map_err(|err| datetime_error(format!("{builtin}: {err}")))?
+            let (components, shape) =
+                map_legacy_component_text(runtime, value, legacy_format, builtin, extractor)?;
+            return tensor_or_scalar(components, shape)
+                .map_err(|err| datetime_error(format!("{builtin}: {}", err.message())));
         }
         value => serial_tensor_from_value(value, &format!("{builtin} legacy serial input"))?,
     };

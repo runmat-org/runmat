@@ -10,7 +10,9 @@ use runmat_gc::RootId;
 use crate::context::{RuntimeContext, RuntimeLocalTaskOutcome};
 use crate::{BuiltinResult, RuntimeError};
 
-use super::registry::{CleanupAdmission, CleanupEntry, CleanupReceipt, CleanupRegistry};
+use super::registry::{
+    CleanupAdmission, CleanupCompletionId, CleanupEntry, CleanupReceipt, CleanupRegistry,
+};
 
 enum CleanupCallbackOutcome {
     Skipped,
@@ -50,6 +52,8 @@ impl Drop for InnerDropRetirementGuard {
         self.entry.note_future_retired();
         self.entry.release_terminal_after_future_drop();
         self.entry.settle_deferred_from_receipt();
+        schedule_eligible(&self.runtime, &self.registry, &[]);
+        self.entry.finish_future_retirement();
     }
 }
 
@@ -72,6 +76,7 @@ impl OwnedCleanupFuture {
             runtime,
             armed: true,
         };
+        let _ = schedule_before_retirement(&retirement.runtime, &retirement.registry, &[]);
         drop(inner);
         retirement.armed = false;
         // The scoped inner has retired; terminal root release and its
@@ -120,6 +125,7 @@ impl OwnedCleanupFuture {
         if settled {
             self.entry.settle_deferred_from_receipt();
         }
+        self.entry.finish_future_retirement();
     }
 }
 
@@ -158,8 +164,10 @@ fn settle_retired_after_ack(
     let missing_receipt = entry.receipt().is_none();
     let queue_runtime = runtime
         .clone()
-        .with_cleanup_command_origin(entry.queued_command_origin());
+        .with_cleanup_command_origin(entry.queued_command_origin())
+        .with_cleanup_completion(entry.completion());
     let _selected = queue_runtime.enter();
+    let _ = schedule_before_retirement(&queue_runtime, registry, &[]);
     if missing_receipt {
         entry.abandon();
         registry.mark_terminal(entry);
@@ -169,6 +177,7 @@ fn settle_retired_after_ack(
     if missing_receipt {
         schedule_eligible(&queue_runtime, registry, &[]);
     }
+    entry.finish_future_retirement();
 }
 
 fn lifecycle_error(identifier: &'static str, message: &'static str) -> RuntimeError {
@@ -195,7 +204,7 @@ pub(crate) fn start_queued(
         Err(error) => {
             entry.dispatch_failed(error);
             registry.mark_terminal(&entry);
-            return receipt_result(registry, &entry);
+            return receipt_result_selected(registry, &entry, false);
         }
     };
     let Some(callback) = entry.callback() else {
@@ -205,14 +214,15 @@ pub(crate) fn start_queued(
         );
         entry.dispatch_failed(error);
         registry.mark_terminal(&entry);
-        return receipt_result(registry, &entry);
+        return receipt_result_selected(registry, &entry, false);
     };
     let task_entry = Rc::clone(&entry);
     // Queue admission, not the eventual drain, fixed this callback's origin.
     // Explicit None masks a drainer that belongs to a later command.
     let task_runtime = runtime
         .clone()
-        .with_cleanup_command_origin(entry.queued_command_origin());
+        .with_cleanup_command_origin(entry.queued_command_origin())
+        .with_cleanup_completion(entry.completion());
     let callback_runtime = task_runtime.clone();
     let inner = task_runtime.clone().scope(async move {
         if !task_entry.begin_running() {
@@ -245,7 +255,7 @@ pub(crate) fn start_queued(
                 if retired {
                     entry.settle_deferred_from_receipt();
                 }
-                receipt_result(registry, &entry)
+                receipt_result_selected(registry, &entry, false)
             } else {
                 // A custom port may have polled the callback through Ready
                 // before returning Err. The callback's completed receipt
@@ -254,7 +264,9 @@ pub(crate) fn start_queued(
                 if retired {
                     entry.settle_deferred_from_receipt();
                 }
-                Err(error)
+                entry.note_submission_failure(error);
+                registry.mark_terminal(&entry);
+                receipt_result_selected(registry, &entry, false)
             }
         }
     }
@@ -268,13 +280,75 @@ pub(crate) fn schedule_eligible(
     registry: &Rc<CleanupRegistry>,
     temporary: &[RootId],
 ) {
-    if let CleanupAdmission::Queued(entries) =
-        registry.admit_batch(temporary, runtime.command_profiling())
-    {
-        for entry in entries {
-            let _ = start_queued(runtime, registry, entry);
-        }
+    let _ = schedule_selected(runtime, registry, temporary, runtime.cleanup_completion());
+}
+
+pub(crate) fn schedule_before_retirement(
+    runtime: &RuntimeContext,
+    registry: &Rc<CleanupRegistry>,
+    temporary: &[RootId],
+) -> BuiltinResult<()> {
+    schedule_selected(runtime, registry, temporary, None)
+}
+
+pub(crate) fn schedule_completion(
+    runtime: &RuntimeContext,
+    registry: &Rc<CleanupRegistry>,
+    temporary: &[RootId],
+    completion: CleanupCompletionId,
+) -> BuiltinResult<()> {
+    schedule_selected(runtime, registry, temporary, Some(completion))
+}
+
+fn schedule_selected(
+    runtime: &RuntimeContext,
+    registry: &Rc<CleanupRegistry>,
+    temporary: &[RootId],
+    completion: Option<CleanupCompletionId>,
+) -> BuiltinResult<()> {
+    // Ordinary numeric execution with no active lifecycle targets performs no
+    // root census or callback allocation at a value-retirement safepoint.
+    if !registry.has_active() {
+        return Ok(());
     }
+    match registry.admit_batch_for_completion(temporary, runtime.command_profiling(), completion) {
+        CleanupAdmission::Queued(entries) => {
+            for entry in entries {
+                // Failed submissions retain their typed errors on the entry.
+                // Only its completion owner (or host drain) reports them.
+                let _ = start_queued(runtime, registry, entry);
+            }
+            Ok(())
+        }
+        CleanupAdmission::NoneEligible => Ok(()),
+        CleanupAdmission::Indeterminate => Err(lifecycle_error(
+            "RunMat:onCleanup:ReachabilityUnavailable",
+            "cleanup reachability is incomplete; callbacks remain rooted for retry",
+        )),
+    }
+}
+
+/// A function joins only its own admitted callbacks and cascades. It never
+/// joins a current/enclosing callback or an unrelated pending task.
+pub(crate) async fn drain_completion(
+    _runtime: &RuntimeContext,
+    registry: &Rc<CleanupRegistry>,
+    completion: CleanupCompletionId,
+) -> BuiltinResult<()> {
+    let mut result = Ok(());
+    while let Some(entry) = registry.pending_completion(completion) {
+        let settled = wait_queued(registry, &entry).await;
+        // A cancelled lease can acknowledge before its currently polling
+        // future is destroyed. Join the exact entry's physical retirement;
+        // cascades are admitted under the same queue-time completion ID.
+        entry.wait_future_retired().await;
+        result = crate::runtime_error::complete_with_cleanup(result, settled);
+    }
+    while let Some(entry) = registry.completion_errors(completion) {
+        result =
+            crate::runtime_error::complete_with_cleanup(result, receipt_result(registry, &entry));
+    }
+    result
 }
 
 pub(crate) async fn wait_queued(
@@ -294,32 +368,43 @@ pub(crate) async fn wait_queued(
 }
 
 fn receipt_result(registry: &CleanupRegistry, entry: &CleanupEntry) -> BuiltinResult<()> {
-    match entry.receipt() {
+    receipt_result_selected(registry, entry, true)
+}
+
+fn receipt_result_selected(
+    registry: &CleanupRegistry,
+    entry: &CleanupEntry,
+    report: bool,
+) -> BuiltinResult<()> {
+    let callback = match entry.receipt() {
         Some(CleanupReceipt::Completed(Ok(()))) | Some(CleanupReceipt::Cancelled) => Ok(()),
         Some(CleanupReceipt::Completed(Err(error)))
         | Some(CleanupReceipt::DispatchFailed(error)) => {
-            if entry.report_once() {
-                registry.note_reported(entry);
-                Err(RuntimeError::from_shared_original(error))
-            } else {
-                Ok(())
-            }
+            Err(RuntimeError::from_shared_original(error))
         }
-        Some(CleanupReceipt::Abandoned) => {
-            if entry.report_once() {
-                registry.note_reported(entry);
-                Err(lifecycle_error(
-                    "RunMat:onCleanup:Abandoned",
-                    "cleanup callback was abandoned during session shutdown",
-                ))
-            } else {
-                Ok(())
-            }
-        }
+        Some(CleanupReceipt::Abandoned) => Err(lifecycle_error(
+            "RunMat:onCleanup:Abandoned",
+            "cleanup callback was abandoned during session shutdown",
+        )),
         None => Err(lifecycle_error(
             "RunMat:onCleanup:MissingReceipt",
             "cleanup callback has no completion receipt",
         )),
+    };
+    let result = match entry.submission_failure() {
+        Some(error) => crate::runtime_error::complete_with_cleanup(
+            Err(RuntimeError::from_shared_original(error)),
+            callback,
+        ),
+        None => callback,
+    };
+    match result {
+        Err(error) if !report => Err(error),
+        Err(error) if entry.report_once() => {
+            registry.note_reported(entry);
+            Err(error)
+        }
+        _ => Ok(()),
     }
 }
 

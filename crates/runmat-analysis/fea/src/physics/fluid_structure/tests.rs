@@ -499,12 +499,14 @@ fn a_fluid_solid_face_with_neither_an_interface_nor_a_wall_is_an_admission_error
 #[test]
 fn a_fluid_solid_face_with_an_interface_and_a_wall_is_an_admission_error() {
     let mut c = case(1e9);
-    c.model.constraints.push(AnalysisConstraint::Fluid(FluidConstraint {
-        constraint_id: "extra_wall".into(),
-        kind: FluidConstraintKind::NoSlipWall {
-            target: target(&c.mesh, "interface_channel_plate"),
-        },
-    }));
+    c.model
+        .constraints
+        .push(AnalysisConstraint::Fluid(FluidConstraint {
+            constraint_id: "extra_wall".into(),
+            kind: FluidConstraintKind::NoSlipWall {
+                target: target(&c.mesh, "interface_channel_plate"),
+            },
+        }));
     let p = prepared(&c);
     assert!(matches!(
         try_problem(&c, &p, 1e-6),

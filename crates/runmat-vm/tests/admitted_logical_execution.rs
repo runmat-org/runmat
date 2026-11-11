@@ -83,6 +83,19 @@ impl RuntimePlacementService for Selection {
     fn observe(&self, feedback: PlacementFeedback) -> Result<(), RuntimeError> {
         RuntimePlacementService::observe(&self.session, feedback)
     }
+    fn observe_selected_whole_work(
+        &self,
+        selected: &RuntimeWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), RuntimeError> {
+        RuntimePlacementService::observe_selected_whole_work(
+            &self.session,
+            selected,
+            elapsed_ns,
+            outcome,
+        )
+    }
     fn defer_feedback(
         &self,
         source: Box<dyn RuntimePlacementFeedbackSource>,
@@ -227,7 +240,8 @@ fn assert_execution(selection: &Selection, provider: bool, operands: usize) {
             runmat_execution::CandidateObservationEvidence::Unavailable(
                 runmat_execution::CandidateCostUnavailable::NoObservations
             ),
-            "enqueue is not a measured device completion"
+            "{}: enqueue is not a measured device completion",
+            selection.operation
         );
     } else {
         assert_eq!(uploads, 0);
@@ -243,7 +257,9 @@ fn assert_execution(selection: &Selection, provider: bool, operands: usize) {
                     successful: 1,
                     failed: 0
                 }
-            )
+            ),
+            "{}: completed host route must retain its observation",
+            selection.operation
         );
     }
 }

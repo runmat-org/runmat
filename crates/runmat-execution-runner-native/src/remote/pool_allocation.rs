@@ -53,11 +53,13 @@ pub(super) async fn reconcile_or_indeterminate(
     resources: &AllocationResources,
     generation: &AtomicU64,
     primary: impl std::fmt::Display,
-) -> Result<(), RemotePoolExecutionOutcome> {
+) -> Result<(), super::pool_execution::RemoteExecutionStop> {
     reconcile_ambiguous_generation(control, authority, desired_workers, resources, generation)
         .await
         .map_err(|ownership| {
-            RemotePoolExecutionOutcome::Indeterminate(format!("{primary}; {ownership}"))
+            super::pool_execution::RemoteExecutionStop::Indeterminate(format!(
+                "{primary}; {ownership}"
+            ))
         })
 }
 
@@ -86,7 +88,7 @@ pub(super) async fn resolve_failed_initial(
                 )
             };
             let outcome = if cancelled {
-                Ok(RemotePoolExecutionOutcome::Cancelled)
+                Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled))
             } else {
                 Err(protocol(diagnostic))
             };
@@ -101,7 +103,7 @@ pub(super) async fn resolve_failed_initial(
         }
         Ok(Ok(worker_pool)) if worker_pool.desired_workers == 0 => {
             let outcome = if cancelled {
-                Ok(RemotePoolExecutionOutcome::Cancelled)
+                Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled))
             } else {
                 Err(protocol(primary))
             };
@@ -114,9 +116,9 @@ pub(super) async fn resolve_failed_initial(
             )
             .await
         }
-        Ok(Ok(_)) | Ok(Err(_)) | Err(_) => Ok(RemotePoolExecutionOutcome::Indeterminate(format!(
+        Ok(Ok(_)) | Ok(Err(_)) | Err(_) => Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(format!(
             "initial worker allocation failed and allocation ownership could not be proven: {primary}"
-        ))),
+        )))),
     }
 }
 
@@ -161,14 +163,20 @@ fn indeterminate(
     release: &str,
 ) -> RemotePoolExecutionOutcome {
     let primary = match outcome {
-        Ok(RemotePoolExecutionOutcome::Indeterminate(message)) => message,
-        Ok(RemotePoolExecutionOutcome::Completed(_)) => "remote execution completed".into(),
-        Ok(RemotePoolExecutionOutcome::Cancelled) => "remote execution was cancelled".into(),
+        Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message))) => {
+            message
+        }
+        Ok(Ok(_)) => "remote execution completed".into(),
+        Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled)) => {
+            "remote execution was cancelled".into()
+        }
         Err(error) => format!("remote execution failed: {error}"),
     };
-    RemotePoolExecutionOutcome::Indeterminate(format!(
-        "{primary}; release ownership is indeterminate because {release}"
-    ))
+    Err(
+        crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(format!(
+            "{primary}; release ownership is indeterminate because {release}"
+        )),
+    )
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
@@ -307,12 +315,17 @@ mod tests {
             &authority(),
             &resources(),
             7,
-            Ok(RemotePoolExecutionOutcome::Cancelled),
+            Ok(Err(
+                crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+            )),
         )
         .await
         .unwrap();
 
-        assert!(matches!(outcome, RemotePoolExecutionOutcome::Cancelled));
+        assert!(matches!(
+            outcome,
+            Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled)
+        ));
     }
 
     #[tokio::test]
@@ -334,7 +347,9 @@ mod tests {
         .await
         .unwrap();
 
-        let RemotePoolExecutionOutcome::Indeterminate(message) = outcome else {
+        let Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message)) =
+            outcome
+        else {
             panic!("release failure must be indeterminate")
         };
         assert!(message.contains("primary execution failure"));
@@ -366,12 +381,17 @@ mod tests {
             &authority(),
             &resources,
             generation.load(Ordering::Acquire),
-            Ok(RemotePoolExecutionOutcome::Cancelled),
+            Ok(Err(
+                crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+            )),
         )
         .await
         .unwrap();
 
-        assert!(matches!(outcome, RemotePoolExecutionOutcome::Cancelled));
+        assert!(matches!(
+            outcome,
+            Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled)
+        ));
         assert_eq!(releases.lock().unwrap().as_slice(), &[9]);
     }
 }

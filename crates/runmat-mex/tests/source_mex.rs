@@ -12,6 +12,22 @@ use runmat_mex::{
 use runmat_value::Value;
 
 fn fortran_compiler_available() -> bool {
+    if cfg!(target_os = "windows") {
+        // GNU Fortran objects are not admitted into the MSVC host ABI.
+        // Exercise that boundary even when gfortran happens to be on PATH.
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("unsupported.F90");
+        fs::write(&source, "subroutine mexFunction\nend\n").unwrap();
+        let error = MexBuild::new(&source, directory.path())
+            .compiler("gfortran")
+            .plan()
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            runmat_mex::MexBuildError::UnsupportedCompilerForTarget { .. }
+        ));
+        return false;
+    }
     std::process::Command::new("gfortran")
         .arg("--version")
         .output()
@@ -21,7 +37,7 @@ fn fortran_compiler_available() -> bool {
 #[test]
 fn fortran_gateway_uses_native_handles_and_fortran_array_copy_routines() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -100,7 +116,7 @@ fn fortran_gateway_uses_native_handles_and_fortran_array_copy_routines() {
 #[test]
 fn mixed_c_and_fortran_sources_use_their_own_compilers_and_one_fortran_link() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -153,7 +169,7 @@ end
 #[test]
 fn fortran_gateway_preserves_interleaved_complex_aliases() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -222,7 +238,7 @@ fn fortran_gateway_preserves_interleaved_complex_aliases() {
 #[test]
 fn fortran_separate_complex_copy_family_preserves_both_components() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -276,7 +292,7 @@ fn fortran_separate_complex_copy_family_preserves_both_components() {
 #[test]
 fn fortran_gateway_uses_character_arguments_for_callbacks_and_diagnostics() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -325,7 +341,7 @@ fn fortran_gateway_uses_character_arguments_for_callbacks_and_diagnostics() {
 #[test]
 fn fortran_container_api_uses_fortran_index_and_field_number_conventions() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -386,7 +402,7 @@ fn fortran_container_api_uses_fortran_index_and_field_number_conventions() {
 #[test]
 fn fortran_compatible_array_dims_keeps_pointer_and_dimension_widths_distinct() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -422,7 +438,7 @@ fn fortran_compatible_array_dims_keeps_pointer_and_dimension_widths_distinct() {
 #[test]
 fn fortran_sparse_api_preserves_canonical_buffers_and_zero_based_csc_indices() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -502,7 +518,7 @@ fn fortran_sparse_api_preserves_canonical_buffers_and_zero_based_csc_indices() {
 #[test]
 fn fortran_lifecycle_callbacks_reuse_the_module_host_context() {
     if !fortran_compiler_available() {
-        eprintln!("skipping Fortran MEX fixture because gfortran is unavailable");
+        eprintln!("Fortran MEX execution requires a compatible native compiler; unsupported target admission is checked");
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -1236,7 +1252,21 @@ public:
                     matlab::mex::ArgumentList inputs) override {
         (void)inputs;
         matlab::data::ArrayFactory factory;
-        outputs[0] = factory.createScalar<double>(c_support(5.0));
+        auto values = factory.createArray<double>({1, 2}, {c_support(5.0), 11.0});
+        for (auto &value : values) {
+            value = static_cast<double>(value);
+        }
+        auto source = values.begin();
+        auto destination = source + 1;
+        (void)*destination;
+        destination = source;
+        if (static_cast<double>(values[1]) != 11.0) {
+            throw matlab::Exception("iterator assignment changed the array");
+        }
+        decltype(destination) unbound;
+        unbound = destination;
+        *unbound = static_cast<double>(*source);
+        outputs[0] = factory.createScalar<double>(static_cast<double>(*unbound));
     }
 };
 "#,
@@ -1255,8 +1285,13 @@ double c_support(double value) {
     let build = MexBuild::new(&source, directory.path()).source(&support);
     let plan = build.plan().unwrap();
     assert_eq!(plan.steps.len(), 4);
-    assert!(plan.steps[0].arguments.contains(&"-std=c++17".to_string()));
-    assert!(plan.steps[1].arguments.contains(&"-std=c11".to_string()));
+    let (cpp_standard, c_standard) = if cfg!(target_os = "windows") {
+        ("/std:c++17", "/std:c11")
+    } else {
+        ("-std=c++17", "-std=c11")
+    };
+    assert!(plan.steps[0].arguments.contains(&cpp_standard.to_string()));
+    assert!(plan.steps[1].arguments.contains(&c_standard.to_string()));
     let artifact = build.compile().unwrap();
     let module = MexModule::load(&artifact.module).unwrap();
     let result = module.invoke(&[], 1, module.api_mode()).unwrap();

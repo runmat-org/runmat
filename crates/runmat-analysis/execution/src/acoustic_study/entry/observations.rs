@@ -184,21 +184,23 @@ impl AcousticStudyEntryCoordinator {
         if state.reduced.len() != state.reduction_hosts.len() {
             return Err(invalid("acoustic reductions lost their task hosts"));
         }
-        Ok(crate::sampled_study_observations::history::EntryHistorySample {
-            catalog: ObservationFieldCatalog::volume_mesh_recovery(
-                recovery.request.clone(),
-                fields.manifest.clone(),
-                SequenceIdentity::from_solver_contract(&self.workload().model.sequence)?,
-                self.preparation.selected_step().clone(),
-            )?,
-            plan: state.plan().cloned(),
-            reduced: state
-                .reduced
-                .iter()
-                .cloned()
-                .zip(state.reduction_hosts.iter().cloned())
-                .collect(),
-        })
+        Ok(
+            crate::sampled_study_observations::history::EntryHistorySample {
+                catalog: ObservationFieldCatalog::volume_mesh_recovery(
+                    recovery.request.clone(),
+                    fields.manifest.clone(),
+                    SequenceIdentity::from_solver_contract(&self.workload().model.sequence)?,
+                    self.preparation.selected_step().clone(),
+                )?,
+                plan: state.plan().cloned(),
+                reduced: state
+                    .reduced
+                    .iter()
+                    .cloned()
+                    .zip(state.reduction_hosts.iter().cloned())
+                    .collect(),
+            },
+        )
     }
 
     pub(super) fn observation_partition_count(&self) -> usize {

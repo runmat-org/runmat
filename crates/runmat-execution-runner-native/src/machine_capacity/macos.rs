@@ -54,7 +54,10 @@ pub(super) fn process_footprint() -> io::Result<(u64, u64)> {
     if status != 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok((usage.ri_phys_footprint, usage.ri_lifetime_max_phys_footprint))
+    Ok((
+        usage.ri_phys_footprint,
+        usage.ri_lifetime_max_phys_footprint,
+    ))
 }
 
 fn available_bytes(counters: &libc::vm_statistics64, page_size: u64) -> io::Result<u64> {

@@ -14,7 +14,8 @@ use crate::results::observation::{
 };
 
 const PREFIX: &[u8] = b"runmat-observation-history-finalization/v1\0";
-const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy)]
 pub enum ObservationHistorySourceContext<'a> {
@@ -434,8 +435,13 @@ impl ObservationHistoryFinalizationRequest {
             }
             for entry in &manifest.fields {
                 if entry.definition.identity() == observation.source_field_definition_identity
-                    && resolved_observation_accepts_sample(&self.plan, observation, entry.sample, None)
-                        .map_err(invalid)?
+                    && resolved_observation_accepts_sample(
+                        &self.plan,
+                        observation,
+                        entry.sample,
+                        None,
+                    )
+                    .map_err(invalid)?
                 {
                     expected.push(entry);
                 }

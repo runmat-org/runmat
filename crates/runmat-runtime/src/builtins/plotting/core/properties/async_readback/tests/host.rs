@@ -2,6 +2,140 @@ use super::super::super::set_target::PropertyPresentation;
 use super::*;
 
 #[test]
+fn scatter3_properties_preserve_sources_and_reject_partial_resize() {
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    crate::builtins::plotting::reset_plot_state();
+    let vector = |values: Vec<f64>| Value::Tensor(Tensor::new(values, vec![1, 2]).unwrap());
+    let id = block_on(crate::builtins::plotting::scatter3::scatter3_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            vector(vec![1.0, 2.0]),
+            vector(vec![3.0, 4.0]),
+            vector(vec![5.0, 6.0]),
+            vector(vec![36.0, 49.0]),
+            vector(vec![0.0, 1.0]),
+        ]),
+    ))
+    .expect("scatter3");
+    let read = |name: &str| {
+        let handle = resolve_plot_handle(&Value::Num(id), "get").unwrap();
+        block_on(get_properties_async(handle, Some(name), "get")).unwrap()
+    };
+    assert_eq!(read("CData"), vector(vec![0.0, 1.0]));
+    let assert_sizes = |actual: Value, expected: &[f64]| {
+        let Value::Tensor(actual) = actual else {
+            panic!("SizeData vector")
+        };
+        let values = crate::builtins::common::tensor::tensor_values_f64(&actual);
+        assert_eq!(values.len(), expected.len());
+        for (actual, expected) in values.iter().zip(expected) {
+            assert!((actual - expected).abs() < 0.001, "{actual} != {expected}");
+        }
+    };
+    assert_sizes(read("SizeData"), &[36.0, 49.0]);
+
+    let replacement = |values: Vec<f64>| Value::Tensor(Tensor::new(values, vec![1, 3]).unwrap());
+    // A 1x3 CData row is a uniform RGB color in the constructor contract;
+    // Nx1 denotes three scalar colors for the resized three-point plot.
+    let scalar_colors = Value::Tensor(Tensor::new(vec![0.1, 0.2, 0.3], vec![3, 1]).unwrap());
+    let target = resolve_plot_handle(&Value::Num(id), "set").unwrap();
+    block_on(set_properties_async(
+        target,
+        &[
+            Value::String("XData".into()),
+            replacement(vec![7.0, 8.0, 9.0]),
+            Value::String("YData".into()),
+            replacement(vec![10.0, 11.0, 12.0]),
+            Value::String("ZData".into()),
+            replacement(vec![13.0, 14.0, 15.0]),
+            Value::String("CData".into()),
+            scalar_colors,
+            Value::String("SizeData".into()),
+            replacement(vec![16.0, 25.0, 36.0]),
+        ],
+        "set",
+    ))
+    .expect("atomic scatter3 resize");
+    assert_eq!(read("XData"), replacement(vec![7.0, 8.0, 9.0]));
+    assert_eq!(read("CData"), replacement(vec![0.1, 0.2, 0.3]));
+    assert_sizes(read("SizeData"), &[16.0, 25.0, 36.0]);
+
+    let target = resolve_plot_handle(&Value::Num(id), "set").unwrap();
+    block_on(set_properties_async(
+        target,
+        &[
+            Value::String("CData".into()),
+            Value::Tensor(Tensor::new(vec![0.2, 0.4, 0.6], vec![1, 3]).unwrap()),
+        ],
+        "set",
+    ))
+    .expect("uniform RGB CData");
+    let Value::Tensor(rgb) = read("CData") else {
+        panic!("RGB CData matrix")
+    };
+    assert_eq!(rgb.shape(), &[3, 3]);
+    let expected = [0.2, 0.2, 0.2, 0.4, 0.4, 0.4, 0.6, 0.6, 0.6];
+    for (actual, expected) in crate::builtins::common::tensor::tensor_values_f64(&rgb)
+        .iter()
+        .zip(expected)
+    {
+        assert!((actual - expected).abs() < 1e-6);
+    }
+
+    let before = [
+        read("XData"),
+        read("YData"),
+        read("ZData"),
+        read("CData"),
+        read("SizeData"),
+    ];
+    let target = resolve_plot_handle(&Value::Num(id), "set").unwrap();
+    assert!(block_on(set_properties_async(
+        target,
+        &[
+            Value::String("XData".into()),
+            replacement(vec![1.0, 2.0, 3.0]),
+            Value::String("YData".into()),
+            replacement(vec![4.0, 5.0, 6.0]),
+            Value::String("ZData".into()),
+            replacement(vec![7.0, 8.0, 9.0]),
+            Value::String("CData".into()),
+            vector(vec![0.0, 1.0]),
+        ],
+        "set",
+    ))
+    .is_err());
+    assert_eq!(
+        before,
+        [
+            read("XData"),
+            read("YData"),
+            read("ZData"),
+            read("CData"),
+            read("SizeData")
+        ]
+    );
+    let target = resolve_plot_handle(&Value::Num(id), "set").unwrap();
+    assert!(block_on(set_properties_async(
+        target,
+        &[Value::String("NotAProperty".into()), Value::Num(1.0)],
+        "set",
+    ))
+    .is_err());
+    assert_eq!(
+        before,
+        [
+            read("XData"),
+            read("YData"),
+            read("ZData"),
+            read("CData"),
+            read("SizeData")
+        ]
+    );
+}
+
+#[test]
 fn async_get_preserves_host_numeric_source_and_unpolled_set_has_no_effect() {
     let _guard = lock_plot_registry();
     ensure_plot_test_env();

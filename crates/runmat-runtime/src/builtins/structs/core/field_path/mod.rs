@@ -1,8 +1,8 @@
 //! Typed field paths shared by functional field reads and writes.
 
+pub(in crate::builtins::structs::core) mod native;
 mod parse;
 mod plan;
-pub(in crate::builtins::structs::core) mod native;
 
 #[cfg(test)]
 mod tests;
@@ -47,6 +47,7 @@ pub(super) struct IndexSelector {
 pub(super) enum IndexComponent {
     Scalar(usize),
     Vector(Vec<usize>, Vec<usize>),
-    Logical(Vec<u8>),
+    LogicalScalar(bool),
+    Logical(runmat_value::LogicalArray),
     End,
 }

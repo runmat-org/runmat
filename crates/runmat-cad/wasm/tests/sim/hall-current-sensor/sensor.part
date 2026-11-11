@@ -1,0 +1,78 @@
+runmat 0.7
+std 1
+
+// An open-loop Hall current sensor: a gapped C-core of MnZn power ferrite (TDK N87), 44 x 44 x
+// 12 mm with a 26 mm square window and 9 mm legs, around a 16 mm copper primary rod; the Hall
+// element sits in the 3 mm air gap in the right leg. The air is a 120 mm cube round both, less
+// the core and the rod, so the core's and the rod's faces are shared with the air.
+//
+// Sizing at 500 A: one primary turn drives B = mu0 N I / (g + l_core / mu_r) =
+// 4 pi e-7 x 500 / (3 mm + 126 mm / 2200) = 0.206 T across the gap, about 42 % of N87's
+// 490 mT saturation at 25 degC (TDK N87 datasheet). Change `gap` and re-run the study.
+// The core's axis (the primary's) is z; the core's center is the origin.
+part sensor {
+    input outer : length = 44 mm
+    input window : length = 26 mm
+    input depth : length = 12 mm
+    input gap : length = 3 mm
+    input primary : length = 16 mm
+    input air : length = 120 mm
+
+    let o = input.outer / 2
+    let w = input.window / 2
+    let g = input.gap / 2
+    let a = input.air / 2
+    let h = input.depth / 2
+
+    feature core_plane = plane.offset(base = origin.xy, distance = -let.h)
+    sketch core_s on plane.core_plane {
+        upper_outer = line(start = [let.o, let.g], end = [let.o, let.o])
+        top_outer = line(start = [let.o, let.o], end = [-let.o, let.o])
+        left_outer = line(start = [-let.o, let.o], end = [-let.o, -let.o])
+        bottom_outer = line(start = [-let.o, -let.o], end = [let.o, -let.o])
+        lower_outer = line(start = [let.o, -let.o], end = [let.o, -let.g])
+        lower_pole = line(start = [let.o, -let.g], end = [let.w, -let.g])
+        lower_inner = line(start = [let.w, -let.g], end = [let.w, -let.w])
+        bottom_inner = line(start = [let.w, -let.w], end = [-let.w, -let.w])
+        left_inner = line(start = [-let.w, -let.w], end = [-let.w, let.w])
+        top_inner = line(start = [-let.w, let.w], end = [let.w, let.w])
+        upper_inner = line(start = [let.w, let.w], end = [let.w, let.g])
+        upper_pole = line(start = [let.w, let.g], end = [let.o, let.g])
+    }
+    feature core = extrude(profile = sketch.core_s, distance = input.depth)
+
+    feature rod_plane = plane.offset(base = origin.xy, distance = -let.a)
+    sketch rod_s on plane.rod_plane {
+        rod = circle(center = [0 mm, 0 mm], radius = input.primary / 2)
+    }
+    feature rod = extrude(profile = sketch.rod_s, distance = input.air)
+
+    sketch air_s on plane.rod_plane {
+        front = line(start = [-let.a, -let.a], end = [let.a, -let.a])
+        right = line(start = [let.a, -let.a], end = [let.a, let.a])
+        back = line(start = [let.a, let.a], end = [-let.a, let.a])
+        left = line(start = [-let.a, let.a], end = [-let.a, -let.a])
+    }
+    feature air = extrude(profile = sketch.air_s, distance = input.air)
+    feature surround = boolean.subtract(target = feature.air.body, tools = [feature.core.body, feature.rod.body], keep_tools = true)
+
+    region primary_in : face = { select = [feature.rod.face.start], expect = exactly_one, label = "Primary in" }
+    region primary_out : face = { select = [feature.rod.face.end], expect = exactly_one, label = "Primary out" }
+    region gap : face = { select = [feature.core.face.side(core_s.lower_pole), feature.core.face.side(core_s.upper_pole)], expect = at_least_one, body = feature.core.body, label = "Gap" }
+    region outer_boundary : face = {
+        select = [
+            feature.air.face.start,
+            feature.air.face.end,
+            feature.air.face.side(air_s.front),
+            feature.air.face.side(air_s.right),
+            feature.air.face.side(air_s.back),
+            feature.air.face.side(air_s.left)
+        ],
+        expect = at_least_one,
+        label = "Outer boundary"
+    }
+
+    output core = { body = feature.core.body, label = "Core", part_number = "HS-N87-44", material = "ferrite_n87", color = "#3A3A3F" }
+    output primary = { body = feature.rod.body, label = "Primary", material = "copper_c11000", color = "#C8794A" }
+    output air = { body = feature.air.body, label = "Air", color = "#CFE3F5" }
+}

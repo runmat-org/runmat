@@ -490,9 +490,7 @@ async fn run_exact_structural_sweep_conformance() {
         .await
         .expect("remote exact structural sweep timed out")
         .unwrap();
-        let crate::remote::pool_execution::RemotePoolExecutionOutcome::Completed(completed) =
-            outcome
-        else {
+        let Ok(completed) = outcome else {
             panic!("remote exact structural sweep did not complete")
         };
         assert_eq!(

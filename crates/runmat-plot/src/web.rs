@@ -296,7 +296,7 @@ impl WebRenderer {
         .filter(|mode| {
             mode.supported_by_formats(
                 format_features(format),
-                format_features(wgpu::TextureFormat::Depth24Plus),
+                format_features(crate::core::renderer::WgpuRenderer::depth_format()),
             )
         })
         .collect();
@@ -638,6 +638,7 @@ impl WebRenderer {
     pub fn set_pixels_per_point(&mut self, pixels_per_point: f32) {
         if pixels_per_point.is_finite() && pixels_per_point > 0.0 {
             self.pixels_per_point = pixels_per_point;
+            self.plot_renderer.wgpu_renderer.pixels_per_point = pixels_per_point;
         }
     }
 

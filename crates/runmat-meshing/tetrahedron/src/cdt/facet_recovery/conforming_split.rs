@@ -32,15 +32,15 @@ mod corner;
 mod insertion;
 mod local;
 mod pair;
+pub(super) use cascade::segment_edge_location;
 use cascade::*;
 use cavity::*;
 use corner::*;
 use insertion::*;
 use local::*;
-use pair::*;
-pub(super) use cascade::segment_edge_location;
 #[cfg(test)]
 pub(super) use pair::shared_vertex_split_points;
+use pair::*;
 
 pub(super) struct ProtectedFacetSplit {
     pub(super) source: DelaunayRecoveredFacetTriangle,

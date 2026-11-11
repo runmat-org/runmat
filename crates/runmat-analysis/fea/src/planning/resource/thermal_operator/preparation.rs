@@ -138,10 +138,15 @@ impl ThermalOperatorResourceFacts {
 ///
 /// Scratch: row starts and the node→clique incidence (one word each), a row marker and a split
 /// bitset, all within the support builder's entry-free floor.
-fn distinct_support_entries(mesh: &SolverMeshArtifact) -> Result<Option<u64>, ResourcePlanningError> {
+fn distinct_support_entries(
+    mesh: &SolverMeshArtifact,
+) -> Result<Option<u64>, ResourcePlanningError> {
     let topology = &mesh.topology;
     let nodes = topology.nodes.as_slice();
-    if !nodes.windows(2).all(|pair| pair[0].node_id < pair[1].node_id) {
+    if !nodes
+        .windows(2)
+        .all(|pair| pair[0].node_id < pair[1].node_id)
+    {
         return Ok(None);
     }
     let dense = nodes.first().is_some_and(|first| {

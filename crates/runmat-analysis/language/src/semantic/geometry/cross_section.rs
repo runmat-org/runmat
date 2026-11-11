@@ -110,7 +110,10 @@ pub(super) fn source(
         }
     }
     if traces.is_empty() {
-        reader.error(declaration.span, "a cross_section needs at least one `trace`");
+        reader.error(
+            declaration.span,
+            "a cross_section needs at least one `trace`",
+        );
     }
     if reader.diagnostics.len() != errors {
         return None;
@@ -221,7 +224,10 @@ impl Reader<'_> {
                 ..
             }) => layer.clone(),
             Some(value) => {
-                self.error(value.span, "a trace `layer` is the copper layer name in quotes");
+                self.error(
+                    value.span,
+                    "a trace `layer` is the copper layer name in quotes",
+                );
                 return None;
             }
             None => {
@@ -243,7 +249,10 @@ impl Reader<'_> {
                 "top" => Some(CrossSectionTraceBase::Top),
                 "bottom" => Some(CrossSectionTraceBase::Bottom),
                 other => {
-                    self.error(value.span, format!("`base = {other}`: expected top or bottom"));
+                    self.error(
+                        value.span,
+                        format!("`base = {other}`: expected top or bottom"),
+                    );
                     return None;
                 }
             },
@@ -392,7 +401,9 @@ impl Reader<'_> {
 
     fn angle(&mut self, value: &CheckedExpression) -> Option<f64> {
         match &value.kind {
-            CheckedExpressionKind::Quantity { unit, .. } if unit.angle_power() == 1 => scalar(value),
+            CheckedExpressionKind::Quantity { unit, .. } if unit.angle_power() == 1 => {
+                scalar(value)
+            }
             _ => None,
         }
         .or_else(|| {
@@ -435,8 +446,8 @@ fn scalar(value: &CheckedExpression) -> Option<f64> {
         CheckedExpressionKind::Unary { operator, operand } => {
             let scalar = scalar(operand)?;
             Some(match operator {
-                runmat_fea_syntax::FeaUnaryOperator::Positive => scalar,
-                runmat_fea_syntax::FeaUnaryOperator::Negative => -scalar,
+                runmat_design_syntax::FeaUnaryOperator::Positive => scalar,
+                runmat_design_syntax::FeaUnaryOperator::Negative => -scalar,
             })
         }
         _ => None,
@@ -453,8 +464,5 @@ fn quoted_name_and_role(rest: &str) -> Option<(String, &str)> {
 }
 
 fn is_identifier(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

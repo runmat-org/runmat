@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "recorded_on": "2026-11-09",
+  "scope": "Windows CLI diagnostic qualification and conservation of the existing scientific measurements. Distributed products require the subsequent consolidated CI run.",
+  "repair_commit": "c096ba97bd1db22f1138e018a679abf99888ef16",
+  "accepted_inputs": {
+    "sha256": "14486aa3de9dc5297bc4eebc35ab4455bd2db434d4be765eb7b0491bbdca17b7",
+    "files": 24831,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "source_review": "The two CLI excerpt helpers remove a trailing carriage return from displayed source lines. Source bytes, offsets, Unicode column calculation and numerical execution are unchanged. Runtime caret widths exclude the removed line terminator. The existing FEA diagnostic integration fixture uses CRLF on every platform and keeps its exact expected text, location and caret assertion. The original Linux scientific workloads retain their solver inputs, kernels, publication paths, resource charges and assertions.",
+  "platform": "windows-x86_64",
+  "toolchain": "Rust 1.90.0",
+  "builder": "gh-windows-20260330-204014",
+  "candidate": "C:\\Users\\nallana\\rm1293-r964-source",
+  "candidate_scope": "Full byte-verified public snapshot based on 4d8be25ae8e4f710811878398f3bf99adcacfc7a, including the three CLI repair files and the then-current CI/cache helpers. All Rust and Cargo inputs match c096ba97bd1db22f1138e018a679abf99888ef16. Later runner-storage and scheduling revisions are outside this functional proof.",
+  "snapshot_identity": "40b2b533c4a0d4d6ab20fde27c89cb0a3cf48ccf48411d7b4599d138d4c7ac2f",
+  "source_guard": {
+    "matched": 25867,
+    "differences": 0,
+    "log_location": "C:\\Users\\nallana\\rm1293\\logs\\dev-ci-crlf-r1.tests\\postsource.json",
+    "sha256": "536fd2a5c826a57cb3ad1327b4861b72ca946e024ea062cbbb4406f66700ad03"
+  },
+  "checks": [
+    {
+      "command": [
+        "cargo", "test", "--message-format=json-render-diagnostics", "--locked", "--offline", "--no-fail-fast", "--all-features",
+        "--package", "runmat", "--package", "runmat-config",
+        "--package", "runmat-execution", "--package", "runmat-execution-artifact",
+        "--package", "runmat-execution-runner", "--package", "runmat-execution-runner-native",
+        "--package", "runmat-execution-transport-native", "--package", "runmat-logging",
+        "--package", "runmat-lsp", "--package", "runmat-node-agent",
+        "--package", "runmat-package", "--package", "runmat-package-cache",
+        "--package", "runmat-package-cache-native", "--package", "runmat-process-host",
+        "--package", "runmat-server-client", "--package", "runmat-fea-admission-native",
+        "--package", "runmat-test-runner", "--package", "runmat-test-runner-execution",
+        "--package", "runmat-test-runner-native", "--package", "runmat-wasm",
+        "--test", "check_cli"
+      ],
+      "exit_code": 0,
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 0,
+      "test_seconds": 857.93,
+      "log_location": "C:\\Users\\nallana\\rm1293\\logs\\dev-ci-crlf-r1.log",
+      "log_sha256": "e171fdbf4cbb889c6b0c11f5f78e1a07c2c58332bc9561f82ca61d6d94521070",
+      "compiler_log_location": "C:\\Users\\nallana\\rm1293\\logs\\dev-ci-crlf-r1.stderr",
+      "compiler_log_sha256": "2270b2bd3a37cd2b8d078dc1179b50505693e903af599654ccf2e4c119e04316",
+      "cli_artifact": {
+        "path": "C:\\Users\\nallana\\rm1293\\targets\\debug\\runmat.exe",
+        "bytes": 1111127040,
+        "sha256": "cf90f0bba24dbfbad7d67dadc808575581b434f5621a813edbfc73cf1dc19fec",
+        "role": "Debug CLI exercised by check_cli. Its older embedded r1057 AOT archive is outside this diagnostic qualification."
+      }
+    }
+  ],
+  "gpu_witness": {
+    "source": "4d8be25ae8e4f710811878398f3bf99adcacfc7a",
+    "run": 42534293840,
+    "job": 128895056107,
+    "step": "Isolate GPU sequence regression before Windows Runtime tests",
+    "conclusion": "success",
+    "scope": "The logspace/atan2 preflight step passed. The broader Windows Runtime job was still running when this record was written."
+  },
+  "limits": "The original scientific totals and executed artifact identities remain unchanged. This is functional diagnostic evidence, not a performance benchmark, full workspace result or shipping native-product qualification."
+}

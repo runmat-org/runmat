@@ -44,6 +44,15 @@ extern "C" {
     fn exact_resident_bytes() -> Result<f64, JsValue>;
 }
 impl FeaGeometryExecutionHost for BrowserGeometryHost<'_> {
+    async fn ensure_preparation_capacity(
+        &self,
+        additional: runmat_simulation_usage::OperationCount,
+    ) -> Result<(), runmat_runtime::analysis::fea_run_admission::FeaRunDenied> {
+        self.context
+            .ensure_preparation_capacity(additional)
+            .await
+            .map_err(super::fea_lease::denial_from_js)
+    }
     async fn provider_profile(&self) -> Result<GeometryProviderProfile, String> {
         serde_json::from_str(
             &exact_execute("{\"operation\":\"profile\"}", JsValue::UNDEFINED)

@@ -84,7 +84,7 @@ mod tests {
         execution.worker_memory_bytes = 123_456;
         let config = LocalSupervisorConfig::new(
             execution,
-            SupervisorPaths::new(temp.path().to_path_buf()).unwrap(),
+            SupervisorPaths::new(temp.path().join("authority")).unwrap(),
         )
         .unwrap();
         let path = publish_profile(&config).unwrap();
@@ -112,7 +112,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let config = LocalSupervisorConfig::new(
             NativeExecutionConfig::for_current_executable().unwrap(),
-            SupervisorPaths::new(temp.path().to_path_buf()).unwrap(),
+            SupervisorPaths::new(temp.path().join("authority")).unwrap(),
         )
         .unwrap();
         let path = publish_profile(&config).unwrap();

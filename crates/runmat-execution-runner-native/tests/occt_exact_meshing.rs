@@ -24,10 +24,10 @@ use runmat_meshing_execution::{
 const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
 const DISCONNECTED_SOLIDS: &[u8] =
     include_bytes!("../../runmat-geometry/io/tests/fixtures/disconnected_solids.brep");
-// Schema 9 identity includes the typed-unit contracts. The differential test
-// independently checks this box's geometry, volume and linear-field energy.
+// Snapshot of the integrated sizing field. The differential test independently
+// checks geometry, volume and linear-field energy.
 const EXPECTED_BOX_ARTIFACT_DIGEST: &str =
-    "ca159734b541dee8e9935960c60361fbcf67b1cddc19880c0bd265921254d827";
+    "d893fe7da9f4ba05ad730913f882030fe2953df746b59a34cc603d9b4f65743a";
 
 #[path = "occt_exact_meshing/differential.rs"]
 mod differential;

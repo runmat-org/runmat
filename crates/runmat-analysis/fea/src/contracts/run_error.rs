@@ -17,7 +17,7 @@ pub enum FeaRunError {
     #[error("FEA_OBSERVATION_FAILED: {0}")]
     Observation(String),
     #[error(transparent)]
-    Resource(#[from] crate::planning::resource::ResourcePlanningError),
+    Resource(crate::planning::resource::ResourcePlanningError),
     #[error(transparent)]
     FrequencyPlan(#[from] crate::frequency::FrequencyPlanError),
     #[error("FEA_ELECTROMAGNETIC_SOURCE_MISSING: no nonzero source at {frequency_hz} Hz")]
@@ -32,6 +32,15 @@ pub enum FeaRunError {
     AcceleratorRequired(#[from] super::accelerator_admission::AcceleratorRequiredError),
     #[error("FEA_CANCELLED: execution cancelled by user")]
     Cancelled,
+}
+
+impl From<crate::planning::resource::ResourcePlanningError> for FeaRunError {
+    fn from(error: crate::planning::resource::ResourcePlanningError) -> Self {
+        match error {
+            crate::planning::resource::ResourcePlanningError::Cancelled => Self::Cancelled,
+            other => Self::Resource(other),
+        }
+    }
 }
 
 impl From<runmat_simulation_usage::LedgerError> for FeaRunError {
@@ -93,6 +102,18 @@ impl From<crate::constraints::ConstraintResultError> for FeaRunError {
             crate::constraints::ConstraintResultError::Accounting(cause) => Self::Usage(cause),
             crate::constraints::ConstraintResultError::Cancelled => Self::Cancelled,
             other => Self::Assembly(other.to_string()),
+        }
+    }
+}
+
+impl From<crate::results::observation::ObservationError> for FeaRunError {
+    fn from(error: crate::results::observation::ObservationError) -> Self {
+        match error {
+            crate::results::observation::ObservationError::Accounting(cause) => Self::Usage(cause),
+            crate::results::observation::ObservationError::Topology(
+                crate::topology::AnalysisProjectionError::Cancelled,
+            ) => Self::Cancelled,
+            other => Self::Observation(other.to_string()),
         }
     }
 }

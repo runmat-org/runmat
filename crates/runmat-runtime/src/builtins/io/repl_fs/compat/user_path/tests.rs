@@ -26,9 +26,6 @@ fn text(value: &Value) -> String {
 fn setting_survives_a_later_context_and_restoration_uses_captured_layers() {
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = fs::provider_override_lock();
-    #[cfg(windows)]
-    let (first, second) = ("C:\\first", "C:\\second");
-    #[cfg(not(windows))]
     let (first, second) = ("/first", "/second");
     let _first = fs::replace_provider(Arc::new(fs::MemoryFsProvider::with_current_dir(first)));
     let settings = Rc::new(IsolatedMemoryPreferenceService::new());
@@ -150,15 +147,10 @@ impl RuntimeUserPathService for RejectedCommit {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn uncertain_commit_invalidates_source_search_until_rehydration() {
+    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = fs::provider_override_lock();
-    #[cfg(windows)]
-    let cwd = "C:\\selected";
-    #[cfg(not(windows))]
     let cwd = "/selected";
     let _selected = fs::replace_provider(Arc::new(fs::MemoryFsProvider::with_current_dir(cwd)));
-    #[cfg(windows)]
-    let changed = "C:\\new";
-    #[cfg(not(windows))]
     let changed = "/new";
     let search = Arc::new(SearchPath::new(String::new()));
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
@@ -204,15 +196,10 @@ fn known_invalid_path_list_rejects_before_context_or_provider_capture() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn definitive_rejection_preserves_current_user_path_authority() {
+    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = fs::provider_override_lock();
-    #[cfg(windows)]
-    let cwd = "C:\\selected";
-    #[cfg(not(windows))]
     let cwd = "/selected";
     let _selected = fs::replace_provider(Arc::new(fs::MemoryFsProvider::with_current_dir(cwd)));
-    #[cfg(windows)]
-    let changed = "C:\\new";
-    #[cfg(not(windows))]
     let changed = "/new";
     let search = Arc::new(SearchPath::new(String::new()));
     search.install_captured_factory(

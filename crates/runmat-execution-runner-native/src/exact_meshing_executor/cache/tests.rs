@@ -328,14 +328,15 @@ fn cache_lifecycle_reclaims_publication_staging_left_by_an_exited_writer() {
 #[test]
 fn cache_lifecycle_skips_publication_staging_of_a_running_writer() {
     let cache = Cache::new();
-    let mut writers = vec![std::process::id()];
     #[cfg(unix)]
     let mut running = std::process::Command::new("sleep")
         .arg("60")
         .spawn()
         .unwrap();
     #[cfg(unix)]
-    writers.push(running.id());
+    let writers = [std::process::id(), running.id()];
+    #[cfg(not(unix))]
+    let writers = [std::process::id()];
     let temps = writers
         .iter()
         .flat_map(|pid| {

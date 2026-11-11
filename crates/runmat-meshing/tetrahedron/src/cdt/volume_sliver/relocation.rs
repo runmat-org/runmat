@@ -7,9 +7,9 @@ use super::admission::{
     candidate_quality_is_admissible, evaluate_candidate, evaluate_candidate_unranked,
     CandidateAdmissionPolicy, CandidateTopologyContract,
 };
-use super::working::rejected::{RankedOutCandidate, SearchRecording};
 use super::retriangulate::PreparedVertexRemoval;
 use super::work::OptimizationWork;
+use super::working::rejected::{RankedOutCandidate, SearchRecording};
 use super::{
     error, DelaunayVolumeSliverDeletion, DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind,
     DelaunayVolumeSliverMutation, DelaunayVolumeSliverOptions, DelaunayVolumeSliverRelocation,

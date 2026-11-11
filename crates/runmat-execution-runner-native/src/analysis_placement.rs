@@ -43,21 +43,24 @@ pub struct NativeStructuralStudyPlacement {
     program_environment: ProgramEnvironment,
 }
 
+mod allocation;
 pub(crate) mod source_failure;
 mod thermal;
 pub(crate) use thermal::convert_completed_thermal_study;
 pub use thermal::thermal_study_completion_from_source;
 
 impl NativeStructuralStudyPlacement {
-    fn allocation_for(&self, study_count: usize) -> (u32, usize) {
-        let available_workers = self.config.max_workers.max(1);
-        let workers_per_study = if study_count == 1 {
-            available_workers
-        } else {
-            1
-        };
-        let concurrent_studies = (available_workers as usize).min(study_count);
-        (workers_per_study, concurrent_studies)
+    fn allocation_for(&self, study_count: usize) -> Option<(u32, usize)> {
+        let capacity = self
+            .config
+            .local_cpu_capacity_millicores
+            .map(u64::from)
+            .into_iter()
+            .chain(
+                runmat_runtime::analysis::fea_run_admission::current_fea_cpu_capacity_millicores(),
+            )
+            .min();
+        allocation::study_allocation(self.config.max_workers, capacity, study_count)
     }
 
     pub fn new(config: NativeExecutionConfig, program_environment: ProgramEnvironment) -> Self {
@@ -79,15 +82,12 @@ impl NativeStructuralStudyPlacement {
 
 impl StructuralStudyPlacementExecutor for NativeStructuralStudyPlacement {
     fn allocated_cpu_millicores(&self, study_count: usize) -> u32 {
-        let (workers, concurrent) = self.allocation_for(study_count);
+        let Some((workers, concurrent)) = self.allocation_for(study_count) else {
+            return 0;
+        };
         workers
             .saturating_mul(concurrent as u32)
             .saturating_mul(1000)
-            .min(
-                self.config
-                    .local_cpu_capacity_millicores
-                    .unwrap_or(u32::MAX),
-            )
     }
 
     fn execute<'a>(
@@ -98,7 +98,9 @@ impl StructuralStudyPlacementExecutor for NativeStructuralStudyPlacement {
             if entries.is_empty() {
                 return Err("native structural placement requires at least one study".into());
             }
-            let (workers_per_study, concurrent_studies) = self.allocation_for(entries.len());
+            let (workers_per_study, concurrent_studies) = self
+                .allocation_for(entries.len())
+                .ok_or("native structural placement requires an admitted whole CPU core")?;
             let mut results = Vec::with_capacity(entries.len());
             for batch in entries.chunks(concurrent_studies) {
                 let pending = FuturesUnordered::new();

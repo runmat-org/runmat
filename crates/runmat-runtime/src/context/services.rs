@@ -238,6 +238,16 @@ pub trait RuntimeWorkspaceService {
         self.ensure_mutation_authority()
     }
 
+    /// Publish already-admitted mutations before retired values are observed.
+    /// Staging adapters override this boundary without capturing or reconciling
+    /// a workspace snapshot. Immediate adapters only validate their authority.
+    fn publish_admitted_mutations_with_context(
+        &self,
+        context: &RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_mutation_authority_with_context(context)
+    }
+
     /// Revision of an authority-backed workspace after its latest admission
     /// checkpoint. Exact executor adapters use this to avoid materializing a
     /// complete workspace when no externally visible state changed.

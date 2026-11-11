@@ -219,6 +219,7 @@ async fn execute_command(
             verbose,
             deny,
             search_paths,
+            no_simulate,
         } => {
             boxed_command(|| {
                 check::execute_check(
@@ -231,6 +232,7 @@ async fn execute_command(
                         verbose,
                         deny,
                         search_paths,
+                        no_simulate,
                     },
                 )
             })
@@ -250,13 +252,15 @@ async fn execute_command(
         } => {
             boxed_command(|| {
                 fea::snapshot(
-                    file,
-                    study,
-                    step,
-                    case,
-                    views,
-                    out,
-                    presentation,
+                    fea::SnapshotRequest {
+                        file,
+                        study,
+                        step,
+                        case,
+                        views,
+                        out,
+                        presentation,
+                    },
                     cli,
                     config,
                 )

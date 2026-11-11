@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
+    "files": 24826,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "51d1c9812c4397e06f28fa087fd7c5b227a4365a62c2105d44b57270a76519c6",
+    "files": 24826,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "authored-cli-physics",
+    "driver-recovery-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows.rs",
+      "before": [
+        "100644",
+        "blob",
+        "759278f039c5be230240ad3f4e61953fe174c400"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1a202c9f903b48f4fdc622e8f2025868ede68075"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows/directory.rs",
+      "before": [
+        "100644",
+        "blob",
+        "35bb7a89e2471be8f93ac9cae4f99f0a8b561866"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "dc320ba33fa932ce82aad0ee26ba09c26d477f8b"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f67e8814b51e07aa4508817998a050919d4d5025"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "64271da928cf481eb3203bcc574758cbb9aa4d7f"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    },
+    {
+      "path": "crates/runmat-cli/src/commands/job/submit.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7ecf4553f77eb3ee1eb76e2daacc6db11bd9c1a8"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cf6c590440744353e4b077e4ae89dd4aa59881bc"
+      ],
+      "reason": "Only the remote CLI artifact-upload request uses the corrected existing suite constant. The authored scientific cohort executes local studies; the recovery harness exercises the unchanged execution runner. Their numerical algorithms, fixtures, worker/admission/publication code and assertions are unchanged. Final remote upload and platform-product acceptance remain separate requirements."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/windows-private-path-r1056.json",
+      "sha256": "e1ddce3db2aafa79944170959f2ab9b94ea12c0bd27ba11fa60b81b8477fbc80"
+    },
+    {
+      "path": "qualification/scientific/evidence/cli-artifact-suite-r1057.json",
+      "sha256": "0a408db2fbd2299ac7b33454c6edcaf0f79e5caa797926c7ed0c1f108f8556f4"
+    }
+  ],
+  "reason": "Three Windows-only private-filesystem inputs are excluded from the measured Linux target. The fourth input changes only the CLI remote-upload metadata producer, outside both measured scientific routes. Exact inverse edits reconstruct the original measured inventory. Preserve original measured counts, commands, artifacts and logs. This conservation does not qualify the corrected remote flow or final platform products."
+}

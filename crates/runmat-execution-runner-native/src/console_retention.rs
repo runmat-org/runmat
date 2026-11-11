@@ -751,8 +751,8 @@ mod tests {
         assert!(grant.minimum_memory_bytes().unwrap() <= resources.memory_bytes);
         assert_eq!(grant.max_records, 4);
         assert_eq!(grant.max_text_bytes, 100);
-        let unbounded = ConsoleRetentionOwner::source_subgrant(resources.memory_bytes, limits, 1)
-            .unwrap();
+        let unbounded =
+            ConsoleRetentionOwner::source_subgrant(resources.memory_bytes, limits, 1).unwrap();
         assert!(unbounded.max_encoded_bytes > resources.max_artifact_bytes);
     }
 

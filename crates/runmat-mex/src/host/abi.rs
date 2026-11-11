@@ -23,6 +23,9 @@ pub const MEX_HOST_ABI_VERSION: u32 = 10;
 #[cfg(all(test, not(target_family = "wasm")))]
 mod retirement_tests;
 
+#[cfg(all(test, not(target_family = "wasm")))]
+mod callback_lock_tests;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexDiagnostic {
     pub identifier: Option<String>,
@@ -143,16 +146,31 @@ impl MexCallState {
         services: Rc<dyn MexHostServices>,
         values: Rc<crate::MxValueContext>,
     ) {
-        let mut state = self.inner.lock().expect("MEX state is not poisoned");
+        let (mode, interface) = {
+            let state = self.inner.lock().expect("MEX state is not poisoned");
+            (state.mx.mode(), state.interface)
+        };
         let services = Rc::new(DirectMexBoundaryHostServices::new(
-            services,
-            values,
-            state.mx.mode(),
-            state.interface,
+            services, values, mode, interface,
         ));
         let (guard, services) = LocalBoundaryServiceGuard::register(services);
-        state.local_service_guard = Some(guard);
-        state.services = services;
+        self.replace_boundary_services(services, Some(guard));
+    }
+
+    fn replace_boundary_services(
+        &self,
+        services: BoundaryServiceSlot,
+        local_service_guard: Option<LocalBoundaryServiceGuard>,
+    ) {
+        let retired = {
+            let mut state = self.inner.lock().expect("MEX state is not poisoned");
+            (
+                std::mem::replace(&mut state.local_service_guard, local_service_guard),
+                std::mem::replace(&mut state.services, services),
+            )
+        };
+        // A retired service can release values or reenter its invocation.
+        drop(retired);
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -160,9 +178,7 @@ impl MexCallState {
         &self,
         services: std::sync::Arc<dyn ConcurrentMexBoundaryHostServices>,
     ) {
-        let mut state = self.inner.lock().expect("MEX state is not poisoned");
-        state.local_service_guard = None;
-        state.services = BoundaryServiceSlot::concurrent(services);
+        self.replace_boundary_services(BoundaryServiceSlot::concurrent(services), None);
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -1413,10 +1429,13 @@ unsafe extern "C" fn get_property(
             state.fail("handle object index is out of range");
             return std::ptr::null_mut();
         }
-        return match state
-            .services
-            .get_object_property(handle, index, &property_name)
-        {
+        let services = state.services.clone();
+        drop(state);
+        let result = services.get_object_property(handle, index, &property_name);
+        let Some(mut state) = (unsafe { self::state(host) }) else {
+            return std::ptr::null_mut();
+        };
+        return match result {
             Ok(value) => state.mx.allocate(value),
             Err(error) => {
                 state.error = Some(error);
@@ -1649,7 +1668,13 @@ unsafe extern "C" fn eval(host: *mut c_void, command: *const c_char) -> i32 {
         state.fail("evaluation command is null");
         return 1;
     };
-    match state.services.eval(&command) {
+    let services = state.services.clone();
+    drop(state);
+    let result = services.eval(&command);
+    let Some(mut state) = (unsafe { self::state(host) }) else {
+        return 1;
+    };
+    match result {
         Ok(()) => 0,
         Err(error) => {
             state.error = Some(error);
@@ -1702,16 +1727,37 @@ unsafe extern "C" fn call(
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let outputs = state.services.call(&function, arguments, nlhs)?;
-        if outputs.len() != nlhs {
-            return Err(MexDiagnostic {
-                identifier: Some("RunMat:MEX:OutputCount".into()),
-                message: format!(
-                    "callback '{function}' returned {} outputs when {nlhs} were requested",
-                    outputs.len()
-                ),
-            });
+        Ok((function, arguments, nlhs))
+    })();
+    let (function, arguments, nlhs) = match result {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            state.error = Some(error);
+            return 1;
         }
+    };
+    let services = state.services.clone();
+    // Nested host calls may inspect or retire this invocation. Keep argument
+    // leases alive, but release the arena mutex before entering host code.
+    drop(state);
+    let result = services
+        .call(&function, arguments, nlhs)
+        .and_then(|outputs| {
+            if outputs.len() != nlhs {
+                return Err(MexDiagnostic {
+                    identifier: Some("RunMat:MEX:OutputCount".into()),
+                    message: format!(
+                        "callback '{function}' returned {} outputs when {nlhs} were requested",
+                        outputs.len()
+                    ),
+                });
+            }
+            Ok(outputs)
+        });
+    let Some(mut state) = (unsafe { self::state(host) }) else {
+        return 1;
+    };
+    let result = result.map(|outputs| {
         let output_pointers = if nlhs == 0 {
             &mut [][..]
         } else {
@@ -1721,8 +1767,7 @@ unsafe extern "C" fn call(
         for (slot, output) in output_pointers.iter_mut().zip(outputs) {
             *slot = state.mx.allocate(output);
         }
-        Ok(())
-    })();
+    });
     match result {
         Ok(()) => 0,
         Err(error) => {
@@ -1748,7 +1793,13 @@ unsafe extern "C" fn get_variable(
         state.fail("variable name is null");
         return std::ptr::null_mut();
     };
-    match state.services.get_variable(&workspace, &name) {
+    let services = state.services.clone();
+    drop(state);
+    let result = services.get_variable(&workspace, &name);
+    let Some(mut state) = (unsafe { self::state(host) }) else {
+        return std::ptr::null_mut();
+    };
+    match result {
         Ok(Some(value)) => {
             let pointer = state.mx.allocate(value);
             if workspace == "global" {
@@ -1785,8 +1836,21 @@ unsafe extern "C" fn put_variable(
                 identifier: Some("RunMat:MEX:InvalidArray".into()),
                 message: error.to_string(),
             })?;
-        state.services.put_variable(&workspace, &name, value)
+        Ok((workspace, name, value))
     })();
+    let (workspace, name, value) = match result {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            state.error = Some(error);
+            return 1;
+        }
+    };
+    let services = state.services.clone();
+    drop(state);
+    let result = services.put_variable(&workspace, &name, value);
+    let Some(mut state) = (unsafe { self::state(host) }) else {
+        return 1;
+    };
     match result {
         Ok(()) => 0,
         Err(error) => {

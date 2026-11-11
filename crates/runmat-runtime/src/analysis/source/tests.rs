@@ -238,6 +238,16 @@ study static {
 
     let program = check_fea_source_in_root(temporary.path(), &path, source.as_bytes()).unwrap();
 
+    #[cfg(windows)]
+    {
+        let canonical_root = fs::canonicalize(temporary.path()).unwrap();
+        let canonical =
+            check_fea_source_in_root(&canonical_root, &path, source.as_bytes()).unwrap();
+        assert!(canonical.is_valid(), "{:#?}", canonical.diagnostics);
+        assert_eq!(canonical.materials.len(), program.materials.len());
+        assert_eq!(canonical.studies.len(), program.studies.len());
+    }
+
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     assert_eq!(program.materials.len(), 1);
     assert_eq!(program.studies.len(), 1);
@@ -389,7 +399,15 @@ study second {
         "part"
     );
     assert_eq!(report.program.studies[0].mesh.mesh_id, "volume");
-    assert_eq!(report.program.studies[0].model.as_ref().unwrap().model.model_id, "structure");
+    assert_eq!(
+        report.program.studies[0]
+            .model
+            .as_ref()
+            .unwrap()
+            .model
+            .model_id,
+        "structure"
+    );
     assert_eq!(
         report.program.studies[0].sequence.steps[0].step_id.0,
         "solve"
@@ -404,6 +422,88 @@ study second {
         }))
         .unwrap();
     assert_eq!(selected.id(), "second");
+}
+
+#[test]
+fn sweeps_own_their_study_root_but_preserve_explicit_study_selection() {
+    let temporary = tempdir().unwrap();
+    let path = temporary.path().join("main.fea");
+    let study = r#"
+study response {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.structure
+    input scale : real = 1
+    analysis solve { structural static {} }
+    output displacement = analysis.solve.field.node.displacement
+}
+"#;
+    let source = format!(
+        r#"
+geometry part {{
+    construct {{
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }}
+}}
+mesh volume on geometry.part {{
+    tetrahedra {{
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }}
+}}
+model structure {{}}
+{study}
+sweep envelope over study.response {{
+    axis scale {{ half = 0.5; full = 1 }}
+}}
+"#
+    );
+    for independent in [false, true] {
+        let source = if independent {
+            format!(
+                "{source}\n{}",
+                study.replace("study response", "study independent")
+            )
+        } else {
+            source.clone()
+        };
+        let checked = prepare_fea_sources_in_root(
+            temporary.path(),
+            &path,
+            &[(path.clone(), source.into_bytes())],
+        )
+        .unwrap()
+        .check(Vec::new(), Vec::new())
+        .unwrap();
+        assert_eq!(checked.check_result().status, super::FeaCheckStatus::Valid);
+        let explicit = super::FeaRootSelector::Study {
+            id: "response".into(),
+        };
+        assert_eq!(
+            checked.resolve_root(Some(&explicit)).unwrap().id(),
+            "response"
+        );
+        if independent {
+            assert_eq!(checked.root_selectors().len(), 2);
+            assert!(matches!(
+                checked.resolve_root(None),
+                Err(super::FeaRootSelectionError::MultipleRoots { .. })
+            ));
+        } else {
+            assert_eq!(
+                checked.root_selectors(),
+                vec![super::FeaRootSelector::Sweep {
+                    id: "envelope".into()
+                }]
+            );
+            assert!(matches!(
+                checked.resolve_root(None),
+                Ok(super::ResolvedFeaRoot::Sweep(_))
+            ));
+        }
+    }
 }
 
 #[test]

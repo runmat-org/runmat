@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::path::Path;
 
 use serde::de::DeserializeOwned;
@@ -39,11 +38,17 @@ pub(crate) fn immutable_json(path: &Path, value: &impl Serialize) -> NativeExecu
         }),
         AtomicCreateResult::Existing(existing) if existing == bytes => {
             // Preserve the winner; reaffirm retention rather than replacing it.
-            File::open(path)
+            // Windows FlushFileBuffers requires write access; reopening never
+            // truncates or replaces the original immutable publication.
+            #[cfg(windows)]
+            let retained = std::fs::OpenOptions::new().write(true).open(path);
+            #[cfg(not(windows))]
+            let retained = std::fs::File::open(path);
+            retained
                 .and_then(|file| file.sync_all())
                 .map_err(|error| retained_publication_error(path, error))?;
-            File::open(path.parent().expect("validated parent"))
-                .and_then(|dir| dir.sync_all())
+            NativeFsProvider
+                .synchronize_directory(path.parent().expect("validated parent"))
                 .map_err(|error| retained_publication_error(path, error))
         }
         AtomicCreateResult::Existing(_) => Err(NativeExecutionError::Protocol(

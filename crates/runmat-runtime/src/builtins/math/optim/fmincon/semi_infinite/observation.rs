@@ -71,11 +71,12 @@ pub(in crate::builtins::math::optim::fmincon) async fn observe(
     direction: &[f64],
     alpha: Option<f64>,
 ) -> BuiltinResult<bool> {
-    #[cfg_attr(not(feature = "plot-core"), allow(unused_mut))]
-    let mut domain = evaluator
+    let domain = evaluator
         .semi_infinite
         .take()
         .expect("selected semi-infinite observer domain");
+    #[cfg(feature = "plot-core")]
+    let mut domain = domain;
     let result=async {
         let terminal=phase==OutputState::Done;
         let show=match parameters.display {

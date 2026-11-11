@@ -400,7 +400,7 @@ fn package_completed(
         result_objects: result.result_objects,
     };
     response.validate_against(request).map_err(protocol)?;
-    packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
+    packaged(response, pool).map(Ok)
 }
 
 fn validate_source_entities(

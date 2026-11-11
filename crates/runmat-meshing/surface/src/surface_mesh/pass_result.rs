@@ -10,8 +10,7 @@ use super::{
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-exact-surface-pass-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "exact-surface-pass-result/v1";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::platform_content(1024 * 1024, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 pub fn validate_exact_surface_pass_result(
     result: &ExactSurfacePassResult,

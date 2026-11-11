@@ -197,7 +197,7 @@ pub fn prepare_structural_linear_program(
         &field_definitions,
         ObservationLimits::default(),
     )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    .map_err(AnalysisBridgeError::from)?;
     let solve_bytes = preparation.workload.canonical_bytes()?;
     let topology_digest = constraint_plan.topology.discretization_digest();
     match (

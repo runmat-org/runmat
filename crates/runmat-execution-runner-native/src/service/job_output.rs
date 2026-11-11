@@ -4,8 +4,44 @@ use runmat_runtime::execution::ExecutionServiceError;
 use runmat_value::SharedJobHandle;
 
 use crate::durable::DurableJobBridge;
-use crate::supervisor::{RawProcessOutputAttempt, RawProcessOutputCursor};
+use crate::supervisor::{
+    RawProcessOutputAttempt, RawProcessOutputCursor, RawProcessOutputLookup, RawProcessOutputPage,
+};
 use crate::RawOutputState;
+
+trait OriginalOutputSource {
+    fn raw_output_attempt(
+        &self,
+        handle: SharedJobHandle,
+        ordinal: u32,
+    ) -> Result<RawProcessOutputLookup, ExecutionServiceError>;
+
+    fn raw_output_page(
+        &self,
+        handle: SharedJobHandle,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cursor: RawProcessOutputCursor,
+    ) -> Result<Option<RawProcessOutputPage>, ExecutionServiceError>;
+}
+
+impl OriginalOutputSource for DurableJobBridge {
+    fn raw_output_attempt(
+        &self,
+        handle: SharedJobHandle,
+        ordinal: u32,
+    ) -> Result<RawProcessOutputLookup, ExecutionServiceError> {
+        DurableJobBridge::raw_output_attempt(self, handle, ordinal)
+    }
+
+    fn raw_output_page(
+        &self,
+        handle: SharedJobHandle,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cursor: RawProcessOutputCursor,
+    ) -> Result<Option<RawProcessOutputPage>, ExecutionServiceError> {
+        DurableJobBridge::raw_output_page(self, handle, attempt_id, cursor)
+    }
+}
 
 pub(super) fn wait<'a>(
     record: std::rc::Rc<super::DurableJobReceipt>,
@@ -146,7 +182,7 @@ impl DurableCallerOutput {
 
     fn pump_open(
         &mut self,
-        bridge: &DurableJobBridge,
+        bridge: &impl OriginalOutputSource,
         handle: &SharedJobHandle,
         runtime: &RuntimeContext,
     ) -> Result<bool, ExecutionServiceError> {
@@ -177,13 +213,20 @@ impl DurableCallerOutput {
                 self.advance();
                 return Ok(true);
             }
-            return if refreshed.terminal.is_some() {
-                Err(invalid(
+            if refreshed.terminal.is_some() {
+                // Discovery can precede header publication while the following
+                // lookup already sees closure. Recheck after that observation.
+                if bridge
+                    .raw_output_page(handle.clone(), active.attempt_id, self.cursor)?
+                    .is_some()
+                {
+                    return Ok(true);
+                }
+                return Err(invalid(
                     "closed durable attempt has no original output journal",
-                ))
-            } else {
-                Ok(false)
-            };
+                ));
+            }
+            return Ok(false);
         };
         let mut progress = page.next != self.cursor;
         for (index, bytes, state, stream) in [
@@ -229,10 +272,10 @@ impl DurableCallerOutput {
         if !progress {
             let lookup = bridge.raw_output_attempt(handle.clone(), self.ordinal)?;
             if lookup.state.is_terminal() && !page.retired {
-                // The page above was read before this terminal observation.
-                // The producer marks its journal retired before it returns the
-                // outcome whose report makes the job terminal, so only a page
-                // read after the terminal state can prove a missing retirement.
+                // Terminal closure can occur after the earlier page snapshot.
+                // Release that page before refreshing retirement in this order.
+                // The next pump delivers any bytes in the newer terminal page.
+                drop(page);
                 let fresh = bridge
                     .raw_output_page(handle.clone(), active.attempt_id, self.cursor)?
                     .ok_or_else(|| invalid("durable output journal disappeared"))?;
@@ -260,3 +303,7 @@ impl DurableCallerOutput {
 fn invalid(message: &'static str) -> ExecutionServiceError {
     ExecutionServiceError::Infrastructure(message.into())
 }
+
+#[cfg(test)]
+#[path = "job_output/tests.rs"]
+mod tests;

@@ -109,11 +109,7 @@ fn mesh() -> SolverMeshArtifact {
 
 /// The two-layer joint box with `cells` hexahedral cells (each split into tetrahedra).
 pub(super) fn mesh_with(cells: [usize; 3]) -> SolverMeshArtifact {
-    let mut mesh = layered_box_mesh(
-        cells,
-        [0.5, 1.0, 0.5],
-        &[(SPLIT, "lower"), (2.0, "upper")],
-    );
+    let mut mesh = layered_box_mesh(cells, [0.5, 1.0, 0.5], &[(SPLIT, "lower"), (2.0, "upper")]);
     for face in &mut mesh.topology.boundary_faces {
         if let Some(lower) = face
             .provenance

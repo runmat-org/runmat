@@ -49,10 +49,14 @@ fn loose_search_root_identity_is_relocatable_and_distinguishes_equal_leaf_source
 #[test]
 fn loose_companion_uses_the_same_captured_search_root_not_cwd_display_text() {
     use runmat_runtime::builtins::common::path_search::FileCandidateOrigin;
-    let build = |prefix: &str| {
+    let build = |prefix: &str, companion_prefix: &str, canonical_root: Option<&str>| {
         let access_root = std::path::PathBuf::from(prefix);
         let primary_access = format!("{prefix}/+pkg/main.m");
-        let companion_access = format!("{prefix}/+pkg/helper.m");
+        let companion_access = std::path::Path::new(companion_prefix)
+            .join("+pkg")
+            .join("helper.m")
+            .to_string_lossy()
+            .into_owned();
         let origin = FileCandidateOrigin::SearchRoot {
             ordinal: 2,
             access_root,
@@ -62,6 +66,12 @@ fn loose_companion_uses_the_same_captured_search_root_not_cwd_display_text() {
             ProgramSourceTable::dynamic_root(&primary_access, "value = helper();", None, &origin)
                 .unwrap();
         let mut discovery = CompanionSourceDiscovery::default();
+        #[cfg(windows)]
+        {
+            discovery.canonical_search_root = canonical_root.map(std::path::PathBuf::from);
+        }
+        #[cfg(not(windows))]
+        let _ = canonical_root;
         discovery.statements.push(DiscoveredSourceStatement {
             statement: runmat_parser::parse("function y = helper(); y = 5; end")
                 .unwrap()
@@ -81,16 +91,37 @@ fn loose_companion_uses_the_same_captured_search_root_not_cwd_display_text() {
             1,
             None,
             &origin,
-        )
-        .unwrap();
+        )?;
         assert_eq!(table.source_map.entries()[1].relative_path, "+pkg/helper.m");
         assert_eq!(
             table.source_map.entries()[1].owner_identity,
             "dynamic-search-root:2"
         );
-        serde_json::to_vec(&table.source_map.portable_v2().unwrap()).unwrap()
+        Ok::<_, String>(serde_json::to_vec(&table.source_map.portable_v2().unwrap()).unwrap())
     };
-    assert_eq!(build("/checkout-one"), build("/checkout-two"));
+    assert_eq!(
+        build("/checkout-one", "/checkout-one", None).unwrap(),
+        build("/checkout-two", "/checkout-two", None).unwrap()
+    );
+    assert!(build("/checkout-one", "/different-root", None).is_err());
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            build(r"C:\checkout-one", r"C:\checkout-one", None).unwrap(),
+            build(
+                r"C:\checkout-one",
+                r"\\?\C:\checkout-one",
+                Some(r"\\?\C:\checkout-one")
+            )
+            .unwrap()
+        );
+        assert!(build(
+            r"C:\checkout-one",
+            r"\\?\C:\different-root",
+            Some(r"\\?\C:\checkout-one")
+        )
+        .is_err());
+    }
 }
 
 fn runtime() -> runmat_runtime::context::RuntimeContext {

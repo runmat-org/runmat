@@ -18,6 +18,7 @@ impl RuntimeContext {
         let captured = self.background_callback_services(requires_source_evaluation, operation)?;
         Ok(self
             .clone()
+            .with_cleanup_completion(None)
             .with_graphics_callback_mutation(None)
             .with_language_policy(captured.policy)
             .with_service_ports(captured.services))
@@ -92,6 +93,7 @@ impl RuntimeContext {
             self.background_callback_services(requires_source_evaluation, "graphics callback")?;
         // Do not clone a caller's constructor/Value payload merely to clear it.
         let mut selected = RuntimeContext {
+            cleanup_completion: None,
             acceleration_policy: self.acceleration_policy,
             graphics_callback_mutation: None,
             execution: self.execution.clone(),
@@ -163,6 +165,7 @@ impl RuntimeContext {
         // Exhaustive decomposition makes a new context field an explicit
         // capture/reconstruction decision, rather than inheriting a drainer.
         let RuntimeContext {
+            cleanup_completion: _,
             acceleration_policy,
             graphics_callback_mutation: _,
             execution,
@@ -246,6 +249,7 @@ impl RuntimeContext {
                     services = services.with_graphics_presentation(presentation.clone());
                 }
                 Ok(RuntimeContext {
+                    cleanup_completion: None,
                     acceleration_policy,
                     graphics_callback_mutation: None,
                     execution,

@@ -6,6 +6,9 @@
 #[path = "../gui/plot_overlay.rs"]
 pub mod plot_overlay;
 
+#[path = "../gui/legend_placement.rs"]
+pub(crate) mod legend_placement;
+
 #[path = "../gui/cad_overlay.rs"]
 pub(crate) mod cad_overlay;
 

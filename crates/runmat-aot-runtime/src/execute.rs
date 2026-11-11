@@ -15,11 +15,11 @@ use crate::{
 
 #[path = "execute/acceleration.rs"]
 mod acceleration;
+mod failure;
 #[path = "execute/linked_selected.rs"]
 mod linked_selected;
 #[path = "execute/target_test.rs"]
 mod target_test;
-mod failure;
 pub(crate) use failure::ProcessFailure;
 
 enum InvocationMode<'a> {
@@ -436,6 +436,20 @@ fn execute_with_linked_authority(
         interpreter_resume_points: resume_points,
         ..runmat_native_executor::NativeExecutorOptions::default()
     };
+    let failure_reservation = failure::RuntimeFailureReservation::prepare(&runtime)?;
+    let liveness_admission = match runmat_native_codegen::NativeLivenessAdmission::capture(&runtime)
+    {
+        Ok(admission) => admission,
+        Err(source) => {
+            let cause = runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+                Some(&runtime),
+                "RunMat:NativeLivenessAdmission",
+                "standalone native liveness metadata admission failed",
+                source,
+            );
+            return Err(failure_reservation.into_failure(cause));
+        }
+    };
     let executor = Rc::new(
         match &linked_selected {
             Some(linked) => runmat_native_executor::NativeExecutor::bind_linked_selected(
@@ -444,12 +458,16 @@ fn execute_with_linked_authority(
                 options,
                 &linked.product,
                 linked.services.clone(),
+                liveness_admission,
             ),
-            None => {
-                runmat_native_executor::NativeExecutor::bind(assembly.clone(), executable, options)
-            }
+            None => runmat_native_executor::NativeExecutor::bind(
+                assembly.clone(),
+                executable,
+                options,
+                liveness_admission,
+            ),
         }
-        .map_err(|error| format!("standalone native host initialization failed: {error}"))?,
+        .map_err(|error| failure_reservation.into_failure(error.into_runtime_error()))?,
     );
 
     // Keep the original session owner through foreign teardown and terminal
@@ -689,7 +707,9 @@ fn standalone_runtime(
         match runmat_runtime::analysis::fea_run_admission::capture_fea_run_admission() {
             Ok(originating) => originating,
             Err(runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired) => {
-                std::sync::Arc::new(runmat_fea_admission_native::NativeFeaAdmission::compiled(None))
+                std::sync::Arc::new(runmat_fea_admission_native::NativeFeaAdmission::compiled(
+                    None,
+                ))
             }
             Err(_) => std::sync::Arc::new(
                 runmat_fea_admission_native::NativeFeaAdmission::from_selection(

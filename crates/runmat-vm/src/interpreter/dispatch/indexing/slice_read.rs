@@ -48,8 +48,13 @@ pub(super) async fn dispatch(
                         &plan,
                     )?;
                     stack.try_push(match selected {
-                        Value::LogicalArray(value) if value.len() <= 1 => {
-                            Value::Bool(value.data.first().copied().unwrap_or(0) != 0)
+                        Value::LogicalArray(value)
+                            if value.len() == 1
+                                && runmat_runtime::builtins::common::shape::is_scalar_shape(
+                                    &value.shape,
+                                ) =>
+                        {
+                            Value::Bool(value.data[0] != 0)
                         }
                         other => other,
                     })?;

@@ -225,8 +225,14 @@ fn dynamic_classpath_add_and_remove_rebuilds_the_session_loader() {
         eprintln!("live JVM fixture requires javac; test was not requested");
         return;
     }
-    let root = tempfile::tempdir().unwrap();
-    let package = root.path().join("fixture/dynamic");
+    let root = tempfile::Builder::new()
+        .prefix("runmat classes # λ ")
+        .tempdir()
+        .unwrap();
+    // Keep javac's platform command-line encoding separate from the loader's
+    // Unicode classpath contract. Only the classloader consumes the final root.
+    let compilation = tempfile::tempdir().unwrap();
+    let package = compilation.path().join("fixture/dynamic");
     std::fs::create_dir_all(&package).unwrap();
     let source = package.join("DynamicValue.java");
     let interface = package.join("NumberSource.java");
@@ -253,11 +259,23 @@ fn dynamic_classpath_add_and_remove_rebuilds_the_session_loader() {
     )
     .unwrap();
     assert!(Command::new(compiler)
-        .args(["-d", root.path().to_str().unwrap()])
+        .arg("-d")
+        .arg(compilation.path())
         .args([&interface, &source, &driver, &service_access])
         .status()
         .unwrap()
         .success());
+    let published_package = root.path().join("fixture/dynamic");
+    std::fs::create_dir_all(&published_package).unwrap();
+    for name in [
+        "NumberSource",
+        "DynamicValue",
+        "FixtureDriver",
+        "ServiceAccess",
+    ] {
+        let class = format!("{name}.class");
+        std::fs::copy(package.join(&class), published_package.join(class)).unwrap();
+    }
     let services = root.path().join("META-INF/services");
     std::fs::create_dir_all(&services).unwrap();
     std::fs::write(

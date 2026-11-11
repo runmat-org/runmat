@@ -294,6 +294,14 @@ pub async fn execute_serial_structural_sequence_with_capacity<S: CacheImport + C
         if cancelled() {
             return Err(AnalysisBridgeError::Invalid("Simulation stopped.".into()));
         }
+        if let Some(capacity) = capacity {
+            capacity
+                .ensure_capacity(coordinator.next_solve_wave_work_upper_bound()?)
+                .await
+                .map_err(|cause| {
+                    AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(cause))
+                })?;
+        }
         let solve_wave = coordinator.prepare_next_solve_wave()?;
         let mut responses = BTreeMap::new();
         let mut attempts = BTreeMap::new();

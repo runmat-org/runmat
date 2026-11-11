@@ -1,0 +1,111 @@
+// The 4-in-1 ESC at full throttle inside the closed body: its losses pass through a gap pad into
+// the aluminium heatsink in the belly window, whose fins give them to the propellers' downwash.
+//
+// Geometry: ./geometry/esc_thermal.step, exported from esc_thermal.assembly (the heatsink, the gap
+// pad on its pedestal and the ESC as a plate on its standoffs). The lower shell is left out: the
+// heatsink clears its window by 0.1 mm or more, so the shell carries none of the heat.
+//
+// Heat: copied by hand from the ESC's gate_drive simulation and its parts, because the FEA does
+// not yet take a circuit's losses or a routed board as a heat source (brief to the FEA lane,
+// 2026-11-05). Per channel at 20 A: conduction in the two conducting FETs 20^2 x 1.6 mOhm x 2 =
+// 1.28 W; switching 0.5 x 22.2 V x 20 A x (7 ns + 7 ns) x 48 kHz = 0.15 W (7 ns edges from the
+// simulation); gate drive 6 x 35 nC x 10 V x 48 kHz = 0.10 W; the three current shunts at most
+// 20^2 x 0.5 mOhm = 0.20 W (one shunt carrying the full 20 A); the phase copper, about one 2 oz
+// square (0.25 mOhm) from the FETs to each motor pad, 2 x 20^2 x 0.25 mOhm = 0.20 W for the two
+// conducting phases; driver and MCU about 0.03 W. That is 1.96 W a channel and 7.8 W for the
+// board: 7.84 W over 4,326 mm^3 is 1.81e6 W/m^3.
+//
+// Board: a six-layer stack, 2 oz outside and 1 oz inside (278 um of copper in 1.6 mm, 17 % of
+// the thickness), spreads heat in plane at about 68 W/m/K: 0.17 x 385 + 0.83 x 0.8. The plate is
+// isotropic, so it overstates through-plane conduction. It also spreads the losses evenly, while
+// the board concentrates them in the FETs and shunts: bridges A and B of each channel stand at
+// the board's edge, 4.7 mm outside the 36 mm gap pad, so their heat reaches the pad sideways
+// through the copper. Hand check: a bridge's 0.69 W (with its copper) across 4.7 mm of a 10 mm wide
+// strip is 3 K through all six layers (4.4 K/W) and 12 K through the 2 oz top layer alone
+// (17 K/W).
+// Gap pad: 3 W/m/K silicone filler, 0.5 mm. Heatsink: 6061-T6 (167 W/m/K). Downwash: forced
+// convection at 25 W/m^2/K and 35 degC on the heatsink's fins and plate below the belly. The air
+// inside the shell is left out (still air carries little).
+//
+// Hand check (esc_heatsink.part): 19,260 mm^2 of fins and plate below the belly at 99 % fin
+// efficiency is 2.1 K/W, the pad 0.15 K/W and the pedestal 0.03 K/W, so at 7.8 W the pad's seat
+// runs about 18 K over ambient, 53 degC, and the edge bridges 3 to 12 K more, 56 to 65 degC. The
+// study must land within about 5 K of the pad seat; its board peak reads the even spread, below
+// the edge bridges' figure.
+
+geometry esc {
+    file = "./geometry/esc_thermal.step"
+    units = mm
+    interfaces = shared
+    region board : solid { select name "esc_board_thermal"; expect exactly_one }
+    region pad : solid { select name "thermal_pad"; expect exactly_one }
+    region heatsink : solid { select name "esc_heatsink"; expect exactly_one }
+    region fins : face { select name "fins"; expect one_or_more }
+}
+
+mesh esc on geometry.esc {
+    tetrahedra {
+        order = linear
+        target_size = 2 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material board_stack {
+    mass_density = 2200 kg/m^3
+    thermal {
+        reference_temperature = 308.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.000016 K^-1
+        conductivity = 68 W/m/K
+        specific_heat = 900 J/kg/K
+    }
+}
+
+material gap_pad {
+    mass_density = 3100 kg/m^3
+    thermal {
+        reference_temperature = 308.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.0002 K^-1
+        conductivity = 3 W/m/K
+        specific_heat = 1000 J/kg/K
+    }
+}
+
+material aluminum_6061 {
+    mass_density = 2700 kg/m^3
+    thermal {
+        reference_temperature = 308.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.0000236 K^-1
+        conductivity = 167 W/m/K
+        specific_heat = 896 J/kg/K
+    }
+}
+
+model full_throttle {
+    thermal { reference_temperature = 308.15 K }
+    assign material.board_stack to geometry.esc.region.board
+    assign material.gap_pad to geometry.esc.region.pad
+    assign material.aluminum_6061 to geometry.esc.region.heatsink
+    load esc_losses { heat_generation on geometry.esc.region.board = 1.81e6 W/m^3 }
+    load fin_downwash {
+        thermal.convection {
+            target = geometry.esc.region.fins
+            ambient_temperature = 308.15 K
+            coefficient = 25 W/m^2/K
+        }
+    }
+}
+
+study esc_temperature {
+    geometry = geometry.esc
+    mesh = mesh.esc
+    model = model.full_throttle
+    analysis heat { thermal steady {} }
+    output temperature = analysis.heat.field.node.temperature
+    output heat_flux = analysis.heat.field.element.heat_flux
+    output peak_board_temperature = max(analysis.heat.field.node.temperature, over = geometry.esc.region.board)
+    output peak_heatsink_temperature = max(analysis.heat.field.node.temperature, over = geometry.esc.region.heatsink)
+}

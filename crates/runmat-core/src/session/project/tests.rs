@@ -413,12 +413,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         .manifest
         .strip_prefix(&project)
         .expect("project manifest");
+    let manifest_literal = toml::Value::String(manifest.to_string_lossy().into_owned()).to_string();
+    let module_literal = toml::Value::String(module.to_string_lossy().into_owned()).to_string();
     std::fs::write(
         project.join("runmat.toml"),
         format!(
-            "[package]\nname = \"project-retirement\"\n[sources]\nroots = [\"src\"]\n[mex-artifacts.handoff_probe]\nmanifest = \"{}\"\nmodule = \"{}\"\n",
-            manifest.display(),
-            module.display()
+            "[package]\nname = \"project-retirement\"\n[sources]\nroots = [\"src\"]\n[mex-artifacts.handoff_probe]\nmanifest = {manifest_literal}\nmodule = {module_literal}\n"
         ),
     )
     .expect("project manifest source");

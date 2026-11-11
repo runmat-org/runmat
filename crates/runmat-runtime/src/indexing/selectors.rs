@@ -89,7 +89,8 @@ pub(crate) async fn build_component_selectors_with_context(
     assignment: bool,
 ) -> VmResult<ExactArrayStorage<SliceSelector>> {
     use crate::indexing::plan::{
-        admission, effective_index_extent, numeric_linear_output_shape_in_context,
+        admission, effective_index_extent, logical_linear_output_shape_in_context,
+        numeric_linear_output_shape_in_context,
     };
     use crate::object::indexing::ObjectIndexComponent;
     let owner = admission::Owner::new(context)?;
@@ -129,12 +130,20 @@ pub(crate) async fn build_component_selectors_with_context(
                             tensor.len(),
                         )?,
                     },
-                    value @ Value::LogicalArray(_) => {
+                    value @ (Value::Bool(_) | Value::LogicalArray(_)) => {
                         let values =
                             indices_from_host_value_linear_in_context(context, value, extent)?;
-                        let output_shape = admission::shape(context, 2, |dimension| {
-                            Ok(if dimension == 0 { values.len() } else { 1 })
-                        })?;
+                        let mask_shape: &[usize] = match value {
+                            Value::LogicalArray(mask) => &mask.shape,
+                            Value::Bool(_) => &[1, 1],
+                            _ => unreachable!(),
+                        };
+                        let output_shape = logical_linear_output_shape_in_context(
+                            context,
+                            base_shape,
+                            mask_shape,
+                            values.len(),
+                        )?;
                         SliceSelector::LinearIndices {
                             values,
                             output_shape,
@@ -768,7 +777,8 @@ fn selectors_from_host<B: Borrow<Value>>(
     assignment: bool,
 ) -> VmResult<ExactArrayStorage<SliceSelector>> {
     use crate::indexing::plan::{
-        admission, effective_index_extent, numeric_linear_output_shape_in_context,
+        admission, effective_index_extent, logical_linear_output_shape_in_context,
+        numeric_linear_output_shape_in_context,
     };
     validate_shape(base_shape, dims)?;
     let mut numeric_position = 0usize;
@@ -812,11 +822,19 @@ fn selectors_from_host<B: Borrow<Value>>(
                         tensor.len(),
                     )?,
                 }),
-                value @ Value::LogicalArray(_) => {
+                value @ (Value::Bool(_) | Value::LogicalArray(_)) => {
                     let values = indices_from_host_value_linear_in_context(context, value, extent)?;
-                    let output_shape = admission::shape(context, 2, |dimension| {
-                        Ok(if dimension == 0 { values.len() } else { 1 })
-                    })?;
+                    let mask_shape: &[usize] = match value {
+                        Value::LogicalArray(mask) => &mask.shape,
+                        Value::Bool(_) => &[1, 1],
+                        _ => unreachable!(),
+                    };
+                    let output_shape = logical_linear_output_shape_in_context(
+                        context,
+                        base_shape,
+                        mask_shape,
+                        values.len(),
+                    )?;
                     Ok(SliceSelector::LinearIndices {
                         values,
                         output_shape,

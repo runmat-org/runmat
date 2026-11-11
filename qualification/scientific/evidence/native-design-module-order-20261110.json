@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source_revision": "f678e633111745f6679d3f09bcd9799dc246dbd4",
+  "scope": "Move unchanged is_circuit_file before the workspace test module",
+  "unchanged_declaration_sha256": "aac90f9b4c06d59b266c39b9eec0ce86599fee82236024939cc480a22e4e40b7",
+  "command": [
+    "cargo",
+    "clippy",
+    "--locked",
+    "-p",
+    "runmat-design-tools",
+    "--lib",
+    "--tests",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "environment": {
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0"
+  },
+  "exit_code": 0,
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "numerical_workloads": "Unchanged; preserve the three measured receipts and native boundary evidence"
+}

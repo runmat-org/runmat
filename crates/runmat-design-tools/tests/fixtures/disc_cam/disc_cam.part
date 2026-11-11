@@ -1,0 +1,34 @@
+runmat 0.7
+std 1
+
+// A disc cam whose profile comes from its motion law, computed in MATLAB code: camBaseRadius.m
+// sizes the base circle for the pressure-angle limit, and camRadius.m gives the pitch radius at
+// each 30 deg station (cycloidal rise, dwell, cycloidal return). Change an input and the
+// profile regenerates from the functions.
+part disc_cam {
+    input lift : length = 8 mm
+    input rise : angle = 150 deg
+    input dwell : angle = 30 deg
+    input max_pressure : angle = 30 deg
+    input thickness : length = 10 mm
+
+    let base = camBaseRadius(lift = input.lift, rise = input.rise, max_pressure = input.max_pressure) as m
+    let r0 = camRadius(theta = 0 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r30 = camRadius(theta = 30 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r60 = camRadius(theta = 60 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r90 = camRadius(theta = 90 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r120 = camRadius(theta = 120 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r150 = camRadius(theta = 150 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r180 = camRadius(theta = 180 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r210 = camRadius(theta = 210 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r240 = camRadius(theta = 240 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r270 = camRadius(theta = 270 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r300 = camRadius(theta = 300 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+    let r330 = camRadius(theta = 330 deg, base = base, lift = input.lift, rise = input.rise, dwell = input.dwell) as m
+
+    sketch profile on origin.xy {
+        // Station points at r(theta) * [cos theta, sin theta].
+        lobe = spline(points = [[r0, 0 mm], [r30 * 0.866025, r30 * 0.5], [r60 * 0.5, r60 * 0.866025], [0 mm, r90], [r120 * -0.5, r120 * 0.866025], [r150 * -0.866025, r150 * 0.5], [-r180, 0 mm], [r210 * -0.866025, r210 * -0.5], [r240 * -0.5, r240 * -0.866025], [0 mm, -r270], [r300 * 0.5, r300 * -0.866025], [r330 * 0.866025, r330 * -0.5]], closed)
+    }
+    feature disc = extrude(profile = sketch.profile, distance = input.thickness)
+}

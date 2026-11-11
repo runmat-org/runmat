@@ -186,32 +186,30 @@ pub(super) async fn execute(
             )
             .await
             {
-                Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(result)) => {
-                    match result.console {
-                        Some(super::pool_execution::RemoteTerminalConsole::LocalSources {
+                Ok(Ok(result)) => match result.console {
+                    Some(super::pool_execution::RemoteTerminalConsole::LocalSources {
+                        root,
+                        source,
+                        budget,
+                    }) => WorkerExecutionOutcome::CapturedResponse(
+                        result.response,
+                        Some(super::attempt_reply::RemoteAttemptConsole::Sources {
                             root,
                             source,
                             budget,
-                        }) => WorkerExecutionOutcome::CapturedResponse(
-                            result.response,
-                            Some(super::attempt_reply::RemoteAttemptConsole::Sources {
-                                root,
-                                source,
-                                budget,
-                            }),
-                        ),
-                        None => WorkerExecutionOutcome::Response(result.response),
-                        Some(_) => WorkerExecutionOutcome::RetirementUnverified(
-                            "remote Graph child changed its console retention owner".into(),
-                        ),
-                    }
-                }
-                Ok(super::pool_execution::RemotePoolExecutionOutcome::Cancelled) => {
+                        }),
+                    ),
+                    None => WorkerExecutionOutcome::Response(result.response),
+                    Some(_) => WorkerExecutionOutcome::RetirementUnverified(
+                        "remote Graph child changed its console retention owner".into(),
+                    ),
+                },
+                Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled)) => {
                     WorkerExecutionOutcome::Response(failure("remote Graph attempt was cancelled"))
                 }
-                Ok(super::pool_execution::RemotePoolExecutionOutcome::Indeterminate(message)) => {
-                    WorkerExecutionOutcome::RetirementUnverified(message)
-                }
+                Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
+                    message,
+                ))) => WorkerExecutionOutcome::RetirementUnverified(message),
                 Err(error) => WorkerExecutionOutcome::RetirementUnverified(error.to_string()),
             };
         }

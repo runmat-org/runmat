@@ -517,7 +517,9 @@ pub fn validate_tags(tags: &[Tag], registry: &[&Requirement]) -> Vec<Problem> {
             if !known_checks.contains(check.as_str()) {
                 problems.push(Problem {
                     location: location.clone(),
-                    message: format!("unknown reference check `{check}`; add it to the ledger's `checks`"),
+                    message: format!(
+                        "unknown reference check `{check}`; add it to the ledger's `checks`"
+                    ),
                 });
             }
         }

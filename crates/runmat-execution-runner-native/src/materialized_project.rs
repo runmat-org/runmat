@@ -537,7 +537,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .execution_identity()
             .unwrap();
         let native_object_format = native_target.object_format;
-        let mex_root = format!("mex/{mex_identity}");
+        let mex_root = "mex/fixture";
         let mex_filename = mex_output.module.file_name().unwrap().to_string_lossy();
         let mex_sidecar = LogicalObject::new(
             ObjectNamespace::ForeignArtifact,

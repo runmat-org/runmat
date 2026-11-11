@@ -5,6 +5,15 @@ members = [
     "crates/runmat-simulation-usage",
     "crates/runmat-sparse-solvers",
     "crates/runmat-sparse-accelerate",
+    "crates/runmat-constraint",
+    "crates/runmat-cad",
+    "crates/runmat-cad/wasm",
+    "crates/runmat-design-commands",
+    "crates/runmat-rules",
+    "crates/runmat-circuit",
+    "crates/runmat-circuit/wasm",
+    "crates/runmat-circuit-spice",
+    "crates/runmat-circuit-sim",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
@@ -28,7 +37,9 @@ members = [
     "crates/runmat-builtins",
     "crates/runmat-value",
     "crates/runmat-types",
-    "crates/runmat-fea-syntax",
+    "crates/runmat-design-syntax",
+    "crates/runmat-design-tools",
+    "crates/runmat-design-tools/wasm",
     "crates/runmat-fea-source",
     "crates/runmat-runtime",
     "crates/runmat-clarabel",
@@ -68,6 +79,7 @@ members = [
     "crates/runmat-geometry/core",
     "crates/runmat-geometry/fixtures",
     "crates/runmat-geometry/io",
+    "crates/runmat-geometry/kernel",
     "crates/runmat-geometry/wasm-host",
     "crates/runmat-geometry/ops",
     "crates/runmat-analysis/core",
@@ -87,12 +99,12 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-clarabel = { package = "runmat-clarabel", version = "=0.7.0", path = "crates/runmat-clarabel", default-features = false }
-runmat-build-identity = { version = "=0.7.0", path = "crates/runmat-build-identity" }
-runmat-cpu-execution = { version = "=0.7.0", path = "crates/runmat-cpu-execution" }
-runmat-simulation-usage = { version = "=0.7.0", path = "crates/runmat-simulation-usage" }
-runmat-sparse-solvers = { version = "=0.7.0", path = "crates/runmat-sparse-solvers" }
-runmat-sparse-accelerate = { version = "=0.7.0", path = "crates/runmat-sparse-accelerate" }
+clarabel = { package = "runmat-clarabel", version = "=0.7.1", path = "crates/runmat-clarabel", default-features = false }
+runmat-build-identity = { version = "=0.7.1", path = "crates/runmat-build-identity" }
+runmat-cpu-execution = { version = "=0.7.1", path = "crates/runmat-cpu-execution" }
+runmat-simulation-usage = { version = "=0.7.1", path = "crates/runmat-simulation-usage" }
+runmat-sparse-solvers = { version = "=0.7.1", path = "crates/runmat-sparse-solvers" }
+runmat-sparse-accelerate = { version = "=0.7.1", path = "crates/runmat-sparse-accelerate" }
 # External dependencies used across multiple crates
 sobol = "=1.0.2"
 wgpu = "24.0.0"
@@ -141,86 +153,88 @@ hmac = "0.12"
 url = { version = "2", features = ["serde"] }
 
 # Internal workspace crates
-runmat-lexer = { version = "=0.7.0", path = "crates/runmat-lexer" }
-runmat-parser = { version = "=0.7.0", path = "crates/runmat-parser" }
-runmat-fea-syntax = { version = "=0.7.0", path = "crates/runmat-fea-syntax" }
-runmat-hir = { version = "=0.7.0", path = "crates/runmat-hir" }
-runmat-mir = { version = "=0.7.0", path = "crates/runmat-mir", default-features = false }
-runmat-native-codegen = { version = "=0.7.0", path = "crates/runmat-native-codegen", default-features = false }
-runmat-extension-abi = { version = "=0.7.0", path = "crates/runmat-extension-abi" }
-runmat-native-ffi = { version = "=0.7.0", path = "crates/runmat-native-ffi" }
-runmat-mex = { version = "=0.7.0", path = "crates/runmat-mex" }
-runmat-java = { version = "=0.7.0", path = "crates/runmat-java" }
-runmat-python = { version = "=0.7.0", path = "crates/runmat-python" }
-runmat-native-executor = { version = "=0.7.0", path = "crates/runmat-native-executor" }
-runmat-aot-runtime = { version = "=0.7.0", path = "crates/runmat-aot-runtime" }
-runmat-aot = { version = "=0.7.0", path = "crates/runmat-aot" }
-runmat-jit = { version = "=0.7.0", path = "crates/runmat-jit" }
-runmat-vm = { version = "=0.7.0", path = "crates/runmat-vm" }
-runmat-async = { version = "=0.7.0", path = "crates/runmat-async" }
-runmat-telemetry = { version = "=0.7.0", path = "crates/runmat-telemetry" }
-runmat-logging = { version = "=0.7.0", path = "crates/runmat-logging" }
-runmat-core = { version = "=0.7.0", path = "crates/runmat-core", default-features = false }
-runmat-plot = { version = "=0.7.0", path = "crates/runmat-plot", default-features = false }
-runmat-macros = { version = "=0.7.0", path = "crates/runmat-macros" }
-runmat-builtins = { version = "=0.7.0", path = "crates/runmat-builtins" }
-runmat-value = { version = "=0.7.0", path = "crates/runmat-value" }
-runmat-types = { version = "=0.7.0", path = "crates/runmat-types" }
-runmat-fea-source = { version = "=0.7.0", path = "crates/runmat-fea-source" }
-runmat-runtime = { version = "=0.7.0", path = "crates/runmat-runtime", default-features = false }
-runmat-time = { path = "crates/runmat-time", version = "=0.7.0" }
-runmat-gc = { version = "=0.7.0", path = "crates/runmat-gc" }
-runmat-workspace-contracts = { version = "=0.7.0", path = "crates/runmat-workspace-contracts" }
-runmat-filesystem = { version = "=0.7.0", path = "crates/runmat-filesystem" }
-runmat-config = { version = "=0.7.0", path = "crates/runmat-config" }
-runmat-package = { version = "=0.7.0", path = "crates/runmat-package" }
-runmat-package-cache = { version = "=0.7.0", path = "crates/runmat-package-cache" }
-runmat-package-cache-native = { version = "=0.7.0", path = "crates/runmat-package-cache-native" }
-runmat-test = { version = "=0.7.0", path = "crates/runmat-test" }
-runmat-test-runner = { version = "=0.7.0", path = "crates/runmat-test-runner" }
-runmat-test-runner-execution = { version = "=0.7.0", path = "crates/runmat-test-runner-execution" }
-runmat-test-runner-native = { version = "=0.7.0", path = "crates/runmat-test-runner-native" }
-runmat-execution = { version = "=0.7.0", path = "crates/runmat-execution" }
-runmat-execution-artifact = { version = "=0.7.0", path = "crates/runmat-execution-artifact" }
-runmat-execution-runner = { version = "=0.7.0", path = "crates/runmat-execution-runner" }
-runmat-execution-runner-native = { version = "=0.7.0", path = "crates/runmat-execution-runner-native" }
-runmat-execution-transport-native = { version = "=0.7.0", path = "crates/runmat-execution-transport-native" }
-runmat-process-host = { version = "=0.7.0", path = "crates/runmat-process-host" }
-runmat-static-analysis = { version = "=0.7.0", path = "crates/runmat-static-analysis" }
-runmat-canonical-codec = { version = "=0.7.0", path = "crates/runmat-canonical-codec" }
-runmat-server-client = { version = "=0.7.0", path = "crates/runmat-server-client" }
-runmat-fea-admission-native = { version = "=0.7.0", path = "crates/runmat-fea-admission-native" }
-runmat-node-agent = { version = "=0.7.0", path = "crates/runmat-node-agent" }
-runmat-accelerate = { version = "=0.7.0", path = "crates/runmat-accelerate" }
-runmat-accelerate-api = { version = "=0.7.0", path = "crates/runmat-accelerate-api" }
-runmat-gc-api = { version = "=0.7.0", path = "crates/runmat-gc-api" }
-runmat-thread-local = { version = "=0.7.0", path = "crates/runmat-thread-local" }
-runmat-geometry-core = { version = "=0.7.0", path = "crates/runmat-geometry/core" }
+runmat-lexer = { version = "=0.7.1", path = "crates/runmat-lexer" }
+runmat-parser = { version = "=0.7.1", path = "crates/runmat-parser" }
+runmat-design-syntax = { version = "=0.7.1", path = "crates/runmat-design-syntax" }
+runmat-hir = { version = "=0.7.1", path = "crates/runmat-hir" }
+runmat-mir = { version = "=0.7.1", path = "crates/runmat-mir", default-features = false }
+runmat-native-codegen = { version = "=0.7.1", path = "crates/runmat-native-codegen", default-features = false }
+runmat-extension-abi = { version = "=0.7.1", path = "crates/runmat-extension-abi" }
+runmat-native-ffi = { version = "=0.7.1", path = "crates/runmat-native-ffi" }
+runmat-mex = { version = "=0.7.1", path = "crates/runmat-mex" }
+runmat-java = { version = "=0.7.1", path = "crates/runmat-java" }
+runmat-python = { version = "=0.7.1", path = "crates/runmat-python" }
+runmat-native-executor = { version = "=0.7.1", path = "crates/runmat-native-executor" }
+runmat-aot-runtime = { version = "=0.7.1", path = "crates/runmat-aot-runtime" }
+runmat-aot = { version = "=0.7.1", path = "crates/runmat-aot" }
+runmat-jit = { version = "=0.7.1", path = "crates/runmat-jit" }
+runmat-vm = { version = "=0.7.1", path = "crates/runmat-vm" }
+runmat-async = { version = "=0.7.1", path = "crates/runmat-async" }
+runmat-telemetry = { version = "=0.7.1", path = "crates/runmat-telemetry" }
+runmat-logging = { version = "=0.7.1", path = "crates/runmat-logging" }
+runmat-core = { version = "=0.7.1", path = "crates/runmat-core", default-features = false }
+runmat-plot = { version = "=0.7.1", path = "crates/runmat-plot", default-features = false }
+runmat-macros = { version = "=0.7.1", path = "crates/runmat-macros" }
+runmat-builtins = { version = "=0.7.1", path = "crates/runmat-builtins" }
+runmat-value = { version = "=0.7.1", path = "crates/runmat-value" }
+runmat-types = { version = "=0.7.1", path = "crates/runmat-types" }
+runmat-fea-source = { version = "=0.7.1", path = "crates/runmat-fea-source" }
+runmat-runtime = { version = "=0.7.1", path = "crates/runmat-runtime", default-features = false }
+runmat-time = { path = "crates/runmat-time", version = "=0.7.1" }
+runmat-gc = { version = "=0.7.1", path = "crates/runmat-gc" }
+runmat-workspace-contracts = { version = "=0.7.1", path = "crates/runmat-workspace-contracts" }
+runmat-filesystem = { version = "=0.7.1", path = "crates/runmat-filesystem" }
+runmat-config = { version = "=0.7.1", path = "crates/runmat-config" }
+runmat-package = { version = "=0.7.1", path = "crates/runmat-package" }
+runmat-package-cache = { version = "=0.7.1", path = "crates/runmat-package-cache" }
+runmat-package-cache-native = { version = "=0.7.1", path = "crates/runmat-package-cache-native" }
+runmat-test = { version = "=0.7.1", path = "crates/runmat-test" }
+runmat-test-runner = { version = "=0.7.1", path = "crates/runmat-test-runner" }
+runmat-test-runner-execution = { version = "=0.7.1", path = "crates/runmat-test-runner-execution" }
+runmat-test-runner-native = { version = "=0.7.1", path = "crates/runmat-test-runner-native" }
+runmat-execution = { version = "=0.7.1", path = "crates/runmat-execution" }
+runmat-execution-artifact = { version = "=0.7.1", path = "crates/runmat-execution-artifact" }
+runmat-execution-runner = { version = "=0.7.1", path = "crates/runmat-execution-runner" }
+runmat-execution-runner-native = { version = "=0.7.1", path = "crates/runmat-execution-runner-native" }
+runmat-execution-transport-native = { version = "=0.7.1", path = "crates/runmat-execution-transport-native" }
+runmat-process-host = { version = "=0.7.1", path = "crates/runmat-process-host" }
+runmat-static-analysis = { version = "=0.7.1", path = "crates/runmat-static-analysis" }
+runmat-canonical-codec = { version = "=0.7.1", path = "crates/runmat-canonical-codec" }
+runmat-server-client = { version = "=0.7.1", path = "crates/runmat-server-client" }
+runmat-fea-admission-native = { version = "=0.7.1", path = "crates/runmat-fea-admission-native" }
+runmat-node-agent = { version = "=0.7.1", path = "crates/runmat-node-agent" }
+runmat-accelerate = { version = "=0.7.1", path = "crates/runmat-accelerate" }
+runmat-accelerate-api = { version = "=0.7.1", path = "crates/runmat-accelerate-api" }
+runmat-gc-api = { version = "=0.7.1", path = "crates/runmat-gc-api" }
+runmat-thread-local = { version = "=0.7.1", path = "crates/runmat-thread-local" }
+runmat-geometry-core = { version = "=0.7.1", path = "crates/runmat-geometry/core" }
 runmat-geometry-fixtures = { path = "crates/runmat-geometry/fixtures" }
-runmat-geometry-io = { version = "=0.7.0", path = "crates/runmat-geometry/io" }
-runmat-geometry-ops = { version = "=0.7.0", path = "crates/runmat-geometry/ops" }
-runmat-analysis-core = { version = "=0.7.0", path = "crates/runmat-analysis/core" }
-runmat-analysis-language = { version = "=0.7.0", path = "crates/runmat-analysis/language" }
-runmat-analysis-fea = { version = "=0.7.0", path = "crates/runmat-analysis/fea" }
-runmat-analysis-execution = { version = "=0.7.0", path = "crates/runmat-analysis/execution" }
-runmat-analysis-distributed = { version = "=0.7.0", path = "crates/runmat-analysis/distributed" }
-runmat-meshing-core = { version = "=0.7.0", path = "crates/runmat-meshing/core" }
-runmat-meshing-execution = { version = "=0.7.0", path = "crates/runmat-meshing/execution" }
-runmat-meshing-size = { version = "=0.7.0", path = "crates/runmat-meshing/size" }
-runmat-meshing-curve = { version = "=0.7.0", path = "crates/runmat-meshing/curve" }
-runmat-meshing-surface = { version = "=0.7.0", path = "crates/runmat-meshing/surface" }
-runmat-meshing-tetrahedron = { version = "=0.7.0", path = "crates/runmat-meshing/tetrahedron" }
+runmat-geometry-io = { version = "=0.7.1", path = "crates/runmat-geometry/io" }
+runmat-geometry-kernel = { version = "=0.7.1", path = "crates/runmat-geometry/kernel" }
+runmat-geometry-ops = { version = "=0.7.1", path = "crates/runmat-geometry/ops" }
+runmat-analysis-core = { version = "=0.7.1", path = "crates/runmat-analysis/core" }
+runmat-analysis-language = { version = "=0.7.1", path = "crates/runmat-analysis/language" }
+runmat-analysis-fea = { version = "=0.7.1", path = "crates/runmat-analysis/fea" }
+runmat-analysis-execution = { version = "=0.7.1", path = "crates/runmat-analysis/execution" }
+runmat-analysis-distributed = { version = "=0.7.1", path = "crates/runmat-analysis/distributed" }
+runmat-meshing-core = { version = "=0.7.1", path = "crates/runmat-meshing/core" }
+runmat-meshing-execution = { version = "=0.7.1", path = "crates/runmat-meshing/execution" }
+runmat-meshing-size = { version = "=0.7.1", path = "crates/runmat-meshing/size" }
+runmat-meshing-curve = { version = "=0.7.1", path = "crates/runmat-meshing/curve" }
+runmat-meshing-surface = { version = "=0.7.1", path = "crates/runmat-meshing/surface" }
+runmat-meshing-tetrahedron = { version = "=0.7.1", path = "crates/runmat-meshing/tetrahedron" }
 
-# Optimize the largest release archive producers as whole crates without
-# changing optimization level, target CPU, features, or unwind semantics.
+# Partition the largest release crates into eight codegen units so LLVM can
+# optimize them in parallel. Optimization level and other release settings
+# retain their existing values.
 [profile.release.package.runmat-runtime]
-codegen-units = 1
+codegen-units = 8
 
 [profile.release.package.runmat-analysis-fea]
-codegen-units = 1
+codegen-units = 8
 
 [profile.release.package.runmat-builtins]
-codegen-units = 1
+codegen-units = 8
 
 # Large test harnesses otherwise spend minutes importing between codegen units
 # even with Cargo's default `lto = false` (local ThinLTO). Keep numerical crate

@@ -82,7 +82,6 @@ pub(super) async fn cold_fixture(
     let directory = tempfile::tempdir().unwrap();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.store_root = directory.path().join(identity);
-    config.worker_arguments = vec!["--child".into()];
     config.max_workers = 1;
     config.worker_cpu_millicores = 1000;
     config.worker_memory_bytes = ceiling.min(fixture.policy.resident_byte_budget());

@@ -5,9 +5,9 @@ use runmat_execution::Digest;
 use runmat_runtime::analysis::fea_run_admission::{
     FeaRunDenied, FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope, FeaRunSite,
 };
+use runmat_simulation_usage::{CompletedUsage, DelegatedReservation, LedgerError, OperationCount};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use runmat_simulation_usage::{CompletedUsage, DelegatedReservation, LedgerError, OperationCount};
 use wasm_bindgen::prelude::*;
 
 #[derive(Serialize, Deserialize)]
@@ -146,7 +146,11 @@ impl LocalFeaRunContext {
         })
     }
 
-    pub(super) async fn worker_context(&self, prepared_json: &str, work_class: WorkerWorkClass) -> Result<JsValue, JsValue> {
+    pub(super) async fn worker_context(
+        &self,
+        prepared_json: &str,
+        work_class: WorkerWorkClass,
+    ) -> Result<JsValue, JsValue> {
         let host = self
             .host
             .as_ref()
@@ -241,7 +245,9 @@ impl LocalFeaRunContext {
     pub(crate) fn scope(&self) -> &FeaRunScope {
         &self.scope
     }
-    pub(super) fn request(&self) -> &FeaRunRequest { &self.request }
+    pub(super) fn request(&self) -> &FeaRunRequest {
+        &self.request
+    }
     pub(super) fn active_lease(&self) -> ActiveFeaLease {
         ActiveFeaLease {
             run_id: self.request.run_id.clone(),
@@ -260,29 +266,83 @@ impl LocalFeaRunContext {
         .map_err(|error| js_error(&error.to_string()))?;
         self.refresh("check", &report).await.map(|_| ())
     }
+    /// Await only the shared preparation quote, before entering synchronous
+    /// topology work. A delegated worker must retire before the root uses it.
+    pub(crate) async fn ensure_preparation_capacity(
+        &self,
+        additional: OperationCount,
+    ) -> Result<(), JsValue> {
+        if self.worker_authority.is_some()
+            || self
+                .worker
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_some()
+        {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
+        self.check().await?;
+        if additional == OperationCount::ZERO {
+            return self.scope.check().map_err(denied_to_js);
+        }
+        let required = self
+            .scope
+            .control()
+            .exclusive_work_requirement(additional)
+            .map_err(denied_to_js)?;
+        let count = crate::wire::json_contract_to_js(&required)
+            .map_err(|error| js_error(&error.to_string()))?;
+        let state = self.refresh("grant", &count).await?;
+        if state.lease.granted_ops < required {
+            return Err(denied_to_js(FeaRunDenied::Accounting(
+                LedgerError::MoreGrantRequired {
+                    required,
+                    granted: state.lease.granted_ops,
+                },
+            )));
+        }
+        self.scope.check().map_err(denied_to_js)
+    }
     pub(crate) async fn retire_finished(&self) -> Result<(), JsValue> {
-        let host = self.host.as_ref().ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
+        let host = self
+            .host
+            .as_ref()
+            .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
         self.active_lease().retire_finished(host).await
     }
     /// Worker-side cooperative boundary. The caller awaits this before it
     /// reserves the next synchronous numerical batch.
-    pub(crate) async fn acquire_worker_grant(&self, required: OperationCount) -> Result<runmat_runtime::analysis::fea_run_admission::FeaRunBudget, JsValue> {
-        let (authority, original) = self.worker_authority.as_ref()
+    pub(crate) async fn acquire_worker_grant(
+        &self,
+        required: OperationCount,
+    ) -> Result<runmat_runtime::analysis::fea_run_admission::FeaRunBudget, JsValue> {
+        let (authority, original) = self
+            .worker_authority
+            .as_ref()
             .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
         let required_js = crate::wire::json_contract_to_js(&WorkerGrantRequest {
             required_ops: required,
-            usage: UsageReport { completed_ops: self.scope.usage().map_err(denied_to_js)?.completed_ops },
+            usage: UsageReport {
+                completed_ops: self.scope.usage().map_err(denied_to_js)?.completed_ops,
+            },
         })
-            .map_err(|error| js_error(&error.to_string()))?;
+        .map_err(|error| js_error(&error.to_string()))?;
         let state: LeaseState = serde_wasm_bindgen::from_value(
             call_host(authority, "acquireWorkerGrant", original, &required_js).await?,
-        ).map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
+        )
+        .map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
         if state.lease.lease_id != self.lease.lease_id
             || state.root_started_at_unix_millis != self.root_started_at_unix_millis
-        { return Err(denied_to_js(FeaRunDenied::LicenseInvalid)); }
+        {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
         let budget = state.lease.budget()?;
-        if budget.granted_ops < required { return Err(denied_to_js(FeaRunDenied::LicenseInvalid)); }
-        self.scope.renew_parent_supervised(budget).map_err(denied_to_js)?;
+        if budget.granted_ops < required {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
+        self.scope
+            .renew_parent_supervised(budget)
+            .map_err(denied_to_js)?;
         Ok(budget)
     }
     async fn refresh(&self, method: &str, extra: &JsValue) -> Result<LeaseState, JsValue> {
@@ -308,8 +368,12 @@ impl LocalFeaRunContext {
     pub(crate) async fn settle(self, outcome: FeaRunOutcome) -> Result<(), JsValue> {
         if let Some(host) = &self.host {
             self.active_lease().retire_finished(host).await?;
-            let undispatched = self.worker.lock().unwrap_or_else(|error| error.into_inner())
-                .as_ref().is_some_and(|worker| !worker.started);
+            let undispatched = self
+                .worker
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .as_ref()
+                .is_some_and(|worker| !worker.started);
             if undispatched {
                 let request = crate::wire::json_contract_to_js(&self.request)
                     .map_err(|error| js_error(&error.to_string()))?;
@@ -386,7 +450,9 @@ impl ActiveFeaLease {
     pub(super) async fn retire_finished(&self, host: &JsValue) -> Result<(), JsValue> {
         let request = crate::wire::json_contract_to_js(&self.request)
             .map_err(|error| js_error(&error.to_string()))?;
-        call_host(host, "retireFinished", &request, &JsValue::UNDEFINED).await.map(|_| ())
+        call_host(host, "retireFinished", &request, &JsValue::UNDEFINED)
+            .await
+            .map(|_| ())
     }
     pub(super) fn root_started_at_unix_millis(&self) -> u64 {
         self.root_started_at_unix_millis
@@ -402,7 +468,8 @@ impl ActiveFeaLease {
             || context.delegation_id.len() > 256
             || context.prepared_study_identity.len() != 71
             || !context.prepared_study_identity.starts_with("sha256:")
-            || !context.prepared_study_identity.as_bytes()[7..].iter()
+            || !context.prepared_study_identity.as_bytes()[7..]
+                .iter()
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
         {
             return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
@@ -412,9 +479,17 @@ impl ActiveFeaLease {
     pub(super) fn delegate_worker(&self, value: JsValue) -> Result<JsValue, JsValue> {
         let context = self.owned_worker_context(value)?;
         let child_budget = context.lease.budget()?;
-        let mut worker = self.worker.lock().unwrap_or_else(|error| error.into_inner());
-        if worker.is_some() { return Err(denied_to_js(FeaRunDenied::LicenseInvalid)); }
-        let mut grant = self.control.delegate(OperationCount::ZERO).map_err(denied_to_js)?;
+        let mut worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if worker.is_some() {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
+        let mut grant = self
+            .control
+            .delegate(OperationCount::ZERO)
+            .map_err(denied_to_js)?;
         if child_budget.budget_ops != grant.delegation.budget.budget_ops
             || child_budget.heartbeat_millis != grant.delegation.budget.heartbeat_millis
             || child_budget.expires_at_unix_millis != grant.delegation.budget.expires_at_unix_millis
@@ -444,54 +519,104 @@ impl ActiveFeaLease {
             lease: context.lease,
             root_started_at_unix_millis: self.root_started_at_unix_millis,
             delegation_id: None,
-        }).map_err(|error| js_error(&error.to_string()))
+        })
+        .map_err(|error| js_error(&error.to_string()))
     }
-    pub(super) fn report_worker(&self, value: JsValue, usage: JsValue, final_report: bool) -> Result<JsValue, JsValue> {
+    pub(super) fn report_worker(
+        &self,
+        value: JsValue,
+        usage: JsValue,
+        final_report: bool,
+    ) -> Result<JsValue, JsValue> {
         let context = self.owned_worker_context(value)?;
         let usage: UsageReport = serde_wasm_bindgen::from_value(usage)
             .map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
-        let mut worker = self.worker.lock().unwrap_or_else(|error| error.into_inner());
-        let worker = worker.as_mut().filter(|worker| worker.delegation_id == context.delegation_id
-            && worker.prepared_study_identity == context.prepared_study_identity
-            && worker.work_class == context.work_class)
+        let mut worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let worker = worker
+            .as_mut()
+            .filter(|worker| {
+                worker.delegation_id == context.delegation_id
+                    && worker.prepared_study_identity == context.prepared_study_identity
+                    && worker.work_class == context.work_class
+            })
             .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
-        if !worker.started { return Err(denied_to_js(FeaRunDenied::LicenseInvalid)); }
-        if worker.work_class == WorkerWorkClass::OcctPreparation && usage.completed_ops != CompletedUsage::default() {
+        if !worker.started {
             return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
         }
-        if worker.final_reported && (!final_report || worker.reservation.completed() != usage.completed_ops) {
+        if worker.work_class == WorkerWorkClass::OcctPreparation
+            && usage.completed_ops != CompletedUsage::default()
+        {
             return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
         }
-        worker.reservation.report(usage.completed_ops).map_err(|error| denied_to_js(error.into()))?;
-        if final_report { worker.final_reported = true; }
+        if worker.final_reported
+            && (!final_report || worker.reservation.completed() != usage.completed_ops)
+        {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
+        worker
+            .reservation
+            .report(usage.completed_ops)
+            .map_err(|error| denied_to_js(error.into()))?;
+        if final_report {
+            worker.final_reported = true;
+        }
         crate::wire::json_contract_to_js(&UsageReport {
             completed_ops: self.control.usage().map_err(denied_to_js)?.completed_ops,
-        }).map_err(|error| js_error(&error.to_string()))
+        })
+        .map_err(|error| js_error(&error.to_string()))
     }
     pub(super) fn start_worker(&self, value: JsValue) -> Result<(), JsValue> {
         let context = self.owned_worker_context(value)?;
-        let mut slot = self.worker.lock().unwrap_or_else(|error| error.into_inner());
-        let worker = slot.as_mut().filter(|worker| worker.delegation_id == context.delegation_id
-            && worker.prepared_study_identity == context.prepared_study_identity
-            && worker.work_class == context.work_class && !worker.started)
+        let mut slot = self
+            .worker
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let worker = slot
+            .as_mut()
+            .filter(|worker| {
+                worker.delegation_id == context.delegation_id
+                    && worker.prepared_study_identity == context.prepared_study_identity
+                    && worker.work_class == context.work_class
+                    && !worker.started
+            })
             .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
         worker.started = true;
         Ok(())
     }
     /// The UI has proved this assignment never entered numerical execution.
-    pub(super) fn discard_undispatched_worker(&self, value: JsValue, receipt: JsValue) -> Result<(), JsValue> {
+    pub(super) fn discard_undispatched_worker(
+        &self,
+        value: JsValue,
+        receipt: JsValue,
+    ) -> Result<(), JsValue> {
         let context = self.owned_worker_context(value)?;
         let receipt: WorkerRetirementReceipt = serde_wasm_bindgen::from_value(receipt)
             .map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
         self.validate_retirement(&context, &receipt)?;
-        let mut slot = self.worker.lock().unwrap_or_else(|error| error.into_inner());
-        if slot.is_none() { return Ok(()); }
-        let worker = slot.as_mut().filter(|worker| worker.delegation_id == context.delegation_id
-            && worker.prepared_study_identity == context.prepared_study_identity
-            && worker.work_class == context.work_class && !worker.started
-            && worker.reservation.capacity() == OperationCount::ZERO)
+        let mut slot = self
+            .worker
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if slot.is_none() {
+            return Ok(());
+        }
+        let worker = slot
+            .as_mut()
+            .filter(|worker| {
+                worker.delegation_id == context.delegation_id
+                    && worker.prepared_study_identity == context.prepared_study_identity
+                    && worker.work_class == context.work_class
+                    && !worker.started
+                    && worker.reservation.capacity() == OperationCount::ZERO
+            })
             .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
-        worker.reservation.finish(CompletedUsage::default()).map_err(|error| denied_to_js(error.into()))?;
+        worker
+            .reservation
+            .finish(CompletedUsage::default())
+            .map_err(|error| denied_to_js(error.into()))?;
         slot.take();
         Ok(())
     }
@@ -505,11 +630,20 @@ impl ActiveFeaLease {
         let maximum: OperationCount = serde_wasm_bindgen::from_value(required_value)
             .map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
         {
-            let slot = self.worker.lock().unwrap_or_else(|error| error.into_inner());
-            let worker = slot.as_ref().filter(|worker| worker.delegation_id == context.delegation_id
-                && worker.prepared_study_identity == context.prepared_study_identity
-                && worker.work_class == WorkerWorkClass::Numerical
-                && context.work_class == WorkerWorkClass::Numerical && worker.started && !worker.final_reported)
+            let slot = self
+                .worker
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let worker = slot
+                .as_ref()
+                .filter(|worker| {
+                    worker.delegation_id == context.delegation_id
+                        && worker.prepared_study_identity == context.prepared_study_identity
+                        && worker.work_class == WorkerWorkClass::Numerical
+                        && context.work_class == WorkerWorkClass::Numerical
+                        && worker.started
+                        && !worker.final_reported
+                })
                 .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
             let _ = worker;
         }
@@ -517,26 +651,41 @@ impl ActiveFeaLease {
             .map_err(|error| js_error(&error.to_string()))?;
         let usage = crate::wire::json_contract_to_js(&UsageReport {
             completed_ops: self.control.usage().map_err(denied_to_js)?.completed_ops,
-        }).map_err(|error| js_error(&error.to_string()))?;
-        let state: LeaseState = serde_wasm_bindgen::from_value(
-            call_host(&host, "check", &request, &usage).await?,
-        ).map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
+        })
+        .map_err(|error| js_error(&error.to_string()))?;
+        let state: LeaseState =
+            serde_wasm_bindgen::from_value(call_host(&host, "check", &request, &usage).await?)
+                .map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
         if state.lease.lease_id != self.lease_id
             || state.root_started_at_unix_millis != self.root_started_at_unix_millis
-        { return Err(denied_to_js(FeaRunDenied::LicenseInvalid)); }
-        self.control.renew(state.lease.budget()?).map_err(denied_to_js)?;
+        {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
+        self.control
+            .renew(state.lease.budget()?)
+            .map_err(denied_to_js)?;
         let mut lease = state.lease;
         for _ in 0..3 {
             let acquisition = {
-                let mut slot = self.worker.lock().unwrap_or_else(|error| error.into_inner());
-                let worker = slot.as_mut().filter(|worker| worker.delegation_id == context.delegation_id
-                    && worker.prepared_study_identity == context.prepared_study_identity
-                    && worker.work_class == WorkerWorkClass::Numerical
-                    && context.work_class == WorkerWorkClass::Numerical && worker.started && !worker.final_reported)
+                let mut slot = self
+                    .worker
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                let worker = slot
+                    .as_mut()
+                    .filter(|worker| {
+                        worker.delegation_id == context.delegation_id
+                            && worker.prepared_study_identity == context.prepared_study_identity
+                            && worker.work_class == WorkerWorkClass::Numerical
+                            && context.work_class == WorkerWorkClass::Numerical
+                            && worker.started
+                            && !worker.final_reported
+                    })
                     .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
-                // Grow with headroom so per-element reserves in the worker do
-                // not each wait on a host call.
-                worker.reservation.grow_capacity(maximum).map(|()| worker.reservation.capacity())
+                worker
+                    .reservation
+                    .grow_capacity(maximum)
+                    .map(|()| worker.reservation.capacity())
             };
             match acquisition {
                 Ok(capacity) => {
@@ -545,31 +694,34 @@ impl ActiveFeaLease {
                         lease,
                         root_started_at_unix_millis: self.root_started_at_unix_millis,
                         delegation_id: None,
-                    }).map_err(|error| js_error(&error.to_string()));
+                    })
+                    .map_err(|error| js_error(&error.to_string()));
                 }
                 Err(LedgerError::MoreGrantRequired { required, granted }) => {
-                    // Ask the host ahead by the shared doubling law so
-                    // per-element reserves do not each call the host.
-                    let target = runmat_simulation_usage::grant_target(
-                        required,
-                        granted,
-                        lease.budget_ops,
-                    );
+                    let target =
+                        runmat_simulation_usage::grant_target(required, granted, lease.budget_ops);
                     let count = crate::wire::json_contract_to_js(&target)
                         .map_err(|error| js_error(&error.to_string()))?;
                     let state: LeaseState = serde_wasm_bindgen::from_value(
                         call_host(&host, "grant", &request, &count).await?,
-                    ).map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
+                    )
+                    .map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
                     if state.lease.lease_id != self.lease_id
                         || state.root_started_at_unix_millis != self.root_started_at_unix_millis
-                    { return Err(denied_to_js(FeaRunDenied::LicenseInvalid)); }
-                    self.control.renew(state.lease.budget()?).map_err(denied_to_js)?;
+                    {
+                        return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+                    }
+                    self.control
+                        .renew(state.lease.budget()?)
+                        .map_err(denied_to_js)?;
                     lease = state.lease;
                 }
                 Err(error) => return Err(denied_to_js(error.into())),
             }
         }
-        Err(denied_to_js(FeaRunDenied::Accounting(LedgerError::GrantUnavailable)))
+        Err(denied_to_js(FeaRunDenied::Accounting(
+            LedgerError::GrantUnavailable,
+        )))
     }
     /// The UI coordinator invokes this only after stopOwnedWork has resolved.
     /// A missing final report must keep the hold instead of closing the root.
@@ -578,30 +730,68 @@ impl ActiveFeaLease {
         let receipt: WorkerRetirementReceipt = serde_wasm_bindgen::from_value(receipt)
             .map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
         self.validate_retirement(&context, &receipt)?;
-        let mut worker = self.worker.lock().unwrap_or_else(|error| error.into_inner());
+        let mut worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if worker.is_none()
-            && self.last_retired_worker.lock().unwrap_or_else(|error| error.into_inner()).as_ref()
-                .is_some_and(|(id, worker_id)| id == &context.delegation_id && Some(worker_id) == receipt.worker_id.as_ref())
-        { return Ok(()); }
-        let owned = worker.as_mut().filter(|worker| worker.delegation_id == context.delegation_id
-            && worker.prepared_study_identity == context.prepared_study_identity
-            && worker.work_class == context.work_class)
+            && self
+                .last_retired_worker
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .as_ref()
+                .is_some_and(|(id, worker_id)| {
+                    id == &context.delegation_id && Some(worker_id) == receipt.worker_id.as_ref()
+                })
+        {
+            return Ok(());
+        }
+        let owned = worker
+            .as_mut()
+            .filter(|worker| {
+                worker.delegation_id == context.delegation_id
+                    && worker.prepared_study_identity == context.prepared_study_identity
+                    && worker.work_class == context.work_class
+            })
             .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
-        if receipt.worker_id.is_none() { return Err(denied_to_js(FeaRunDenied::LicenseInvalid)); }
-        if !owned.final_reported { return Err(denied_to_js(FeaRunDenied::Accounting(LedgerError::OutstandingWork))); }
+        if receipt.worker_id.is_none() {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
+        if !owned.final_reported {
+            return Err(denied_to_js(FeaRunDenied::Accounting(
+                LedgerError::OutstandingWork,
+            )));
+        }
         let completed: CompletedUsage = owned.reservation.completed();
-        owned.reservation.finish(completed).map_err(|error| denied_to_js(error.into()))?;
+        owned
+            .reservation
+            .finish(completed)
+            .map_err(|error| denied_to_js(error.into()))?;
         worker.take();
-        *self.last_retired_worker.lock().unwrap_or_else(|error| error.into_inner()) = Some((
+        *self
+            .last_retired_worker
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some((
             context.delegation_id,
             receipt.worker_id.expect("validated physical worker id"),
         ));
         Ok(())
     }
-    fn validate_retirement(&self, context: &WorkerContext, receipt: &WorkerRetirementReceipt) -> Result<(), JsValue> {
-        if !receipt.retired || receipt.run_id != self.run_id || receipt.delegation_id != context.delegation_id
-            || receipt.worker_id.as_ref().is_some_and(|id| id.is_empty() || id.len() > 256)
-        { return Err(denied_to_js(FeaRunDenied::LicenseInvalid)); }
+    fn validate_retirement(
+        &self,
+        context: &WorkerContext,
+        receipt: &WorkerRetirementReceipt,
+    ) -> Result<(), JsValue> {
+        if !receipt.retired
+            || receipt.run_id != self.run_id
+            || receipt.delegation_id != context.delegation_id
+            || receipt
+                .worker_id
+                .as_ref()
+                .is_some_and(|id| id.is_empty() || id.len() > 256)
+        {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
         Ok(())
     }
     pub(super) fn study_identity(&self) -> Result<Digest, JsValue> {
@@ -622,7 +812,8 @@ impl ActiveFeaLease {
         let assignment = crate::wire::json_contract_to_js(&WorkerAssignment {
             prepared_study_identity: digest.clone(),
             work_class,
-        }).map_err(|error| js_error(&error.to_string()))?;
+        })
+        .map_err(|error| js_error(&error.to_string()))?;
         let state: LeaseState = serde_wasm_bindgen::from_value(
             call_host(host, "delegate", &request, &assignment).await?,
         )

@@ -122,9 +122,7 @@ fn usage(cpu: u64, wall: u64) -> ResourceUsage {
 pub(crate) fn parent_reply_timeout(budget: Option<&FeaRunBudget>) -> std::time::Duration {
     use runmat_simulation_usage::outage;
     budget.map_or(outage::LEASE_EXCHANGE_TIMEOUT, |budget| {
-        outage::forwarded_reply_timeout(std::time::Duration::from_millis(
-            budget.heartbeat_millis,
-        ))
+        outage::forwarded_reply_timeout(std::time::Duration::from_millis(budget.heartbeat_millis))
     })
 }
 

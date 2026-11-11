@@ -40,8 +40,7 @@ pub use acoustic_response_product::{
 };
 pub use compilation::{
     compile_analysis_study, compile_cross_section_study, AnalysisStudyCompilationError,
-    AnalysisStudyCompilationInput,
-    AnalysisStudyDefinition, CompiledAnalysisStudy,
+    AnalysisStudyCompilationInput, AnalysisStudyDefinition, CompiledAnalysisStudy,
 };
 pub use electrical_planning::{
     plan_electrical_study, ElectricalStudyPlanningError, ElectricalStudyPlanningPolicy,

@@ -131,8 +131,9 @@ pub(super) fn retriangulated_face_missing(
         if !protected_faces.contains(&face) {
             return false;
         }
-        let [Some(a), Some(b), Some(c)] =
-            triangle.node_identities.map(|identity| topology.node_index(identity))
+        let [Some(a), Some(b), Some(c)] = triangle
+            .node_identities
+            .map(|identity| topology.node_index(identity))
         else {
             return true;
         };
@@ -329,7 +330,11 @@ pub(super) fn illegal_star_face(
     protected_faces: &BTreeSet<[StableDigest; 3]>,
     kept_edges: &BTreeSet<[StableDigest; 2]>,
 ) -> IllegalStarFace {
-    let point = |vertex: u32| topology.nodes[vertex as usize].coordinates_m.canonical_value();
+    let point = |vertex: u32| {
+        topology.nodes[vertex as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     for left_index in topology.vertex_stars[inserted as usize].iter().copied() {
         let Some(left) = topology.tetrahedron(left_index) else {
             continue;
@@ -350,7 +355,9 @@ pub(super) fn illegal_star_face(
             else {
                 continue;
             };
-            let nodes = left.vertex_indices.map(|vertex| topology.nodes[vertex as usize]);
+            let nodes = left
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize]);
             if !topology
                 .insphere_nodes([
                     nodes[0],

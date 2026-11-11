@@ -199,9 +199,7 @@ fn prepare(
             request
                 .task
                 .console
-                .map(|controls| {
-                    crate::console_source_subgrant(&request.task.resources, controls)
-                })
+                .map(|controls| crate::console_source_subgrant(&request.task.resources, controls))
                 .transpose()
                 .map_err(|error| invalid(error.to_string()))?,
         )?,

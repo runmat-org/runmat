@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "scope": "Canonical WASM registry generation and type checking; product execution has separate acceptance evidence",
+  "source_revision": "d3598e5fd41e0f94b168278f7795f4763d72f711",
+  "target": "wasm32-unknown-unknown",
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "command": [
+    "node",
+    "scripts/regenerate-wasm-registry.mjs",
+    "--output",
+    "/home/nallana/rm1293/logs/integration-071-d3598e5fd4-wasm-registry.generated.rs"
+  ],
+  "exit_code": 0,
+  "configuration": "target=wasm32-unknown-unknown;features=plot-core,plot-web",
+  "registrations": {
+    "total": 3084,
+    "builtins": 2343,
+    "constants": 11,
+    "gpu_specs": 370,
+    "fusion_specs": 360,
+    "manifest_digest": "65e318c94dc0ab6f5d9dc62ed8f28e5eba674e4426903fc594ec718edf6404fe"
+  },
+  "source_guard": {
+    "expected_files": 27107,
+    "matched_files": 27107,
+    "differences": 0,
+    "absent_files": 0
+  },
+  "output_sha256": "f83f0af5e05be51524ef71c1923c053ce8a6d41bc557106982b6b4f5ad883708",
+  "previous_output_sha256": "b233bacd70b63fb89ba42e521016df4d7c31e831151b82f9162216ec60d5146c",
+  "review": "Replacing only the previous REGISTRY_SOURCE_FINGERPRINT literal reconstructs the generated output byte for byte. Registration rows, manifest digest, counts and build configuration are unchanged. wasm_registry.rs includes this file only under target_arch = wasm32; native registration uses its separate no-op function.",
+  "log_sha256": "298793fe4eb8983928997fa0ad78a8cfeedbb162cc5502795068dbb26891482a",
+  "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-d3598e5fd4-wasm-registry.log"
+}

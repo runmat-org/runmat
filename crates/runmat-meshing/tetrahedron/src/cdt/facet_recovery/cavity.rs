@@ -38,13 +38,13 @@ mod steiner;
 
 use footprint::facet_footprint_crosses_face;
 pub(super) use footprint::segment_hits_triangle_interior;
-use sides::{side_cavities, SideCavityConstruction};
-use simultaneous::{refill_cavity_sides, CavityRefillRequest};
-use star::star_refill;
 pub(super) use in_place::{
     insert_candidate_in_place, try_recover_facet_with_cavity_in_place, InPlaceCandidate,
     InPlaceCandidateRequest,
 };
+use sides::{side_cavities, SideCavityConstruction};
+use simultaneous::{refill_cavity_sides, CavityRefillRequest};
+use star::star_refill;
 pub(super) use steiner::{
     candidate_node, steiner_identity, steiner_lineage, try_insert_candidate_with_conflicts,
     try_recover_facet_with_cavity, CandidateInsertion, CandidateInsertionResult,
@@ -159,7 +159,9 @@ pub(super) fn try_recover_facet_patch_in_place(
                         failure.to_string(),
                     ),
                 })?
-                .map(|violation| format!("candidate cavity was not constrained-Delaunay: {violation}"))
+                .map(|violation| {
+                    format!("candidate cavity was not constrained-Delaunay: {violation}")
+                })
             }
         };
         let recovered = rejection.is_none();
@@ -220,8 +222,7 @@ fn plan_facet_cavity(
         .collect::<Result<Vec<_>, _>>()?;
     let cap_boundary_edges = patch_boundary_edges(&cap_nodes);
     let signs = plane_signs(topology, facet_nodes, constraint_index, work)?;
-    let mut removed =
-        facet_intersection_seed(topology, facet_nodes, constraint_index, work)?;
+    let mut removed = facet_intersection_seed(topology, facet_nodes, constraint_index, work)?;
     if removed.is_empty() {
         work.reject("no tetrahedron face crosses the missing facet footprint");
         return Ok(CavityPlan::Unavailable);
@@ -261,13 +262,8 @@ fn plan_facet_cavity(
         return Ok(CavityPlan::Unavailable);
     }
     let boundary = cavity_boundary(topology, &removed, constraint_index, work)?;
-    let cavities = match side_cavities(
-        topology,
-        &cap_nodes,
-        &removed,
-        &boundary,
-        constraint_index,
-    )? {
+    let cavities = match side_cavities(topology, &cap_nodes, &removed, &boundary, constraint_index)?
+    {
         SideCavityConstruction::Ready(cavities) => cavities,
         SideCavityConstruction::Unavailable { reason, open_edge } => {
             let reason = open_edge.map_or(reason.clone(), |edge| {
@@ -282,7 +278,12 @@ fn plan_facet_cavity(
     };
     let cavity_nodes = removed
         .iter()
-        .flat_map(|tetrahedron| topology.tetrahedron(*tetrahedron).expect("live cavity tetrahedron").vertex_indices)
+        .flat_map(|tetrahedron| {
+            topology
+                .tetrahedron(*tetrahedron)
+                .expect("live cavity tetrahedron")
+                .vertex_indices
+        })
         .collect::<BTreeSet<_>>();
     if cavity_nodes.len() as u64 > work.options.maximum_cavity_nodes {
         return Err(resource_or_cancelled(
@@ -608,7 +609,10 @@ pub(super) fn recovered_segments_exist(recovery: &DelaunaySegmentRecovery) -> bo
             recovery.topology.incidence.vertex_stars[first]
                 .iter()
                 .any(|tetrahedron| {
-                    recovery.topology.tetrahedron(*tetrahedron).expect("live cavity tetrahedron")
+                    recovery
+                        .topology
+                        .tetrahedron(*tetrahedron)
+                        .expect("live cavity tetrahedron")
                         .vertex_indices
                         .contains(&(second as u32))
                 })
@@ -654,13 +658,8 @@ impl std::ops::Index<usize> for PlaneSigns<'_> {
                 let [a, b, c] = self.facet;
                 // Coordinates are validated finite on admission, so the exact predicate
                 // cannot fail here.
-                let sign = orient3d([
-                    a,
-                    b,
-                    c,
-                    self.nodes[node].coordinates_m.canonical_value(),
-                ])
-                .unwrap_or(PredicateSign::Zero);
+                let sign = orient3d([a, b, c, self.nodes[node].coordinates_m.canonical_value()])
+                    .unwrap_or(PredicateSign::Zero);
                 let code = match sign {
                     PredicateSign::Negative => 1,
                     PredicateSign::Zero => 2,
@@ -686,7 +685,11 @@ fn plane_signs<'t>(
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<PlaneSigns<'t>, DelaunayFacetRecoveryError> {
     work.search_step(constraint_index)?;
-    let facet = facet.map(|node| topology.nodes()[node as usize].coordinates_m.canonical_value());
+    let facet = facet.map(|node| {
+        topology.nodes()[node as usize]
+            .coordinates_m
+            .canonical_value()
+    });
     if facet.iter().flatten().any(|value| !value.is_finite()) {
         return Err(invalid_topology(
             constraint_index,
@@ -713,7 +716,11 @@ fn facet_intersection_seed(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<BTreeSet<u32>, DelaunayFacetRecoveryError> {
-    let point = |node: u32| topology.nodes()[node as usize].coordinates_m.canonical_value();
+    let point = |node: u32| {
+        topology.nodes()[node as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let corners = facet.map(point);
     let mut lower = corners[0];
     let mut upper = corners[0];
@@ -724,7 +731,12 @@ fn facet_intersection_seed(
         }
     }
     let span = (0..3)
-        .map(|axis| (upper[axis] - lower[axis]).abs().max(lower[axis].abs()).max(upper[axis].abs()))
+        .map(|axis| {
+            (upper[axis] - lower[axis])
+                .abs()
+                .max(lower[axis].abs())
+                .max(upper[axis].abs())
+        })
         .fold(0.0_f64, f64::max);
     let margin = span * 1.0e-6 + f64::MIN_POSITIVE;
     for axis in 0..3 {
@@ -732,11 +744,16 @@ fn facet_intersection_seed(
         upper[axis] += margin;
     }
     let meets_box = |tetrahedron: u32| {
-        let vertices = topology.tetrahedron(tetrahedron).expect("live cavity tetrahedron")
+        let vertices = topology
+            .tetrahedron(tetrahedron)
+            .expect("live cavity tetrahedron")
             .vertex_indices
             .map(point);
         (0..3).all(|axis| {
-            let low = vertices.iter().map(|vertex| vertex[axis]).fold(f64::INFINITY, f64::min);
+            let low = vertices
+                .iter()
+                .map(|vertex| vertex[axis])
+                .fold(f64::INFINITY, f64::min);
             let high = vertices
                 .iter()
                 .map(|vertex| vertex[axis])
@@ -756,7 +773,9 @@ fn facet_intersection_seed(
     let mut removed = BTreeSet::new();
     while let Some(index) = queue.pop_front() {
         work.cavity_step(constraint_index)?;
-        let tetrahedron = topology.tetrahedron(index).expect("live cavity tetrahedron");
+        let tetrahedron = topology
+            .tetrahedron(index)
+            .expect("live cavity tetrahedron");
         for neighbor in tetrahedron.neighbors.into_iter().flatten() {
             if !visited.contains(&neighbor) && meets_box(neighbor) {
                 visited.insert(neighbor);
@@ -846,7 +865,9 @@ fn cavity_boundary(
 ) -> Result<Vec<BoundaryFace>, DelaunayFacetRecoveryError> {
     let mut boundary = Vec::new();
     for tetrahedron_index in removed {
-        let tetrahedron = topology.tetrahedron(*tetrahedron_index).expect("live cavity tetrahedron");
+        let tetrahedron = topology
+            .tetrahedron(*tetrahedron_index)
+            .expect("live cavity tetrahedron");
         for opposite in 0..4 {
             work.search_step(constraint_index)?;
             if tetrahedron.neighbors[opposite].is_some_and(|neighbor| removed.contains(&neighbor)) {
@@ -905,11 +926,14 @@ fn regularize_nonmanifold_edge_stars(
         else {
             return Ok(true);
         };
-        let incident = topology.vertex_star(edge[0])
+        let incident = topology
+            .vertex_star(edge[0])
             .iter()
             .copied()
             .filter(|tetrahedron| {
-                topology.tetrahedron(*tetrahedron).expect("live cavity tetrahedron")
+                topology
+                    .tetrahedron(*tetrahedron)
+                    .expect("live cavity tetrahedron")
                     .vertex_indices
                     .contains(&edge[1])
             })
@@ -1031,7 +1055,9 @@ fn edge_star_components(
         let mut component = Vec::new();
         while let Some(tetrahedron_id) = pending.pop() {
             component.push(tetrahedron_id);
-            let tetrahedron = topology.tetrahedron(tetrahedron_id).expect("live cavity tetrahedron");
+            let tetrahedron = topology
+                .tetrahedron(tetrahedron_id)
+                .expect("live cavity tetrahedron");
             for (opposite, node) in tetrahedron.vertex_indices.iter().enumerate() {
                 if edge.contains(node) {
                     continue;
@@ -1064,7 +1090,9 @@ fn disconnected_edge_star_gaps(
     let mut gaps = edge_star_components(topology, edge, &unselected);
     gaps.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
     let open_star = incident.iter().any(|tetrahedron_id| {
-        let tetrahedron = topology.tetrahedron(*tetrahedron_id).expect("live cavity tetrahedron");
+        let tetrahedron = topology
+            .tetrahedron(*tetrahedron_id)
+            .expect("live cavity tetrahedron");
         tetrahedron
             .vertex_indices
             .iter()
@@ -1088,11 +1116,14 @@ fn disconnected_edge_star_gaps(
             .collect::<Vec<_>>();
         let expansion_set = expansion.iter().copied().collect::<BTreeSet<_>>();
         let preserves_cap_boundary = protected_edges.iter().all(|protected| {
-            topology.vertex_star(protected[0])
+            topology
+                .vertex_star(protected[0])
                 .iter()
                 .copied()
                 .filter(|tetrahedron| {
-                    topology.tetrahedron(*tetrahedron).expect("live cavity tetrahedron")
+                    topology
+                        .tetrahedron(*tetrahedron)
+                        .expect("live cavity tetrahedron")
                         .vertex_indices
                         .contains(&protected[1])
                 })

@@ -102,13 +102,33 @@ impl super::NativeExecutionService {
     /// terminal/retention authority has expired. Never hold the service lock
     /// across the supervisor query, which may reenter a callback or block.
     pub(super) fn prune_expired_job_receipts(&self) -> Result<(), ExecutionServiceError> {
+        self.prune_expired_job_receipts_matching(None)
+    }
+
+    /// Awaiting one job must not synchronously query retention for unrelated jobs.
+    /// Submission still reclaims all expired receipts; an awaited expired receipt
+    /// keeps the same supervisor-authorized retirement check.
+    pub(super) fn prune_expired_job_receipt(
+        &self,
+        id: runmat_execution::JobId,
+    ) -> Result<(), ExecutionServiceError> {
+        self.prune_expired_job_receipts_matching(Some(id))
+    }
+
+    fn prune_expired_job_receipts_matching(
+        &self,
+        selected: Option<runmat_execution::JobId>,
+    ) -> Result<(), ExecutionServiceError> {
         let now = crate::supervisor::unix_millis();
         let candidates = {
             let state = self.state.lock().expect("native service poisoned");
             state
                 .durable_jobs
                 .iter()
-                .filter(|(_, record)| record.retain_until_unix_millis <= now)
+                .filter(|(id, record)| {
+                    selected.is_none_or(|selected| selected == **id)
+                        && record.retain_until_unix_millis <= now
+                })
                 .map(|(id, record)| (*id, Rc::clone(record)))
                 .collect::<Vec<_>>()
         };

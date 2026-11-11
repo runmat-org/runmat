@@ -1,0 +1,60 @@
+runmat 0.7
+std 1
+
+// A plain journal bearing: a 50 mm steel shaft running in a 40 mm long bronze bush, and the oil
+// film between them, fed through a 4 mm hole at the top of the bush. The radial clearance is
+// 50 um (c / R = 0.002, a usual figure for a 50 mm journal); under load the shaft sits
+// `eccentricity` below the bush's center, so the film runs from 20 um at the bottom to 80 um at
+// the top, where the feed hole is.
+// Hand check, short-bearing theory at 0.6 eccentricity: Sommerfeld number about 0.12; with ISO
+// VG 46 at 40 degC and 3000 rpm that carries about 6 kN.
+// Change `clearance` or `eccentricity` and re-run the study.
+part bearing {
+    input shaft_diameter : length = 50 mm
+    input clearance : length = 0.05 mm
+    input eccentricity : length = 0.03 mm
+    input bush_length : length = 40 mm
+    input bush_outer : length = 70 mm
+    input shaft_overhang : length = 20 mm
+    input feed : length = 4 mm
+    input feed_stub : length = 5 mm
+
+    let r = input.shaft_diameter / 2
+    let rb = input.shaft_diameter / 2 + input.clearance
+    let ro = input.bush_outer / 2
+
+    // The shaft, run through the bush with an overhang each side; its center sits low by the
+    // eccentricity.
+    feature shaft_plane = plane.offset(base = origin.xy, distance = -input.shaft_overhang)
+    sketch shaft_s on plane.shaft_plane {
+        journal = circle(center = [0 mm, -input.eccentricity], radius = let.r)
+    }
+    feature shaft = extrude(profile = sketch.shaft_s, distance = input.bush_length + input.shaft_overhang * 2)
+
+    // The oil: the bush's bore with the feed hole up through the top of the bush, less the shaft.
+    sketch bore_s on origin.xy {
+        bore = circle(center = [0 mm, 0 mm], radius = let.rb)
+    }
+    feature film = extrude(profile = sketch.bore_s, distance = input.bush_length)
+    feature feed_plane = plane.offset(base = origin.zx, distance = let.r)
+    sketch feed_s on plane.feed_plane {
+        hole = circle(center = [input.bush_length / 2, 0 mm], radius = input.feed / 2)
+    }
+    feature feed_hole = extrude(profile = sketch.feed_s, distance = let.ro - let.r + input.feed_stub, mode = add(targets = [feature.film.body]))
+    feature oil = boolean.subtract(target = feature.film.body, tools = [feature.shaft.body], keep_tools = true)
+
+    // The bush: its outside, less the oil.
+    sketch bush_s on origin.xy {
+        outside = circle(center = [0 mm, 0 mm], radius = let.ro)
+    }
+    feature bush = extrude(profile = sketch.bush_s, distance = input.bush_length)
+    feature bush_cut = boolean.subtract(target = feature.bush.body, tools = [feature.film.body, feature.shaft.body], keep_tools = true)
+
+    region shaft_surface : face = { select = [feature.shaft.face.side(shaft_s.journal)], expect = at_least_one, body = feature.film.body, label = "Shaft surface" }
+    region bush_surface : face = { select = [feature.film.face.side(bore_s.bore)], expect = at_least_one, body = feature.film.body, label = "Bush surface" }
+    region feed : face = { select = [feature.feed_hole.face.end], expect = exactly_one, body = feature.film.body, label = "Feed hole" }
+
+    output film = { body = feature.film.body, label = "Film", color = "#D08A1E" }
+    output shaft = { body = feature.shaft.body, label = "Shaft", material = "steel_42crmo4", color = "#9AA3AD" }
+    output bush = { body = feature.bush.body, label = "Bush", material = "bronze_cc493k", color = "#B08D57" }
+}

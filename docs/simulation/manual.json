@@ -75,7 +75,7 @@
       "id": "steady-heat-transfer",
       "route": "/docs/simulation/guides/steady-heat-transfer",
       "title": "Steady heat transfer",
-      "summary": "Model heater power and air cooling on a real finned heat sink, and explore its saved temperature and heat-flow fields in RunMat.",
+      "summary": "Prescribe end temperatures on a steel bar and explore its saved temperature and heat-flow fields.",
       "keywords": [
         "Steady heat transfer",
         "RunMat",
@@ -85,6 +85,7 @@
       "order": 2,
       "narrative": "docs/simulation/guides/steady-heat-transfer.md",
       "examples": [
+        "steady-conduction",
         "heatsink-steady"
       ],
       "related_topics": [

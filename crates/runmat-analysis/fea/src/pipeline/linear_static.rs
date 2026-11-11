@@ -5,6 +5,7 @@ use runmat_analysis_core::{
 };
 mod preflight;
 mod prepared;
+mod observations;
 mod reference_diagnostics;
 mod solve;
 mod static_diagnostics;
@@ -14,6 +15,7 @@ use reference_diagnostics::{
 };
 mod static_thermomechanical;
 mod thermal_state;
+mod work;
 use crate::{
     algebra::apply_k,
     assembly::{
@@ -36,18 +38,10 @@ use crate::{
         RealizedExcitations,
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
-    post::{
-        fields::{
-            recover_result_fields_with_capacity, structural_field_recovery_metrics_from_fields,
-            take_structural_observable_fields,
-        },
-        recover_connector_observable_fields, recover_constraint_group_observable_fields,
+    post::fields::{
+        recover_result_fields_with_capacity, structural_field_recovery_metrics_from_fields,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    results::{
-        field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
-        observation::{evaluate_structural_observations, ObservationLimits},
-    },
 };
 pub use prepared::{
     run_linear_static_with_prepared_constraint_plan,
@@ -64,10 +58,24 @@ pub use thermal_state::{
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 
+/// Shared quote for constraint compilation, observation resolution and structural
+/// resource planning, including their model-dependent connector projections.
+pub fn structural_linear_preparation_work_upper_bound(
+    model: &AnalysisModel,
+    mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
+) -> Result<runmat_simulation_usage::OperationCount, FeaRunError> {
+    work::preparation_work_upper_bound(model, mesh)
+}
+
 impl From<LinearAssemblyError> for FeaRunError {
     fn from(error: LinearAssemblyError) -> Self {
         match error {
             LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Accounting(cause))
+            | LinearAssemblyError::SolverMeshRegionMapping(
+                crate::assembly::SolverMeshRegionMappingError::Projection(
+                    crate::topology::AnalysisProjectionError::Accounting(cause),
+                ),
+            )
             | LinearAssemblyError::Structural(
                 crate::assembly::StructuralAssemblyError::Accounting(cause),
             )
@@ -75,6 +83,11 @@ impl From<LinearAssemblyError> for FeaRunError {
                 crate::constraints::ConstraintPlanError::Accounting(cause),
             ) => Self::Usage(cause),
             LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
+            | LinearAssemblyError::SolverMeshRegionMapping(
+                crate::assembly::SolverMeshRegionMappingError::Projection(
+                    crate::topology::AnalysisProjectionError::Cancelled,
+                ),
+            )
             | LinearAssemblyError::Structural(
                 crate::assembly::StructuralAssemblyError::Cancelled,
             )
@@ -261,6 +274,17 @@ where
             crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference;
     }
     let phase_clock = crate::progress::phase_timer("structural_static.preflight");
+    if awaited_solid {
+        let work =
+            structural_linear_preparation_work_upper_bound(model, options.solver_mesh.as_ref())?;
+        if work > runmat_simulation_usage::OperationCount::ZERO {
+            before_block(
+                crate::algebra::NumericalCapacityPhase::StaticPreassembly,
+                work,
+            )
+            .await?;
+        }
+    }
     let preassembly = preflight::prepare_static_preassembly(
         model,
         execution_step,
@@ -318,6 +342,21 @@ where
             maximum_block_elements,
             |phase, required| {
                 let phase = match phase {
+                    crate::assembly::StructuralCapacityPhase::ConstraintValidation => {
+                        crate::algebra::NumericalCapacityPhase::ConstraintValidation
+                    }
+                    crate::assembly::StructuralCapacityPhase::BodyLoadQuadrature => {
+                        crate::algebra::NumericalCapacityPhase::BodyLoadQuadrature
+                    }
+                    crate::assembly::StructuralCapacityPhase::ThermoelasticLoadProjection => {
+                        crate::algebra::NumericalCapacityPhase::ThermoelasticLoadProjection
+                    }
+                    crate::assembly::StructuralCapacityPhase::ConnectorProjection => {
+                        crate::algebra::NumericalCapacityPhase::ConnectorProjection
+                    }
+                    crate::assembly::StructuralCapacityPhase::SolidLoadProjection => {
+                        crate::algebra::NumericalCapacityPhase::SolidLoadProjection
+                    }
                     crate::assembly::StructuralCapacityPhase::Solid(
                         crate::assembly::solver_solid::SolidCapacityPhase::Block { elements },
                     ) => crate::algebra::NumericalCapacityPhase::SolidAssemblyBlock { elements },
@@ -374,6 +413,16 @@ where
     // Element recovery now owns the temperatures it needs. Release the aligned global
     // field before solving; only the canonical transition must survive into the result.
     let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
+    if awaited_solid && assembly_constraint_plan.is_some() {
+        let work = work::resource_derivation_work_upper_bound(model, options.solver_mesh.as_ref())?;
+        if work > runmat_simulation_usage::OperationCount::ZERO {
+            before_block(
+                crate::algebra::NumericalCapacityPhase::StaticStorageVerification,
+                work,
+            )
+            .await?;
+        }
+    }
     let planned_reduced_support = preflight::verify_executed_preassembly(
         model,
         &options,
@@ -604,56 +653,19 @@ where
     fields.extend(electro_thermal_fields.thermal_residual_snapshots);
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.observations");
-    let observations = if execution_step.observations.is_empty() {
-        Vec::new()
-    } else {
-        let mesh = options.solver_mesh.as_ref();
-        let mut recovered = take_structural_observable_fields(&mut fields)
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        recovered.extend(
-            recover_constraint_group_observable_fields(&structural_constraint_result)
-                .map_err(|error| FeaRunError::Observation(error.to_string()))?,
-        );
-        recovered.extend(
-            recover_connector_observable_fields(&structural_connector_result)
-                .map_err(|error| FeaRunError::Observation(error.to_string()))?,
-        );
-        let mut topology = StructuralRecoveredFieldTopology::derive(model, mesh)
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        topology.entity_counts.constraint_groups = structural_constraint_result.groups.len();
-        topology.entity_counts.connectors = structural_connector_result.responses.len();
-        let catalog = RecoveredFieldCatalog::new_for_topology(
-            topology.identity.discretization_digest(),
-            topology.entity_counts,
-            recovered,
-        )
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let definitions = catalog
-            .fields()
-            .iter()
-            .map(|field| field.definition().clone())
-            .collect::<Vec<_>>();
-        let plan =
-            crate::results::observation::resolve_structural_observation_plan_with_connectors(
-                execution_step,
-                model,
-                mesh,
-                executed_constraint_plan,
-                &structural_connector_result.plan,
-                &definitions,
-                ObservationLimits::default(),
-            )
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let observations = evaluate_structural_observations(&plan, model, mesh, &catalog)
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        fields.extend(
-            catalog
-                .into_fields()
-                .into_iter()
-                .map(|field| field.into_storage()),
-        );
-        observations
-    };
+    let observations = observations::evaluate(
+        observations::StaticObservationInputs {
+            model,
+            step: execution_step,
+            mesh: options.solver_mesh.as_ref(),
+            constraints: executed_constraint_plan,
+            constraint_result: &structural_constraint_result,
+            connector_result: &structural_connector_result,
+        },
+        &mut fields,
+        awaited_solid.then_some(&mut before_block),
+    )
+    .await?;
     drop(phase_clock);
     emit_phase(
         "fea.run_linear_static",

@@ -13,6 +13,7 @@ use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     encode_encrypted_run_object, encode_run_key_envelope, EncryptionContext, EncryptionPurpose,
     ExecutionRecipientKey, PortableExecutionEncryption, RunKeyMaterial, RunObjectEncryption,
+    TRANSFER_FRAME_ENCRYPTION_SUITE,
 };
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, ProgramBuildRecipe, ProgramExecutionDescriptor,
@@ -31,7 +32,6 @@ use crate::commands::session::create_session;
 
 const RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 const MEDIA_TYPE: &str = "application/vnd.runmat.execution+ciphertext";
-const ENCRYPTION_SUITE: &str = "hkdf-sha256-aes256gcm-v1";
 const DRIVER_MEMORY_BYTES: i64 = 1024 * 1024 * 1024;
 
 pub(crate) struct PreparedRemoteExecution {
@@ -370,6 +370,13 @@ where
         .idempotency_key
         .take()
         .unwrap_or_else(|| Uuid::new_v4().to_string());
+    // Ask the Server to authorize the child and its terminal control envelope
+    // together. The captured numerical policy and console budget keep the
+    // original child limit after the driver partitions the parent grant.
+    let driver_memory_bytes = i64::try_from(
+        runmat_execution::resource::remote_driver_memory_bytes(DRIVER_MEMORY_BYTES as u64)?,
+    )
+    .context("driver parent memory exceeds API range")?;
     let request_digest = request_digest(
         &idempotency_key,
         &revision,
@@ -377,6 +384,7 @@ where
         &options,
         &digest_accelerators,
         recovery_fingerprint.as_deref(),
+        driver_memory_bytes,
     );
     let run = client
         .api()
@@ -402,7 +410,7 @@ where
                 ]),
                 resources: types::ResourceRequestBody {
                     cpu_millicores: 1_000,
-                    memory_bytes: DRIVER_MEMORY_BYTES,
+                    memory_bytes: driver_memory_bytes,
                     scratch_bytes: 1024 * 1024 * 1024,
                     accelerators: driver_accelerators,
                     maximum_wall_millis: 60 * 60 * 1_000,
@@ -723,7 +731,7 @@ async fn upload(
                 kind,
                 ciphertext,
                 media_type: MEDIA_TYPE.into(),
-                encryption_suite: ENCRYPTION_SUITE.into(),
+                encryption_suite: TRANSFER_FRAME_ENCRYPTION_SUITE.into(),
                 retain_for_seconds: RETENTION_SECONDS,
             },
         )
@@ -738,6 +746,7 @@ fn request_digest(
     options: &RemoteSubmissionOptions,
     accelerators: &[runmat_execution::resource::AcceleratorRequest],
     recovery_recipient_fingerprint: Option<&str>,
+    driver_memory_bytes: i64,
 ) -> String {
     let mut digest = Sha256::new();
     digest.update(b"runmat-remote-run-request-v2\0");
@@ -755,7 +764,7 @@ fn request_digest(
             digest.update(limits.max_text_bytes.to_be_bytes());
         }
     }
-    digest.update(DRIVER_MEMORY_BYTES.to_be_bytes());
+    digest.update(driver_memory_bytes.to_be_bytes());
     for accelerator in accelerators {
         digest.update(b"\0accelerator\0");
         digest.update(

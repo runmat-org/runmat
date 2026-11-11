@@ -83,7 +83,6 @@ pub(super) async fn run() {
         let directory = tempfile::tempdir().unwrap();
         let producing_root = directory.path().join("producing");
         let mut config = NativeExecutionConfig::for_current_executable().unwrap();
-        config.worker_arguments = vec!["--child".into()];
         config.max_workers = 1;
         config.store_root = producing_root.clone();
         let limits = NativeAnalysisHostLimits::default();
@@ -92,6 +91,7 @@ pub(super) async fn run() {
         let executed = execute_thermal_study_locally_with_source(
             config,
             ThermalStudyPreparation {
+                maximum_resident_bytes: None,
                 local_execution:
                     runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 scope: ThermalStudyScope::SelectedStep,

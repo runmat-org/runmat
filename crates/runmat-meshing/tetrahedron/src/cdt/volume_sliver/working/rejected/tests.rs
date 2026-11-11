@@ -149,21 +149,38 @@ fn changed_cell_ranking_matches_whole_spectrum_comparison() {
                 objective: QualityObjective::Shape,
                 floor: floor_key,
             };
-            assert_eq!(candidate.admissible(ranking), expected, "{removed:?} -> {added:?} at {floor}");
+            assert_eq!(
+                candidate.admissible(ranking),
+                expected,
+                "{removed:?} -> {added:?} at {floor}"
+            );
         }
         let expected = crate::cdt::volume_quality::compare_spectra(
             &spectrum(&next, false),
             &spectrum(&current, false),
         ) == Ordering::Less
             && crate::cdt::volume_quality::compare_spectra(
-                &spectrum(&next.iter().map(|cell| [cell[1], 0.0]).collect::<Vec<_>>(), false),
-                &spectrum(&current.iter().map(|cell| [cell[1], 0.0]).collect::<Vec<_>>(), false),
+                &spectrum(
+                    &next.iter().map(|cell| [cell[1], 0.0]).collect::<Vec<_>>(),
+                    false,
+                ),
+                &spectrum(
+                    &current
+                        .iter()
+                        .map(|cell| [cell[1], 0.0])
+                        .collect::<Vec<_>>(),
+                    false,
+                ),
             ) != Ordering::Greater;
         let ranking = Ranking {
             coupled: false,
             objective: QualityObjective::Shape,
             floor: 0,
         };
-        assert_eq!(candidate.admissible(ranking), expected, "{removed:?} -> {added:?} preserve");
+        assert_eq!(
+            candidate.admissible(ranking),
+            expected,
+            "{removed:?} -> {added:?} preserve"
+        );
     }
 }

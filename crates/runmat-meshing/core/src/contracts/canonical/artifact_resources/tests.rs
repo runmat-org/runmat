@@ -10,7 +10,11 @@ fn validation_estimate_covers_the_direct_encoding_for_both_orders() {
         let encoded = mesh.canonical_encode().unwrap();
         // Identity validation runs the direct encoder; no serde value tree is materialized, so
         // the estimate covers the encoded bytes, not a value-tree materialization.
-        assert!(estimate >= encoded.len() as u64, "{estimate} vs {}", encoded.len());
+        assert!(
+            estimate >= encoded.len() as u64,
+            "{estimate} vs {}",
+            encoded.len()
+        );
         assert_eq!(mesh, original);
         assert_eq!(estimate, mesh.validation_resident_bytes_estimate().unwrap());
     }

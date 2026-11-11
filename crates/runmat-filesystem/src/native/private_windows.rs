@@ -8,7 +8,7 @@ use std::os::windows::{
     fs::MetadataExt as _,
     io::{AsRawHandle as _, FromRawHandle as _},
 };
-use std::path::Path;
+use std::path::{Component, Path, Prefix};
 use std::ptr::null_mut;
 
 use windows_sys::Win32::Foundation::{
@@ -55,8 +55,68 @@ fn invalid(message: &'static str) -> io::Error {
     io::Error::new(ErrorKind::PermissionDenied, message)
 }
 
-fn wide(value: &std::ffi::OsStr) -> io::Result<Vec<u16>> {
-    let mut value: Vec<u16> = value.encode_wide().collect();
+fn wide(path: &Path) -> io::Result<Vec<u16>> {
+    // The private Win32 calls need extended-length paths independently of the
+    // caller's executable manifest and machine-wide long-path policy. Build
+    // the same absolute namespace lexically; never follow a parent link here.
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "private Windows path must be absolute",
+        ));
+    }
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "private Windows path needs a volume or share",
+        ));
+    };
+    let mut value = Vec::new();
+    match prefix.kind() {
+        Prefix::Disk(drive) => {
+            value.extend(r"\\?\".encode_utf16());
+            value.push(u16::from(drive));
+            value.push(u16::from(b':'));
+        }
+        Prefix::UNC(server, share) => {
+            value.extend(r"\\?\UNC\".encode_utf16());
+            value.extend(server.encode_wide());
+            value.push(u16::from(b'\\'));
+            value.extend(share.encode_wide());
+        }
+        Prefix::VerbatimDisk(_) | Prefix::VerbatimUNC(_, _) => {
+            value.extend(prefix.as_os_str().encode_wide());
+        }
+        Prefix::DeviceNS(_) | Prefix::Verbatim(_) => {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "private Windows state requires a disk or UNC share",
+            ));
+        }
+    }
+    let mut separator = false;
+    for component in components {
+        match component {
+            Component::RootDir => {
+                value.push(u16::from(b'\\'));
+                separator = false;
+            }
+            Component::Normal(name) => {
+                if separator {
+                    value.push(u16::from(b'\\'));
+                }
+                value.extend(name.encode_wide());
+                separator = true;
+            }
+            Component::CurDir | Component::ParentDir | Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "private Windows path must not contain relative components",
+                ));
+            }
+        }
+    }
     if value.contains(&0) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
@@ -108,7 +168,7 @@ pub(super) fn create_file_new(path: &Path) -> io::Result<File> {
     )?;
     let descriptor = descriptor(PrivateObject::File)?;
     let attributes = attributes(&descriptor);
-    let path = wide(path.as_os_str())?;
+    let path = wide(&path)?;
     // SAFETY: all input storage remains live; CREATE_NEW never replaces a
     // collision/reparse. Protection exists before the file becomes visible.
     let handle = unsafe {
@@ -138,7 +198,7 @@ pub(super) fn open_file(path: &Path) -> io::Result<File> {
             .ok_or_else(|| invalid("private file needs a parent"))?,
         directory::Mode::Existing,
     )?;
-    let path = wide(path.as_os_str())?;
+    let path = wide(&path)?;
     // SAFETY: terminated path; reparse handles are opened, not followed, and
     // rejected below before a caller can read any secret bytes.
     let handle = unsafe {

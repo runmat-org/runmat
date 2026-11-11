@@ -57,10 +57,12 @@ pub(super) fn preparation(
                 _ => continue,
             };
             if !conductance.is_finite() || conductance < 0.0 {
-                return Err(refused(ScalarConductionError::NegativeInterfaceConductance {
-                    interface_id: interface.interface_id.clone(),
-                    value: conductance,
-                }));
+                return Err(refused(
+                    ScalarConductionError::NegativeInterfaceConductance {
+                        interface_id: interface.interface_id.clone(),
+                        value: conductance,
+                    },
+                ));
             }
         }
     }

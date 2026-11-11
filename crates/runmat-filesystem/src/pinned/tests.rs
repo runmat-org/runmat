@@ -8,6 +8,10 @@ use std::sync::{Arc, Mutex};
 
 type OutputVersions = (BTreeMap<PathBuf, String>, BTreeMap<String, Vec<u8>>);
 
+#[cfg(windows)]
+#[path = "tests/native_mounts.rs"]
+mod native_mounts;
+
 struct Versions {
     live: MemoryFsProvider,
     outputs: Mutex<OutputVersions>,
@@ -429,4 +433,6 @@ async fn dependency_mounts_are_readonly_and_cannot_shadow_workspace_authority() 
         .mount_readonly_dependency(Path::new("/owned"), cache)
         .is_err());
     assert_eq!(base.read(Path::new("/owned")).await.unwrap(), b"output");
+    #[cfg(windows)]
+    native_mounts::assert_native_cache_access(&pinned).await;
 }

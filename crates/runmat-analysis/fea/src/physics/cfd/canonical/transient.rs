@@ -300,7 +300,10 @@ impl CanonicalFluidBackwardEulerStep<'_, '_, '_> {
     /// The interval's solve started from `initial` (fields of the same cell complex, such as
     /// the previous coupling iterate of a fluid-structure step) instead of the predecessor.
     /// The time history, equations, acceptance and retained identity are unchanged.
-    pub fn solve_from(&self, initial: CanonicalFluidFields<'_>) -> Result<CanonicalFluidResult, Error> {
+    pub fn solve_from(
+        &self,
+        initial: CanonicalFluidFields<'_>,
+    ) -> Result<CanonicalFluidResult, Error> {
         let n = self.problem.topology.cells.len();
         if initial.velocity_m_per_s.canonical_values().len() != n
             || initial.pressure_fluctuation_pa.canonical_values().len() != n

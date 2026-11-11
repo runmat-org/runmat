@@ -110,6 +110,7 @@ fn assert_removed_endpoint_placements(
     placements: usize,
     code: &'static str,
 ) {
+    let _admission = crate::fea_admission::guard();
     let specs = super::super::manifest::manifest_specs()
         .into_iter()
         .filter(|spec| select(spec.id))

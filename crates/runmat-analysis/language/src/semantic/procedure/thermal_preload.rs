@@ -1,6 +1,6 @@
 use super::{header::ProcedureHeader, lower::error, requirements};
 use crate::{CheckedFeaDeclaration, CheckedFeaStatement, CheckedFeaStatementKind, FeaDiagnostic};
-use runmat_fea_syntax::FeaAssignmentRelation;
+use runmat_design_syntax::FeaAssignmentRelation;
 
 pub(super) fn temperature(
     declaration: &CheckedFeaDeclaration,

@@ -11,8 +11,7 @@ use runmat_meshing_core::{MeshingCancellationSignal, MeshingCanonicalCodecContro
 use runmat_meshing_curve::SharedCurveMesh;
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-face-partition-result-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "exact-face-partition-result/v1";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::platform_content(1024 * 1024, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 mod face;
 pub use face::decode_exact_face_reuse_record_with_cancellation;

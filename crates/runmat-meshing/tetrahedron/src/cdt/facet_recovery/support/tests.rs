@@ -111,11 +111,7 @@ fn captured_rounded_facet_recovers_every_original_edge_without_a_degenerate_ear(
 //   physical quality, resource or scientific gates.
 #[test]
 fn facet_support_is_the_exact_delaunay_triangulation_of_the_boundary_polygon() {
-    let corners = [
-        [0.0, 0.0, 0.0],
-        [1.0, 0.1, 0.3],
-        [0.4, 0.9, 0.7],
-    ];
+    let corners = [[0.0, 0.0, 0.0], [1.0, 0.1, 0.3], [0.4, 0.9, 0.7]];
     let identity = |index: usize| StableDigest::from_bytes([(index + 1) as u8; 32]);
     // Boundary order: corner 0, midpoint 0-1, corner 1, midpoint 1-2, corner 2, midpoint 2-0.
     let mut nodes = Vec::new();

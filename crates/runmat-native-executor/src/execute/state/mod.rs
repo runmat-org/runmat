@@ -115,6 +115,9 @@ pub(super) enum NativeCaptureInput {
 }
 
 pub(super) struct HostState {
+    pub liveness: Option<
+        runmat_execution::resource::ExactShared<runmat_native_codegen::NativeProgramLiveness>,
+    >,
     pub function: NativeFunction,
     pub functions: Arc<Vec<NativeFunction>>,
     pub runtime: RuntimeContext,
@@ -124,6 +127,7 @@ pub(super) struct HostState {
     pub roots: roots::NativeRoots,
     pub last_error: Option<runmat_runtime::runtime_error::RuntimeErrorOwner>,
     pub host_failure: Option<NativeExecutorError>,
+    pub retirement_failure: Option<NativeExecutorError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
     pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,
     pub pending_assign: Option<super::mutation::PendingAssign>,

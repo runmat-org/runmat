@@ -18,6 +18,33 @@ pub(super) struct Selected {
     // Drop the input headers/routes before retiring the original root forest.
     pub(super) inputs: RootedValueLease,
 }
+
+fn real_arithmetic_shape(value: &Value) -> Option<&[usize]> {
+    match value {
+        Value::Bool(_) => Some(&[1, 1]),
+        Value::LogicalArray(logical) => Some(logical.shape.as_slice()),
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_is_logical(handle)
+                && handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
+                && matches!(
+                    handle.physical().element_type(),
+                    runmat_accelerate_api::NumericElementType::U8
+                        | runmat_accelerate_api::NumericElementType::F32
+                        | runmat_accelerate_api::NumericElementType::F64
+                )
+                && runmat_accelerate_api::handle_provenance(handle)
+                    == Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                && handle.allocation_lease().validate_live().is_ok()
+                && handle.view().validate(handle.physical()).is_ok()
+                && crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+                    .is_some() =>
+        {
+            Some(handle.shape())
+        }
+        other => host_route::real_floating_shape(other),
+    }
+}
+
 pub(super) fn prepare(
     context: Option<&RuntimeContext>,
     identity: BuiltinCatalogIdentity,
@@ -63,8 +90,8 @@ pub(super) fn prepare(
         }
     }
     let admitted = input_count == 2
-        && host_route::real_floating_shape(&left)
-            .zip(host_route::real_floating_shape(&right))
+        && real_arithmetic_shape(&left)
+            .zip(real_arithmetic_shape(&right))
             .is_some_and(|(left, right)| BroadcastPlan::new(left, right).is_ok());
     let branch = if admitted {
         Branch::Admitted(BuiltinPreparationAdmission {

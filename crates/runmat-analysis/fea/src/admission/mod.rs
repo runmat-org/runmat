@@ -19,8 +19,8 @@ use runmat_analysis_core::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use electrical::{admit_canonical_electrical_static, admit_cross_section_line_parameters};
 pub(crate) use electrical::realization as canonical_electrical_realization;
+pub use electrical::{admit_canonical_electrical_static, admit_cross_section_line_parameters};
 pub use fluid::{
     admit_canonical_conjugate_heat_steady, admit_canonical_conjugate_heat_transient,
     admit_canonical_fluid_steady, admit_canonical_fluid_structure_steady,
@@ -32,7 +32,6 @@ pub use fluid_solid::{
     FLUID_SOLID_FACE_CODE,
 };
 pub use identity::AnalysisRunIdentity;
-pub(crate) use study::fluid_step_initial_selection_supported;
 pub use magnetic::admit_canonical_magnetostatic;
 pub(crate) use magnetic::realization as canonical_magnetic_realization;
 pub use maxwell::{admit_canonical_maxwell, canonical_maxwell_realization};
@@ -43,6 +42,7 @@ pub use structural::{
     structural_exact_realization, thermomechanical_exact_realization, StructuralRealizationInput,
     ThermomechanicalRealizationInput,
 };
+pub(crate) use study::fluid_step_initial_selection_supported;
 pub use study::{
     admit_accelerator_policy, admit_study, is_electrothermal, select_family, AdmissionIssue,
     AdmittedFamily, StaticRule, ACCELERATOR_REQUIRED_CODE, ACOUSTIC_ROTATED_PERIODIC,
@@ -50,10 +50,9 @@ pub use study::{
     CONJUGATE_HEAT_INITIAL_KIND, CONJUGATE_HEAT_INITIAL_TEMPERATURE,
     CONJUGATE_HEAT_INITIAL_UNIFORM, CONJUGATE_HEAT_STEADY_INITIAL,
     ELECTROMAGNETIC_INITIAL_CONDITION, FAMILY_PROCEDURE_CODE, FLUID_INITIAL_CONDITION,
-    FLUID_STRUCTURE_INITIAL_CONDITION, FLUID_STRUCTURE_INTERFACE,
-    FLUID_PERIODIC, MAGNETIC_STATIC_CONSTRAINT, MAGNETIC_STATIC_GAUGE, MAXWELL_CONSTRAINT,
-    MAXWELL_FAR_FIELD, MAXWELL_NONELECTROMAGNETIC_CONSTRAINT, OBSERVATION_CODE,
-    PROCEDURE_GRAPH_CODE,
+    FLUID_PERIODIC, FLUID_STRUCTURE_INITIAL_CONDITION, FLUID_STRUCTURE_INTERFACE,
+    MAGNETIC_STATIC_CONSTRAINT, MAGNETIC_STATIC_GAUGE, MAXWELL_CONSTRAINT, MAXWELL_FAR_FIELD,
+    MAXWELL_NONELECTROMAGNETIC_CONSTRAINT, OBSERVATION_CODE, PROCEDURE_GRAPH_CODE,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

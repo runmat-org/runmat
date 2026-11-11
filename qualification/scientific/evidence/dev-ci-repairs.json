@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "scope": "Source-equivalence review for retained Linux scientific cohorts. Targeted preflight checks do not qualify future dev artifact builds.",
+  "previous_accepted_inputs": {
+    "sha256": "414b12c71918894968bd083a7d9dc54f900c91280a5d18ebc6559dd649f9aba1",
+    "files": 24830,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "439739512d092976024bf839de61deebb3066be66f9d0c2ca6987b7ff90c912c",
+    "files": 24830,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "changes": [
+    {
+      "path": "crates/runmat-execution-runner-native/tests/meshing_process_conformance.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b2c61ef681f3af3fd55edb909eb581bff2020f73"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "057ed9f9421eba26b90b4fb59b9b3281c3446bf3"
+      ],
+      "reason": "Separate process-conformance fixture: its cancellation worker parks until retirement instead of finishing after a timer. Original cancellation classification and cleanup assertions remain. A focused test entrypoint skips unrelated recovery cases. This target is outside both retained scientific cohorts; production execution is unchanged."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/output_process_conformance.rs",
+      "before": [
+        "100644",
+        "blob",
+        "03ff49a845c7f2209ca852bbaae9314f69462b41"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "bd1ec8d0aa2170631c5a552aa65bb50834b3876a"
+      ],
+      "reason": "Adds a focused test-only entrypoint for the unchanged nested-console assertions with isolated temporary configuration. The ordinary full conformance path remains. This target is outside both retained scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/output_process_conformance/nested_console.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3962dd87f9fa5329d5ac6d1f286601f8fc8ab248"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "9156f80efa6ee6e80c66bd3d2225be1edc5ae931"
+      ],
+      "reason": "Adds root records to the assertion diagnostic while preserving the exact root-record count and child-delivery assertions. This separate test target is outside both retained scientific cohorts."
+    },
+    {
+      "path": "crates/runmat-python/src/environment/discover.rs",
+      "before": [
+        "100644",
+        "blob",
+        "33fd98f2755faac694706d26ff67668278c5baed"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fd936a29f7c39fba2fac6e6225e76ec4e2620b66"
+      ],
+      "reason": "Preserves requested interpreter and PATH precedence instead of sorting candidates. Both retained scientific cohorts run native authored studies and execution recovery without Python interop. Their numerical kernels and assertions are unchanged. The Python library passes 19 tests on macOS and Windows."
+    },
+    {
+      "path": "scripts/meshing/tests/test_validate_corpus.py",
+      "before": [
+        "100644",
+        "blob",
+        "37cf99b8e940317261a7507a7933f46aea69821b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ebe8624698bcbb2f230af07e097f34729c7c15d0"
+      ],
+      "reason": "Metadata-only integration coverage validation and its Python regression test. Neither measured Rust scientific command invokes this tooling. Numerical workloads, fixtures and thresholds are unchanged."
+    },
+    {
+      "path": "scripts/meshing/validate_corpus.py",
+      "before": [
+        "100644",
+        "blob",
+        "52a96d5d86272c42e3871f777296eeaeb124332d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "d44bbc95a0e31e323d9e36a92c555b7bf077ee2d"
+      ],
+      "reason": "Metadata-only integration coverage validation and its Python regression test. Neither measured Rust scientific command invokes this tooling. Numerical workloads, fixtures and thresholds are unchanged."
+    },
+    {
+      "path": "verification/meshing/integration.json",
+      "before": [
+        "100644",
+        "blob",
+        "5d0b5bc0e80ddc96cfa0f9989d71f2958beee2af"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e4cd89aa7c3a878c6c662115c10e6ac721b8ad3e"
+      ],
+      "reason": "Conserves all 25 previous import cases and adds 14 catalog fixtures with import-admission expectations and empty mesh scenario lists. This manifest is outside the two measured scientific workloads. The additions provide no meshing accuracy or performance evidence."
+    }
+  ],
+  "import_metadata": {
+    "conserved_cases": 25,
+    "added_import_only_cases": 14,
+    "new_mesh_scenarios": 0
+  },
+  "qualification": {
+    "python_library": {
+      "macos_passed": 19,
+      "windows_passed": 19
+    },
+    "meshing_tooling_passed": 35,
+    "workspace_driver_passed": 8,
+    "policy_node_passed": 30,
+    "native_staging_preflight": "Four bounded acceptance cases pass on each retained qualified macOS, Linux and Windows product. These validate the staging helper, not newly built dev products.",
+    "limits": "Original scientific measurements, totals, executed artifact identities and log hashes remain unchanged. Required dev CI is pending the consolidated commit."
+  }
+}

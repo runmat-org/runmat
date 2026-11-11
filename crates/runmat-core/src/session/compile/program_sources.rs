@@ -373,6 +373,12 @@ impl ProgramSourceTable {
                     let full = context.fullpath_name.as_deref().ok_or_else(|| {
                         "loose companion lacks captured full access path".to_string()
                     })?;
+                    #[cfg(windows)]
+                    let access_root = if std::path::Path::new(full).starts_with(access_root) {
+                        access_root.as_path()
+                    } else {
+                        discovery.canonical_search_root.as_deref().unwrap_or(access_root)
+                    };
                     let relative = std::path::Path::new(full)
                         .strip_prefix(access_root)
                         .map_err(|_| "loose companion is outside its selected search root".to_string())?;

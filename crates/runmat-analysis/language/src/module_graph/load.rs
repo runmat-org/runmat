@@ -6,7 +6,7 @@ use crate::{
     AnalysisOperationCatalog, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
     FeaModuleSource, FeaRelatedDiagnostic, LogicalSourcePath, ModuleRequest, SourceAvailability,
 };
-use runmat_fea_syntax::{FeaImportKind, FeaModuleItem, FeaSyntaxDiagnostic};
+use runmat_design_syntax::{FeaImportKind, FeaModuleItem, FeaSyntaxDiagnostic};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn build_module_graph<H>(host: &H, request: ModuleGraphRequest) -> FeaModuleGraph

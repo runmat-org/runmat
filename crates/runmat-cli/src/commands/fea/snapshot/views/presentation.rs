@@ -222,11 +222,7 @@ impl Presentation {
     }
 }
 
-fn load_context(
-    path: &Path,
-    opacity: f32,
-    units: LengthUnit,
-) -> Result<ContextGeometry> {
+fn load_context(path: &Path, opacity: f32, units: LengthUnit) -> Result<ContextGeometry> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("cannot read context geometry {}", path.display()))?;
     let name = path.display().to_string();
@@ -282,13 +278,13 @@ fn load_context(
         .map(|chunk| chunk.into_context([r, g, b, opacity], [er, eg, eb, edge_opacity]))
         .collect();
     log::info!(
-        "context geometry {name}: {} triangles; peak resident {} MiB",
+        "context geometry {name}: {} triangles; peak resident {}",
         asset
             .surface_meshes
             .iter()
             .map(|mesh| mesh.triangles.len())
             .sum::<usize>(),
-        super::peak_resident_mib()
+        super::peak_resident_memory()
     );
     Ok(ContextGeometry {
         record: ContextRecord {

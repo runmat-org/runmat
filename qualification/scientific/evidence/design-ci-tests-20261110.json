@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "previous_source_revision": "2012f077cfdfab71b1addd307e220d48f3bd6b81",
+  "source_revision": "cb738ca03faaf171b811eba242eeb319fce6b402",
+  "target": "macos-aarch64",
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "scope": "Integration-test expectations, missing vendored XSD, cross-platform schema-validator setup, and optional manual boolean STEP routing. No numerical implementation or required scientific command changes.",
+  "exit_code": 0,
+  "design_reference": {
+    "passed": 23,
+    "failed": 0,
+    "ignored": 0,
+    "features": [],
+    "commands": [["target/debug/deps/three_mf-6b50ddc7c224de98"], ["target/debug/deps/tools-e89a65c93f9ce68f"]],
+    "environment": {"RUST_TEST_THREADS": "1", "schema_validator": "isolated Python lxml 6.1.3 environment"},
+    "log_location": "Main:.runtime-rca-work/private-dev-20261110/design-reference-ci-repairs.log",
+    "log_sha256": "a590d40fb62c3eab30e3e37a5d0256eb2ebb8f5df00ad7aafcf09bf9faa2971a",
+    "artifact_sha256": ["56de1bcad589ca53f3a171fa70fd5a881af7aff43f3caa43bc0809276b2fcf39", "ef2efca4c3c0ea8cb36ba78e2ef06f8d6906530cba5fbcb57b59150eb3bb4ea3"]
+  },
+  "design_occt": {
+    "passed": 23,
+    "failed": 0,
+    "ignored": 0,
+    "features": ["occt"],
+    "command": ["cargo", "+1.90.0", "test", "--locked", "-p", "runmat-design-tools", "--features", "occt", "--test", "tools", "--test", "three_mf"],
+    "log_location": "Main:.runtime-rca-work/private-dev-20261110/design-occt-ci-repairs.log",
+    "log_sha256": "9603e74a2d7349b0e62462ba76937847749337e6740dac547e3b4429e17d44b0",
+    "artifact_sha256": ["682f16dbe2ae687330aa5c77d43c3b6d6ffcfba34e4adff7c893b872a3a56e51", "83311f853dc52c0eb2da5b66b04d0faba916993e080400dcca0d88788830eaf1"]
+  },
+  "box_mesh": {
+    "passed": 4,
+    "failed": 0,
+    "ignored": 0,
+    "command": ["cargo", "+1.90.0", "test", "--locked", "-p", "runmat-execution-runner-native", "--features", "occt-native", "--test", "occt_exact_meshing"],
+    "environment": {"CARGO_PROFILE_DEV_DEBUG": "0", "CARGO_BUILD_JOBS": "2", "CARGO_INCREMENTAL": "0"},
+    "case_names": ["occt_box_executes_the_complete_serial_exact_dag", "differential::runmat_and_independent_meshers_agree_on_box_invariants", "disconnected_cad_solids_retain_distinct_region_identity_through_meshing", "occt_box_artifact_is_independent_of_legal_partition_layout"],
+    "log_location": "Main:.runtime-rca-work/private-dev-20261110/box-mesh-ci-repairs-debug0.log",
+    "log_sha256": "6c8e6321e7405db117a50571cfbfc528025de70a1a6e58ae89724833246b6730",
+    "artifact_sha256": "842d7e5ebeb0570e9cd89e4832d1d839ca402e2a66e8cebe21e0adc1b40f70a9",
+    "snapshot": {"boundary_faces": 240, "artifact_digest": "d893fe7da9f4ba05ad730913f882030fe2953df746b59a34cc603d9b4f65743a"},
+    "independent_checks": "Unchanged box area 22, volume 6 and linear-field energy 84, watertightness, bounds, exact entity provenance, partition invariance and region assignment assertions pass."
+  },
+  "retained_failure": {
+    "source_revision": "2012f077cfdfab71b1addd307e220d48f3bd6b81",
+    "job": "https://github.com/runmat-org/runmat/actions/runs/42868464344/job/130016016501",
+    "case": "the_arm_and_its_motor_pod_mesh_with_a_shared_interface",
+    "reason": "Constrained-Delaunay facet recovery rejects the arm/motor-pod topology on Linux. The long boolean STEP corpus is explicitly manual under the existing governed-meshing beta disposition. No success receipt is claimed."
+  }
+}

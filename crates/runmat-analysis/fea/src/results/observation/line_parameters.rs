@@ -7,8 +7,8 @@
 //! specs and the section's mesh, with one-partition evidence whose source is the solved result.
 //! Publication and assessments then read these results like any other reduction.
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldLayout, LineParameterScope, ObservationQuantity,
-    ObservationTarget, ProcedureStep, SpatialReduction,
+    AnalysisField, AnalysisFieldLayout, LineParameterScope, ObservationQuantity, ObservationTarget,
+    ProcedureStep, SpatialReduction,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -16,8 +16,8 @@ use runmat_meshing_core::SolverMeshArtifact;
 use super::contract::{OBSERVATION_LIMITS, OBSERVATION_PREFIX};
 use super::distributed::ObservationPartitionEvidence;
 use super::partition::ObservationPartitionPlanIdentity;
-use super::{ObservationError, ObservationResult, ObservationResultIdentity};
 use super::ResolvedObservationPlanIdentity;
+use super::{ObservationError, ObservationResult, ObservationResultIdentity};
 use crate::physics::electrical::cross_section::LineParameters;
 use crate::results::field::{RecoveredFieldIdentity, RecoveredFieldSample};
 
@@ -62,12 +62,14 @@ pub fn line_parameter_plan_identity(
 }
 
 fn source_identity(parameters: &LineParameters) -> Result<Digest, ObservationError> {
-    Ok(crate::contracts::canonical_digest::canonical_contract_digest(
-        OBSERVATION_PREFIX,
-        SOURCE_DOMAIN,
-        parameters,
-        OBSERVATION_LIMITS,
-    )?)
+    Ok(
+        crate::contracts::canonical_digest::canonical_contract_digest(
+            OBSERVATION_PREFIX,
+            SOURCE_DOMAIN,
+            parameters,
+            OBSERVATION_LIMITS,
+        )?,
+    )
 }
 
 /// One result per authored observation of `step`, evaluated from `parameters` solved on `mesh`.
@@ -95,11 +97,12 @@ pub fn evaluate_line_parameter_observations(
                 )));
             }
             let value_shape = spec.result_value_shape();
-            let values = line_parameter_values(spec.quantity, &spec.target, parameters)
-                .map_err(|reason| ObservationError::Target {
+            let values = line_parameter_values(spec.quantity, &spec.target, parameters).map_err(
+                |reason| ObservationError::Target {
                     observation_id: spec.observation_id.0.clone(),
                     reason,
-                })?;
+                },
+            )?;
             let expected = value_shape.component_count().unwrap_or(0);
             if values.len() != expected {
                 return Err(ObservationError::Invalid(format!(
@@ -108,8 +111,11 @@ pub fn evaluate_line_parameter_observations(
                     values.len()
                 )));
             }
-            let shape =
-                super::contract::observation_result_storage_shape(None, &value_shape, spec.complex_representation)?;
+            let shape = super::contract::observation_result_storage_shape(
+                None,
+                &value_shape,
+                spec.complex_representation,
+            )?;
             let contribution = crate::contracts::canonical_digest::canonical_contract_digest(
                 OBSERVATION_PREFIX,
                 "line-parameter-contribution",

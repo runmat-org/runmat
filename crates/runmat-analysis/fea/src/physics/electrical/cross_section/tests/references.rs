@@ -8,7 +8,10 @@ const ETA0: f64 = 376.73;
 /// Z0 = 87 / sqrt(εr + 1.41) · ln(5.98 h / (0.8 w + t)), stated for 0.1 < w/h < 2.0 and
 /// 1 < εr < 15.
 pub fn ipc_microstrip(w: f64, h: f64, t: f64, er: f64) -> f64 {
-    assert!(w / h > 0.1 && w / h < 2.0 && er > 1.0 && er < 15.0, "outside IPC-2141A range");
+    assert!(
+        w / h > 0.1 && w / h < 2.0 && er > 1.0 && er < 15.0,
+        "outside IPC-2141A range"
+    );
     87.0 / (er + 1.41).sqrt() * (5.98 * h / (0.8 * w + t)).ln()
 }
 

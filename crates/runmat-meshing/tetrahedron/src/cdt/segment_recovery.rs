@@ -416,8 +416,8 @@ fn local_flip_can_connect_endpoints(
             if vertices[first] == left || !right_link.contains(&vertices[first]) {
                 continue;
             }
-            for &second in &vertices[(first + 1)..4] {
-                if second != left && right_link.contains(&second) {
+            for second in vertices.iter().skip(first + 1) {
+                if *second != left && right_link.contains(second) {
                     return true;
                 }
             }
@@ -594,7 +594,9 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment(
                 options.insertion,
                 cancellation,
             )
-            .map_err(|failure| temporary_error(failure, constraint_index, context, "legalization"))?,
+            .map_err(|failure| {
+                temporary_error(failure, constraint_index, context, "legalization")
+            })?,
         };
         let conflicting_protected_edges = protected_edges
             .iter()

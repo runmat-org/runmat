@@ -149,10 +149,7 @@ pub(super) async fn read_response(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use runmat_execution::{
-        resource::ResourceRequest,
-        ProgramExecutionAssignment,
-    };
+    use runmat_execution::{resource::ResourceRequest, ProgramExecutionAssignment};
     use runmat_runtime::analysis::fea_run_admission::*;
 
     struct Host {

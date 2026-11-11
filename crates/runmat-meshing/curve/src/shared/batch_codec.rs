@@ -5,8 +5,7 @@ use super::{batch::validate_batch, SharedCurveBatch, SharedCurveError};
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-curve-batch-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "shared-curve-batch/v1";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::platform_content(1024 * 1024, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 /// Encodes one independently admitted canonical edge batch.
 pub fn encode_shared_curve_batch(

@@ -86,7 +86,11 @@ fn incremental_inventory_matches_full_certification_after_node_moves() {
             } else {
                 topology.nodes[slot].coordinates_m.canonical_value()
             };
-            let scale = if sequence.next() % 3 == 0 { 0.4 } else { 0.04 };
+            let scale = if sequence.next().is_multiple_of(3) {
+                0.4
+            } else {
+                0.04
+            };
             if round % 10 != 9 {
                 for value in &mut point {
                     *value += scale * sequence.unit();

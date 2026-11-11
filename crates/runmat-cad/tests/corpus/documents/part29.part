@@ -1,0 +1,34 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    sketch s_pocket on feature.body.face.end {
+        p1 = line(start = [20 mm, 10 mm], end = [40 mm, 10 mm])
+        p2 = line(start = [40 mm, 10 mm], end = [40 mm, 30 mm])
+        p3 = line(start = [40 mm, 30 mm], end = [20 mm, 30 mm])
+        p4 = line(start = [20 mm, 30 mm], end = [20 mm, 10 mm])
+    }
+    feature pocket = extrude(profile = sketch.s_pocket, distance = 4 mm, reverse, mode = cut)
+    feature heal = direct.delete_faces(
+        faces = [
+            feature.pocket.face.side(s_pocket.p1),
+            feature.pocket.face.side(s_pocket.p2),
+            feature.pocket.face.side(s_pocket.p3),
+            feature.pocket.face.side(s_pocket.p4),
+            feature.pocket.face.end
+        ]
+    )
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+}

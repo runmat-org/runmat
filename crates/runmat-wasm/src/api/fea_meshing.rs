@@ -92,7 +92,11 @@ pub(super) async fn execute(
         ));
     }
     let delegation = active
-        .worker_context(&host, &json, super::fea_run_context::WorkerWorkClass::OcctPreparation)
+        .worker_context(
+            &host,
+            &json,
+            super::fea_run_context::WorkerWorkClass::OcctPreparation,
+        )
         .await
         .map_err(|error| MeshingExecutionError::Admission(denial_from_js(error)))?;
     let result = super::fea_execution::exact_execute(&json, delegation)

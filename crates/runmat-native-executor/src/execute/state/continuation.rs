@@ -1,13 +1,50 @@
 use super::*;
 
 impl HostState {
+    /// Remove only SSA tokens proven dead by the admitted canonical analysis.
+    /// Locals, captures, outputs and explicit arena pins remain separate roots.
+    pub(in crate::execute) fn retire_site_values(
+        &mut self,
+        site: &runmat_native_codegen::NativeMirSite,
+    ) -> NativeExecutorResult<()> {
+        if !self.runtime.has_cleanup_candidates() {
+            return Ok(());
+        }
+        let liveness = self.liveness.as_ref().ok_or_else(|| {
+            NativeExecutorError::Host("native retirement has no admitted liveness metadata".into())
+        })?;
+        for value in liveness.get().retired_after(self.function.id, site) {
+            self.values.remove(value);
+        }
+        Ok(())
+    }
+
+    /// Edge operands have already been rebound to the target parameters.
+    /// Prune against the target entry, not the predecessor kill set: a loop
+    /// parameter may have just replaced its own earlier dynamic generation.
+    pub(in crate::execute) fn retire_edge_values(
+        &mut self,
+        target: NativeBlockId,
+    ) -> NativeExecutorResult<()> {
+        if !self.runtime.has_cleanup_candidates() {
+            return Ok(());
+        }
+        let liveness = self.liveness.as_ref().ok_or_else(|| {
+            NativeExecutorError::Host("native retirement has no admitted liveness metadata".into())
+        })?;
+        let function = self.function.id;
+        self.values
+            .retain(|value, _| liveness.get().live_on_entry(function, target, *value));
+        Ok(())
+    }
+
     /// Reclaim obsolete physical generations, never logical SSA definitions.
     /// Call only between settled native sites, with no arena Value borrow live.
     pub(in crate::execute) fn retire_obsolete_generations(
         &mut self,
         call: &mut runmat_runtime::native::NativeCall,
     ) -> NativeExecutorResult<()> {
-        if !self.arena.has_retirement_debt() {
+        if !self.arena.has_retirement_debt() && !self.runtime.has_cleanup_candidates() {
             return Ok(());
         }
         // Use the original allocation policy, not a guessed next-operation
@@ -22,7 +59,7 @@ impl HostState {
             )),
             Ok(runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed)
         );
-        if !managed && !self.arena.retirement_due() {
+        if !managed && !self.runtime.has_cleanup_candidates() && !self.arena.retirement_due() {
             return Ok(());
         }
         if call.frame.is_null() {
@@ -104,6 +141,7 @@ impl HostState {
         }
         self.pending_call = None;
         self.completed_call = None;
+        self.retirement_failure = None;
         self.pending_await = None;
         self.abandon_captured_sequences();
         self.contextual_index_extents.clear();

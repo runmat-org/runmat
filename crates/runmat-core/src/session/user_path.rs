@@ -150,9 +150,6 @@ mod tests {
     #[test]
     fn later_core_session_hydrates_exact_setting_before_execution_and_restores_its_factory() {
         let _serial = runmat_filesystem::provider_override_lock();
-        #[cfg(windows)]
-        let (first, second) = ("C:\\selected", "C:\\later");
-        #[cfg(not(windows))]
         let (first, second) = ("/selected", "/later");
         let _first = runmat_filesystem::replace_provider(Arc::new(
             runmat_filesystem::MemoryFsProvider::with_current_dir(first),

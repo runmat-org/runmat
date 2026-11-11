@@ -13,17 +13,38 @@ const ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
 const LANCZOS_BLOCK_SIZE: u64 = 6;
 const MODAL_RECEIPT_PAYLOAD_BYTES_UPPER_BOUND: u64 = 16 * 1024;
 
+pub(super) struct ModalWorkspaceDimensions {
+    pub full: u64,
+    pub reduced: u64,
+    pub subspace: u64,
+    pub residual_vectors: u64,
+}
+
+pub(super) struct ModalOperatorStorage {
+    pub stiffness_nonzeros: u64,
+    pub mass_nonzeros: u64,
+    pub shifted_nonzeros: u64,
+    pub factor_bytes: u64,
+    pub energy_proof_bytes: u64,
+}
+
 pub(super) fn modal_workspace_bytes(
-    full_dimension: u64,
-    reduced_dimension: u64,
-    subspace_dimension: u64,
-    residual_vector_count: u64,
-    reduced_stiffness_nonzeros: u64,
-    reduced_mass_nonzeros: u64,
-    shifted_nonzeros: u64,
-    factor_bytes: u64,
-    energy_proof_bytes: u64,
+    dimensions: ModalWorkspaceDimensions,
+    operators: ModalOperatorStorage,
 ) -> Result<u64, ResourcePlanningError> {
+    let ModalWorkspaceDimensions {
+        full: full_dimension,
+        reduced: reduced_dimension,
+        subspace: subspace_dimension,
+        residual_vectors: residual_vector_count,
+    } = dimensions;
+    let ModalOperatorStorage {
+        stiffness_nonzeros: reduced_stiffness_nonzeros,
+        mass_nonzeros: reduced_mass_nonzeros,
+        shifted_nonzeros,
+        factor_bytes,
+        energy_proof_bytes,
+    } = operators;
     let reduced_row_offsets = checked_bytes(
         checked_mul(
             checked_add(reduced_dimension, 1, "reduced row offsets")?,

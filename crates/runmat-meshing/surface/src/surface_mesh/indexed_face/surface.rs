@@ -7,8 +7,7 @@ use runmat_meshing_core::MeshingCanonicalCodecControl;
 use serde::{Deserialize, Serialize};
 pub(crate) const PREFIX: &[u8] = b"runmat-meshing-indexed-surface/v2\0";
 const DOMAIN: &str = "exact-surface-mesh/indexed-v2";
-pub(crate) const LIMITS: CanonicalLimits =
-    CanonicalLimits::platform_content(1024 * 1024, 64);
+pub(crate) const LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 pub(crate) struct SurfaceEncoding<'a> {
     mesh: &'a ExactSurfaceMesh,
     rows: FaceEncoding<'a>,

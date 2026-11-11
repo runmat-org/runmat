@@ -72,7 +72,6 @@ pub(super) async fn run(
     let directory = tempfile::tempdir().unwrap();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.store_root = directory.path().join("thermal-radiation");
-    config.worker_arguments = vec!["--child".into()];
     config.max_workers = 1;
     // Placement capacity is explicit and equals the unchanged authored resource envelope.
     // Task hints do not resize a local pool.
@@ -81,6 +80,7 @@ pub(super) async fn run(
     config.worker_scratch_bytes = ceiling;
     config.worker_capabilities = super::super::capabilities();
     let preparation = ThermalStudyPreparation {
+        maximum_resident_bytes: None,
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         scope: ThermalStudyScope::Standalone,
         field_source: None,

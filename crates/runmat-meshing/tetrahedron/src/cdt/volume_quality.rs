@@ -299,7 +299,7 @@ fn evaluate_from_metric_contexts(
     metric_request: &MetricFieldRequest,
     options: DelaunayVolumeQualityOptions,
     metric_contexts: MetricContexts<'_>,
-    boundary: stream::BoundaryProtection<'_>,
+    protection: stream::BoundaryProtection<'_>,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeQuality, DelaunayVolumeQualityError> {
     let mut tetrahedra = Vec::with_capacity(topology.tetrahedra.len());
@@ -308,7 +308,7 @@ fn evaluate_from_metric_contexts(
         metric_request,
         options,
         metric_contexts,
-        boundary,
+        protection,
         cancellation,
         |_, quality| {
             tetrahedra.push(quality);

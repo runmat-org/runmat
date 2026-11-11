@@ -135,6 +135,8 @@ pub fn import_nonlinear_solid_study_root(
         max_object_bytes: limits.max_object_bytes.min(maximum_resident_bytes),
         ..limits
     };
+    let admitted_source = crate::study_closure::CallerBoundedImport::new(source, read_limits)?;
+    let source = &admitted_source;
     let manifest_bytes = read(source, root, read_limits)?;
     let manifest_resident =
         runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&manifest_bytes)?;
@@ -193,14 +195,6 @@ pub fn import_nonlinear_solid_study_root(
         .resources
         .resident_byte_budget()
         .saturating_sub(maximum_resident_bytes);
-    if wire.preparation.max_objects > limits.max_objects
-        || wire.preparation.max_object_bytes > limits.max_object_bytes
-        || wire.preparation.max_total_bytes > limits.max_total_bytes
-    {
-        return Err(invalid(
-            "nonlinear replay policy exceeds caller import limits",
-        ));
-    }
     wire.descendants.validate()?;
     let mut all = wire.descendants.objects.clone();
     all.extend(objects.unique_references(access, ValueRefKind::ResultObject)?);
@@ -218,6 +212,8 @@ pub fn import_nonlinear_solid_study_root(
     drop(manifest);
     drop(manifest_bytes);
     let expected_descendants = wire.descendants;
+    let closed_source = admitted_source.close(&expected_descendants.objects, access)?;
+    let source = &closed_source;
     let catalog_resident = runmat_canonical_codec::profile_serialized(
         &expected_descendants,
         completion_codec_limits(limits),

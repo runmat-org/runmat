@@ -72,10 +72,11 @@ impl DelegatedReservation {
     ///
     /// Headroom comes only from operations the parent already holds as grant
     /// and has not reserved, and it never asks the host for more grant. It is
-    /// at most the child's current capacity, so capacity doubles and the number
-    /// of renewals grows with the logarithm of the work. It is also at most half
-    /// of the free grant, so sibling children keep the rest. Headroom is not
-    /// charged: `finish` returns unused capacity to the parent.
+    /// at most the larger of the child's current capacity and the exact
+    /// increment, so incremental requests can double capacity. It is also at
+    /// most half of the remaining free grant, so sibling children keep the
+    /// rest. Headroom is not charged: `finish` returns unused capacity to the
+    /// parent.
     pub fn grow_capacity(&mut self, required: OperationCount) -> Result<(), LedgerError> {
         if self.closed {
             return Err(LedgerError::Closed);
@@ -87,7 +88,10 @@ impl DelegatedReservation {
         let headroom = {
             let state = self.ledger.lock()?;
             let committed = state.completed.total()?.checked_add(state.reserved)?;
-            let free = state.grant.operations().saturating_sub(committed.operations());
+            let free = state
+                .grant
+                .operations()
+                .saturating_sub(committed.operations());
             let spare = free.saturating_sub(exact) / 2;
             self.maximum.operations().max(exact).min(spare)
         };

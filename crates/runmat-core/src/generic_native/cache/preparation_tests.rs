@@ -82,7 +82,13 @@ fn retired_recipe_prices_without_retaining_code_and_stale_evidence_restores_expl
     let profile = cache
         .representation_profile(&[runmat_value::Value::Num(1.0)])
         .unwrap();
-    cache.resolve_or_compile(&unit, Some("quote")).unwrap();
+    cache
+        .resolve_or_compile(
+            &unit,
+            Some("quote"),
+            runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
+        )
+        .unwrap();
     for _ in 0..3 {
         cache
             .observe_invocation(&unit, Some("quote"), Some(&profile), 100)

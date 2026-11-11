@@ -8,11 +8,28 @@ use super::{
     },
     element::tetrahedron_geometry,
     identity::projection_digest,
-    quadrature::visit_volume_quadrature,
+    quadrature::{visit_volume_quadrature, volume_rule_work, KEAST_FIFTEEN},
     storage::{check_cancelled, reserve, SortedValues},
 };
 
 impl AnalysisProjection {
+    /// Maximum currently metered reference work in one projection derivation.
+    ///
+    /// The same per-point batches are reserved by volume quadrature. An invalid
+    /// element may complete only a prefix; the unused grant is never completed.
+    pub fn derivation_work_upper_bound(
+        mesh: &SolverMeshArtifact,
+    ) -> Result<runmat_simulation_usage::OperationCount, AnalysisProjectionError> {
+        use runmat_simulation_usage::{LedgerError, OperationCount};
+
+        let mut work = OperationCount::ZERO;
+        for element in &mesh.topology.volume_elements {
+            let element_work = volume_rule_work(element.order, KEAST_FIFTEEN.len())?;
+            work = work.checked_add(element_work).map_err(LedgerError::from)?;
+        }
+        Ok(work)
+    }
+
     pub fn derive(mesh: &SolverMeshArtifact) -> Result<Self, AnalysisProjectionError> {
         Self::derive_with_policy(mesh, AnalysisProjectionPolicy::default())
     }
@@ -33,6 +50,12 @@ impl AnalysisProjection {
                 }
             })?;
         check_cancelled()?;
+        if let Some(usage) = runmat_simulation_usage::UsageContext::capture() {
+            usage
+                .ledger()
+                .ensure_capacity(Self::derivation_work_upper_bound(mesh)?)?;
+            check_cancelled()?;
+        }
         let mut nodes = reserve(mesh.topology.nodes.len())?;
         for node in &mesh.topology.nodes {
             check_cancelled()?;

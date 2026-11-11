@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Validates a 3MF model part against the core and production schemas together. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:import namespace="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" schemaLocation="core-schema.xsd"/>
+  <xs:import namespace="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" schemaLocation="production.xsd"/>
+</xs:schema>

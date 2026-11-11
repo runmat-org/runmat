@@ -19,7 +19,10 @@ pub(super) fn build_thermal_plan(
         return invalid("sample count is 0".into());
     }
     if !input.worker.accelerators.is_empty() {
-        return invalid(format!("{} accelerators requested", input.worker.accelerators.len()));
+        return invalid(format!(
+            "{} accelerators requested",
+            input.worker.accelerators.len()
+        ));
     }
     // Content-addressed repeated chunks can make unique transport smaller than the logical
     // payload (a large mesh repeats region and provenance runs); decoded residency is separate.

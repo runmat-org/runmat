@@ -2,7 +2,7 @@
 //! Kelvin literals without an explicit origin remain contextual; Celsius literals
 //! declare an absolute origin, and differences of absolute temperatures are linear.
 use super::{CheckedExpression, CheckedExpressionKind};
-use runmat_fea_syntax::{FeaBinaryOperator, FeaUnaryOperator};
+use runmat_design_syntax::{FeaBinaryOperator, FeaUnaryOperator};
 use runmat_types::{
     physical::{QuantityKind, UnitError},
     PhysicalDimension,

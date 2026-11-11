@@ -3,10 +3,12 @@ use serde::Serialize;
 use std::path::Path;
 mod camera;
 mod legend;
+mod memory;
 mod outputs;
 mod presentation;
 mod profiles;
 pub(super) use legend::authored_bound_units;
+pub(super) use memory::peak_resident_memory;
 pub(super) use outputs::OutputNames;
 pub(super) use presentation::Presentation;
 
@@ -118,15 +120,15 @@ struct Detail {
     cap_triangle_budget: usize,
 }
 
-enum Attempt {
-    Fits(Encoded),
-    /// The encoded scene is `required` bytes and the consumer accepts `maximum`; `cap` is the
-    /// section cap drawn (triangles, evaluation grid) for a section view.
-    TooLarge {
-        required: usize,
-        maximum: usize,
-        cap: Option<(usize, usize)>,
-    },
+/// Encoding within a payload budget. A limit miss can retry at lower detail;
+/// fatal encoding failures use the outer runtime result.
+type EncodingAttempt = std::result::Result<Encoded, ScenePayloadLimit>;
+
+struct ScenePayloadLimit {
+    required: usize,
+    maximum: usize,
+    /// The section cap drawn (triangles, evaluation grid) for a section view.
+    cap: Option<(usize, usize)>,
 }
 
 /// The next lighter drawing of a view whose scene is `required` bytes against a `maximum`
@@ -222,7 +224,7 @@ pub(super) async fn capture(
             })
             .transpose()
             .map_err(anyhow::Error::msg)?;
-        let encode = |detail: Detail| -> Result<Attempt> {
+        let encode = |detail: Detail| -> Result<EncodingAttempt> {
             let (mut scene, deformation_scale, surface, volume) = match spec.volume {
                 Some(volume) => {
                     let solver_mesh = mesh_path.as_deref().ok_or_else(|| {
@@ -324,18 +326,24 @@ pub(super) async fn capture(
                 presentation.max_scene_bytes,
             ) {
                 Ok(bytes) => bytes,
-                Err(plotting::GeometrySceneEncodeError::PayloadTooLarge { required, maximum }) => {
-                    return Ok(Attempt::TooLarge {
+                Err(error) => {
+                    if let plotting::GeometrySceneEncodeErrorKind::PayloadTooLarge {
                         required,
                         maximum,
-                        cap: volume
-                            .as_ref()
-                            .and_then(|volume| volume.cap_triangles.zip(volume.cap_subdivisions)),
-                    })
+                    } = error.kind()
+                    {
+                        return Ok(Err(ScenePayloadLimit {
+                            required,
+                            maximum,
+                            cap: volume.as_ref().and_then(|volume| {
+                                volume.cap_triangles.zip(volume.cap_subdivisions)
+                            }),
+                        }));
+                    }
+                    return Err(anyhow::Error::new(error));
                 }
-                Err(error) => return Err(anyhow::Error::msg(error.to_string())),
             };
-            Ok(Attempt::Fits(Encoded {
+            Ok(Ok(Encoded {
                 legend: has_legend,
                 legend_note,
                 minimum: range.map(|range| range.0),
@@ -380,12 +388,12 @@ pub(super) async fn capture(
             };
             loop {
                 let (required, maximum, cap) = match encode(detail)? {
-                    Attempt::Fits(encoded) => break encoded,
-                    Attempt::TooLarge {
+                    Ok(encoded) => break encoded,
+                    Err(ScenePayloadLimit {
                         required,
                         maximum,
                         cap,
-                    } => (required, maximum, cap),
+                    }) => (required, maximum, cap),
                 };
                 detail = match lighter(detail, spec.volume.is_some(), required, maximum, cap) {
                     Some(lighter) => lighter,
@@ -409,9 +417,9 @@ pub(super) async fn capture(
         let scene_path = format!("{id}.scene.json");
         std::fs::write(output.join(&scene_path), bytes)?;
         log::info!(
-            "snapshot view {}/{view_count} '{id}' written; peak resident {} MiB",
+            "snapshot view {}/{view_count} '{id}' written; peak resident {}",
             position + 1,
-            peak_resident_mib()
+            peak_resident_memory()
         );
         let deformation_field = spec
             .deformation
@@ -577,27 +585,10 @@ pub(super) async fn capture(
         result.push(view);
     }
     log::info!(
-        "snapshot posters drawn; peak resident {} MiB",
-        peak_resident_mib()
+        "snapshot posters drawn; peak resident {}",
+        peak_resident_memory()
     );
     Ok(result)
-}
-
-/// This process's peak resident memory so far, for the capture's phase log.
-pub(super) fn peak_resident_mib() -> u64 {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
-    // SAFETY: getrusage writes one rusage for this process into the provided buffer.
-    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
-        return 0;
-    }
-    // SAFETY: getrusage returned success, so it initialized the buffer.
-    let maximum = u64::try_from(unsafe { usage.assume_init() }.ru_maxrss).unwrap_or(0);
-    // macOS reports bytes; Linux reports KiB.
-    if cfg!(target_os = "macos") {
-        maximum / (1024 * 1024)
-    } else {
-        maximum / 1024
-    }
 }
 
 #[cfg(test)]

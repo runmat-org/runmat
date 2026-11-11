@@ -3,7 +3,9 @@
 
 pub(crate) mod entrypoints;
 pub(crate) mod async_host;
-pub use async_host::{ensure_available_capacity, reserve_work, AsyncFeaRunAdmission, AsyncFeaRunLease};
+pub use async_host::{
+    ensure_available_capacity, reserve_work, AsyncFeaRunAdmission, AsyncFeaRunLease,
+};
 pub use entrypoints::merge_lease_error;
 mod lifecycle;
 mod host;

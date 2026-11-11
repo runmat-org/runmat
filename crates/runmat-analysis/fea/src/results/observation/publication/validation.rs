@@ -187,9 +187,13 @@ impl ObservationPublicationCatalog {
                 ObservationPublicationScope::Entry => {
                     let mut scheduled = false;
                     for sample in &entry_samples {
-                        scheduled |=
-                            resolved_observation_accepts_sample(&self.plan, observation, *sample, None)
-                                .map_err(invalid)?;
+                        scheduled |= resolved_observation_accepts_sample(
+                            &self.plan,
+                            observation,
+                            *sample,
+                            None,
+                        )
+                        .map_err(invalid)?;
                     }
                     !history && scheduled
                 }

@@ -343,7 +343,13 @@ fn actual_worker_settles_before_result_delivery() {
         lease,
     ))
     .unwrap();
-    assert_eq!(names, vec!["/output/entry.txt".to_string()]);
+    assert_eq!(
+        names,
+        vec![PathBuf::from("/output")
+            .join("entry.txt")
+            .to_string_lossy()
+            .into_owned()]
+    );
     assert!(!path.exists());
     assert_eq!(
         observed.recv().unwrap().deferred_work,

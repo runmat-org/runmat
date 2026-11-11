@@ -115,10 +115,7 @@ fn explicit_gpu_method_controls_are_gated_before_path_or_receiver_work() {
 #[test]
 fn mapped_data_is_live_and_indexed_write_stays_on_original_provider() {
     let _lock = vfs::provider_override_lock();
-    #[cfg(target_arch = "wasm32")]
     let root = std::path::PathBuf::from("/memmap-live");
-    #[cfg(not(target_arch = "wasm32"))]
-    let root = std::env::temp_dir().join("runmat-memmap-live");
     let selected = Arc::new(MemoryFsProvider::with_current_dir(root.clone()));
     selected
         .write_project_path(root.join("data.bin"), b"\x01\x02\x03\x04")
@@ -185,10 +182,7 @@ fn mapped_data_is_live_and_indexed_write_stays_on_original_provider() {
 #[test]
 fn mapped_receiver_controls_clone_independently_without_changing_backing() {
     let _lock = vfs::provider_override_lock();
-    #[cfg(target_arch = "wasm32")]
     let root = std::path::PathBuf::from("/memmap-clones");
-    #[cfg(not(target_arch = "wasm32"))]
-    let root = std::env::temp_dir().join("runmat-memmap-clones");
     let provider = Arc::new(MemoryFsProvider::with_current_dir(root.clone()));
     provider
         .write_project_path(root.join("data.bin"), b"a")
@@ -270,10 +264,7 @@ fn mapped_receiver_controls_clone_independently_without_changing_backing() {
 #[test]
 fn indexed_read_observes_only_current_selected_byte_and_forged_class_has_no_authority() {
     let _lock = vfs::provider_override_lock();
-    #[cfg(target_arch = "wasm32")]
     let root = std::path::PathBuf::from("/memmap-selected-read");
-    #[cfg(not(target_arch = "wasm32"))]
-    let root = std::env::temp_dir().join("runmat-memmap-selected-read");
     let provider = Arc::new(MemoryFsProvider::with_current_dir(root.clone()));
     provider
         .write_project_path(root.join("data.bin"), b"\x01\x02\x03\x04")
@@ -315,10 +306,7 @@ fn indexed_read_observes_only_current_selected_byte_and_forged_class_has_no_auth
 #[test]
 fn indexed_named_field_write_preserves_other_fields_and_elements() {
     let _lock = vfs::provider_override_lock();
-    #[cfg(target_arch = "wasm32")]
     let root = std::path::PathBuf::from("/memmap-field-range");
-    #[cfg(not(target_arch = "wasm32"))]
-    let root = std::env::temp_dir().join("runmat-memmap-field-range");
     let provider = Arc::new(MemoryFsProvider::with_current_dir(root.clone()));
     provider
         .write_project_path(root.join("record.bin"), b"\x01\x02\x03\x04")

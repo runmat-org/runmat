@@ -650,6 +650,24 @@
       "snapshot": false
     },
     {
+      "id": "steady-conduction",
+      "title": "Conduct heat through a steel bar",
+      "description": "Hold the ends of a steel bar at 300 K and 350 K and inspect temperature and heat flux.",
+      "entry": "steady-conduction.fea",
+      "files": ["steady-conduction.fea", "geometry/cantilever.step"],
+      "expected_outputs": ["Node temperature, in kelvin", "Element heat flux, in watts per square meter"],
+      "host_note": "Explore the saved results here. Open the project in RunMat Desktop to edit and solve it.",
+      "actions": ["open_source", "download"],
+      "requirements": ["FEA-THERMAL-DOMAIN-001"],
+      "snapshot": true,
+      "source_sections": [
+        {"title": "Import and mesh the bar", "start": "geometry beam {", "end": "\nmaterial steel"},
+        {"title": "Set conductivity", "start": "material steel {", "end": "\nmodel conducting_bar"},
+        {"title": "Prescribe end temperatures", "start": "model conducting_bar {", "end": "\nstudy conduction"},
+        {"title": "Request fields", "start": "study conduction {", "end": null}
+      ]
+    },
+    {
       "id": "heatsink-steady",
       "title": "Cool a finned electronics heat sink",
       "description": "Apply heater power to an aluminum heat sink and inspect conduction into its air-cooled fins.",
@@ -665,7 +683,7 @@
         "Node temperature, in kelvin",
         "Element heat flux, in watts per square meter"
       ],
-      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "host_note": "Open or download the complete project, then run it in RunMat Desktop or the native CLI to compute temperature and heat flux.",
       "actions": [
         "open_source",
         "download"
@@ -673,7 +691,7 @@
       "requirements": [
         "FEA-THERMAL-DOMAIN-001"
       ],
-      "snapshot": true,
+      "snapshot": false,
       "source_sections": [
         {
           "title": "Import the heat sink and choose the mesh",

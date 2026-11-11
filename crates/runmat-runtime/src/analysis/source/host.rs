@@ -14,6 +14,9 @@ use sha2::{Digest, Sha256};
 
 use super::geometry_resolver::inspect_geometry;
 
+#[cfg(windows)]
+mod windows_path;
+
 const LOGICAL_ROOT: &str = ".";
 
 pub struct FilesystemFeaHost {
@@ -114,7 +117,11 @@ pub fn logical_source_path(
     let physical_root = normalized_root(physical_root)?;
     // `crates/runmat-cli/../../docs/x.fea` names the same file as `docs/x.fea`.
     let physical_path = lexically_normalized(physical_path);
-    let relative = physical_path.strip_prefix(&physical_root).map_err(|_| {
+    #[cfg(windows)]
+    let relative = windows_path::strip_root(&physical_path, &physical_root).ok_or(());
+    #[cfg(not(windows))]
+    let relative = physical_path.strip_prefix(&physical_root);
+    let relative = relative.map_err(|_| {
         format!(
             "FEA source `{}` is outside source root `{}`",
             physical_path.display(),

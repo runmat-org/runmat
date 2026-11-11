@@ -7,10 +7,9 @@ fn gradient_owner_settles_valid_and_invalid_norm_prefixes() {
 
     let metric = MetricTensor3::isotropic_length_m(1.0).unwrap();
     let prepared = PreparedJacobian::new(metric).unwrap().unwrap();
-    // Each kernel reserves its full bound before it runs, so the ledger needs room for the
-    // second kernel's 760-operation reservation; settlement keeps only its 75-operation prefix.
-    let budget = OperationCount::from_operations(760 + 760);
-    let settled = OperationCount::from_operations(760 + 75);
+    // The invalid call needs the full reservation, then settles only its prefix.
+    let budget = OperationCount::from_operations(2 * 760);
+    let expected_completed = OperationCount::from_operations(760 + 75);
     let ledger = Arc::new(UsageLedger::new(budget, budget).unwrap());
     let context = UsageContext::new(Arc::clone(&ledger));
     context.run_sync(|| {
@@ -26,7 +25,7 @@ fn gradient_owner_settles_valid_and_invalid_norm_prefixes() {
         assert!(prepared.corner_gradients([[0.0; 3]; 4]).unwrap().is_none());
     });
     let snapshot = ledger.snapshot().unwrap();
-    assert_eq!(snapshot.completed.meshing, settled);
+    assert_eq!(snapshot.completed.meshing, expected_completed);
     assert_eq!(snapshot.reserved, OperationCount::ZERO);
 }
 use runmat_meshing_size::metric::MetricTensor3;

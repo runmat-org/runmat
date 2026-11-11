@@ -59,25 +59,25 @@ const SIGNATURES: &[BuiltinSignatureDescriptor] = &[
         outputs: &[STATUS],
     },
 ];
-const TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const REHASH_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REHASH.TOO_MANY_OUTPUTS",
     identifier: Some("RunMat:rehash:TooManyOutputs"),
     when: "More than one result is requested.",
     message: "rehash: too many output arguments",
 };
-const INVALID_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const REHASH_ERROR_INVALID_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REHASH.INVALID_MODE",
     identifier: Some("RunMat:rehash:InvalidMode"),
     when: "A mode is not scalar host text, or is not path, toolbox, or toolboxcache.",
     message: "rehash: expected path, toolbox, or toolboxcache",
 };
-const INVALID_ARITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const REHASH_ERROR_INVALID_ARITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REHASH.INVALID_ARITY",
     identifier: Some("RunMat:rehash:InvalidCall"),
     when: "More than one mode argument is supplied.",
     message: "rehash: too many input arguments",
 };
-const UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const REHASH_ERROR_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REHASH.UNAVAILABLE",
     identifier: Some("RunMat:rehash:Unavailable"),
     when: "The runtime has no source-cache refresh service.",
@@ -94,10 +94,10 @@ pub const REHASH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
-        TOO_MANY_OUTPUTS,
-        INVALID_MODE,
-        INVALID_ARITY,
-        UNAVAILABLE,
+        REHASH_ERROR_TOO_MANY_OUTPUTS,
+        REHASH_ERROR_INVALID_MODE,
+        REHASH_ERROR_INVALID_ARITY,
+        REHASH_ERROR_UNAVAILABLE,
         CANCELLED,
     ],
 };

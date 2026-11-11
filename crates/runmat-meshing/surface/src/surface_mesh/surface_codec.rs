@@ -13,8 +13,7 @@ use super::{
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-exact-surface-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "exact-surface-mesh/v1";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::platform_content(1024 * 1024, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 pub fn encode_exact_surface_mesh(
     mesh: &ExactSurfaceMesh,

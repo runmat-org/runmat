@@ -9,7 +9,9 @@
 //! C_ij = u_iᵀ K u_j of the full potential vectors, symmetric by construction.
 use super::{geometry::Geometry, mesh::CrossSectionMesh, ConductorRole, CrossSectionError};
 use crate::physics::electrical::VACUUM_PERMITTIVITY_F_PER_M;
-use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind, SymbolicFactorization};
+use runmat_sparse_solvers::direct::{
+    DirectOptions, DirectSolver, FactorKind, SymbolicFactorization,
+};
 use runmat_sparse_solvers::TripletBuilder;
 
 /// Square matrix, row-major.
@@ -95,7 +97,7 @@ pub(super) fn capacitance_matrices(
     let mut elements = Vec::with_capacity(mesh.triangles.len());
     for corners in &mesh.triangles {
         let (b, c, area) = shape(mesh, *corners);
-        if !(area > 0.0) {
+        if area.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return Err(CrossSectionError::Operator(
                 "a mesh triangle is inverted or degenerate".into(),
             ));
@@ -125,12 +127,16 @@ pub(super) fn capacitance_matrices(
             })
             .transpose()
             .map_err(CrossSectionError::Accounting)?;
-        let mut triplets = TripletBuilder::<f64>::with_capacity(free, free, 9 * mesh.triangles.len());
+        let mut triplets =
+            TripletBuilder::<f64>::with_capacity(free, free, 9 * mesh.triangles.len());
         // Column-major right-hand sides, one column per signal conductor.
         let mut rhs = vec![0.0; free * signals];
         for (e, corners) in mesh.triangles.iter().enumerate() {
             for i in 0..3 {
-                let Some(row) = holders[corners[i]].is_none().then(|| free_index[corners[i]]) else {
+                let Some(row) = holders[corners[i]]
+                    .is_none()
+                    .then(|| free_index[corners[i]])
+                else {
                     continue;
                 };
                 for j in 0..3 {
@@ -157,8 +163,11 @@ pub(super) fn capacitance_matrices(
             let plan = crate::solve::shared_sparse::ambient_plan();
             crate::solve::shared_sparse::with_plan(plan, || {
                 let control = crate::solve::shared_sparse::control();
-                let symbolic =
-                    SymbolicFactorization::analyze::<f64>(matrix.as_ref().into(), &options, control)?;
+                let symbolic = SymbolicFactorization::analyze::<f64>(
+                    matrix.as_ref().into(),
+                    &options,
+                    control,
+                )?;
                 let required = symbolic.estimate().peak_bytes();
                 if let Some(budget) = crate::solve::shared_sparse::default_memory_budget() {
                     if required > budget {

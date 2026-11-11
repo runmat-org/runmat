@@ -15,7 +15,10 @@ pub(super) fn build_accuracy_plan(
             demand.evaluator_workspace_bytes_upper_bound.0 == 0,
             "no evaluator workspace",
         ),
-        (!input.worker.accelerators.is_empty(), "an accelerator worker"),
+        (
+            !input.worker.accelerators.is_empty(),
+            "an accelerator worker",
+        ),
         (
             demand.inputs.transport_closure_bytes.0 == 0,
             "no input transport closure",

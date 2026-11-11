@@ -156,6 +156,13 @@ impl AccelProvider for Owner {
         }
         Ok(self.publish(self.inner.upload_numeric_raw(host)?))
     }
+    fn upload_logical_raw(
+        &self,
+        host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.uploads.fetch_add(1, Ordering::Relaxed);
+        Ok(self.publish(self.inner.upload_logical_raw(host)?))
+    }
     fn download<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
@@ -1006,6 +1013,50 @@ fn managed_selected_readback_moves_native_vecs_into_retained_alias() {
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
     drop((stack, source));
     assert_eq!(provider.live_count(), 0);
+}
+
+#[test]
+fn managed_selected_readback_adopts_logical_with_retained_owner() {
+    use crate::fusion_exec::host_readback::{CpuReadbackPlan, Source};
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+
+    let provider = owner_with_quote_and_failure(1_000_000_000, false, false);
+    let source = provider
+        .upload_logical_raw(&runmat_accelerate_api::HostLogicalTensorView {
+            data: &[0, 1, 1],
+            shape: &[1, 3],
+        })
+        .expect("fixture publishes a certified logical source")
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .expect("fixture marks the owned source automatic");
+    let ledger = ManagedHostEffectLedger::new_with_epoch(1 << 20, 36);
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedCastOwner(ledger.clone()))),
+    );
+    let stack = [Value::GpuTensor(source.clone())];
+    let plan = CpuReadbackPlan {
+        sources: vec![Source::admit(&source, provider, vec![0], Vec::new())
+            .expect("validated automatic logical source has a finite readback quote")],
+        stack_len: stack.len(),
+        resident_offsets: vec![0],
+    };
+    let prepared =
+        futures::executor::block_on(context.scope(plan.prepare_inputs_managed(&stack, &context)))
+            .expect("managed logical readback completes");
+    let alias = prepared.entry[0].1.clone();
+    let Value::LogicalArray(logical) = &alias else {
+        panic!("logical readback retains a logical host allocation")
+    };
+    assert_eq!(logical.shape, [1, 3]);
+    assert_eq!(logical.data.as_slice(), [0, 1, 1]);
+    assert_eq!(provider.staged_downloads.load(Ordering::Relaxed), 1);
+    prepared.cleanup().expect("release selected source");
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(alias);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
 }
 
 #[test]

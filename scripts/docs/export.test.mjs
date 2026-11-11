@@ -216,3 +216,22 @@ test("file inventory preserves byte-exact hashes across chunks and detects chang
         rmSync(root, { recursive: true, force: true });
     }
 });
+test("every committed grammar ships with an extension index the site selects by", () => {
+    const { root, options } = fixture();
+    try {
+        const source = resolve(import.meta.dirname, "../..");
+        cpSync(join(source, "crates/runmat-design-syntax/grammar"), join(root, "crates/runmat-design-syntax/grammar"), { recursive: true });
+        buildSourceDocs(options);
+        const index = JSON.parse(readFileSync(join(options.output, "design/grammars.json")));
+        assert.equal(index.schema_version, 1);
+        assert.deepEqual(index.grammars.map(grammar => grammar.extension), ["circuit.layout", "assembly", "circuit", "drawing", "part", "fea"]);
+        for (const grammar of index.grammars) {
+            const shipped = JSON.parse(readFileSync(join(options.output, grammar.path)));
+            assert.equal(shipped.scopeName, grammar.scopeName);
+        }
+        assert.equal(index.grammars.find(grammar => grammar.extension === "circuit").scopeName, "source.circuit");
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});

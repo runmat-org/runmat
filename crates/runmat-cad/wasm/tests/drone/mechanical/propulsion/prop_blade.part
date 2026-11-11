@@ -1,0 +1,40 @@
+runmat 0.7
+std 1
+
+// One folding propeller blade, 7 in class: a flat root tab on the pivot (its origin, z the pivot
+// axis) that runs out 20 mm between the hub's plates, then the blade lofted through five
+// twisted, tapered sections to the tip. The pitch angle at radius R is atan(pitch / 2 pi R) for
+// a 115 mm pitch. The tab turns on the hub's pin, so the blade folds back along the arm with
+// its airfoil outside the plates.
+part prop_blade {
+    sketch tab_s on origin.xy {
+        t1 = line(start = [0 mm, -3.4 mm], end = [20 mm, -3.4 mm])
+        t2 = line(start = [20 mm, -3.4 mm], end = [20 mm, 3.4 mm])
+        t3 = line(start = [20 mm, 3.4 mm], end = [0 mm, 3.4 mm])
+        t4 = arc(center = [0 mm, 0 mm], start = [0 mm, 3.4 mm], end = [0 mm, -3.4 mm])
+        pin = circle(center = [0 mm, 0 mm], radius = 1.05 mm)
+    }
+    feature tab = extrude(profile = sketch.tab_s, distance = 2.2 mm)
+    feature blade_st1 = plane.offset(base = origin.yz, distance = 18 mm)
+    sketch blade_s1 on plane.blade_st1 {
+        c = spline(points = [[5.869 mm, 5.67 mm], [4.959 mm, 5.62 mm], [3.023 mm, 4.711 mm], [0.482 mm, 3.075 mm], [-2.13 mm, 0.996 mm], [-4.295 mm, -1.113 mm], [-5.616 mm, -2.795 mm], [-5.869 mm, -3.67 mm], [-5.021 mm, -3.542 mm], [-3.224 mm, -2.458 mm], [-0.794 mm, -0.682 mm], [1.817 mm, 1.396 mm], [4.094 mm, 3.365 mm], [5.554 mm, 4.873 mm]], closed)
+    }
+    feature blade_st2 = plane.offset(base = origin.yz, distance = 38 mm)
+    sketch blade_s2 on plane.blade_st2 {
+        c = spline(points = [[7.361 mm, 4.133 mm], [6.472 mm, 4.198 mm], [4.28 mm, 3.68 mm], [1.237 mm, 2.638 mm], [-2.038 mm, 1.244 mm], [-4.899 mm, -0.227 mm], [-6.791 mm, -1.448 mm], [-7.361 mm, -2.133 mm], [-6.503 mm, -2.127 mm], [-4.378 mm, -1.45 mm], [-1.389 mm, -0.281 mm], [1.887 mm, 1.113 mm], [4.801 mm, 2.457 mm], [6.761 mm, 3.519 mm]], closed)
+    }
+    feature blade_st3 = plane.offset(base = origin.yz, distance = 58 mm)
+    sketch blade_s3 on plane.blade_st3 {
+        c = spline(points = [[6.002 mm, 2.744 mm], [5.321 mm, 2.87 mm], [3.574 mm, 2.667 mm], [1.117 mm, 2.139 mm], [-1.554 mm, 1.363 mm], [-3.91 mm, 0.492 mm], [-5.494 mm, -0.272 mm], [-6.002 mm, -0.744 mm], [-5.337 mm, -0.814 mm], [-3.627 mm, -0.484 mm], [-1.2 mm, 0.146 mm], [1.471 mm, 0.922 mm], [3.857 mm, 1.691 mm], [5.478 mm, 2.328 mm]], closed)
+    }
+    feature blade_st4 = plane.offset(base = origin.yz, distance = 74 mm)
+    sketch blade_s4 on plane.blade_st4 {
+        c = spline(points = [[3.653 mm, 1.846 mm], [3.243 mm, 1.973 mm], [2.183 mm, 1.935 mm], [0.691 mm, 1.716 mm], [-0.935 mm, 1.339 mm], [-2.372 mm, 0.879 mm], [-3.34 mm, 0.447 mm], [-3.653 mm, 0.154 mm], [-3.252 mm, 0.067 mm], [-2.213 mm, 0.194 mm], [-0.737 mm, 0.484 mm], [0.889 mm, 0.861 mm], [2.342 mm, 1.249 mm], [3.331 mm, 1.592 mm]], closed)
+    }
+    feature blade_st5 = plane.offset(base = origin.yz, distance = 78 mm)
+    sketch blade_s5 on plane.blade_st5 {
+        c = spline(points = [[1.709 mm, 1.377 mm], [1.509 mm, 1.48 mm], [1.006 mm, 1.507 mm], [0.303 mm, 1.436 mm], [-0.458 mm, 1.269 mm], [-1.125 mm, 1.037 mm], [-1.571 mm, 0.801 mm], [-1.709 mm, 0.623 mm], [-1.515 mm, 0.547 mm], [-1.024 mm, 0.579 mm], [-0.332 mm, 0.697 mm], [0.429 mm, 0.865 mm], [1.107 mm, 1.049 mm], [1.565 mm, 1.226 mm]], closed)
+    }
+    feature blade = loft(profiles = [sketch.blade_s1, sketch.blade_s2, sketch.blade_s3, sketch.blade_s4, sketch.blade_s5], mode = add)
+    output prop_blade = { body = feature.tab.body, part_number = "CD-PR-320", material = "glass_filled_nylon", color = "#202226" }
+}

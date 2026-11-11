@@ -1,3 +1,4 @@
+use futures::FutureExt;
 use runmat_analysis_core::{
     ExcitationDistribution, ExcitationKinematics, StructuralRotationDof, StructuralTranslationDof,
 };
@@ -8,9 +9,7 @@ use crate::{
     assembly::{
         dofs::{StructuralDofKind, StructuralDofLayout},
         explicit_loads::apply_projected_explicit_structural_loads,
-        solver_solid_boundary::{
-            apply_solver_mesh_structural_loads, apply_solver_mesh_structural_loads_on_projection,
-        },
+        solver_solid_boundary::apply_solver_mesh_structural_loads_on_projection,
         MomentProjectionSummary,
     },
     constraints::{
@@ -25,14 +24,25 @@ use crate::{
 };
 
 use super::{
+    capacity::{admit_body_quadrature, derive_solid_projection, solid_load_error},
     CanonicalStructuralLoadEntry, CanonicalStructuralLoadPlan, CanonicalStructuralLoadTerm,
-    StructuralLoadPlanError,
+    MixedLoadCapacityError, MixedLoadPhase, StructuralLoadPlanError,
 };
 
 pub(crate) struct StructuralLoadCompilation {
     pub plan: CanonicalStructuralLoadPlan,
     pub direct_rotational_moment_count: usize,
     pub moment_projection: Vec<MomentProjectionSummary>,
+}
+
+pub(crate) struct MixedLoadContext<'a> {
+    pub structural: &'a runmat_analysis_core::StructuralModel,
+    pub properties: &'a CompiledPropertyMap,
+    pub excitations: &'a RealizedExcitations,
+    pub mesh: &'a SolverMeshArtifact,
+    pub constraint_plan: &'a CanonicalStructuralConstraintPlan,
+    pub topology: &'a CanonicalStructuralNodeSpace,
+    pub layout: &'a StructuralDofLayout,
 }
 
 pub(crate) fn compile_solid(
@@ -68,7 +78,7 @@ pub(crate) fn compile_solid(
                 scratch,
                 true,
             )
-            .map_err(|error| unresolved(load, error.to_string()))?;
+            .map_err(|error| solid_load_error(load, error))?;
             Ok(ProjectedLoad {
                 evidence: require_evidence(load, projection.evidence)?,
                 direct_rotational_moment_count: 0,
@@ -119,14 +129,59 @@ pub(crate) fn compile_mixed(
     constraint_plan: &CanonicalStructuralConstraintPlan,
     topology: &CanonicalStructuralNodeSpace,
     layout: &StructuralDofLayout,
-) -> Result<StructuralLoadCompilation, StructuralLoadPlanError> {
-    compile_entries(
+) -> Result<StructuralLoadCompilation, MixedLoadCapacityError<std::convert::Infallible>> {
+    compile_mixed_with_owner(
+        MixedLoadContext {
+            structural,
+            properties,
+            excitations,
+            mesh,
+            constraint_plan,
+            topology,
+            layout,
+        },
+        false,
+        |_, _| std::future::ready(Ok::<(), std::convert::Infallible>(())),
+    )
+    .now_or_never()
+    .ok_or_else(|| {
+        MixedLoadCapacityError::Plan(StructuralLoadPlanError::Invalid(
+            "synchronous mixed-load projection yielded without an admission owner".into(),
+        ))
+    })?
+}
+
+pub(crate) async fn compile_mixed_with_owner<O, F, A>(
+    context: MixedLoadContext<'_>,
+    awaited_elements: bool,
+    mut before: O,
+) -> Result<StructuralLoadCompilation, MixedLoadCapacityError<A>>
+where
+    O: FnMut(MixedLoadPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+{
+    let MixedLoadContext {
+        structural,
+        properties,
         excitations,
+        mesh,
+        constraint_plan,
+        topology,
+        layout,
+    } = context;
+    let mut entries = EntryAccumulator::new(
         topology,
         &constraint_plan.reference_points,
         layout,
-        |load, scratch| {
-            validate_policy(load)?;
+        excitations.len(),
+    );
+    for load in excitations.iter() {
+        if !load.kind.is_structural_load() {
+            continue;
+        }
+        let mut scratch = vec![0.0; layout.total_dof_count()];
+        let projected = async {
+            validate_policy(load).map_err(MixedLoadCapacityError::Plan)?;
             if matches!(
                 load.kind,
                 crate::excitation::RealizedExcitationKind::BodyForce(_)
@@ -135,34 +190,47 @@ pub(crate) fn compile_mixed(
                 crate::excitation::RealizedExcitationTarget::WholeModel
             ) {
                 let singleton = RealizedExcitations::new(vec![load.clone()]);
-                let solid = apply_solver_mesh_structural_loads(
+                let projection =
+                    derive_solid_projection(mesh, awaited_elements, &mut before).await?;
+                admit_body_quadrature(&projection, load, awaited_elements, &mut before).await?;
+                let solid = apply_solver_mesh_structural_loads_on_projection(
                     &singleton,
                     mesh,
+                    &projection,
                     constraint_plan,
                     layout,
-                    scratch,
+                    &mut scratch,
                     true,
                 )
-                .map_err(|error| unresolved(load, error.to_string()))?;
+                .map_err(|error| MixedLoadCapacityError::Plan(solid_load_error(load, error)))?;
                 let explicit = apply_projected_explicit_structural_loads(
-                    structural, properties, &singleton, layout, scratch, topology,
+                    structural,
+                    properties,
+                    &singleton,
+                    layout,
+                    &mut scratch,
+                    topology,
                 )
-                .map_err(|error| unresolved(load, error.to_string()))?;
+                .map_err(|error| {
+                    MixedLoadCapacityError::Plan(unresolved(load, error.to_string()))
+                })?;
                 let evidence = solid
                     .evidence
                     .into_iter()
                     .chain(explicit.evidence)
                     .collect();
-                return Ok(ProjectedLoad {
-                    evidence: require_evidence(load, evidence)?,
+                return Ok::<_, MixedLoadCapacityError<A>>(ProjectedLoad {
+                    evidence: require_evidence(load, evidence)
+                        .map_err(MixedLoadCapacityError::Plan)?,
                     direct_rotational_moment_count: 0,
                     moment_projection: Vec::new(),
                 });
             }
             let ownership = match &load.target {
                 crate::excitation::RealizedExcitationTarget::Region(target) => {
-                    resolve_mixed_structural_target(target, mesh, structural, topology)
-                        .map_err(|error| unresolved(load, error.to_string()))?
+                    resolve_mixed_structural_target(target, mesh, structural, topology).map_err(
+                        |error| MixedLoadCapacityError::Plan(unresolved(load, error.to_string())),
+                    )?
                 }
                 crate::excitation::RealizedExcitationTarget::ReferencePoint { .. } => {
                     MixedStructuralTargetOwnership::Solid {
@@ -170,10 +238,10 @@ pub(crate) fn compile_mixed(
                     }
                 }
                 _ => {
-                    return Err(unresolved(
+                    return Err(MixedLoadCapacityError::Plan(unresolved(
                         load,
                         "mixed structural loads require a region or coupled reference point",
-                    ));
+                    )));
                 }
             };
             if matches!(
@@ -186,33 +254,47 @@ pub(crate) fn compile_mixed(
                     properties,
                     &RealizedExcitations::new(vec![load.clone()]),
                     layout,
-                    scratch,
+                    &mut scratch,
                     topology,
                 )
-                .map_err(|error| unresolved(load, error.to_string()))?;
+                .map_err(|error| {
+                    MixedLoadCapacityError::Plan(unresolved(load, error.to_string()))
+                })?;
                 Ok(ProjectedLoad {
-                    evidence: require_evidence(load, projection.evidence)?,
+                    evidence: require_evidence(load, projection.evidence)
+                        .map_err(MixedLoadCapacityError::Plan)?,
                     direct_rotational_moment_count: projection.direct_rotational_moment_count,
                     moment_projection: projection.moment_projection,
                 })
             } else {
-                let projection = apply_solver_mesh_structural_loads(
+                let solid_projection =
+                    derive_solid_projection(mesh, awaited_elements, &mut before).await?;
+                admit_body_quadrature(&solid_projection, load, awaited_elements, &mut before)
+                    .await?;
+                let projection = apply_solver_mesh_structural_loads_on_projection(
                     &RealizedExcitations::new(vec![load.clone()]),
                     mesh,
+                    &solid_projection,
                     constraint_plan,
                     layout,
-                    scratch,
+                    &mut scratch,
                     true,
                 )
-                .map_err(|error| unresolved(load, error.to_string()))?;
+                .map_err(|error| MixedLoadCapacityError::Plan(solid_load_error(load, error)))?;
                 Ok(ProjectedLoad {
-                    evidence: require_evidence(load, projection.evidence)?,
+                    evidence: require_evidence(load, projection.evidence)
+                        .map_err(MixedLoadCapacityError::Plan)?,
                     direct_rotational_moment_count: 0,
                     moment_projection: projection.moment_projection,
                 })
             }
-        },
-    )
+        }
+        .await?;
+        entries
+            .append(load, &scratch, projected)
+            .map_err(MixedLoadCapacityError::Plan)?;
+    }
+    entries.finish().map_err(MixedLoadCapacityError::Plan)
 }
 
 struct ProjectedLoad {
@@ -231,19 +313,60 @@ fn compile_entries(
         &mut [f64],
     ) -> Result<ProjectedLoad, StructuralLoadPlanError>,
 ) -> Result<StructuralLoadCompilation, StructuralLoadPlanError> {
-    let mut entries = Vec::with_capacity(excitations.len());
-    let mut direct_rotational_moment_count = 0;
-    let mut moment_projection = Vec::new();
+    let mut entries = EntryAccumulator::new(topology, reference_points, layout, excitations.len());
     for load in excitations.iter() {
         if !load.kind.is_structural_load() {
             continue;
         }
         let mut scratch = vec![0.0; layout.total_dof_count()];
         let projected = project(load, &mut scratch)?;
-        let terms = terms_from_rows(topology, reference_points, layout, &scratch, load)?;
-        direct_rotational_moment_count += projected.direct_rotational_moment_count;
-        moment_projection.extend(projected.moment_projection);
-        entries.push(CanonicalStructuralLoadEntry {
+        entries.append(load, &scratch, projected)?;
+    }
+    entries.finish()
+}
+
+struct EntryAccumulator<'a> {
+    topology: &'a CanonicalStructuralNodeSpace,
+    reference_points: &'a [crate::constraints::CanonicalStructuralReferencePoint],
+    layout: &'a StructuralDofLayout,
+    entries: Vec<CanonicalStructuralLoadEntry>,
+    direct_rotational_moment_count: usize,
+    moment_projection: Vec<MomentProjectionSummary>,
+}
+
+impl<'a> EntryAccumulator<'a> {
+    fn new(
+        topology: &'a CanonicalStructuralNodeSpace,
+        reference_points: &'a [crate::constraints::CanonicalStructuralReferencePoint],
+        layout: &'a StructuralDofLayout,
+        capacity: usize,
+    ) -> Self {
+        Self {
+            topology,
+            reference_points,
+            layout,
+            entries: Vec::with_capacity(capacity),
+            direct_rotational_moment_count: 0,
+            moment_projection: Vec::new(),
+        }
+    }
+
+    fn append(
+        &mut self,
+        load: &RealizedExcitation,
+        scratch: &[f64],
+        projected: ProjectedLoad,
+    ) -> Result<(), StructuralLoadPlanError> {
+        let terms = terms_from_rows(
+            self.topology,
+            self.reference_points,
+            self.layout,
+            scratch,
+            load,
+        )?;
+        self.direct_rotational_moment_count += projected.direct_rotational_moment_count;
+        self.moment_projection.extend(projected.moment_projection);
+        self.entries.push(CanonicalStructuralLoadEntry {
             excitation_id: load.excitation_id.0.clone(),
             case_ids: load.case_ids.iter().map(|id| id.0.clone()).collect(),
             signal_id: load.signal_id.0.clone(),
@@ -257,12 +380,16 @@ fn compile_entries(
             terms,
             evidence: projected.evidence,
         });
+        Ok(())
     }
-    Ok(StructuralLoadCompilation {
-        plan: CanonicalStructuralLoadPlan::new(topology.identity, entries)?,
-        direct_rotational_moment_count,
-        moment_projection,
-    })
+
+    fn finish(self) -> Result<StructuralLoadCompilation, StructuralLoadPlanError> {
+        Ok(StructuralLoadCompilation {
+            plan: CanonicalStructuralLoadPlan::new(self.topology.identity, self.entries)?,
+            direct_rotational_moment_count: self.direct_rotational_moment_count,
+            moment_projection: self.moment_projection,
+        })
+    }
 }
 
 fn terms_from_rows(

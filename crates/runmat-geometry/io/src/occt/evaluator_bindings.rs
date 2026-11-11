@@ -256,7 +256,9 @@ impl EvaluatorBindings {
         )?;
         let mut surface_by_face = BTreeMap::new();
         for (surface, face) in &surfaces {
-            surface_by_face.entry(*face).or_insert_with(|| surface.clone());
+            surface_by_face
+                .entry(*face)
+                .or_insert_with(|| surface.clone());
         }
         Ok(Self {
             curves,

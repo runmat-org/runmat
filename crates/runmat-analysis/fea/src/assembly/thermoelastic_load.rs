@@ -50,6 +50,12 @@ pub(crate) enum ThermoelasticLoadCapacityError<A> {
     Admission(A),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ThermoelasticCapacityPhase {
+    Projection,
+    Element { element: usize },
+}
+
 impl<A> From<ThermoelasticLoadError> for ThermoelasticLoadCapacityError<A> {
     fn from(error: ThermoelasticLoadError) -> Self {
         Self::Numerical(error)
@@ -229,16 +235,28 @@ pub(super) async fn assemble_prescribed_temperature_load_with_owner<O, F, A>(
     before: &mut O,
 ) -> Result<Vec<f64>, ThermoelasticLoadCapacityError<A>>
 where
-    O: FnMut(usize, OperationCount) -> F,
+    O: FnMut(ThermoelasticCapacityPhase, OperationCount) -> F,
     F: std::future::Future<Output = Result<(), A>>,
 {
     validate_temperature_regions(mesh, context)?;
+    let projection_work =
+        AnalysisProjection::derivation_work_upper_bound(mesh).map_err(projection_error)?;
+    if projection_work > OperationCount::ZERO {
+        before(ThermoelasticCapacityPhase::Projection, projection_work)
+            .await
+            .map_err(ThermoelasticLoadCapacityError::Admission)?;
+    }
     let projection = AnalysisProjection::derive(mesh).map_err(projection_error)?;
     let mut load = vec![0.0; projection.nodes.len() * 3];
     for (element_index, element) in projection.elements.iter().enumerate() {
-        before(element_index, quadrature_work(element.order, true))
-            .await
-            .map_err(ThermoelasticLoadCapacityError::Admission)?;
+        before(
+            ThermoelasticCapacityPhase::Element {
+                element: element_index,
+            },
+            quadrature_work(element.order, true),
+        )
+        .await
+        .map_err(ThermoelasticLoadCapacityError::Admission)?;
         let owner = properties
             .solid_material(element.stable_identity)
             .ok_or(ThermoelasticLoadError::MissingOwner(element.element_id))?;
@@ -300,16 +318,23 @@ pub(crate) fn assemble_solved_temperature_load(
     ))
 }
 
-pub(crate) async fn assemble_solved_temperature_load_with_owner<O, F, A>(
+pub(super) async fn assemble_solved_temperature_load_with_owner<O, F, A>(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
     temperature: &crate::execution::SolvedTemperatureField,
     before: &mut O,
 ) -> Result<Vec<f64>, ThermoelasticLoadCapacityError<A>>
 where
-    O: FnMut(usize, OperationCount) -> F,
+    O: FnMut(ThermoelasticCapacityPhase, OperationCount) -> F,
     F: std::future::Future<Output = Result<(), A>>,
 {
+    let projection_work =
+        AnalysisProjection::derivation_work_upper_bound(mesh).map_err(projection_error)?;
+    if projection_work > OperationCount::ZERO {
+        before(ThermoelasticCapacityPhase::Projection, projection_work)
+            .await
+            .map_err(ThermoelasticLoadCapacityError::Admission)?;
+    }
     let projection = AnalysisProjection::derive(mesh).map_err(projection_error)?;
     if projection.nodes.len() != temperature.node_count()
         || projection.nodes.len() != mesh.topology.nodes.len()
@@ -324,9 +349,14 @@ where
     }
     let mut load = vec![0.0; projection.nodes.len() * 3];
     for (element_index, element) in projection.elements.iter().enumerate() {
-        before(element_index, quadrature_work(element.order, false))
-            .await
-            .map_err(ThermoelasticLoadCapacityError::Admission)?;
+        before(
+            ThermoelasticCapacityPhase::Element {
+                element: element_index,
+            },
+            quadrature_work(element.order, false),
+        )
+        .await
+        .map_err(ThermoelasticLoadCapacityError::Admission)?;
         let owner = properties
             .solid_material(element.stable_identity)
             .ok_or(ThermoelasticLoadError::MissingOwner(element.element_id))?;
@@ -427,11 +457,22 @@ mod tests {
                 ))
                 .unwrap();
             assert_eq!(awaited, native);
-            assert_eq!(quotes.borrow().len(), mesh.topology.volume_elements.len());
-            assert!(quotes
-                .borrow()
-                .iter()
-                .all(|(_, count)| *count == quadrature_work(order, true)));
+            let quotes = quotes.borrow();
+            assert_eq!(quotes.len(), 1 + mesh.topology.volume_elements.len());
+            assert_eq!(
+                quotes[0],
+                (
+                    ThermoelasticCapacityPhase::Projection,
+                    AnalysisProjection::derivation_work_upper_bound(&mesh).unwrap(),
+                )
+            );
+            assert!(quotes[1..].iter().enumerate().all(|(element, quote)| {
+                *quote
+                    == (
+                        ThermoelasticCapacityPhase::Element { element },
+                        quadrature_work(order, true),
+                    )
+            }));
             let mut deny = |_, _| std::future::ready(Err::<(), _>("denied"));
             let denied =
                 futures::executor::block_on(assemble_prescribed_temperature_load_with_owner(

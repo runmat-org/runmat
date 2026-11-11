@@ -28,7 +28,7 @@ use super::{
         ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT, FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER,
     },
     build_resource_plan,
-    structural_facts::derive_structural_resource_facts,
+    structural_facts::{derive_structural_resource_facts, StructuralResourceFacts},
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     FieldRecoveryResourceFacts, LocalExecutionPlan, NumericalScalar, ObservationResourceFacts,
@@ -138,13 +138,21 @@ pub(crate) fn build_static_resource_plan_selecting(
     input: StaticResourcePreflight<'_>,
     selection: StaticSolveSelection,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    if let StaticSolveSelection::Recorded(path) = selection {
+        validate_static_path(&input, path)?;
+    }
+    // These original-input facts are independent of the candidate solve path.
+    // Retain their symbolic storage once while each candidate checks its own
+    // resource ceilings, identity and solver requirements.
+    let compiler_peak = compilation::original_peak(&input)?;
+    let facts = derive_structural_resource_facts(input.model, input.mesh, input.constraints)?;
     match selection {
-        StaticSolveSelection::Recorded(path) => {
-            build_resource_plan(build_static_resource_input(input, path)?)
-        }
+        StaticSolveSelection::Recorded(path) => build_resource_plan(
+            build_static_resource_input_with_facts(input, path, compiler_peak, &facts)?,
+        ),
         StaticSolveSelection::WithinCeiling {
             machine_memory_bytes,
-        } => plan_static_solve_within_ceiling(input, machine_memory_bytes),
+        } => plan_static_solve_within_ceiling(input, machine_memory_bytes, compiler_peak, &facts),
     }
 }
 
@@ -160,9 +168,17 @@ pub(crate) fn build_static_resource_plan_selecting(
 fn plan_static_solve_within_ceiling(
     input: StaticResourcePreflight<'_>,
     machine_memory_bytes: Option<u64>,
+    compiler_peak: ByteCount,
+    facts: &StructuralResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    let plan_path =
-        |path: StaticSolvePath| build_resource_plan(build_static_resource_input(input, path)?);
+    let plan_path = |path: StaticSolvePath| {
+        build_resource_plan(build_static_resource_input_with_facts(
+            input,
+            path,
+            compiler_peak,
+            facts,
+        )?)
+    };
     if !elastic_rigidity_admits(&input) {
         return plan_path(StaticSolvePath::ProvingFactorization);
     }
@@ -287,12 +303,31 @@ pub(super) fn build_static_resource_input(
     input: StaticResourcePreflight<'_>,
     path: StaticSolvePath,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
-    if path == StaticSolvePath::ElasticRigidityMultigrid && !elastic_rigidity_admits(&input) {
+    validate_static_path(&input, path)?;
+    let compiler_peak = compilation::original_peak(&input)?;
+    let facts = derive_structural_resource_facts(input.model, input.mesh, input.constraints)?;
+    build_static_resource_input_with_facts(input, path, compiler_peak, &facts)
+}
+
+fn validate_static_path(
+    input: &StaticResourcePreflight<'_>,
+    path: StaticSolvePath,
+) -> Result<(), ResourcePlanningError> {
+    if path == StaticSolvePath::ElasticRigidityMultigrid && !elastic_rigidity_admits(input) {
         return Err(ResourcePlanningError::Invalid(
             "the elastic rigidity path requires a linear static tetrahedral solid with fixed-DOF constraints".into(),
         ));
     }
-    let compiler_peak = compilation::original_peak(&input)?;
+    Ok(())
+}
+
+fn build_static_resource_input_with_facts(
+    input: StaticResourcePreflight<'_>,
+    path: StaticSolvePath,
+    compiler_peak: ByteCount,
+    facts: &StructuralResourceFacts,
+) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
+    validate_static_path(&input, path)?;
     let StaticResourcePreflight {
         compilation: _,
         model,
@@ -307,7 +342,6 @@ pub(super) fn build_static_resource_input(
         local_execution,
         prepared_inputs,
     } = input;
-    let facts = derive_structural_resource_facts(model, mesh, constraints)?;
     let state_profiles_output =
         super::structural_state_profiles_output_resource_facts(model, step, facts.topology_digest)?;
     let thermal_storage = super::thermal_state::ThermalStateStorage::derive(step, mesh)?;
@@ -346,15 +380,17 @@ pub(super) fn build_static_resource_input(
     let admission_pattern = if constraints.enforcement != ConstraintEnforcement::DirectElimination
         || step.procedure == runmat_analysis_core::AnalysisProcedure::Nonlinear
     {
-        facts
-            .constraint_matrix
-            .affine_reduction()
-            .and_then(|reduction| {
-                reduction.reduce_sparse_pattern(facts.symbolic.stiffness_upper_bound())
-            })
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+        std::borrow::Cow::Owned(
+            facts
+                .constraint_matrix
+                .affine_reduction()
+                .and_then(|reduction| {
+                    reduction.reduce_sparse_pattern(facts.symbolic.stiffness_upper_bound())
+                })
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        )
     } else {
-        facts.symbolic.stiffness_upper_bound().clone()
+        std::borrow::Cow::Borrowed(facts.symbolic.stiffness_upper_bound())
     };
     // The topology-derived pattern is a superset of the prepared operator's graph, but the
     // fill-reducing ordering is recalculated for the exact graph. Even a successful symbolic
@@ -465,9 +501,9 @@ pub(super) fn build_static_resource_input(
                     )?,
                     topology_digest: facts.topology_digest,
                     numerical_scope_digest: facts.symbolic.identity(),
-                    topology: facts.topology,
-                    sparse: facts.sparse,
-                    constraints: facts.constraints,
+                    topology: facts.topology.clone(),
+                    sparse: facts.sparse.clone(),
+                    constraints: facts.constraints.clone(),
                     assembly: AssemblyResourcePolicy {
                         contribution_nonzero_upper_bound: Count(contribution_nonzeros),
                         contribution_bytes_upper_bound: ByteCount(contribution_bytes),

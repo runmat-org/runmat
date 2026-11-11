@@ -1,5 +1,5 @@
-use crate::cdt::insertion::topology_access::TetrahedralTopology;
 use super::{resource_or_cancelled, FacetRecoveryWork};
+use crate::cdt::insertion::topology_access::TetrahedralTopology;
 use crate::{
     cavity::constrained::{
         constrained_cavity_boundary_node_ids, constrained_cavity_star_refill_for_apex,

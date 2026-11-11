@@ -87,7 +87,6 @@ pub(super) fn validate_elements(
     Ok(())
 }
 
-/// An element index, its Tet10 node coordinates and its Jacobian certification result.
 type CertifiedElement = (
     usize,
     [[f64; 3]; 10],
@@ -425,8 +424,10 @@ fn certify_jacobian(
             cancellation_check_interval,
         },
         cancellation,
-        &storage,
-        &mut element_work,
+        ValidationWork {
+            storage,
+            counter: &mut element_work,
+        },
         &mut deepest,
     );
     *total_work = total_work.saturating_add(element_work);
@@ -494,8 +495,7 @@ fn certify_element_within(
     coordinates: [[f64; 3]; 10],
     limits: JacobianSearchLimits,
     cancellation: &dyn MeshingCancellationSignal,
-    storage: &Storage<'_>,
-    work: &mut u64,
+    work: ValidationWork<'_, '_>,
     deepest: &mut u32,
 ) -> Result<(), DelaunaySolverTopologyError> {
     let JacobianSearchLimits {
@@ -503,6 +503,10 @@ fn certify_element_within(
         maximum_recursion_depth,
         cancellation_check_interval,
     } = limits;
+    let ValidationWork {
+        storage,
+        counter: work,
+    } = work;
     if cancellation_check_interval == 0 {
         return Err(error::failure(
             DelaunaySolverTopologyErrorKind::InvalidOptions,

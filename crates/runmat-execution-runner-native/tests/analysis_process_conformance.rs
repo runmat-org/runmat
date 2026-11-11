@@ -113,7 +113,14 @@ mod thermal_radiation;
 mod transient;
 use publication_chain::{success_response, PublicationChainDriver};
 
+#[path = "support/native_host.rs"]
+mod native_host;
+
 fn main() {
+    native_host::run(run);
+}
+
+fn run() {
     let mode = std::env::args_os().nth(1);
     if mode.as_deref()
         == Some(std::ffi::OsStr::new(
@@ -134,11 +141,10 @@ fn main() {
             .unwrap();
         return;
     }
-    if mode.as_deref() == Some(std::ffi::OsStr::new("--child"))
-        || mode.as_deref()
-            == Some(std::ffi::OsStr::new(
-                runmat_process_host::HiddenMode::ExecutionWorker.marker(),
-            ))
+    if mode.as_deref()
+        == Some(std::ffi::OsStr::new(
+            runmat_process_host::HiddenMode::ExecutionWorker.marker(),
+        ))
     {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -299,7 +305,6 @@ async fn parent() {
     let explicit_request = explicit_program.request.clone();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.executable = std::env::current_exe().unwrap();
-    config.worker_arguments = vec!["--child".into()];
     config.max_workers = 2;
     config.store_root = directory.path().join("native-analysis-session");
     config.worker_capabilities = capabilities();
@@ -499,7 +504,6 @@ async fn parent() {
 
     let mut sequence_config = NativeExecutionConfig::for_current_executable().unwrap();
     sequence_config.executable = std::env::current_exe().unwrap();
-    sequence_config.worker_arguments = vec!["--child".into()];
     sequence_config.max_workers = 2;
     sequence_config.store_root = directory.path().join("native-analysis-sequence");
     let sequence = execute_structural_sequence_locally(
@@ -513,7 +517,6 @@ async fn parent() {
 
     let mut frequency_config = NativeExecutionConfig::for_current_executable().unwrap();
     frequency_config.executable = std::env::current_exe().unwrap();
-    frequency_config.worker_arguments = vec!["--child".into()];
     frequency_config.max_workers = 2;
     frequency_config.store_root = directory.path().join("native-analysis-frequency");
     let frequency = execute_structural_frequency_locally(
@@ -529,7 +532,6 @@ async fn parent() {
 
     let mut cancelled_sequence_config = NativeExecutionConfig::for_current_executable().unwrap();
     cancelled_sequence_config.executable = std::env::current_exe().unwrap();
-    cancelled_sequence_config.worker_arguments = vec!["--child".into()];
     cancelled_sequence_config.max_workers = 2;
     cancelled_sequence_config.store_root = directory.path().join("cancelled-analysis-sequence");
     // Every task now has an authoritative plan: fallback resources no longer control
@@ -567,7 +569,6 @@ async fn parent() {
 
     let mut user_cancelled_config = NativeExecutionConfig::for_current_executable().unwrap();
     user_cancelled_config.executable = std::env::current_exe().unwrap();
-    user_cancelled_config.worker_arguments = vec!["--child".into()];
     user_cancelled_config.max_workers = 2;
     user_cancelled_config.store_root = directory.path().join("user-cancelled-analysis-sequence");
     let interrupt = runmat_execution::cancellation::CancellationSource::new();
@@ -734,7 +735,6 @@ async fn durable_conformance(
     let directory = tempfile::tempdir().unwrap();
     let mut driver = publication_chain::DurableDriver::open({
         let mut execution = NativeExecutionConfig::for_current_executable().unwrap();
-        execution.worker_arguments = vec!["--child".into()];
         execution.max_workers = 2;
         execution.worker_capabilities.extend(capabilities());
         execution.max_object_bytes = 64 * 1024 * 1024;
@@ -892,7 +892,6 @@ async fn remote_conformance(
 
     let mut modal_local_config = NativeExecutionConfig::for_current_executable().unwrap();
     modal_local_config.executable = std::env::current_exe().unwrap();
-    modal_local_config.worker_arguments = vec!["--child".into()];
     modal_local_config.max_workers = 2;
     modal_local_config.store_root = project_root.path().join("local-modal-transient");
     let mut modal_local_publisher = transient::RecordingPublisher {

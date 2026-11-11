@@ -149,7 +149,7 @@ export function lintDocs(source) {
 
     // Highlighting: every ```fea block colors every word the compiler knows (the grammar is
     // generated from the compiler's tables; skipped for fixture trees without sources).
-    if (existsSync(join(source, "crates/runmat-fea-syntax/src/lexical/token.rs"))) {
+    if (existsSync(join(source, "crates/runmat-design-syntax/src/lexical/token.rs"))) {
         const grammar = feaGrammar(source);
         const known = knownWords(source);
         for (const [file, { text }] of parsed)

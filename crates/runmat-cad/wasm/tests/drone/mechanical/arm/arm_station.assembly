@@ -1,0 +1,20 @@
+runmat 0.7
+std 1
+
+// An arm station: the hinge mount fixed in the body, its pin, and the arm unit turned about the
+// pin by `fold` (0 deg in flight). Its origin is the pin axis (z) at the knuckle's mid-height.
+assembly arm_station {
+    input fold : angle = 0 deg
+    input length_offset : length = 0 mm
+    input rise : length = 11 mm
+    input pod_tilt : angle = 0 deg
+    input blade_a : angle = 0 deg
+    input blade_b : angle = 180 deg
+
+    use part hinge_mount as hinge
+    use part hinge_pin from hardware as pin
+    use assembly arm_unit as unit {
+        configuration = { select = inputs, values = { length_offset = input.length_offset, rise = input.rise, pod_tilt = input.pod_tilt, blade_a = input.blade_a, blade_b = input.blade_b } }
+        placement = { placement = offset, offset = { rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = input.fold } } }
+    }
+}

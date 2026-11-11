@@ -352,20 +352,26 @@ async fn invoke_semantic_function_with_rooted_captures(
     let queue_runtime = runtime.clone();
     let queued_scope = scoped_runtime.prepare_poll_scope()?;
     let make_child = move || async move {
-        // Construct the scoped owner only after the queue has admitted its
-        // future. The lexical guard travels with an unpolled child rather
-        // than remaining in a suspended caller that may be canceled.
-        let _lexical_roots = lexical_roots;
-        invoke_semantic_function_with_captures_inner(
-            function,
-            arguments,
-            requested_outputs,
-            &registry,
-            runtime,
-            selected_handle,
-            lexical_environment,
-        )
-        .await
+        let cleanup = runtime.function_cleanup_scope()?;
+        let (result, cleanup) = cleanup
+            .run(&scoped_runtime, async move {
+                // Construct the scoped owner only after the queue has admitted its
+                // future. The lexical guard travels with an unpolled child rather
+                // than remaining in a suspended caller that may be canceled.
+                let _lexical_roots = lexical_roots;
+                invoke_semantic_function_with_captures_inner(
+                    function,
+                    arguments,
+                    requested_outputs,
+                    &registry,
+                    runtime,
+                    selected_handle,
+                    lexical_environment,
+                )
+                .await
+            })
+            .await?;
+        runmat_runtime::runtime_error::complete_with_cleanup(result, cleanup)
     };
     if let Some(owner) = owner {
         let drive_runtime = queue_runtime.clone();

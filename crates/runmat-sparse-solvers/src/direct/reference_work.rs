@@ -6,6 +6,20 @@ pub(super) enum DirectPhase {
     Solve { rhs_columns: usize },
 }
 
+/// The rsua-1 decision for one sparse direct numeric kernel. An exclusion is
+/// explicit and does not imply that its enclosing solve has zero measured work.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DirectMeasurementCoverage {
+    Measured(DirectReferenceWork),
+    Excluded(ExcludedDirectKernel),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExcludedDirectKernel {
+    /// Pivot-dependent sparse Bunch–Kaufman LBLᴴ factorization and substitution.
+    SparseBunchKaufman,
+}
+
 /// One completed reference batch. Numerical buffers stay with their existing
 /// solver owner; the reservation borrows the admitted run's shared ledger.
 pub(super) fn with_direct_usage<R>(
@@ -17,10 +31,17 @@ pub(super) fn with_direct_usage<R>(
     let Some(context) = UsageContext::capture() else {
         return work();
     };
-    let reference = symbolic.reference_work().map_err(|error| match error {
-        ReferenceWorkError::Overflow(error) => crate::SolverError::Usage(error.into()),
-        error => crate::SolverError::Unsupported(error.to_string()),
-    })?;
+    let coverage = symbolic
+        .measurement_coverage()
+        .map_err(|error| match error {
+            ReferenceWorkError::Overflow(error) => crate::SolverError::Usage(error.into()),
+            error => crate::SolverError::Unsupported(error.to_string()),
+        })?;
+    let DirectMeasurementCoverage::Measured(reference) = coverage else {
+        // Only the named pivot-dependent sparse kernels are excluded. The
+        // caller still charges independently owned residual/vector batches.
+        return work();
+    };
     let (category, operations) = match phase {
         DirectPhase::Factorization => (
             UsageCategory::Factorization,
@@ -77,11 +98,24 @@ pub enum ReferenceWorkError {
 }
 
 impl SymbolicFactorization {
-    /// Reference arithmetic over the stored symbolic fill. LLT/LDLT count the
-    /// factor's own columns; LU counts the elimination fill of the symmetrized
-    /// pattern recorded at analysis. The count is independent of the
-    /// floating-point memory/performance planning estimate. Square roots are
-    /// retained separately for diagnostics and included by
+    /// Classifies the exact rsua-1 arithmetic boundary for this symbolic kind.
+    /// A new factor kind must be classified here; an unsupported schedule must
+    /// never be interpreted as a measured zero.
+    pub fn measurement_coverage(&self) -> Result<DirectMeasurementCoverage, ReferenceWorkError> {
+        match self.kind {
+            FactorKind::Cholesky | FactorKind::Ldlt | FactorKind::Lu => self
+                .reference_work()
+                .map(DirectMeasurementCoverage::Measured),
+            FactorKind::BunchKaufman => Ok(DirectMeasurementCoverage::Excluded(
+                ExcludedDirectKernel::SparseBunchKaufman,
+            )),
+        }
+    }
+
+    /// LLT/LDLT reference arithmetic uses the stored symbolic columns. LU uses
+    /// elimination fill of the symmetrized pattern recorded at analysis. This
+    /// count is independent of the floating-point memory/performance estimate.
+    /// Square roots are retained separately for diagnostics and included by
     /// `DirectReferenceWork::factorization_operations` in the measured total.
     pub fn reference_work(&self) -> Result<DirectReferenceWork, ReferenceWorkError> {
         match (&self.inner, self.kind) {
@@ -141,16 +175,20 @@ pub(super) fn general_columns(
             .and_then(|value| value.checked_add(p.checked_mul(scale)?))
             .and_then(|value| value.checked_add(pivot))
             .ok_or(CountOverflow)?;
-        work.basic_operations = work.basic_operations.checked_add(
-            OperationCount::from_operations(u64::try_from(factor).map_err(|_| CountOverflow)?),
-        )?;
+        work.basic_operations =
+            work.basic_operations
+                .checked_add(OperationCount::from_operations(
+                    u64::try_from(factor).map_err(|_| CountOverflow)?,
+                ))?;
         let solve = p
             .checked_mul(2 * update)
             .and_then(|value| value.checked_add(scale))
             .ok_or(CountOverflow)?;
-        work.solve_operations_per_rhs = work.solve_operations_per_rhs.checked_add(
-            OperationCount::from_operations(u64::try_from(solve).map_err(|_| CountOverflow)?),
-        )?;
+        work.solve_operations_per_rhs =
+            work.solve_operations_per_rhs
+                .checked_add(OperationCount::from_operations(
+                    u64::try_from(solve).map_err(|_| CountOverflow)?,
+                ))?;
     }
     Ok(work)
 }

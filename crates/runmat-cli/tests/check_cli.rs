@@ -76,7 +76,14 @@ fn repository_fixture(temp: &TempDir) -> PathBuf {
 }
 
 fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
-    runmat_from_repository_through(temp, args, None).0
+    runmat_from_repository_through(temp, args, None).output
+}
+
+struct RepositoryRun {
+    output: Output,
+    requests: Vec<(String, &'static str)>,
+    receipts: Vec<Value>,
+    closed_for: Option<std::time::Duration>,
 }
 
 /// Run from the repository against the test Server, optionally closing the Server's port
@@ -85,12 +92,7 @@ fn runmat_from_repository_through(
     temp: &TempDir,
     args: &[&str],
     outage: Option<fea_admission::Outage>,
-) -> (
-    Output,
-    Vec<(String, &'static str)>,
-    Vec<Value>,
-    Option<std::time::Duration>,
-) {
+) -> RepositoryRun {
     let repository = repository_fixture(temp);
     let config = temp.path().join("runmat.toml");
     let artifact_root =
@@ -132,15 +134,20 @@ fn runmat_from_repository_through(
     };
     let output = command.output().expect("run repository FEA example");
     let Some(admission) = admission else {
-        return (output, Vec::new(), Vec::new(), None);
+        return RepositoryRun {
+            output,
+            requests: Vec::new(),
+            receipts: Vec::new(),
+            closed_for: None,
+        };
     };
     let journal = admission.journal();
-    (
+    RepositoryRun {
         output,
-        journal.requests.clone(),
-        journal.receipts.clone(),
-        journal.closed_for,
-    )
+        requests: journal.requests.clone(),
+        receipts: journal.receipts.clone(),
+        closed_for: journal.closed_for,
+    }
 }
 
 fn assert_fea_checks(temp: &TempDir, path: &str) {
@@ -284,7 +291,10 @@ fn trace_impedance_example_publishes_the_microstrip_and_pair_impedances() {
             .unwrap_or_else(|| panic!("{study}: no manifest path in {payload}"));
         let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
         assert_eq!(manifest["public_run"]["run_status"], "completed", "{study}");
-        assert_eq!(manifest["public_run"]["numerically_acceptable"], true, "{study}");
+        assert_eq!(
+            manifest["public_run"]["numerically_acceptable"], true,
+            "{study}"
+        );
         let value = passed_assessment(&payload, assessment);
         eprintln!("trace-impedance {study}: {label} = {value} Ω");
     }
@@ -816,7 +826,11 @@ fn acoustic_cavity_example_runs_its_certified_frequency_sweep() {
 fn a_server_restart_mid_run_keeps_the_lease_and_meters_the_same_operations() {
     let path = "docs/simulation/examples/acoustic-cavity-harmonic.fea";
     let steady_temp = TempDir::new().unwrap();
-    let (steady, _, steady_receipts, _) = runmat_from_repository_through(
+    let RepositoryRun {
+        output: steady,
+        receipts: steady_receipts,
+        ..
+    } = runmat_from_repository_through(
         &steady_temp,
         &["run", path, "--json"],
         Some(fea_admission::Outage {
@@ -830,7 +844,12 @@ fn a_server_restart_mid_run_keeps_the_lease_and_meters_the_same_operations() {
         String::from_utf8_lossy(&steady.stderr)
     );
     let temp = TempDir::new().unwrap();
-    let (output, requests, receipts, closed_for) = runmat_from_repository_through(
+    let RepositoryRun {
+        output,
+        requests,
+        receipts,
+        closed_for,
+    } = runmat_from_repository_through(
         &temp,
         &["run", path, "--json"],
         Some(fea_admission::Outage {
@@ -852,7 +871,13 @@ fn a_server_restart_mid_run_keeps_the_lease_and_meters_the_same_operations() {
     let metered = |receipts: &[Value]| {
         receipts
             .iter()
-            .map(|r| (r["outcome"].clone(), r["usedOps"].clone(), r["totalOps"].clone()))
+            .map(|r| {
+                (
+                    r["outcome"].clone(),
+                    r["usedOps"].clone(),
+                    r["totalOps"].clone(),
+                )
+            })
             .collect::<Vec<_>>()
     };
     assert_eq!(receipts.len(), 1);
@@ -1139,7 +1164,9 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/home_study_check/cantilever.fea"),
     )
-    .unwrap();
+    .unwrap()
+    .replace("\r\n", "\n")
+    .replace('\n', "\r\n");
     fs::write(temp.path().join("cantilever.fea"), &source).unwrap();
 
     let output = runmat_with_env(
@@ -1264,7 +1291,10 @@ fn run_example_witness(temp: &TempDir, name: &str, extra: &str) -> Value {
         format!("docs/simulation/examples/{name}.fea")
     } else {
         let source = fs::read_to_string(examples.join(format!("{name}.fea"))).unwrap();
-        let body = source.trim_end().strip_suffix('}').expect("study block closes the file");
+        let body = source
+            .trim_end()
+            .strip_suffix('}')
+            .expect("study block closes the file");
         fs::write(
             examples.join(format!("{name}.witness.fea")),
             format!("{body}{extra}}}\n"),
@@ -1402,7 +1432,11 @@ fn fsi_check_classifies_the_cad_faces_that_join_fluid_and_solid() {
         .unwrap();
         let output = runmat_from_repository(
             &temp,
-            &["check", &format!("docs/simulation/examples/{name}"), "--json"],
+            &[
+                "check",
+                &format!("docs/simulation/examples/{name}"),
+                "--json",
+            ],
         );
         serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
             panic!(
@@ -1437,7 +1471,11 @@ fn check_variant(temp: &TempDir, name: &str, source: &str) -> Value {
     fs::write(examples.join(name), source).unwrap();
     let output = runmat_from_repository(
         temp,
-        &["check", &format!("docs/simulation/examples/{name}"), "--json"],
+        &[
+            "check",
+            &format!("docs/simulation/examples/{name}"),
+            "--json",
+        ],
     );
     serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
         panic!(
@@ -1546,7 +1584,9 @@ fn transient_conjugate_heat_check_requires_and_admits_its_initial_temperature() 
     let diagnostics = missing["diagnostics"].to_string();
     assert!(
         diagnostics.contains("fea.admission.initial_condition")
-            && diagnostics.contains("transient conjugate heat transfer needs an authored initial temperature"),
+            && diagnostics.contains(
+                "transient conjugate heat transfer needs an authored initial temperature"
+            ),
         "{diagnostics}"
     );
     let declared = check_variant(&temp, "cht-transient-declared.fea", &declare(transient("")));
@@ -1591,7 +1631,8 @@ fn fsi_check_requires_a_declared_fluid_structure_interface() {
     let diagnostics = rigid["diagnostics"].to_string();
     assert!(
         diagnostics.contains("fea.admission.interface")
-            && diagnostics.contains("fluid–structure interaction needs a declared fluid–structure interface"),
+            && diagnostics
+                .contains("fluid–structure interaction needs a declared fluid–structure interface"),
         "{diagnostics}"
     );
 }
@@ -1606,7 +1647,11 @@ fn fsi_check_requires_a_declared_fluid_structure_interface() {
 fn thermal_prestress_example_runs_its_three_step_chain() {
     let temp = TempDir::new().unwrap();
     let payload = run_example_witness(&temp, "thermal-prestress", "");
-    assert_eq!(payload["step_run_ids"].as_array().unwrap().len(), 3, "{payload}");
+    assert_eq!(
+        payload["step_run_ids"].as_array().unwrap().len(),
+        3,
+        "{payload}"
+    );
 }
 
 // witness: FEA-EM-FREQUENCY-001/multi_frequency_study @ harmonic_maxwell/edge_elements/public_study;
@@ -1617,5 +1662,9 @@ fn thermal_prestress_example_runs_its_three_step_chain() {
 fn induction_gear_example_runs_its_three_frequency_harmonic_study() {
     let temp = TempDir::new().unwrap();
     let payload = run_example_witness(&temp, "em-induction-gear-harmonic", "");
-    assert_eq!(payload["step_run_ids"].as_array().unwrap().len(), 3, "{payload}");
+    assert_eq!(
+        payload["step_run_ids"].as_array().unwrap().len(),
+        3,
+        "{payload}"
+    );
 }

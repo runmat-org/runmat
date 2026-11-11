@@ -165,6 +165,7 @@ fn valid_optimized_osr_cancellation_releases_retained_code_without_entering_targ
                 None,
                 BTreeMap::new(),
                 profile,
+                runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
             )
             .unwrap(),
         );

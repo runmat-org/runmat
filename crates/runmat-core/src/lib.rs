@@ -116,5 +116,5 @@ pub fn execute_text_request_for_testing(
 
 pub use session::{
     FeaExecutionPreflight, FeaGeometryExecutionHost, FeaStudyPreparationError,
-    PreparedSerialFeaStudy, PreparedSerialFeaExecutionError,
+    PreparedSerialFeaExecutionError, PreparedSerialFeaStudy,
 };

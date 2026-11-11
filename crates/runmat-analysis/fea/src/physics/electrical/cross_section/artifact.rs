@@ -269,7 +269,10 @@ pub fn cross_section_meshing_evidence(
     let evidence = runmat_meshing_core::MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
         geometry: artifact.geometry.clone(),
-        resolved_request_digest: artifact.resolved_request.canonical_digest().map_err(invalid)?,
+        resolved_request_digest: artifact
+            .resolved_request
+            .canonical_digest()
+            .map_err(invalid)?,
         artifact_digest: artifact.canonical_digest,
         algorithms: artifact.resolved_request.algorithms.clone(),
         deterministic_seed: artifact.resolved_request.deterministic_seed,

@@ -1,9 +1,9 @@
 //! Metric-aware execution owns local search state across accepted passes.
 //! Complete deletion/retriangulation retains its explicit canonical admission
 //! boundary until that owner's full dependency closure has local authority.
+use super::rejected::{CompleteSearchKey, Ranking, RejectedCompleteRelocations, SearchRecording};
 use super::*;
 use crate::cdt::volume_refinement::context::RefinementContext;
-use super::rejected::{CompleteSearchKey, Ranking, RejectedCompleteRelocations, SearchRecording};
 use crate::cdt::volume_sliver::{insertion, reconnection, relocation, work::OptimizationWork};
 use std::collections::BTreeMap;
 
@@ -238,8 +238,8 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
                         .expect("quality corner"),
                 )
         });
-        let complete_key = has_complete_source
-            .then(|| CompleteSearchKey::new(source.node_identities, objective));
+        let complete_key =
+            has_complete_source.then(|| CompleteSearchKey::new(source.node_identities, objective));
         // The current coupled comparison floor: the worst violation of the whole state.
         let ranking = {
             let worst = |objective, ratio: fn(&crate::cdt::DelaunayTetrahedronQuality) -> f64| {

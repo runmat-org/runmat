@@ -66,6 +66,10 @@ fn unexpected() -> io::Error {
 
 #[async_trait(?Send)]
 impl FsProvider for ReadOnlyProvider {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        runmat_filesystem::FsPathNamespace::VirtualRooted
+    }
+
     fn open(&self, _: &Path, _: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         self.evidence.opens.fetch_add(1, Ordering::SeqCst);
         Ok(Box::new(UnsupportedSeekHandle {

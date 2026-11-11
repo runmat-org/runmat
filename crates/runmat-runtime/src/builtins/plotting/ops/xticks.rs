@@ -62,6 +62,62 @@ mod tests {
     }
 
     #[test]
+    fn scalar_xticks_and_property_controls_share_checked_numeric_normalization() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        xticks_builtin(vec![Value::Num(1.0)]).unwrap();
+        assert_eq!(
+            runmat_value::Tensor::try_from(&xticks_builtin(Vec::new()).unwrap())
+                .unwrap()
+                .materialize_f64(),
+            vec![1.0]
+        );
+        let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
+        for (value, expected) in [
+            (Value::Num(2.0), 2.0),
+            (Value::Int(runmat_value::IntValue::I16(3)), 3.0),
+        ] {
+            crate::builtins::plotting::set::set_builtin(vec![
+                ax.clone(),
+                Value::from("XTick"),
+                value,
+            ])
+            .unwrap();
+            let ticks = get_builtin(vec![ax.clone(), Value::from("XTick")]).unwrap();
+            assert_eq!(
+                runmat_value::Tensor::try_from(&ticks)
+                    .unwrap()
+                    .materialize_f64(),
+                vec![expected]
+            );
+            assert_eq!(xticks_builtin(Vec::new()).unwrap(), ticks);
+        }
+        let before = xticks_builtin(Vec::new()).unwrap();
+        assert!(xticks_builtin(vec![Value::Num(f64::INFINITY)]).is_err());
+        assert!(crate::builtins::plotting::set::set_builtin(vec![
+            ax,
+            Value::from("XTick"),
+            tensor(vec![1.0, 1.0]),
+        ])
+        .is_err());
+        assert_eq!(xticks_builtin(Vec::new()).unwrap(), before);
+
+        let wide = (1_u64 << 63) + 1;
+        let exact = crate::builtins::plotting::axis_ticks::tick_tensor_from_value(
+            &Value::Int(runmat_value::IntValue::U64(wide)),
+            "xticks",
+        )
+        .unwrap();
+        assert_eq!(
+            exact.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![wide]))
+        );
+    }
+
+    #[test]
     fn xticks_set_query_mode_and_property_round_trip() {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();

@@ -1,0 +1,180 @@
+{
+  "clips": [
+    {
+      "id": "mcad/sketch",
+      "alt": "A rectangle drawn on the hinge mount's top face arrives with horizontal and vertical relations, two dimensions set it to 8 by 5 mm, and Fix on a corner leaves the sketch fully defined at 0 degrees of freedom.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 14.9,
+      "base": "/design-assets/flow-clips/mcad/sketch/sketch"
+    },
+    {
+      "id": "mcad/extrude",
+      "alt": "A 5 by 8 mm sketch on the hinge mount's lug, between the screw bores and the pin bore, is extruded: the preview shows a 10 mm boss, the depth on the model is set to 4 mm, and the boss joins the part, clear of every bore.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 7.4,
+      "base": "/design-assets/flow-clips/mcad/extrude/extrude"
+    },
+    {
+      "id": "mcad/revolve",
+      "alt": "A hinge leaf's knuckle sketch is revolved about the leaf's front top edge, picked on the model as the axis: the full-turn preview shows two knuckles, and they join the leaf.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.2,
+      "base": "/design-assets/flow-clips/mcad/revolve/revolve"
+    },
+    {
+      "id": "mcad/fillet",
+      "alt": "On the hinge mount, Fillet picks three edges at the back block's top corner, the preview rounds them at 2 mm, the radius on the model is set to 1 mm, and the rounds join the part, carried around the lug's top edge.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 9.1,
+      "base": "/design-assets/flow-clips/mcad/fillet/fillet"
+    },
+    {
+      "id": "mcad/chamfer",
+      "alt": "On the hinge mount, Chamfer picks the upper lug's front top edge, the preview bevels it at 1 mm and carries the bevel around the lug's rounded end, the distance on the model is set to 1.5 mm, and the bevel joins the part.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.2,
+      "base": "/design-assets/flow-clips/mcad/chamfer/chamfer"
+    },
+    {
+      "id": "mcad/pattern",
+      "alt": "On the hinge mount, Pattern takes a 2 mm locating post and the back top edge as the direction, the copies preview at 10 mm, the spacing is set to 5 mm, and a row of three posts joins the part.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 9.6,
+      "base": "/design-assets/flow-clips/mcad/pattern/pattern"
+    },
+    {
+      "id": "mcad/mate",
+      "alt": "In an assembly, Mate set to Concentric takes the floating hinge pin's side and the hinge mount's pin bore; the preview ghosts the pin in the bore, and the pin moves there, flush with both lugs.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.8,
+      "base": "/design-assets/flow-clips/mcad/mate/mate"
+    },
+    {
+      "id": "mcad/drawing",
+      "alt": "On the hinge mount's drawing, Projected view takes the front view and places the right-side view beside it, then Smart dimension picks the back block's top and bottom edges and places the 20.2 mm clevis height.",
+      "width": 1344,
+      "height": 800,
+      "seconds": 10.8,
+      "base": "/design-assets/flow-clips/mcad/drawing/drawing"
+    },
+    {
+      "id": "ecad/place",
+      "alt": "On the flight controller's mcu sheet, Part places C24, a 100 nF decoupling capacitor, upright under C5 in the row of C8 and C9, and Power port gives it +3V3 on its top pin and GND on its bottom pin, like its neighbors.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.3,
+      "base": "/design-assets/flow-clips/ecad/place/place"
+    },
+    {
+      "id": "ecad/wire",
+      "alt": "On the mcu sheet's status LEDs, Wire runs from R5's free end across and down to D2's anode on the LED2_K net, as R4 is wired to D1, and both unconnected-pin markers clear.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 7.4,
+      "base": "/design-assets/flow-clips/ecad/wire/wire"
+    },
+    {
+      "id": "ecad/erc",
+      "alt": "On the mcu sheet, zoomed on the microcontroller's lower pins, ERC finds one warning, the spare PB15 pin unconnected; No-ERC marks the unused pin as meant to be open, and ERC runs again with no violations.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 10.8,
+      "base": "/design-assets/flow-clips/ecad/erc/erc"
+    },
+    {
+      "id": "ecad/update-board",
+      "alt": "With C24 added to the mcu sheet, Update board (ECO) lists C24 Add component with its 0402 footprint; Apply; the Board tab shows C24 beside the board with two airwires and 2 unrouted connections.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 9.4,
+      "base": "/design-assets/flow-clips/ecad/update-board/update-board"
+    },
+    {
+      "id": "ecad/drc",
+      "alt": "On the board, zoomed on D1, D2, R4 and R5, DRC finds the LED2_K net in two pieces; Route joins D2's cathode pad to R5's second pad on the top layer, and DRC runs again with no violations.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 11.3,
+      "base": "/design-assets/flow-clips/ecad/drc/drc"
+    },
+    {
+      "id": "ecad/route",
+      "alt": "With C24 moved 2.1 mm under C5, Route joins C24's +3V3 pad and then its GND pad to C5's with 0.25 mm top-layer tracks, Via drops a GND stitching via on the new ground track between the two capacitors, and the In1.Cu view shows the via joined to the ground plane.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 14.4,
+      "base": "/design-assets/flow-clips/ecad/route/route"
+    },
+    {
+      "id": "ecad/pour",
+      "alt": "On the bottom layer, Draw pour takes GND as its net, four clicks draw its outline inside the board's edge, B.Cu is set as its layer, and the bottom layer fills with ground clear of every other net's copper.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 10.3,
+      "base": "/design-assets/flow-clips/ecad/pour/pour"
+    },
+    {
+      "id": "ecad/outputs",
+      "alt": "The Fabrication outputs panel shows the fab-house package and a clean pre-flight (DRC, ERC, unrouted and schematic changes all 0); Generate writes the package and lists its 19 files under the board.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 6.9,
+      "base": "/design-assets/flow-clips/ecad/outputs/outputs"
+    },
+    {
+      "id": "mcad/direct",
+      "alt": "On the ESC heatsink, zoomed to the pedestal that seats the ESC, Offset face takes the pedestal's top face and moves it down 0.5 mm for a thicker gap pad; the four standoffs now stand 0.5 mm prouder of the seat.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 9.6,
+      "base": "/design-assets/flow-clips/mcad/direct/direct"
+    },
+    {
+      "id": "mcad/weldment",
+      "alt": "The drone's launch stand starts as its layout sketches; Structural member places 20 by 20 by 1.5 mm 6061 aluminium square tube on every line, mitred at the frame corners, and Cut list groups the 12 members into 5 items by length and end angle, with each item's material and mass.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 11.0,
+      "base": "/design-assets/flow-clips/mcad/weldment/weldment"
+    },
+    {
+      "id": "mcad/evaluate",
+      "alt": "On one arm unit of the drone, Mass properties runs over every part: 43.8 g, the center of gravity and the inertia about it, with a row per part giving its material, density, volume and mass.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.4,
+      "base": "/design-assets/flow-clips/mcad/evaluate/evaluate"
+    },
+    {
+      "id": "mcad/surfaces",
+      "alt": "The drone body's skin starts as five closed stations, nose to tail; Lofted surface skins them into one sheet, and Thicken grows the sheet 1.8 mm inward into a solid molded wall, its rim showing at the open tail.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 13.5,
+      "base": "/design-assets/flow-clips/mcad/surfaces/surfaces"
+    },
+    {
+      "id": "mcad/sheet-metal",
+      "alt": "The battery bracket starts as a 60 by 24 mm sketch; Base flange makes it a 1.5 mm aluminium plate, Edge flange folds a 14 mm flange up along its front long edge with a 1 mm inside bend radius, and Flat pattern shows the blank the laser cuts, fitted in the view.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 17.1,
+      "base": "/design-assets/flow-clips/mcad/sheet-metal/sheet-metal"
+    },
+    {
+      "id": "mcad/mold",
+      "alt": "The drone's landing skid gets a parting plane on its centre line; Core/cavity split builds a mold block 10 mm round the skid and splits it at the plane, and one half shown on its own carries the skid's impression.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 10.5,
+      "base": "/design-assets/flow-clips/mcad/mold/mold"
+    }
+  ]
+}

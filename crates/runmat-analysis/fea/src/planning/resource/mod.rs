@@ -144,6 +144,7 @@ mod scoped_execution;
 mod solve_policy;
 pub use general_solve::{GeneralSolveResourceControls, GeneralSparseSolveResourceDemand};
 mod structural_facts;
+pub use structural_facts::structural_resource_derivation_work_upper_bound;
 mod symbolic;
 mod thermal;
 mod thermal_backend_evidence;

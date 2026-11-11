@@ -1,6 +1,6 @@
 [package]
 name = "runmat-execution"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 description = "Portable identities, handles, resource models, value payloads, and protocol contracts for RunMat execution"
 license-file = "../../LICENSE.md"

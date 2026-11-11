@@ -417,7 +417,9 @@ pub enum AuthoredStudyError {
     WrongGeometry,
     #[error("study requires a `model`")]
     MissingModel,
-    #[error("a `line_parameters` study takes no `model`: its cross-section carries the dielectrics")]
+    #[error(
+        "a `line_parameters` study takes no `model`: its cross-section carries the dielectrics"
+    )]
     UnexpectedModel,
     #[error("a `cross_section` geometry is solved only by `electromagnetic line_parameters`, which needs a `cross_section` geometry")]
     CrossSectionProcedure,

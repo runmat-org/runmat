@@ -59,7 +59,7 @@ export function validateBuiltinExampleRequirements(value, label = "example requi
   member(value.host, ["Any", "NativeOnly", "DesktopHostOnly"], `${label} host`);
   member(value.engine, ["Default", "Interpreter", "Jit", "Aot"], `${label} engine`);
   orderedMembers(value.compiler, ["C", "Cxx", "Fortran", "Cuda", "JavaBytecode", "PythonExtension"], `${label} compiler capabilities`);
-  orderedMembers(value.runtime, ["NativeDynamicLoader", "Mex", "NativeFfi", "JavaVirtualMachine", "Python", "NumPy", "PlotCore"], `${label} runtime capabilities`);
+  orderedMembers(value.runtime, ["NativeDynamicLoader", "Mex", "NativeFfi", "JavaVirtualMachine", "Python", "NumPy", "PlotCore", "NativeCad", "NativeMeshing"], `${label} runtime capabilities`);
   orderedMembers(value.toolchain, ["CCompiler", "CxxCompiler", "FortranCompiler", "CudaToolkit", "JavaDevelopmentKit", "PythonInterpreter", "PythonDevelopmentHeaders"], `${label} toolchain capabilities`);
   return value;
 }

@@ -22,6 +22,25 @@ pub struct AnalysisStudyStepResult {
     pub resolved_solver_options: AnalysisSolverOptions,
 }
 
+/// Attach admission failure using the study operation's canonical identity,
+/// retaining any original numerical error as the primary cause.
+pub fn analysis_merge_study_step_admission(
+    result: Result<AnalysisStudyStepResult, OperationErrorEnvelope>,
+    denied: Option<fea_run_admission::FeaRunDenied>,
+    context: &OperationContext,
+) -> Result<AnalysisStudyStepResult, OperationErrorEnvelope> {
+    fea_run_admission::merge_lease_error(
+        result,
+        denied.map(|denied| {
+            denied.into_operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+            )
+        }),
+    )
+}
+
 /// An owned worker must return numerical values, never its process-local
 /// device tokens. Actual GPU execution/provenance remains unchanged.
 pub fn analysis_validate_study_step_transfer(

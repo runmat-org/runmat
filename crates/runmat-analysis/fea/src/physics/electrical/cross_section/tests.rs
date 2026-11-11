@@ -147,8 +147,7 @@ fn stripline_matches_cohn_exact_forms() {
     for (wb, sb) in [(0.5, 0.2), (0.5, 0.5), (0.3, 1.0)] {
         let (w, s) = (wb * b, sb * b);
         let pitch = 0.5 * (w + s);
-        let line =
-            solve_cross_section(&stripline(&[(-pitch, w), (pitch, w)], b, 0.0, er)).unwrap();
+        let line = solve_cross_section(&stripline(&[(-pitch, w), (pitch, w)], b, 0.0, er)).unwrap();
         let pair = line.pair.unwrap();
         let (even, odd) = cohn_coupled_stripline(w, s, b, er);
         let (ee, eo) = (
@@ -162,11 +161,18 @@ fn stripline_matches_cohn_exact_forms() {
             pair.odd_mode_impedance_ohm,
             100.0 * eo
         );
-        assert!(ee.abs() < 3e-3 && eo.abs() < 3e-3, "w/b={wb} s/b={sb}: {ee} {eo}");
+        assert!(
+            ee.abs() < 3e-3 && eo.abs() < 3e-3,
+            "w/b={wb} s/b={sb}: {ee} {eo}"
+        );
         assert!((pair.differential_impedance_ohm - 2.0 * pair.odd_mode_impedance_ohm).abs() < 1e-9);
         assert!((pair.common_mode_impedance_ohm - 0.5 * pair.even_mode_impedance_ohm).abs() < 1e-9);
         // Homogeneous dielectric: no far-end coupling, and both modes travel at c/sqrt(εr).
-        assert!(pair.far_end_coupling.abs() < 1e-9, "{}", pair.far_end_coupling);
+        assert!(
+            pair.far_end_coupling.abs() < 1e-9,
+            "{}",
+            pair.far_end_coupling
+        );
         assert!((pair.odd_mode_effective_permittivity - er).abs() < 1e-9);
         assert!((pair.even_mode_effective_permittivity - er).abs() < 1e-9);
         assert!(pair.near_end_coupling > 0.0);
@@ -195,7 +201,11 @@ fn microstrip_and_stripline_agree_with_ipc_2141a_inside_their_ranges() {
         );
         assert!(error.abs() < 0.05, "{error}");
     }
-    for (w, b, er) in [(0.15 * MM, 0.6 * MM, 4.2), (0.1 * MM, 0.5 * MM, 3.6), (0.2 * MM, 0.8 * MM, 4.4)] {
+    for (w, b, er) in [
+        (0.15 * MM, 0.6 * MM, 4.2),
+        (0.1 * MM, 0.5 * MM, 3.6),
+        (0.2 * MM, 0.8 * MM, 4.4),
+    ] {
         let line = solve_cross_section(&stripline(&[(0.0, w)], b, t, er)).unwrap();
         let reference = ipc_stripline(w, b, t, er);
         let error = relative(line.impedance_ohm[0], reference);
@@ -232,7 +242,10 @@ fn microstrip_impedance_converges_with_the_mesh_and_enclosure() {
         previous = Some(z0);
     }
     eprintln!("successive changes {changes:?}");
-    assert!(changes.windows(2).all(|pair| pair[1] < pair[0]), "{changes:?}");
+    assert!(
+        changes.windows(2).all(|pair| pair[1] < pair[0]),
+        "{changes:?}"
+    );
     assert!(*changes.last().unwrap() < 1e-3, "{changes:?}");
     let default = solve_cross_section(&base).unwrap().impedance_ohm[0];
     let mut wide = base.clone();
@@ -243,7 +256,10 @@ fn microstrip_impedance_converges_with_the_mesh_and_enclosure() {
     });
     let doubled = solve_cross_section(&wide).unwrap().impedance_ohm[0];
     eprintln!("enclosure: default {default:.5}, doubled {doubled:.5}");
-    assert!(relative(doubled, default).abs() < 5e-4, "{default} {doubled}");
+    assert!(
+        relative(doubled, default).abs() < 5e-4,
+        "{default} {doubled}"
+    );
 }
 
 // witness: FEA-EM-LINE-001/pair_parameters @ quasi_static_tem/tri3/numerical_kernel;
@@ -253,7 +269,9 @@ fn microstrip_impedance_converges_with_the_mesh_and_enclosure() {
 #[test]
 fn microstrip_pair_couples_as_an_inhomogeneous_line() {
     let (w, h, t, er) = (0.15 * MM, 0.1 * MM, 35.0 * UM, 4.1);
-    let single = solve_cross_section(&microstrip(w, h, t, er)).unwrap().impedance_ohm[0];
+    let single = solve_cross_section(&microstrip(w, h, t, er))
+        .unwrap()
+        .impedance_ohm[0];
     let mut previous = 0.0;
     for gap in [0.1 * MM, 0.2 * MM, 0.4 * MM] {
         let mut section = microstrip(w, h, t, er);
@@ -269,7 +287,10 @@ fn microstrip_pair_couples_as_an_inhomogeneous_line() {
         assert!(pair.far_end_coupling < 0.0);
         assert!(pair.near_end_coupling > 0.0 && pair.near_end_coupling < 0.25);
         // Reciprocity of the per-length matrices.
-        assert_eq!(line.capacitance_f_per_m[0][1], line.capacitance_f_per_m[1][0]);
+        assert_eq!(
+            line.capacitance_f_per_m[0][1],
+            line.capacitance_f_per_m[1][0]
+        );
         assert!(line.capacitance_f_per_m[0][1] < 0.0);
         // Symmetric pair: both lines see the same Z0 and εeff.
         assert!(relative(line.impedance_ohm[0], line.impedance_ohm[1]).abs() < 1e-6);
@@ -283,7 +304,9 @@ fn microstrip_pair_couples_as_an_inhomogeneous_line() {
 #[test]
 fn stackup_inputs_change_impedance_the_physical_way() {
     let (w, h, t, er) = (0.35 * MM, 0.2 * MM, 35.0 * UM, 4.1);
-    let bare = solve_cross_section(&microstrip(w, h, t, er)).unwrap().impedance_ohm[0];
+    let bare = solve_cross_section(&microstrip(w, h, t, er))
+        .unwrap()
+        .impedance_ohm[0];
     let mut masked = microstrip(w, h, t, er);
     masked.layers.insert(0, mask("F.Mask", 20.0 * UM, 3.8));
     let masked = solve_cross_section(&masked).unwrap().impedance_ohm[0];
@@ -311,7 +334,9 @@ fn malformed_cross_sections_are_rejected() {
         assert!(error.contains(needle), "{error}");
     };
     let mut overlap = good.clone();
-    overlap.conductors.push(trace("b", "F.Cu", 0.1 * MM, 0.3 * MM));
+    overlap
+        .conductors
+        .push(trace("b", "F.Cu", 0.1 * MM, 0.3 * MM));
     reject(overlap, "overlap");
     let mut no_return = good.clone();
     no_return.layers.pop();
@@ -380,7 +405,10 @@ fn site_example_sections_meet_their_targets() {
         parameters.far_end_coupling,
         pair.mesh.nodes,
     );
-    eprintln!("example pair C {:?} L {:?}", pair.capacitance_f_per_m, pair.inductance_h_per_m);
+    eprintln!(
+        "example pair C {:?} L {:?}",
+        pair.capacitance_f_per_m, pair.inductance_h_per_m
+    );
     assert!((single.impedance_ohm[0] - 50.0).abs() < 2.5);
     assert!((parameters.differential_impedance_ohm - 100.0).abs() < 5.0);
 }
@@ -503,7 +531,11 @@ fn solved_section_publishes_its_mesh_as_one_canonical_artifact() {
     assert_eq!(mesh.topology.nodes.len(), reference.mesh.nodes);
     assert_eq!(mesh.topology.boundary_faces.len(), reference.mesh.elements);
     assert_eq!(mesh.geometry, cross_section_geometry(digest));
-    assert!(mesh.topology.nodes.iter().all(|node| node.coordinates_m.canonical_value()[2] == 0.0));
+    assert!(mesh
+        .topology
+        .nodes
+        .iter()
+        .all(|node| node.coordinates_m.canonical_value()[2] == 0.0));
     let platform = runmat_meshing_core::PlatformBuildIdentity {
         capability_cohort: "test-native".into(),
         target_triple: "test-target".into(),
@@ -526,8 +558,8 @@ fn solved_section_publishes_its_mesh_as_one_canonical_artifact() {
 fn line_parameter_outputs_publish_one_observation_result_each() {
     use runmat_analysis_core::{
         AnalysisProcedure, AnalysisSequence, AuthoredOutput, AuthoredOutputExpression,
-        AuthoredOutputPolicy, IndependentDomain, ObservationQuantity, PhysicsFamily,
-        ProcedureStep, SolutionSpace,
+        AuthoredOutputPolicy, IndependentDomain, ObservationQuantity, PhysicsFamily, ProcedureStep,
+        SolutionSpace,
     };
     use runmat_meshing_core::StableDigest;
     let section = example_section(&[("p", -0.2 * MM, 0.23 * MM), ("n", 0.2 * MM, 0.23 * MM)]);
@@ -624,8 +656,8 @@ fn line_parameter_outputs_publish_one_observation_result_each() {
     // A result from another mesh does not satisfy this plan.
     let mut moved = solved.mesh.clone();
     moved.canonical_digest = StableDigest::from_bytes([3; 32]);
-    assert!(crate::results::observation::validate_line_parameter_observations(
-        step, &moved, &results
-    )
-    .is_err());
+    assert!(
+        crate::results::observation::validate_line_parameter_observations(step, &moved, &results)
+            .is_err()
+    );
 }

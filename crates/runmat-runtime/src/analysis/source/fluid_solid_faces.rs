@@ -29,7 +29,12 @@ pub(super) fn fluid_solid_face_issues(
     inspection: Option<&GeometryInspection>,
 ) -> Vec<AdmissionIssue> {
     let fsi = PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction);
-    if !realized.sequence.steps.iter().any(|step| step.family == fsi) {
+    if !realized
+        .sequence
+        .steps
+        .iter()
+        .any(|step| step.family == fsi)
+    {
         return Vec::new();
     }
     let Some(inspection) = inspection.filter(|i| !i.shared_faces.is_empty()) else {
@@ -62,7 +67,10 @@ fn classify(
                 if region.module_path == geometry.module_path
                     && region.geometry_id == geometry.geometry_id =>
             {
-                region_names.get(region.region_id.as_str()).copied().flatten()
+                region_names
+                    .get(region.region_id.as_str())
+                    .copied()
+                    .flatten()
             }
             _ => None,
         }
@@ -111,7 +119,8 @@ fn classify(
         };
         walls.push((constraint.constraint_id.as_str(), name_of(&target.region)?));
     }
-    let is = |names: &[String], set: &BTreeSet<&str>| names.iter().any(|n| set.contains(n.as_str()));
+    let is =
+        |names: &[String], set: &BTreeSet<&str>| names.iter().any(|n| set.contains(n.as_str()));
     let mut issues = Vec::<AdmissionIssue>::new();
     for face in &inspection.shared_faces {
         let [a, b] = &face.solid_names;

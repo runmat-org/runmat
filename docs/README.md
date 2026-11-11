@@ -129,7 +129,7 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Evidence & Artifacts](./simulation/evidence.md)
 - [Validation methodology](./simulation/validation/methodology.md)
 - [Results & Trust](./simulation/trust.md)
-- [Current Status](./simulation/status.md)
+- [Validation Status](./simulation/validation/status.md)
 - [Operation Reference](./simulation/operation-reference.md)
 
 ## Filesystem

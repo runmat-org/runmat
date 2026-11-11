@@ -60,8 +60,10 @@ pub async fn render_geometry_scene_snapshot_with_camera_state(
     height: u32,
     camera: web::PlotSurfaceCameraState,
 ) -> BuiltinResult<Vec<u8>> {
-    render_geometry_scene_snapshot_with_camera_state_scaled(handle, width, height, camera, 1.0, None)
-        .await
+    render_geometry_scene_snapshot_with_camera_state_scaled(
+        handle, width, height, camera, 1.0, None,
+    )
+    .await
 }
 
 /// As [`render_geometry_scene_snapshot_with_camera_state`], with titles, legends and other text

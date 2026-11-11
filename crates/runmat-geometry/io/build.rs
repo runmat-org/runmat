@@ -3,6 +3,10 @@ use std::{env, path::PathBuf};
 
 fn main() {
     runmat_build_identity::emit_configuration();
+    // runmat-cad's integration tests, built into tests/cad_kernel_corpus.rs, run on the OCCT
+    // kernel under test when this cfg is set (runmat-cad/tests/common/mod.rs).
+    println!("cargo:rustc-check-cfg=cfg(runmat_cad_kernel_under_test)");
+    println!("cargo:rustc-cfg=runmat_cad_kernel_under_test");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_ROOT");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_LIB_DIR");
@@ -33,7 +37,12 @@ fn build_occt_backend() {
     let (occt_include, occt_lib, uses_bundled_occt) = occt_paths(&link_mode);
 
     let occt_link_libs = occt_link_libs(&occt_lib);
-    let mut build = cxx_build::bridge("src/occt/ffi.rs");
+    let k1 = env::var_os("CARGO_FEATURE_OCCT_KERNEL").is_some();
+    let mut bridges = vec!["src/occt/ffi.rs"];
+    if k1 {
+        bridges.push("src/occt/kernel_ffi.rs");
+    }
+    let mut build = cxx_build::bridges(bridges);
     build
         .file("src/occt/occt_bridge.cc")
         .file("src/occt/exact_assembly.cc")
@@ -56,6 +65,21 @@ fn build_occt_backend() {
         .std("c++17")
         .flag_if_supported("-Wno-deprecated-declarations")
         .define("_USE_MATH_DEFINES", None);
+    if k1 {
+        // K1: the geometry-engine interface (kernel programs, profiles, tools, analyses,
+        // hidden lines, AP242 export).
+        for f in [
+            "src/occt/exact_kernel.cc",
+            "src/occt/exact_kernel_display.cc",
+            "src/occt/exact_sketch_profile.cc",
+            "src/occt/exact_sweep_loft.cc",
+            "src/occt/exact_boundary.cc",
+            "src/occt/exact_hlr.cc",
+            "src/occt/exact_step_writer.cc",
+        ] {
+            build.file(f);
+        }
+    }
     if uses_bundled_occt || (link_mode == "static" && is_occt_78(&occt_include)) {
         // OCCT 7.8's process-lifetime RTTI registry can be destroyed before STEP/IGES type
         // descriptors when statically linked. This source overrides that one TKernel object with
@@ -93,6 +117,8 @@ fn build_occt_backend() {
     }
     if is_windows {
         println!("cargo:rustc-link-lib=dylib=user32");
+        // TKernel's filesystem/signal code and TKService fonts use registry APIs.
+        println!("cargo:rustc-link-lib=dylib=advapi32");
     }
     if target.to_ascii_lowercase().contains("apple-darwin") {
         println!("cargo:rustc-link-lib=dylib=objc");
@@ -106,6 +132,20 @@ fn build_occt_backend() {
     }
 
     println!("cargo:rerun-if-changed=src/occt/ffi.rs");
+    for k1 in [
+        "src/occt/kernel_ffi.rs",
+        "src/occt/exact_kernel.hxx",
+        "src/occt/exact_kernel_ffi.hxx",
+        "src/occt/exact_kernel.cc",
+        "src/occt/exact_kernel_display.cc",
+        "src/occt/exact_sketch_profile.cc",
+        "src/occt/exact_sweep_loft.cc",
+        "src/occt/exact_boundary.cc",
+        "src/occt/exact_hlr.cc",
+        "src/occt/exact_step_writer.cc",
+    ] {
+        println!("cargo:rerun-if-changed={k1}");
+    }
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.hxx");
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_names.hxx");

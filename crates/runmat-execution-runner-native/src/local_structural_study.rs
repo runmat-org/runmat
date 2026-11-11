@@ -280,8 +280,8 @@ async fn execute_family_locally(
             .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?,
     };
     let worker_memory = || -> Result<u64, String> {
-        let worker_memory_bytes =
-            crate::machine_capacity::worker_memory_bytes(pool).map_err(|error| error.to_string())?;
+        let worker_memory_bytes = crate::machine_capacity::worker_memory_bytes(pool)
+            .map_err(|error| error.to_string())?;
         tracing::info!(
             pool_bytes = pool,
             coordinator_bytes = pool - worker_memory_bytes,

@@ -1318,12 +1318,35 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(ct.shape(), gt.shape());
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
-                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
-                };
-                for (a, b) in ct.materialize_f64().iter().zip(gt.materialize_f64().iter()) {
-                    assert!((a - b).abs() < tol);
+                let precision = runmat_accelerate_api::provider().unwrap().precision();
+                for (index, (a, b)) in ct
+                    .materialize_f64()
+                    .iter()
+                    .zip(gt.materialize_f64().iter())
+                    .enumerate()
+                {
+                    if index == 0 || index == 4 {
+                        assert_eq!(a, b, "logspace must retain its exact endpoints");
+                        continue;
+                    }
+                    let tol = match precision {
+                        runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                        runmat_accelerate_api::ProviderPrecision::F32 => {
+                            // WGSL pow inherits exp2(y * log2(x)) accuracy:
+                            // 3 ULP for log2(10), correctly rounded multiply,
+                            // and (3 + 2 * |argument|) ULP for exp2. For these
+                            // exact quarter-step exponents in [1, 2], their
+                            // propagated error fits within 40 output ULP.
+                            // https://www.w3.org/TR/WGSL/#floating-point-accuracy
+                            let rounded = *a as f32;
+                            let next = f32::from_bits(rounded.to_bits() + 1);
+                            40.0 * f64::from(next - rounded)
+                        }
+                    };
+                    assert!(
+                        (a - b).abs() < tol,
+                        "logspace index {index}: CPU={a:?}, GPU={b:?}, precision={precision:?}, tolerance={tol:?}"
+                    );
                 }
             }
             _ => panic!("unexpected value variants"),

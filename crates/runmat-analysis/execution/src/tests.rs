@@ -45,6 +45,8 @@ mod thermal_execution_tests;
 mod thermal_observation_tests;
 #[path = "tests/thermal_result_access.rs"]
 mod thermal_result_access_tests;
+#[path = "tests/structural_preparation_usage.rs"]
+mod structural_preparation_usage;
 
 fn digest(label: &str) -> Digest {
     Digest::sha256(label)

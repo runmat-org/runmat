@@ -413,22 +413,14 @@ fn xmlwrite_serializes_dom_to_string_or_file() {
 #[test]
 fn encoded_xmlread_xmlwrite_xmlread_roundtrip_labels_utf8_bytes_truthfully() {
     let _guard = fs_test_guard();
-    let directory = if cfg!(windows) { r"C:\xml" } else { "/xml" };
+    let directory = "/xml";
     let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         directory,
     ));
     let _installed = runmat_filesystem::replace_provider(provider.clone());
     runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
-    let source = if cfg!(windows) {
-        r"C:\xml\source.xml"
-    } else {
-        "/xml/source.xml"
-    };
-    let output = if cfg!(windows) {
-        r"C:\xml\output.xml"
-    } else {
-        "/xml/output.xml"
-    };
+    let source = "/xml/source.xml";
+    let output = "/xml/output.xml";
 
     let mut samples = Vec::new();
     let little = "<?xml version='1.0' encoding='UTF-16LE'?><root>温度</root>";
@@ -496,12 +488,8 @@ fn encoded_xmlread_xmlwrite_xmlread_roundtrip_labels_utf8_bytes_truthfully() {
 #[test]
 fn document_tree_mutation_wins_over_retained_source_text() {
     let _guard = fs_test_guard();
-    let directory = if cfg!(windows) { r"C:\xml" } else { "/xml" };
-    let path = if cfg!(windows) {
-        r"C:\xml\mutation.xml"
-    } else {
-        "/xml/mutation.xml"
-    };
+    let directory = "/xml";
+    let path = "/xml/mutation.xml";
     let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         directory,
     ));

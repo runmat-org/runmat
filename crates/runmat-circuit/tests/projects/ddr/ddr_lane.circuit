@@ -1,0 +1,47 @@
+runmat 0.7
+std 1
+
+// A memory byte lane: an MCU drives eight data lines through 10 Ω series resistors to an
+// 2x5 header (two ground pins). Each line is one signal across its resistor, tuned with the others to one
+// delay.
+circuit ddr_lane {
+    root = main
+    net_class supply = { track_width = "0.25 mm" }
+
+    sheet main {
+        component U1 = { part = "MCU-M4-LQFP48" }
+        component J1 = { part = "HDR-2x05" }
+        component R1 = { part = "R0402-10R" }
+        component R2 = { part = "R0402-10R" }
+        component R3 = { part = "R0402-10R" }
+        component R4 = { part = "R0402-10R" }
+        component R5 = { part = "R0402-10R" }
+        component R6 = { part = "R0402-10R" }
+        component R7 = { part = "R0402-10R" }
+        component R8 = { part = "R0402-10R" }
+        component C1 = { part = "C0402-100N" }
+        net GND = { class = supply, global = true, power_flag = true }
+        net "+3V3" = { class = supply, power_flag = true }
+        connect = [net.GND, U1.VSS, U1.VSSA, "C1.2", "J1.9", "J1.10"]
+        connect = ["net.+3V3", U1.VDD, U1.VDDA, "C1.1"]
+        // MCU side of each series resistor, then the line on to the connector.
+        connect = [net.MDQ0, U1.PB0, "R1.1"]
+        connect = [net.MDQ1, U1.PB1, "R2.1"]
+        connect = [net.MDQ2, U1.PB2, "R3.1"]
+        connect = [net.MDQ3, U1.PB3, "R4.1"]
+        connect = [net.MDQ4, U1.PB4, "R5.1"]
+        connect = [net.MDQ5, U1.PB5, "R6.1"]
+        connect = [net.MDQ6, U1.PB6, "R7.1"]
+        connect = [net.MDQ7, U1.PB7, "R8.1"]
+        connect = [net.DQ0, "R1.2", "J1.1"]
+        connect = [net.DQ1, "R2.2", "J1.2"]
+        connect = [net.DQ2, "R3.2", "J1.3"]
+        connect = [net.DQ3, "R4.2", "J1.4"]
+        connect = [net.DQ4, "R5.2", "J1.5"]
+        connect = [net.DQ5, "R6.2", "J1.6"]
+        connect = [net.DQ6, "R7.2", "J1.7"]
+        connect = [net.DQ7, "R8.2", "J1.8"]
+        no_erc = [U1.OSC_IN, U1.OSC_OUT, U1.PC13, U1.PC14, U1.PC15, U1.PA0, U1.PA1, U1.PA2, U1.PA3, U1.PA4, U1.PA5, U1.PA6, U1.PA7, U1.PA8, U1.PA9, U1.PA10, U1.PA11, U1.PA12, U1.PA13, U1.PA14, U1.PA15]
+        no_erc = [U1.PB8, U1.PB9, U1.PB10, U1.PB12, U1.PB13, U1.PB14, U1.PB15, U1.NRST, U1.BOOT0, U1.VCAP]
+    }
+}

@@ -21,7 +21,10 @@ pub struct CompletedLineParametersStudy {
 
 /// Whether `study` solves a cross-section; such studies take [`execute_case`].
 pub(super) fn is_cross_section(study: &runmat_analysis_language::ResolvedAnalysisStudy) -> bool {
-    matches!(study.geometry.source, GeometryDefinitionSource::CrossSection(_))
+    matches!(
+        study.geometry.source,
+        GeometryDefinitionSource::CrossSection(_)
+    )
 }
 
 pub(super) async fn execute_case(

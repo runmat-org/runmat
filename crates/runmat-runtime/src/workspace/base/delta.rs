@@ -255,6 +255,16 @@ pub(super) struct PreparedUnboundedDeltaTransition {
     after_generation: u64,
     changes: [Option<WorkspaceChange>; 2],
     coalesce_assignment: bool,
+    origin: WorkspaceMutationOrigin,
+    clear_delta: Option<WorkspaceDelta>,
+}
+
+/// Public ordered changes preserve replay history. Executor effects may
+/// retire only the already-coalescible internal suffix.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace::base) enum WorkspaceMutationOrigin {
+    Ordered,
+    Executor,
 }
 
 impl PreparedUnboundedDeltaTransition {
@@ -774,6 +784,7 @@ impl WorkspaceDelta {
         first: WorkspaceChange,
         second: Option<WorkspaceChange>,
         coalesce_assignment: bool,
+        origin: WorkspaceMutationOrigin,
     ) -> Result<
         PreparedUnboundedDeltaTransition,
         crate::context::host_allocation::HostAllocationError,
@@ -783,11 +794,40 @@ impl WorkspaceDelta {
             .generation
             .checked_add(count)
             .ok_or(crate::context::host_allocation::HostAllocationError::Overflow)?;
+        let clear_delta = if origin == WorkspaceMutationOrigin::Executor
+            && matches!(first.data(), WorkspaceChangeData::Clear)
+            && second.is_none()
+        {
+            let len = self
+                .executor_suffix_start
+                .checked_add(1)
+                .ok_or(crate::context::host_allocation::HostAllocationError::Overflow)?;
+            let changes = runmat_value::exact_capacity_vec_with(len, |index| {
+                if index + 1 == len {
+                    first.clone()
+                } else {
+                    self.changes[index].clone()
+                }
+            })?;
+            Some(Self {
+                changes,
+                executor_suffix_start: self.executor_suffix_start,
+                generation: after_generation,
+                _admitted_backing: None,
+                prepared_impacts: self.prepared_impacts.clone(),
+                prepared_impacts_complete: self.prepared_impacts_complete,
+                has_prepared_mutation: self.has_prepared_mutation,
+            })
+        } else {
+            None
+        };
         Ok(PreparedUnboundedDeltaTransition {
             before_generation: self.generation,
             after_generation,
             changes: [Some(first), second],
             coalesce_assignment,
+            origin,
+            clear_delta,
         })
     }
 
@@ -808,8 +848,11 @@ impl WorkspaceDelta {
     pub(super) fn install_unbounded_transition(
         &mut self,
         mut transition: PreparedUnboundedDeltaTransition,
-    ) -> [Option<WorkspaceChange>; 2] {
+    ) -> ([Option<WorkspaceChange>; 2], Option<Self>) {
         assert_eq!(self.generation, transition.before_generation);
+        if let Some(candidate) = transition.clear_delta.take() {
+            return ([None, None], Some(std::mem::replace(self, candidate)));
+        }
         let mut retired = [None, None];
         for (retired_slot, change) in retired.iter_mut().zip(&mut transition.changes) {
             let Some(change) = change.take() else {
@@ -817,6 +860,24 @@ impl WorkspaceDelta {
             };
             self.prepare_legacy_mutation();
             let assignment = matches!(change.data(), WorkspaceChangeData::Assign { .. });
+            if !assignment && transition.origin == WorkspaceMutationOrigin::Executor {
+                // Executor namespace changes retire a superseded internal
+                // store, but retain namespace ordering and the authentic
+                // replay prefix. Return the displaced owner to the caller.
+                if let Some(name) = change.name() {
+                    if let Some(index) =
+                        self.changes[self.executor_suffix_start..]
+                            .iter()
+                            .position(|old| {
+                                matches!(old.data(), WorkspaceChangeData::Assign { .. })
+                                    && old.name() == Some(name)
+                            })
+                    {
+                        *retired_slot =
+                            Some(self.changes.remove(self.executor_suffix_start + index));
+                    }
+                }
+            }
             if assignment && transition.coalesce_assignment {
                 let name = change.name().expect("named prepared assignment");
                 if let Some(previous) = self.changes[self.executor_suffix_start..]
@@ -833,13 +894,13 @@ impl WorkspaceDelta {
                 }
             }
             self.changes.push(change);
-            if !assignment || !transition.coalesce_assignment {
+            if transition.origin == WorkspaceMutationOrigin::Ordered {
                 self.executor_suffix_start = self.changes.len();
             }
             self.generation += 1;
         }
         assert_eq!(self.generation, transition.after_generation);
-        retired
+        (retired, None)
     }
 
     /// Detachment actions name independent bindings. Canonicalize their
@@ -1106,7 +1167,17 @@ impl WorkspaceDelta {
         } else {
             PreparedWorkspaceImpacts::default()
         };
+        let replaced = appended.name().and_then(|name| {
+            self.changes[self.executor_suffix_start..prefix_len]
+                .iter()
+                .position(|old| {
+                    matches!(old.data(), WorkspaceChangeData::Assign { .. })
+                        && old.name() == Some(name)
+                })
+                .map(|index| self.executor_suffix_start + index)
+        });
         let len = prefix_len
+            .saturating_sub(usize::from(replaced.is_some()))
             .checked_add(1)
             .ok_or(crate::context::host_allocation::HostAllocationError::Overflow)?;
         let raw = Layout::array::<WorkspaceChange>(len)
@@ -1117,12 +1188,12 @@ impl WorkspaceDelta {
             if index + 1 == len {
                 appended.clone()
             } else {
-                self.changes[index].clone()
+                self.changes[index + usize::from(replaced.is_some_and(|old| index >= old))].clone()
             }
         })?;
         Ok(Self {
             changes,
-            executor_suffix_start: len,
+            executor_suffix_start: self.executor_suffix_start.min(prefix_len),
             generation: self
                 .generation
                 .checked_add(1)

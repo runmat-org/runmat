@@ -2,20 +2,24 @@
 
 RunMat tests are organized by ownership boundary. Parser and lowering crates test language structure, VM tests exercise bytecode and interpreter behavior, runtime tests cover builtins and providers, integration tests cover cross-crate execution behavior, and WASM tests cover browser and JavaScript-hosted behavior.
 
-There are 8,000+ tests in the RunMat codebase, systematically covering the language pipeline, execution engines, runtime builtins, acceleration layer, plotting, CLI, LSP, workspace replay, filesystem, and WASM bindings.
-
 ## Baseline Checks
 
-To run the baseline tests, run the following commands:
+Run the workspace tests through the package groups:
 
 ```bash
 cargo fmt -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo check --all-targets --all-features
-RUST_TEST_THREADS=1 cargo test --all-targets --all-features
+python3 scripts/development/run-workspace-test-group.py --check
+RUST_TEST_THREADS=1 python3 scripts/development/run-workspace-test-group.py language
+RUST_TEST_THREADS=1 python3 scripts/development/run-workspace-test-group.py runtime
+RUST_TEST_THREADS=1 python3 scripts/development/run-workspace-test-group.py geometry-analysis
+RUST_TEST_THREADS=1 python3 scripts/development/run-workspace-test-group.py tooling-distributed
 ```
 
-CI serializes tests with `RUST_TEST_THREADS=1` because several suites touch global runtime state: filesystem providers, GPU providers, registries, process environment, and plotting/runtime hooks.
+The groups assign each workspace package once, exercise the supported Clarabel feature profiles, and run harness-free benchmark smoke tests with bounded arguments. Long scientific cohorts use the separate receipt policy in `qualification/scientific/policy.json`. Add `--include-extended` to execute those cohorts directly.
+
+CI serializes tests with `RUST_TEST_THREADS=1` because several suites touch global runtime state: filesystem providers, GPU providers, registries, process environment, and plotting/runtime hooks. The group runner sets `RUST_MIN_STACK=67108864` to match the native CLI command and Tokio-worker stack reserve. Unoptimized native continuations can exceed libtest's default 2-MiB thread stack. The operating system commits pages as they are used; the reserve does not allocate a second workspace. Use the same environment variable when invoking affected native tests directly.
+
+Run compiler and lint checks with the same supported package feature profiles. A workspace-wide `--all-features` command enables mutually exclusive external BLAS and language bindings in the vendored Clarabel solver.
 
 ## Crate-Level Tests
 
@@ -27,7 +31,7 @@ Use crate tests when a change is localized. For example:
 | HIR/MIR lowering | `cargo test -p runmat-hir`, `cargo test -p runmat-mir` |
 | VM bytecode/interpreter | `cargo test -p runmat-vm`, `cargo test -p runmat-vm --test indexing` |
 | Runtime builtins | `cargo test -p runmat-runtime` |
-| CLI behavior | `cargo test -p runmat-cli` |
+| CLI behavior | `cargo test -p runmat` |
 | Config loading | `cargo test -p runmat-config` |
 | Builtin registry | `cargo test -p runmat-builtins` |
 | Macro expansion | `cargo test -p runmat-macros` |

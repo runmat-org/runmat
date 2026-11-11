@@ -5,7 +5,7 @@ use crate::builtins::common::spec::{
     selected_fusion_binding, FusionHostOutputDomain, FusionHostResourceBound,
     FusionHostResourceInput, FusionHostResourceQuery,
 };
-use runmat_types::{CallRequest, NumericClass, NumericDomain, ValueKindFact};
+use runmat_types::{CallRequest, NumericClass, NumericDomain, NumericFact, ValueKindFact};
 use runmat_value::Value;
 
 pub struct AdmittedHostResources {
@@ -42,6 +42,18 @@ pub(super) fn bound(
     )?
     .canonical?;
     let callback = declaration.host_resources?;
+    let logical_arithmetic = matches!(
+        request.form().operation,
+        runmat_builtins::BuiltinPreparationOperation::ElementwiseBinary
+    );
+    let input_numeric = |fact: &runmat_types::ValueFact| {
+        fact.numeric().or_else(|| {
+            (logical_arithmetic && fact.kind == ValueKindFact::Logical).then_some(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })
+        })
+    };
     let facts = request
         .operands()
         .iter()
@@ -50,23 +62,36 @@ pub(super) fn bound(
             if let Value::GpuTensor(handle) = value {
                 handle.allocation_lease().validate_live().ok()?;
                 handle.view().validate(handle.physical()).ok()?;
-                if handle.view().is_logical()
-                    || handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
-                    || !matches!(
+                let resident_logical = logical_arithmetic
+                    && runmat_accelerate_api::handle_is_logical(handle)
+                    && handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
+                    && matches!(
                         handle.physical().element_type(),
-                        runmat_accelerate_api::NumericElementType::F32
+                        runmat_accelerate_api::NumericElementType::U8
+                            | runmat_accelerate_api::NumericElementType::F32
                             | runmat_accelerate_api::NumericElementType::F64
                     )
+                    && matches!(fact.kind, ValueKindFact::Logical);
+                if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+                    || !(resident_logical
+                        || (!handle.view().is_logical()
+                            && matches!(
+                                handle.physical().element_type(),
+                                runmat_accelerate_api::NumericElementType::F32
+                                    | runmat_accelerate_api::NumericElementType::F64
+                            )))
                 {
                     return None;
                 }
-                let class = NumericClass::from_class_identity(
-                    &handle.physical().element_type().class_identity(),
-                )?;
-                if !matches!(&fact.kind, ValueKindFact::Numeric(numeric)
-                if numeric.class == class && numeric.domain == NumericDomain::Real)
-                {
-                    return None;
+                if !resident_logical {
+                    let class = NumericClass::from_class_identity(
+                        &handle.physical().element_type().class_identity(),
+                    )?;
+                    if !matches!(&fact.kind, ValueKindFact::Numeric(numeric)
+                    if numeric.class == class && numeric.domain == NumericDomain::Real)
+                    {
+                        return None;
+                    }
                 }
                 fact.storage = runmat_types::StorageFact::Dense;
                 fact = runmat_builtins::gathered_value_fact(&fact);
@@ -74,7 +99,7 @@ pub(super) fn bound(
             } else if crate::dispatcher::value_contains_gpu(value) {
                 return None;
             }
-            let numeric = fact.numeric()?;
+            let numeric = input_numeric(&fact)?;
             (numeric.domain == NumericDomain::Real
                 && matches!(numeric.class, NumericClass::Single | NumericClass::Double))
             .then_some(fact)
@@ -102,7 +127,7 @@ pub(super) fn bound(
     let shapes = facts.iter().map(dims).collect::<Option<Vec<_>>>()?;
     let classes = facts
         .iter()
-        .map(|fact| fact.numeric().map(|numeric| numeric.class))
+        .map(|fact| input_numeric(fact).map(|numeric| numeric.class))
         .collect::<Option<Vec<_>>>()?;
     let (output_shape, output_class, output_domain) = if matches!(
         request.form().operation,

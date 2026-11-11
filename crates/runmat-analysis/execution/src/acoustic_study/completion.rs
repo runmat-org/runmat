@@ -9,14 +9,22 @@ use serde::{Deserialize, Serialize};
 pub enum AcousticStudyResultPhase {
     Solve,
     FieldRecovery,
-    ObservationPartition { ordinal: usize },
-    ObservationReduction { ordinal: usize },
+    ObservationPartition {
+        ordinal: usize,
+    },
+    ObservationReduction {
+        ordinal: usize,
+    },
     ObservationAssembly,
     Accuracy,
-    State { ordinal: usize },
+    State {
+        ordinal: usize,
+    },
     Publication,
     /// One checkpoint or finalization task of the study-level history phase, in order.
-    History { ordinal: usize },
+    History {
+        ordinal: usize,
+    },
 }
 
 /// Preserves the original scheduler association; this is not a new scheduler attestation.
@@ -256,7 +264,9 @@ pub fn import_acoustic_study_completion(
         study.complete_history(source, wave)?;
     }
     if histories.next().is_some() {
-        return Err(invalid("acoustic completion contains an extra history phase"));
+        return Err(invalid(
+            "acoustic completion contains an extra history phase",
+        ));
     }
     if study.prepare_assembly()?.host.workload != assembly.workload {
         return Err(invalid(

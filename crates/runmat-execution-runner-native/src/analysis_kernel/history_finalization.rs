@@ -144,9 +144,7 @@ pub(super) fn execute(
             None,
             None,
             Some(mesh),
-        ) => {
-            ObservationHistorySourceContext::VolumeMesh { mesh }
-        }
+        ) => ObservationHistorySourceContext::VolumeMesh { mesh },
         _ => {
             return Err(AnalysisBridgeError::Identity(
                 "history source context differs from catalog",

@@ -332,7 +332,7 @@ fn prepare_program(
         Some(controls) => Ok(WorkerLaunchRequest::ReservedConsole {
             request: reserved,
             console_budget: crate::console_source_subgrant(&request.task.resources, controls)
-            .map_err(|error| error.to_string())?,
+                .map_err(|error| error.to_string())?,
         }),
         None => Ok(WorkerLaunchRequest::Reserved(reserved)),
     }

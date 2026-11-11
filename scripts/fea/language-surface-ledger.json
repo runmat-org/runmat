@@ -127,6 +127,13 @@
           "positive_coverage": "authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold",
           "negative_coverage": "typed_fea.preparation.admission equation-aware static electromagnetic dispatch"
         },
+        "LineParameters": {
+          "default": "Fp64 direct cross-section solve with residual target 1e-8",
+          "target": "electromagnetic line_parameters procedure on a cross_section geometry",
+          "validation": "authenticated compiled section and solver-mesh identity; Fp64 publication; residual at or below the selected target; typed cross-section admission",
+          "positive_coverage": "check_cli.trace_impedance_example_publishes_the_microstrip_and_pair_impedances",
+          "negative_coverage": "physics.electrical.cross_section.tests.malformed_cross_sections_are_rejected"
+        },
         "Magnetostatic": {
           "default": "none from temporal sequence alone; exact magnetostatic equation-bound typed preparation",
           "target": "magnetostatic typed execution solver block",
@@ -325,6 +332,15 @@
           "default": "MeshDimension::Solid",
           "target": "canonical MeshingRequest.dimension",
           "validation": "resolved canonical request validation"
+        },
+        "cross_section": {
+          "cardinality": "optional_once_for_cross_section_geometry",
+          "default": "None for other geometry; authored triangles controls for cross-sections",
+          "target": "MeshingRequestSettings.cross_section",
+          "identity": "canonical mesh request identity",
+          "validation": "CrossSectionMeshSettings::validate and cross-section semantic validation",
+          "positive_coverage": "language.tests.cross_sections.an_inline_cross_section_lowers_to_layers_traces_and_triangle_controls",
+          "negative_coverage": "language.tests.cross_sections.cross_section_mistakes_are_named"
         },
         "deterministic_seed": {},
         "target_edge_length_m": {},

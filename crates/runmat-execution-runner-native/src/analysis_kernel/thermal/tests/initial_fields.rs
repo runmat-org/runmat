@@ -131,6 +131,7 @@ fn native_thermal_worker_consumes_source_bound_cold_initial_field() {
         let expected = workload.execute(&mesh).unwrap();
         let digest = Digest::sha256("thermal-initial-field-native");
         let task = prepare_thermal_task(ThermalTaskPreparation {
+            maximum_resident_bytes: None,
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             field_source: None,
             authored_study_digest: digest,

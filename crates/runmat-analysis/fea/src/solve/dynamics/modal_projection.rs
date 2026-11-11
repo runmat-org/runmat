@@ -657,7 +657,10 @@ mod tests {
         assert_eq!(corrected.mode_count(), modes_only.mode_count() + 1);
         let enriched = reduced_balance(summary, &assembly.imaginary_load, &corrected, omega);
         eprintln!("rod one-mode truncation balance {truncated} -> static-corrected {enriched}");
-        assert!(truncated > 1.0e-3, "modes-only truncation balance={truncated}");
+        assert!(
+            truncated > 1.0e-3,
+            "modes-only truncation balance={truncated}"
+        );
         // At omega / omega_1 = 0.64 the correction leaves only the dynamic part of the missing
         // response: measured 0.396 -> 0.00545 (73x).
         assert!(
@@ -679,5 +682,4 @@ impl ModalCoordinateQuantity for runmat_types::physical::kind::Velocity {
 }
 impl ModalCoordinateQuantity for runmat_types::physical::kind::Acceleration {
     const DERIVATIVE_ORDER: u8 = 2;
-
 }

@@ -1,0 +1,36 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+    input gi : length = 8 mm
+    input go : length = 14 mm
+    input gdep : length = 4 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    feature gplane = plane.offset(base = origin.zx, distance = 25 mm)
+    feature gaxis = axis.through(a = point(40 mm, 25 mm, 0 mm), b = point(40 mm, 25 mm, 10 mm))
+    sketch s_gr on plane.gplane {
+        l1 = line(start = [input.thickness - input.gdep, 40 mm + input.gi], end = [input.thickness + 2 mm, 40 mm + input.gi])
+        l2 = line(start = [input.thickness + 2 mm, 40 mm + input.gi], end = [input.thickness + 2 mm, 40 mm + input.go])
+        l3 = line(start = [input.thickness + 2 mm, 40 mm + input.go], end = [input.thickness - input.gdep, 40 mm + input.go])
+        l4 = line(start = [input.thickness - input.gdep, 40 mm + input.go], end = [input.thickness - input.gdep, 40 mm + input.gi])
+    }
+    feature groove = revolve(profile = sketch.s_gr, axis = axis.gaxis, angle = 360 deg, mode = cut, suppressed)
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+
+    region g_out : face = { select = [feature.groove.face.side(s_gr.l3)], expect = exactly_one }
+    region g_in : face = { select = [feature.groove.face.side(s_gr.l1)], expect = exactly_one }
+    region g_floor : face = { select = [feature.groove.face.side(s_gr.l4)], expect = exactly_one }
+    region blk_top_pieces : face = { select = [feature.body.face.end], expect = at_least_one }
+    region blk_top_one : face = { select = [feature.body.face.end], expect = exactly_one }
+}

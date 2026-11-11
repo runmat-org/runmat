@@ -671,20 +671,16 @@ fn legalize_inserted_node(
                 "mutable legalization tetrahedron inventory limit exceeded",
             ));
         }
-        match flip {
-            LinkFlip::TwoToThree(flip) => {
+        match flip.kind {
+            LinkFlipKind::TwoToThree(flip) => {
                 apply_two_to_three_flip(topology, flip).map_err(mutation_topology_error)?
             }
-            LinkFlip::Edge {
-                removed,
-                created,
-                facet,
-            } => {
+            LinkFlipKind::Edge { removed, created } => {
                 topology
                     .replace_cavity(&removed, created)
                     .map_err(mutation_topology_error)?;
-                if let Some(facet) = facet {
-                    protected_faces.apply(*facet);
+                if let Some(facet) = flip.facet {
+                    protected_faces.apply(facet);
                 }
             }
         }
@@ -698,14 +694,20 @@ struct TwoToThreeFlip {
     face: [u32; 3],
 }
 
-enum LinkFlip {
+struct LinkFlip {
+    kind: LinkFlipKind,
+    // Keep the bounded facet record inline, outside the variant payload, so
+    // legalization does not introduce a separate allocation for each flip.
+    facet: Option<FacetFlip>,
+}
+
+enum LinkFlipKind {
     TwoToThree(TwoToThreeFlip),
     /// A 2-2, 3-2 or 4-4 flip that removes one edge of the illegal link face. Each created
     /// cell carries its region.
     Edge {
         removed: BTreeSet<u32>,
         created: Vec<([u32; 4], Option<runmat_geometry_core::PersistentEntityId>)>,
-        facet: Option<Box<FacetFlip>>,
     },
 }
 
@@ -797,11 +799,14 @@ fn first_illegal_inserted_face(
         .map_err(super::predicate_error)?
             && created_tetrahedra_are_exactly_nondegenerate(topology, inserted, right_apex, face)?
         {
-            return Ok(Some(LinkFlip::TwoToThree(TwoToThreeFlip {
-                left: left_index,
-                right: right_index,
-                face,
-            })));
+            return Ok(Some(LinkFlip {
+                kind: LinkFlipKind::TwoToThree(TwoToThreeFlip {
+                    left: left_index,
+                    right: right_index,
+                    face,
+                }),
+                facet: None,
+            }));
         }
         // Prefer a 2-3 flip anywhere in the link; remember the first edge flip.
         if edge_flip.is_none() {
@@ -926,17 +931,25 @@ fn first_illegal_inserted_face(
                     topology, left_apex, right_apex, face,
                 )?
             {
-                return Ok(Some(LinkFlip::TwoToThree(TwoToThreeFlip {
-                    left: left_index,
-                    right: right_index,
-                    face,
-                })));
+                return Ok(Some(LinkFlip {
+                    kind: LinkFlipKind::TwoToThree(TwoToThreeFlip {
+                        left: left_index,
+                        right: right_index,
+                        face,
+                    }),
+                    facet: None,
+                }));
             }
             // Otherwise an edge flip: a facet flip or a 2-2 flip of two unprotected hull
             // triangles, or (within the budget) a 3-2 or 4-4 flip that removes the unkept edge
             // of the face beyond which the two apexes' segment passes, for example an edge from
             // the inserted node to a coplanar vertex of a facet plane not yet recovered.
-            if let Some(flip @ LinkFlip::Edge { .. }) = edge_link_flip(
+            if let Some(
+                flip @ LinkFlip {
+                    kind: LinkFlipKind::Edge { .. },
+                    ..
+                },
+            ) = edge_link_flip(
                 topology,
                 EdgeLinkFlipSite {
                     cells: [left_index, right_index],
@@ -948,8 +961,8 @@ fn first_illegal_inserted_face(
                 true,
                 work,
             )? {
-                if let LinkFlip::Edge { removed, facet, .. } = &flip {
-                    if facet.is_some() || removed.len() == 2 {
+                if let LinkFlipKind::Edge { removed, .. } = &flip.kind {
+                    if flip.facet.is_some() || removed.len() == 2 {
                         return Ok(Some(flip));
                     }
                     if *star_edge_flips > 0 {
@@ -1098,7 +1111,7 @@ fn edge_link_flip(
             let boundary_protection =
                 [stable([x, y, p]), stable([x, y, d])].map(|face| protected_faces.contains(&face));
             let facet = match boundary_protection {
-                [true, true] if facet_flips => Some(Box::new(facet_record())),
+                [true, true] if facet_flips => Some(facet_record()),
                 [false, false] => None,
                 _ => continue,
             };
@@ -1112,9 +1125,11 @@ fn edge_link_flip(
             {
                 continue;
             }
-            return Ok(Some(LinkFlip::Edge {
-                removed: star,
-                created: vec![([p, d, x, z], region.clone()), ([p, d, z, y], region)],
+            return Ok(Some(LinkFlip {
+                kind: LinkFlipKind::Edge {
+                    removed: star,
+                    created: vec![([p, d, x, z], region.clone()), ([p, d, z, y], region)],
+                },
                 facet,
             }));
         }
@@ -1136,12 +1151,14 @@ fn edge_link_flip(
             {
                 continue;
             }
-            return Ok(Some(LinkFlip::Edge {
-                removed: star,
-                created: created
-                    .into_iter()
-                    .map(|cell| (cell, region.clone()))
-                    .collect(),
+            return Ok(Some(LinkFlip {
+                kind: LinkFlipKind::Edge {
+                    removed: star,
+                    created: created
+                        .into_iter()
+                        .map(|cell| (cell, region.clone()))
+                        .collect(),
+                },
                 facet: None,
             }));
         }
@@ -1194,21 +1211,23 @@ fn edge_link_flip(
         } else if facet_flips
             && protected_shared == BTreeSet::from([stable([x, y, p]), stable([x, y, d])])
         {
-            Some(Box::new(facet_record()))
+            Some(facet_record())
         } else {
             continue;
         };
         if far_region != region && facet.is_none() {
             continue;
         }
-        return Ok(Some(LinkFlip::Edge {
-            removed: star,
-            created: vec![
-                ([p, d, x, z], region.clone()),
-                ([p, d, z, y], region),
-                ([p, d, y, e], far_region.clone()),
-                ([p, d, e, x], far_region),
-            ],
+        return Ok(Some(LinkFlip {
+            kind: LinkFlipKind::Edge {
+                removed: star,
+                created: vec![
+                    ([p, d, x, z], region.clone()),
+                    ([p, d, z, y], region),
+                    ([p, d, y, e], far_region.clone()),
+                    ([p, d, e, x], far_region),
+                ],
+            },
             facet,
         }));
     }

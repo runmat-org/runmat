@@ -1608,7 +1608,191 @@ fn generic_ir_round_trips_prints_deterministically_and_tracks_effect_epochs() {
         .unwrap();
     let next_epoch = effectful.effect_epoch_output.unwrap();
     assert_eq!(block.terminator.frame_state.side_effect_epoch, next_epoch);
-    assert!(analyze_liveness(&assembly).contains_key(&FunctionId(0)));
+    let liveness = analyze_liveness(
+        &assembly,
+        runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
+    )
+    .unwrap();
+    assert!(liveness.get().function(FunctionId(0)).is_some());
+    assert_liveness_cfg_and_retained_admission();
+}
+
+// One canonical analysis family covers loop/diamond transfer, escaped return
+// values and the distinction between retained reads and fresh admission.
+fn assert_liveness_cfg_and_retained_admission() {
+    use runmat_execution::{cancellation::CancellationSource, CancellationReason};
+    use runmat_native_codegen::{NativeLivenessAdmission, NativeLivenessPlan};
+    use runmat_runtime::context::{
+        host_effect::ManagedHostEffectLedger, ParallelCapability, RuntimeContext,
+        RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+    };
+    use std::rc::Rc;
+
+    struct Managed(ManagedHostEffectLedger);
+    impl RuntimeParallelService for Managed {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+    let span = Span { start: 0, end: 8 };
+    let mut mir = function(vec![]);
+    let block = |id, statements, kind| BasicBlock {
+        id: BasicBlockId(id),
+        statements,
+        terminator: MirTerminator { kind, span },
+    };
+    mir.bodies.get_mut(&FunctionId(0)).unwrap().blocks = vec![
+        block(
+            0,
+            vec![assignment(1)],
+            MirTerminatorKind::Branch {
+                cond: MirOperand::Local(MirLocalId(0)),
+                then_block: BasicBlockId(1),
+                else_block: BasicBlockId(2),
+            },
+        ),
+        block(
+            1,
+            vec![assignment(2)],
+            MirTerminatorKind::Goto(BasicBlockId(3)),
+        ),
+        block(
+            2,
+            vec![assignment(3)],
+            MirTerminatorKind::Goto(BasicBlockId(3)),
+        ),
+        block(
+            3,
+            vec![],
+            MirTerminatorKind::Branch {
+                cond: MirOperand::Local(MirLocalId(0)),
+                then_block: BasicBlockId(1),
+                else_block: BasicBlockId(4),
+            },
+        ),
+        block(
+            4,
+            vec![],
+            MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(0))]),
+        ),
+    ];
+    let assembly = lower(&mir);
+    let plan = NativeLivenessPlan::for_assembly(&assembly).unwrap();
+    let ledger = ManagedHostEffectLedger::new(1_048_576);
+    let cancellation = CancellationSource::new();
+    let runtime = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(Managed(ledger.clone()))),
+    )
+    .with_cancellation_token(cancellation.token());
+    let admission = NativeLivenessAdmission::capture(&runtime).unwrap();
+    let liveness = analyze_liveness(&assembly, admission.clone()).unwrap();
+    let charged = ledger.snapshot().live_claimed_bytes;
+    assert!(charged >= plan.retained_bytes as u64);
+    assert!(
+        ledger.snapshot().peak_claimed_bytes >= (plan.retained_bytes + plan.workspace_bytes) as u64
+    );
+    let function = &assembly.functions[0];
+    for block in function
+        .blocks
+        .iter()
+        .filter(|block| block.id.0 == 3 || block.id.0 == 4)
+    {
+        let parameter = block
+            .parameters
+            .iter()
+            .find(|parameter| parameter.local.0 == 0)
+            .unwrap();
+        assert!(liveness
+            .get()
+            .live_on_entry(function.id, block.id, parameter.value));
+    }
+    for predecessor in function
+        .blocks
+        .iter()
+        .filter(|block| block.id.0 == 1 || block.id.0 == 2)
+    {
+        let runmat_native_codegen::NativeTerminatorKind::Goto { edge } =
+            &predecessor.terminator.kind
+        else {
+            panic!("diamond predecessor")
+        };
+        for argument in &edge.arguments {
+            if let runmat_native_codegen::NativeEdgeArgument::Value(value) = argument {
+                for instruction in &predecessor.instructions {
+                    assert!(
+                        !liveness
+                            .get()
+                            .retired_after(function.id, &instruction.site)
+                            .contains(value),
+                        "diamond edge value retired early"
+                    );
+                }
+            }
+        }
+    }
+    let returned = function
+        .blocks
+        .iter()
+        .find(|block| block.id.0 == 4)
+        .unwrap();
+    let runmat_native_codegen::NativeTerminatorKind::Return { values } = &returned.terminator.kind
+    else {
+        panic!("return block")
+    };
+    for value in values {
+        for instruction in &returned.instructions {
+            assert!(!liveness
+                .get()
+                .retired_after(function.id, &instruction.site)
+                .contains(value));
+        }
+    }
+    let alias = liveness.clone();
+    cancellation.cancel(CancellationReason::User);
+    let fresh_runtime = runtime.with_cancellation_token(CancellationSource::new().token());
+    assert!(NativeLivenessAdmission::capture(&fresh_runtime).is_ok());
+    // Immutable cache metadata remains readable across invocation generations.
+    assert!(alias.get().function(function.id).is_some());
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    let failure = analyze_liveness(&assembly, admission)
+        .err()
+        .expect("stale owner cannot allocate");
+    assert_eq!(
+        failure.allocation,
+        Some(runmat_runtime::context::host_allocation::HostAllocationError::Cancelled)
+    );
+    drop(liveness);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(alias);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+    let tiny = ManagedHostEffectLedger::new(1);
+    let runtime = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(Managed(tiny.clone()))),
+    );
+    assert!(analyze_liveness(
+        &assembly,
+        NativeLivenessAdmission::capture(&runtime).unwrap()
+    )
+    .is_err());
+    assert_eq!(tiny.snapshot().live_claimed_bytes, 0);
 }
 
 #[test]

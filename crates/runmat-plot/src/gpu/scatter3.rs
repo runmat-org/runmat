@@ -1,8 +1,12 @@
 use crate::core::renderer::Vertex;
 use crate::core::scene::{DrawIndirectArgsRaw, GpuVertexBuffer};
-use crate::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
+use crate::gpu::scatter2::{
+    ScatterAttributeBuffer, ScatterColorBuffer, ScatterColorLayout, ScatterSizeUnit,
+};
 use crate::gpu::shaders;
-use crate::gpu::{tuning, ScalarType};
+use crate::gpu::{
+    scatter_error::preflight_native_f64_features, tuning, ScalarType, ScatterPackError,
+};
 use glam::Vec4;
 use wgpu::util::DeviceExt;
 
@@ -14,7 +18,11 @@ pub struct Scatter3GpuInputs {
     pub z_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
+    /// Retained source size authority, including a borrowed GPU export.
+    pub sizes: ScatterAttributeBuffer,
+    pub size_unit: ScatterSizeUnit,
     pub colors: ScatterColorBuffer,
+    pub color_layout: ScatterColorLayout,
 }
 
 /// Parameters describing how the GPU vertices should be generated.
@@ -22,7 +30,9 @@ pub struct Scatter3GpuParams {
     pub color: Vec4,
     pub point_size: f32,
     pub sizes: ScatterAttributeBuffer,
+    pub size_unit: ScatterSizeUnit,
     pub colors: ScatterColorBuffer,
+    pub color_layout: ScatterColorLayout,
     pub lod_stride: u32,
 }
 
@@ -36,21 +46,34 @@ struct Scatter3Uniforms {
     has_sizes: u32,
     has_colors: u32,
     color_stride: u32,
+    attribute_layout: u32,
     _pad: u32,
 }
 
 /// Builds a GPU-resident vertex buffer for scatter3 plots directly from
-/// provider-owned XYZ arrays with either single- or double-precision inputs.
+/// provider-owned XYZ arrays. Binary64 inputs are loaded and narrowed to F32
+/// plot vertices. External raw-device callers must validate the native F64
+/// adapter before constructing the device; this function checks enabled
+/// features before creating a shader or output buffer.
 pub fn pack_vertices_from_xyz(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &Scatter3GpuInputs,
     params: &Scatter3GpuParams,
-) -> Result<GpuVertexBuffer, String> {
+) -> Result<GpuVertexBuffer, ScatterPackError> {
     let device = emission.device();
     let queue = emission.queue();
     if inputs.len == 0 {
-        return Err("scatter3: empty input tensors".to_string());
+        return Err(ScatterPackError::EmptyInputs);
     }
+    if inputs.size_unit != params.size_unit || inputs.color_layout != params.color_layout {
+        return Err(ScatterPackError::RetainedAttributeMismatch);
+    }
+    if params.size_unit != ScatterSizeUnit::from_source(&params.sizes)
+        || params.color_layout != ScatterColorLayout::from_source(&params.colors)
+    {
+        return Err(ScatterPackError::SourceAttributeMismatch);
+    }
+    preflight_native_f64_features(inputs.scalar, device.features())?;
 
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
@@ -200,6 +223,7 @@ pub fn pack_vertices_from_xyz(
         has_sizes: if has_sizes { 1 } else { 0 },
         has_colors: if has_colors { 1 } else { 0 },
         color_stride,
+        attribute_layout: params.size_unit.shader_flag() | (params.color_layout.shader_flag() << 1),
         _pad: 0,
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -217,7 +241,7 @@ pub fn pack_vertices_from_xyz(
                 resource: inputs
                     .x_buffer
                     .buffer(emission)
-                    .map_err(|error| error.to_string())?
+                    .map_err(ScatterPackError::BufferAccess)?
                     .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
@@ -225,7 +249,7 @@ pub fn pack_vertices_from_xyz(
                 resource: inputs
                     .y_buffer
                     .buffer(emission)
-                    .map_err(|error| error.to_string())?
+                    .map_err(ScatterPackError::BufferAccess)?
                     .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
@@ -233,7 +257,7 @@ pub fn pack_vertices_from_xyz(
                 resource: inputs
                     .z_buffer
                     .buffer(emission)
-                    .map_err(|error| error.to_string())?
+                    .map_err(ScatterPackError::BufferAccess)?
                     .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
@@ -248,14 +272,14 @@ pub fn pack_vertices_from_xyz(
                 binding: 5,
                 resource: size_buffer
                     .buffer(emission)
-                    .map_err(|error| error.to_string())?
+                    .map_err(ScatterPackError::BufferAccess)?
                     .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 6,
                 resource: color_buffer
                     .buffer(emission)
-                    .map_err(|error| error.to_string())?
+                    .map_err(ScatterPackError::BufferAccess)?
                     .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
@@ -427,32 +451,14 @@ mod stress_tests {
     use super::*;
     use pollster::FutureExt;
 
+    #[test]
+    fn attribute_uniform_layout_matches_both_scatter3_shaders() {
+        assert_eq!(std::mem::size_of::<Scatter3Uniforms>(), 48);
+        assert_eq!(std::mem::offset_of!(Scatter3Uniforms, attribute_layout), 40);
+    }
+
     fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
-        if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
-            || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
-        {
-            return None;
-        }
-        let instance = wgpu::Instance::default();
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })
-            .block_on()?;
-        let (device, queue) = adapter
-            .request_device(
-                &crate::wgpu_compat::device_descriptor(
-                    Some("scatter3-test-device"),
-                    wgpu::Features::empty(),
-                    adapter.limits(),
-                ),
-                None,
-            )
-            .block_on()
-            .ok()?;
-        Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
+        crate::gpu::test_device::maybe_scatter_device("scatter3-test-device")
     }
 
     #[test]
@@ -490,13 +496,18 @@ mod stress_tests {
             z_buffer: make_buffer("scatter3-test-z", &z).into(),
             len: point_count,
             scalar: ScalarType::F32,
+            sizes: ScatterAttributeBuffer::None,
+            size_unit: ScatterSizeUnit::DiameterPixels,
             colors: ScatterColorBuffer::None,
+            color_layout: ScatterColorLayout::Interleaved,
         };
         let params = Scatter3GpuParams {
             color: Vec4::new(0.2, 0.6, 0.9, 1.0),
             point_size: 6.0,
             sizes: ScatterAttributeBuffer::None,
+            size_unit: ScatterSizeUnit::DiameterPixels,
             colors: ScatterColorBuffer::None,
+            color_layout: ScatterColorLayout::Interleaved,
             lod_stride: stride,
         };
 
@@ -505,5 +516,142 @@ mod stress_tests {
             .expect("test device access")
             .expect("gpu scatter3 pack");
         assert_eq!(gpu_vertices.vertex_count, max_points as usize * 6);
+    }
+
+    #[test]
+    fn gpu_area_sizes_and_column_major_rgb_pack_distinct_points() {
+        let Some(access) = maybe_device() else {
+            assert!(
+                std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err(),
+                "forced GPU test requires an adapter"
+            );
+            return;
+        };
+        let supports_f64 = access
+            .with_shared(|emission| {
+                emission
+                    .device()
+                    .features()
+                    .contains(runmat_accelerate_api::native_wgpu_f64::REQUIRED_FEATURES)
+            })
+            .expect("device feature query");
+        if std::env::var("RUNMAT_PLOT_REQUIRE_F64").is_ok() {
+            assert!(
+                supports_f64,
+                "qualification requires a real F64 GPU shader case"
+            );
+        }
+        let make_buffer = |label: &str, data: &[u8]| -> crate::gpu::GpuInputBuffer {
+            runmat_accelerate_api::WgpuBufferOwner::new(
+                access
+                    .with_shared(|emission| {
+                        emission
+                            .device()
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some(label),
+                                contents: data,
+                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                            })
+                    })
+                    .expect("test device access"),
+            )
+            .into()
+        };
+        for scalar in [ScalarType::F32, ScalarType::F64] {
+            if scalar == ScalarType::F64 && !supports_f64 {
+                eprintln!("scatter3 F64 GPU shader unsupported by this adapter");
+                continue;
+            }
+            let sizes = make_buffer(
+                "scatter3-area-points2",
+                bytemuck::cast_slice(&[36.0f32, 49.0]),
+            );
+            // A 2-by-3 MATLAB color matrix in physical column-major order:
+            // point zero is red, point one is green.
+            let colors = make_buffer(
+                "scatter3-column-major-rgb",
+                bytemuck::cast_slice(&[1.0f32, 0.0, 0.0, 1.0, 0.0, 0.0]),
+            );
+            let coordinate = |label_f32: &str,
+                              label_f64: &str,
+                              values_f32: [f32; 2],
+                              values_f64: [f64; 2]| match scalar {
+                ScalarType::F32 => make_buffer(label_f32, bytemuck::cast_slice(&values_f32)),
+                ScalarType::F64 => make_buffer(label_f64, bytemuck::cast_slice(&values_f64)),
+            };
+            let inputs = Scatter3GpuInputs {
+                x_buffer: coordinate(
+                    "scatter3-unit-x-f32",
+                    "scatter3-unit-x-f64",
+                    [0.0, 1.0],
+                    [0.0, 1.0],
+                ),
+                y_buffer: coordinate(
+                    "scatter3-unit-y-f32",
+                    "scatter3-unit-y-f64",
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                ),
+                z_buffer: coordinate(
+                    "scatter3-unit-z-f32",
+                    "scatter3-unit-z-f64",
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                ),
+                len: 2,
+                scalar,
+                sizes: ScatterAttributeBuffer::Gpu(sizes.clone()),
+                size_unit: ScatterSizeUnit::AreaPointsSquared,
+                colors: ScatterColorBuffer::Gpu {
+                    buffer: colors.clone(),
+                    components: 3,
+                },
+                color_layout: ScatterColorLayout::ColumnMajor,
+            };
+            let params = Scatter3GpuParams {
+                color: Vec4::ONE,
+                point_size: 6.0,
+                sizes: ScatterAttributeBuffer::Gpu(sizes),
+                size_unit: ScatterSizeUnit::AreaPointsSquared,
+                colors: ScatterColorBuffer::Gpu {
+                    buffer: colors,
+                    components: 3,
+                },
+                color_layout: ScatterColorLayout::ColumnMajor,
+                lod_stride: 1,
+            };
+            let vertices = access
+                .with_shared(|emission| pack_vertices_from_xyz(emission, &inputs, &params))
+                .expect("test device access")
+                .expect("gpu scatter3 pack");
+            let bytes = crate::gpu::util::copy_readback_bytes_typed(
+                &access,
+                &vertices.buffer.clone().into(),
+                12 * 48,
+            )
+            .block_on()
+            .expect("vertex readback");
+            let mut seen = [0usize; 2];
+            for vertex in bytes.chunks_exact(48).take(12) {
+                let field = |offset: usize| {
+                    f32::from_le_bytes(vertex[offset..offset + 4].try_into().unwrap())
+                };
+                let index = if field(0) < 0.5 { 0 } else { 1 };
+                seen[index] += 1;
+                let expected = if index == 0 {
+                    [1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 1.0, 0.0]
+                };
+                for (channel, expected) in expected.into_iter().enumerate() {
+                    assert!((field(12 + 4 * channel) - expected).abs() < 1e-6);
+                }
+                let area = if index == 0 { 36.0 } else { 49.0 };
+                let expected_size = crate::plots::scatter::marker_area_points2_to_diameter_px(area);
+                assert!((field(36) - expected_size).abs() < 1e-4);
+            }
+            assert_eq!(seen, [6, 6]);
+            eprintln!("scatter3 {scalar:?} GPU attribute case executed");
+        }
     }
 }
