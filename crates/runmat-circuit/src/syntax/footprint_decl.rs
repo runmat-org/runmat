@@ -91,8 +91,10 @@ pub(crate) fn drawn(expr: &Expr) -> Read<Drawn> {
     }
 }
 
+type DrawingCall = (String, Vec<Val>, Vec<(String, Val)>, Span);
+
 /// The drawing calls a field holds: one call or a list of them.
-fn calls(d: Drawn) -> Read<Vec<(String, Vec<Val>, Vec<(String, Val)>, Span)>> {
+fn calls(d: Drawn) -> Read<Vec<DrawingCall>> {
     match d {
         Drawn::Call {
             name,
