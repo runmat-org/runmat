@@ -25,6 +25,9 @@ _November 10, 2026_
 * Updated file, Outline, and Properties controls for compact rows, clearer selection, collapsible panels, and narrow editor layouts. Quantity fields retain typed expressions when their forms refresh.
 * Expanded the example catalog with captured runs that can open directly on their saved results, including FEA studies and multi-drone SLAM playback.
 * Added CAD canvas context menus, command forms populated from the current selection, and shared navigation controls with mouse presets, cursor-centered zoom, orbit, and pan.
+* Added a Settings menu with theme switching and links to account, usage, members, agent, navigation, and runtime settings. The agent panel shows thread and turn credit usage, and warns when less than 20% of the weekly allowance remains.
+* New agent threads open on the Guide tab. Available guides reflect the project's files; examples open their entry document, including assemblies, parts, and circuits.
+* Editor tabs that do not fit move into an overflow menu. Context chips stay on one line, with additional chips grouped under a count.
 
 #### Fixed
 
@@ -40,6 +43,13 @@ _November 10, 2026_
 * Added text-based `.part`, `.assembly`, and `.drawing` documents with unit-aware inputs, configurations, cross-file references, and regeneration through the OCCT geometry kernel.
 * Added part modeling, direct face edits, sheet-metal operations, assemblies with mates and patterns, and drawings with views, dimensions, notes, and parts lists. Supported design exports include STEP, meshes, and drawing sheets.
 * Added design commands for mate connectors, reference curves, sheet-metal conversion, material and appearance changes, body promotion, file splitting, and component configurations.
+* Added `sweep(..., follow_path)` so pipe and cable profiles stay perpendicular to their path through turns.
+* Added a two-story house example with foundation, framing, envelope, interior, routed services, an electrical service one-line, and branch circuits.
+
+#### Fixed
+
+* Improved hidden-line processing for general-arrangement drawings of large assemblies. Drawing parts lists use the indented bill of materials, and balloons can identify subassemblies.
+* Fixed radius and diameter arrows to end on the arc, and added a finding for notes placed outside the sheet. Mold Scale, Parting line, Undercut, and Scale body commands execute their modeling operations.
 
 #### Changed
 
