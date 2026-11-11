@@ -275,6 +275,16 @@ fn a_drawing_exports_as_pdf_dxf_and_dwg() {
     );
 }
 
+/// Sketch on a picked plane writes the new sketch (the Desktop's Sketch command form and the agent).
+#[test]
+fn sketch_on_a_plane_writes_the_new_sketch() {
+    let route = commands::route("part.sketch", EditorKind::Part).expect("part.sketch");
+    assert_eq!(route.handler, Handler::Edit);
+    let (out, unhandled) = run("/p/plate.part", &request("part.sketch", json!({ "plane": "origin.xy" }), &[]));
+    assert_eq!(out["ok"], true, "{out}");
+    assert!(!unhandled);
+}
+
 #[test]
 fn view_commands_run_only_in_the_desktop() {
     let route = commands::route("view.fit", EditorKind::Part).expect("view.fit");

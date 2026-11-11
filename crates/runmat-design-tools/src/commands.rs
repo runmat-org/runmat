@@ -130,6 +130,8 @@ fn handler_of(command: &CommandDescriptor, editor: EditorKind) -> Handler {
     let id = command.id.as_str();
     match command.edit.op {
         _ if editor == EditorKind::Fea => Handler::Shell,
+        // Sketch on a picked plane or face writes the new sketch feature, then the Desktop opens it.
+        EditOp::EnterMode if id == "part.sketch" => Handler::Edit,
         EditOp::View
         | EditOp::EnterMode
         | EditOp::ExitMode
