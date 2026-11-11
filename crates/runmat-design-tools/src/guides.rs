@@ -603,11 +603,13 @@ pub fn catalog() -> GuideCatalog {
         guide(
             "schematic_capture",
             "Schematic capture",
-            "Blocks, interfaces, power rails, parts and alternates",
+            "Purpose, blocks, interfaces, power rails, parts and alternates",
             "circuit",
             ".circuit",
             vec![new_file(".circuit"), EntryPoint::Agent],
             vec![
+                decision("purpose", "What must the circuit do?", &[SingleChoice], &[], true, Ask,
+                    "A sensor node, motor driver, power supply, USB device or radio module, with the blocks each needs"),
                 decision("blocks", "Which blocks does the circuit have?", &[MultipleChoice], &[], true, Ask,
                     "Power, MCU, radio, sensors and connectors, with a part for each"),
                 decision("interfaces", "How do the blocks connect?", &[SingleChoice, EditorPick], &[Net, Pin], true, Ask,
@@ -618,7 +620,7 @@ pub fn catalog() -> GuideCatalog {
                     "Parts in the library with stock and a second source each"),
             ],
             "design.check",
-            vec![needs("components", 1, "blocks"), needs("nets", 1, "interfaces"), needs_none("erc power errors", "rails")],
+            vec![needs("components", 1, "purpose"), needs("components", 1, "blocks"), needs("nets", 1, "interfaces"), needs_none("erc power errors", "rails")],
             "general",
             "Capture a schematic from a block diagram",
         ),
