@@ -123,7 +123,6 @@ GROUPS = {
         "runmat-fea-source",
         "runmat-design-syntax",
         "runmat-design-commands",
-        "runmat-part-record",
         "runmat-geometry-core",
         "runmat-geometry-fixtures",
         "runmat-geometry-io",

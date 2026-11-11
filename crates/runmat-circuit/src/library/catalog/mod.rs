@@ -1,6 +1,5 @@
-//! Catalog parts: the mapping of a [`PartRecord`] (the record a manufacturer part search returns
-//! and a `.circuit` file's `part` declarations hold, owned by `runmat-part-record`) onto pool
-//! items.
+//! Catalog parts: the part record ([`record`]: what a manufacturer part search returns and a
+//! `.circuit` file's `part` declarations hold) and its mapping onto pool items.
 //!
 //! A catalog part names its package by a footprint-generator string (`SOT23-6`, `R0402`,
 //! `QFN32_5mm_P0.5_EP3.1`) and lists its pins with the pads they land on and their electrical
@@ -17,7 +16,9 @@ use super::{
 use crate::ids::Uuid;
 use crate::ir::{Param, Tolerance};
 use runmat_rules::{parse_quantity, BuiltinUnits};
-pub use runmat_part_record::{PartHit, PartOffer, PartPin, PartRecord, PartSpice};
+mod record;
+
+pub use record::{PartHit, PartOffer, PartPin, PartRecord, PartSpice};
 use std::collections::BTreeMap;
 
 /// The designator prefix a category takes when the part names none.

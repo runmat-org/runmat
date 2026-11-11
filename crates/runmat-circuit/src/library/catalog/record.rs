@@ -1,15 +1,7 @@
 //! The orderable part record: what a `.circuit` file's `part "<mpn>" = {…}` declaration holds,
-//! what the server's part search returns, and what the circuit runtime's `library.place` edit
-//! reads. The circuit runtime (`runmat-circuit` `library::catalog`) maps a [`PartRecord`] onto its
-//! pool; the server's part search fills [`PartHit`]s from its connectors. Both use these types,
-//! so the JSON the server sends is the JSON the runtime reads.
-//!
-//! A record names its package by a footprint-generator string (`SOT23-6`, `R0402`,
-//! `QFN32_5mm_P0.5_EP3.1`), a footprint file, or a declared footprint, and lists its pins with
-//! the pads they land on and their electrical types. Supply data (stock, price breaks,
-//! lifecycle) is not part of the record: it comes with each [`PartHit`].
-//!
-//! The `openapi` feature derives `utoipa::ToSchema` for the server's API schema.
+//! what the server's part search returns (server-parts uses these types under the `openapi`
+//! feature), and what the `library.place` edit reads. The JSON the server sends is the JSON the
+//! runtime reads. Supply data (stock, price breaks, lifecycle) comes with each [`PartHit`].
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -71,7 +63,7 @@ pub struct PartRecord {
     #[serde(default)]
     pub category: String,
     /// Designator prefix (`U`, `R`); empty takes one from the category.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub prefix: String,
     /// A footprint-generator string (`SOT23-6`, `R0402`), a footprint file read in place for
     /// interop, or `none` for a part wired in the field; empty when [`PartRecord::footprint`]
