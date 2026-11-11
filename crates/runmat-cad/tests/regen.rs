@@ -730,7 +730,7 @@ fn g11_regeneration_with_the_constraint_solver_end_to_end() {
 }
 
 #[test]
-fn g12_pattern_of_unsupported_seed_is_specific() {
+fn g12_pattern_of_fillet_requires_matching_instance_edges() {
     let env = Env::new();
     let mut d = block();
     d.features.push(fillet(
@@ -756,9 +756,18 @@ fn g12_pattern_of_unsupported_seed_is_specific() {
         }),
     ));
     let r = env.regen(&d);
-    assert!(diag(&r, DiagCode::KernelNotSupported)
-        .message
-        .contains("patterning a fillet"));
+    let error = diag(&r, DiagCode::RegenInvalid);
+    assert_eq!(error.severity, Severity::Error);
+    assert_eq!(error.cause, Cause::Root);
+    assert_eq!(
+        error.site.subject,
+        runmat_cad::diagnostics::Subject::Feature { feature: fid("p") }
+    );
+    assert_eq!(error.site.param.as_deref(), Some("layout"));
+    assert_eq!(
+        error.message,
+        "instance 1 has no edge where the seed's blended edge would be; pattern the feature that makes those edges first"
+    );
 }
 
 #[test]

@@ -985,31 +985,39 @@ fn an_imported_project_keeps_its_net_classes_and_rules() {
         circuit.contains("net_class HV = { clearance = 0.0015 m, track_width = 0.0005 m }"),
         "{circuit}"
     );
-    // It reads back: nothing but the two parts the fixture's board leaves off (reported above
-    // as footprints not carried, so they have no package) is in error.
+    // The two parts absent from the fixture's board retain missing-package errors.
+    // They must not be reclassified as deliberately footprint-free field devices.
+    let expected: Vec<String> = ["Amp:LM358-LM358", "Connector:Conn_01x02-DATA"]
+        .into_iter()
+        .map(|part| format!("part `{part}` needs its `package`: a footprint, or `package = none` for a part wired in the field"))
+        .collect();
     let parsed = runmat_circuit::syntax::parse_circuit("io.circuit", circuit);
     let errors: Vec<_> = parsed
         .diagnostics
         .iter()
-        .map(|d| d.message.as_str())
-        .filter(|m| !m.ends_with("needs its `package`"))
+        .map(|d| d.message.clone())
         .collect();
-    assert!(errors.is_empty(), "{errors:#?}");
+    assert_eq!(errors, expected);
     // The design check (elaboration and ERC) finds no error beyond those two parts.
     let fs: runmat_circuit::runtime::Files = out
         .files
         .iter()
         .map(|(k, v)| (format!("/p/{k}"), v.clone()))
         .collect();
-    let errors: Vec<_> = import_check::design_errors(
+    let errors = import_check::design_errors(
         &fs,
         "/p/boards/io.circuit",
         Some("/p/boards/io.circuit.layout"),
-    )
-    .into_iter()
-    .filter(|m| !m.ends_with("needs its `package`"))
-    .collect();
-    assert!(errors.is_empty(), "{errors:#?}");
+    );
+    let expected: Vec<_> = ["/p/boards/io.circuit", "/p/boards/io.circuit.layout"]
+        .into_iter()
+        .flat_map(|path| {
+            expected
+                .iter()
+                .map(move |message| format!("{path}: {message}"))
+        })
+        .collect();
+    assert_eq!(errors, expected);
 }
 
 /// A board alone imports with an empty circuit stub, so its layout passes the design check;

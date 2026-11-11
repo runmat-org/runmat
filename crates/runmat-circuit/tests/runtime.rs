@@ -451,6 +451,7 @@ fn copy_room_formats_and_board_commands_run_on_the_text() {
     )
     .unwrap_err();
     assert!(route.message.contains("board view"));
+    runtime::take_unhandled();
     let unknown = runtime::edit(
         LAYOUT,
         &files[LAYOUT],
@@ -458,7 +459,12 @@ fn copy_room_formats_and_board_commands_run_on_the_text() {
         &request("board.nonsense", json!({})),
     )
     .unwrap_err();
-    assert!(unknown.message.contains("isn't a model edit"));
+    assert_eq!(
+        unknown.message,
+        "`board.nonsense` has no handler for this file"
+    );
+    assert!(unknown.diagnostics.is_empty());
+    assert!(runtime::take_unhandled());
     assert!(LAYOUT.ends_with(LAYOUT_SUFFIX));
 }
 
