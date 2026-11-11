@@ -589,7 +589,7 @@ export type FeaMonitorStopCondition = { less_than: { threshold: FeaObservationTh
 export interface FeaObservationThreshold { quantity: FeaObservationQuantity; canonical_value: number; }
 export type FeaAccuracyTarget = { observation: string } | { quantity: FeaObservationQuantity } | "global_equilibrium" | "interface_closure" | "execution_equivalence";
 export type FeaAccuracyTolerance = { relative: number } | { absolute: { quantity: FeaObservationQuantity; canonical_value: number } };
-export interface FeaAccuracyCriterion { criterion_id: string; target: FeaAccuracyTarget; contribution: FeaErrorContributionKind; tolerance: FeaAccuracyTolerance; evidence: "a_posteriori_estimator" | "convergence_study" | "conservation_balance" | "residual_bound" | "reference_comparison" | "statistical_confidence" | "transfer_bound"; mandatory: boolean; }
+export interface FeaAccuracyCriterion { criterion_id: string; target: FeaAccuracyTarget; contribution: FeaErrorContributionKind; tolerance: FeaAccuracyTolerance; evidence: "a_posteriori_estimator" | "convergence_study" | "conservation_balance" | "residual_bound" | "backward_error_bound" | "reference_comparison" | "statistical_confidence" | "transfer_bound"; mandatory: boolean; }
 export type FeaErrorContributionKind = "geometry_admission" | "boundary_approximation" | "spatial_discretization" | "algebraic" | "nonlinear" | "temporal" | "frequency_sampling" | "modal_truncation" | "stochastic" | "coupling" | "interface_projection" | "field_transfer" | "signal_interpolation" | "recovery" | "observation_sampling" | "precision" | "execution_equivalence";
 export interface FeaAccuracyPlan { accuracy_plan_id: string; criteria: FeaAccuracyCriterion[]; unavailable_evidence: "fail" | "mark_indeterminate"; exceeded_limit: "refine" | "tighten_solver" | "extend_sampling" | "fail"; equivalence: "deterministic" | { relative_tolerance: number } | { absolute_tolerance: number }; resources: { maximum_refinement_cycles: number; maximum_solver_tightenings: number; maximum_samples: number; maximum_wall_time_milliseconds: number; maximum_resident_bytes: number | null }; }
 export interface FeaProcedureStep {
@@ -694,7 +694,7 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     ...authoringEnums.flatMap((typeSource) => [typeSource, ""]),
     "export type FeaStructuralTimeStepPolicy = { fixed: { interval_count: number } };",
     "export interface FeaModalTruncationPolicy { requested_mode_count: number; eigenspace_relative_tolerance: number; }",
-    "export interface FeaModalConvergencePolicy { relative_residual_tolerance: number; maximum_subspace_iterations: number; }",
+    "export interface FeaModalConvergencePolicy { algebraic_measure: \"backward_error\" | \"relative_residual\"; algebraic_tolerance: number; maximum_subspace_iterations: number; maximum_subspace_dimension: number; }",
     "",
     physicsFamily,
     "",

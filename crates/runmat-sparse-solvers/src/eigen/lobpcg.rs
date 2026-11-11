@@ -7,7 +7,7 @@
 //! falls into the span of `X` and `P`.
 
 use super::blas::{gemm_nn, gemm_tn, spmm, ProductScale};
-use super::{true_residuals, EigenResult};
+use super::{eigenpair_backward_error, true_residuals, EigenResult, ResidualMeasure};
 use crate::control::{Progress, ProgressPhase, SolveControl};
 use crate::csr::CsrRef;
 use crate::dense::symmetric_eigen;
@@ -20,7 +20,10 @@ pub struct LobpcgOptions {
     pub count: usize,
     /// Extra block vectors that accelerate convergence of the wanted ones.
     pub guard: usize,
+    /// Stopping tolerance of each wanted pair, in `measure`.
     pub tolerance: f64,
+    /// The residual measure the stopping test applies `tolerance` to.
+    pub measure: ResidualMeasure,
     pub max_iterations: usize,
 }
 
@@ -30,6 +33,7 @@ impl Default for LobpcgOptions {
             count: 10,
             guard: 4,
             tolerance: 1e-8,
+            measure: ResidualMeasure::RelativeResidual,
             max_iterations: 500,
         }
     }
@@ -229,6 +233,10 @@ pub fn lobpcg(
     let mut applications = 0;
     let mut kx = vec![0.0; n * block];
     let mut mx = vec![0.0; n * block];
+    let pencil_norms = match options.measure {
+        ResidualMeasure::BackwardError => Some((k.norm_inf(), m.norm_inf())),
+        ResidualMeasure::RelativeResidual => None,
+    };
     // Initial Rayleigh–Ritz on X.
     {
         spmm(k, &x, &mut kx, block);
@@ -269,9 +277,20 @@ pub fn lobpcg(
         for c in 0..block {
             let (rc, mc) = (&mut residual[c * n..(c + 1) * n], &mx[c * n..(c + 1) * n]);
             par::axpy(-theta[c], mc, rc);
-            let kn = par::norm2(&kx[c * n..(c + 1) * n]);
-            let mn = par::norm2(mc);
-            norms[c] = par::norm2(rc) / (kn + theta[c].abs() * mn).max(f64::MIN_POSITIVE);
+            norms[c] = match pencil_norms {
+                Some((k_norm, m_norm)) => eigenpair_backward_error(
+                    par::norm_inf(rc),
+                    theta[c],
+                    k_norm,
+                    m_norm,
+                    par::norm_inf(&x[c * n..(c + 1) * n]),
+                ),
+                None => {
+                    let kn = par::norm2(&kx[c * n..(c + 1) * n]);
+                    let mn = par::norm2(mc);
+                    par::norm2(rc) / (kn + theta[c].abs() * mn).max(f64::MIN_POSITIVE)
+                }
+            };
         }
         converged_count = norms
             .iter()
@@ -374,12 +393,13 @@ pub fn lobpcg(
     let count = options.count.min(block);
     let values = theta[..count].to_vec();
     let vectors = x[..n * count].to_vec();
-    let residuals = true_residuals(k, m, &values, &vectors);
+    let (residuals, backward_errors) = true_residuals(k, m, &values, &vectors);
     Ok(EigenResult {
         converged: converged_count >= options.count,
         values,
         vectors,
         residuals,
+        backward_errors,
         restarts: iterations,
         operator_applications: applications,
         shift: 0.0,

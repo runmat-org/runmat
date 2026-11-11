@@ -298,6 +298,7 @@ fn lobpcg_modal_path_matches_shift_invert_frequencies_with_its_own_proof() {
                 count,
                 guard: 6,
                 tolerance: 1e-9,
+                measure: ResidualMeasure::RelativeResidual,
                 max_iterations: 2000,
             },
             ordering: crate::ordering::Ordering::Auto,
@@ -328,6 +329,7 @@ fn lobpcg_modal_path_refuses_an_indefinite_stiffness() {
                 count: 3,
                 guard: 3,
                 tolerance: 1e-8,
+                measure: ResidualMeasure::RelativeResidual,
                 max_iterations: 50,
             },
             ordering: crate::ordering::Ordering::Auto,
@@ -352,6 +354,7 @@ fn lobpcg_reaches_a_tight_tolerance_on_a_slender_beam_with_each_multigrid_varian
         count: 8,
         guard: 6,
         tolerance: 5e-9,
+        measure: ResidualMeasure::RelativeResidual,
         max_iterations: 400,
     };
     let blocked = AmgOptions {
@@ -398,4 +401,105 @@ fn lobpcg_reaches_a_tight_tolerance_on_a_slender_beam_with_each_multigrid_varian
         steps.push(r.restarts);
     }
     assert!(steps[2] < steps[1] && steps[1] < steps[0], "{steps:?}");
+}
+
+/// The 1-D Laplacian pencil `K x = λ x` has the exact pairs `λ_j = 2 − 2cos(jπ/(n+1))`,
+/// `x_j(i) = sin(ijπ/(n+1))`. Rounding the exact vector to double precision leaves a relative
+/// residual near `u · λ_max/λ_1`, above 1e-8 at this size, while its backward error stays at the
+/// unit roundoff; a mixture of the two lowest modes is rejected by the backward error.
+#[test]
+fn backward_error_qualifies_an_exact_pair_the_relative_residual_rejects() {
+    let n = 40_000;
+    let mut builder = crate::csr::TripletBuilder::new(n, n);
+    for i in 0..n {
+        builder.push(i, i, 2.0);
+        if i + 1 < n {
+            builder.push(i, i + 1, -1.0);
+            builder.push(i + 1, i, -1.0);
+        }
+    }
+    let k = builder.build();
+    let identity = CsrMatrix::<f64>::identity(n);
+    let mode = |j: usize| -> (f64, Vec<f64>) {
+        let angle = j as f64 * std::f64::consts::PI / (n + 1) as f64;
+        let scale = (2.0 / (n + 1) as f64).sqrt();
+        (
+            2.0 - 2.0 * angle.cos(),
+            (1..=n).map(|i| scale * (i as f64 * angle).sin()).collect(),
+        )
+    };
+    let (lambda_1, x_1) = mode(1);
+    let (lambda_2, x_2) = mode(2);
+    let (relative, backward) =
+        super::true_residuals(k.as_ref(), identity.as_ref(), &[lambda_1], &x_1);
+    assert!(relative[0] > 1.0e-8, "relative residual {}", relative[0]);
+    assert!(backward[0] < 1.0e-15, "backward error {}", backward[0]);
+    // A wrong eigenvector: an equal mixture of the two lowest modes with its Rayleigh quotient.
+    let mixed: Vec<f64> = x_1
+        .iter()
+        .zip(&x_2)
+        .map(|(a, b)| (a + b) / 2f64.sqrt())
+        .collect();
+    let quotient = 0.5 * (lambda_1 + lambda_2);
+    let (_, backward_mixed) =
+        super::true_residuals(k.as_ref(), identity.as_ref(), &[quotient], &mixed);
+    assert!(
+        backward_mixed[0] > 1.0e-10,
+        "mixed backward error {}",
+        backward_mixed[0]
+    );
+}
+
+/// LOBPCG stopping on the backward error reaches the same frequencies as shift-invert, and every
+/// returned pair carries both measures.
+#[test]
+fn lobpcg_stops_on_the_backward_error_and_reports_both_measures() {
+    let problem = crate::testutil::elasticity::elasticity3d(4, 4, 12);
+    let k = problem.matrix;
+    let m = coupled_mass(&k);
+    let count = 5;
+    let reference = modal(
+        k.as_ref(),
+        m.as_ref(),
+        &EigenOptions {
+            count,
+            shift: Some(0.0),
+            ..Default::default()
+        },
+        SolveControl::NONE,
+    )
+    .unwrap();
+    let amg = crate::precond::Amg::new(
+        k.as_ref(),
+        crate::precond::AmgOptions::default(),
+        SolveControl::NONE,
+    )
+    .unwrap();
+    let tolerance = 1.0e-11;
+    let result = lobpcg(
+        k.as_ref(),
+        m.as_ref(),
+        Some(&amg),
+        &LobpcgOptions {
+            count,
+            guard: 6,
+            tolerance,
+            measure: ResidualMeasure::BackwardError,
+            max_iterations: 2000,
+        },
+        SolveControl::NONE,
+    )
+    .unwrap();
+    assert!(result.converged);
+    assert_eq!(result.backward_errors.len(), count);
+    assert_eq!(result.residuals.len(), count);
+    for (index, (&value, &expected)) in result.values.iter().zip(&reference.values).enumerate() {
+        assert!(result.backward_errors[index] <= tolerance);
+        assert!(result.backward_errors[index] <= result.residuals[index]);
+        assert!(
+            (value - expected).abs() <= 1.0e-8 * expected,
+            "mode {index}: {value} vs {expected}"
+        );
+    }
+    assert!(reference.backward_errors.iter().all(|&eta| eta < 1.0e-14));
 }

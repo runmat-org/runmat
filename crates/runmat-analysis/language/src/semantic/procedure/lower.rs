@@ -305,7 +305,7 @@ fn lower_procedure(
                     diagnostics,
                 )?,
             };
-            super::modal_reduction::residual_vectors(
+            super::modal_reduction::extraction(
                 declaration,
                 statements,
                 &mut step,
@@ -359,7 +359,7 @@ fn lower_procedure(
                     diagnostics,
                 )?,
             };
-            super::modal_reduction::residual_vectors(
+            super::modal_reduction::extraction(
                 declaration,
                 statements,
                 &mut step,

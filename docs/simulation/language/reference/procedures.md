@@ -66,17 +66,36 @@ Each family's [physics reference](../../physics/index.md) states its weak form, 
 | --- | --- | --- |
 | `structural static` | none | `primary` (displacement state) |
 | `structural preload` | none; the step's loads are the preload | `geometric_stiffness` |
-| `structural modal` | `modes` (positive integer); optional `residual_vectors` (one to three global directions, `[[0, 0, 1]]`) | `modal_basis` |
+| `structural modal` | `modes` (positive integer); optional `residual_vectors` (one to three global directions, `[[0, 0, 1]]`); optional `solver = auto` (default), `factorization` or `iterative` | `modal_basis` |
 | `structural transient` | `start_time`, `end_time`, `time_step` | `primary` |
 | `structural modal_transient` | `basis`, `start_time`, `end_time`, `time_step` | `primary` |
 | `structural harmonic` | `frequencies` | `primary` |
 | `structural modal_harmonic` | `basis`, `frequencies`; optional `static_correction = applied_loads` or `none` (default) | `primary` |
-| `structural prestressed_modal` | `prestress`, `modes`; optional `residual_vectors` | `modal_basis` |
+| `structural prestressed_modal` | `prestress`, `modes`; optional `residual_vectors` and `solver` | `modal_basis` |
 | `structural buckling` | `prestress`, `modes` | buckling modes |
 | `structural prestressed_harmonic` | `prestress`, `frequencies`; optional `basis` (modal reduction instead of a direct solve) and, with `basis`, `static_correction` | `primary` |
 | `structural modal_response_spectrum` | `basis`, `spectra = [model.response_spectrum.<name>, …]` | `primary` |
 | `structural random_response` | `basis`, `excitation = model.random_excitation.<name>`, `modal_damping_ratio` (number), `minimum_cumulative_mass_ratio` (number) | `primary` |
 | `structural nonlinear` | `start_load_factor`, `end_load_factor`; optional `kinematics = small_strain` (default) or `large_deformation` | `primary` |
+
+### Modal eigensolver
+
+`solver` chooses how a modal extraction computes its modes:
+
+- `auto` (the default): the resource plan uses shift-invert block Lanczos on a sparse factorization when that plan fits the memory the run is admitted to use, and otherwise block LOBPCG with a multigrid preconditioner when that plan fits.
+- `factorization`: shift-invert block Lanczos only.
+- `iterative`: block LOBPCG only. It holds no factorization, so it fits models whose factor does not.
+
+Both methods prove that no mode below the highest reported one was missed (a Sturm inertia count) and qualify each mode on the same accuracy criterion. When the plan for a required method does not fit the admitted memory, the run is refused before solving, and the error names the bytes the study needs and the bytes the budget offers. RunMat does not switch to the other method.
+
+```fea fragment
+analysis modes {
+    structural modal {
+        modes = 6
+        solver = iterative
+    }
+}
+```
 
 ### Modal truncation and residual vectors
 
@@ -210,7 +229,7 @@ The checker verifies each binding: the producer exists, the state kind matches, 
 | `retain <name>` | statement | Publishes the step's state under `<name>`. |
 | `load_cases = [load_case.<a>, …]` | list | The load cases this step applies. `[]` applies none; omitting it applies the model's load cases. Supports and prescribed values always apply. |
 | `initial_conditions = [model.initial.<a>, …]` | list | Initial state for a step that starts from one, such as a transient step. See [initial conditions](../../constraints/initial-conditions.md). |
-| `accuracy { algebraic_relative_tolerance = <number> }` | block | The relative algebraic tolerance of the step's linear and nonlinear solves, strictly between 0 and 1. It tightens or loosens solver stopping only; it is not a bound on discretization error. |
+| `accuracy { algebraic_measure = <measure>; algebraic_relative_tolerance = <number> }` | block | The step's mandatory algebraic accuracy check. Both members are optional, and at least one is required. `algebraic_relative_tolerance` is strictly between 0 and 1. It sets solver stopping and the check on the computed solution; it does not bound discretization error. See [algebraic accuracy](#algebraic-accuracy). |
 
 ```fea fragment
 analysis heat_up {
@@ -222,6 +241,41 @@ analysis heat_up {
     load_cases = [load_case.heater_on]
     initial_conditions = [model.initial.ambient]
     accuracy { algebraic_relative_tolerance = 1e-8 }
+}
+```
+
+### Algebraic accuracy
+
+Every analysis step checks that its computed solution satisfies the assembled equations. `algebraic_measure` selects the measure the check uses:
+
+- `backward_error`: the normwise backward error in the ∞-norm. For a linear system it is ‖b − A x‖ / (‖A‖ ‖x‖ + ‖b‖). For a mode with eigenvalue λ and shape x it is ‖K x − λ M x‖ / ((‖K‖ + |λ| ‖M‖) ‖x‖). It is the smallest relative change to the operators (and load) for which the computed answer is exact. It does not grow with mesh refinement or conditioning, so one tolerance means the same thing on a coarse and a fine model. The default tolerance is 1e-12. Double-precision direct solvers and converged iterative solvers reach about 1e-16 in this measure, and evaluating `A x` itself is uncertain by up to a few 1e-14 for quadratic solid elements.
+- `relative_residual`: the Euclidean residual relative to the terms that form it, ‖b − A x‖ / ‖b‖, or ‖K x − λ M x‖ / (‖K x‖ + |λ| ‖M x‖) for a mode. The default tolerance is 1e-8. In double precision this measure cannot go below about 1e-16 × the condition number, so on a fine mesh it can reject a correct solution.
+
+Structural modal and prestressed modal steps use `backward_error` by default. Every mode publishes both numbers: `modal.backward_error` and `modal.residual_norm` (the relative residual). The step's measure decides which one is checked. The other procedures check `relative_residual` in this release, and setting `algebraic_measure = backward_error` on them is an error.
+
+| Procedure | Algebraic check in this release | Published |
+| --- | --- | --- |
+| `structural modal`, `structural prestressed_modal` | backward error of each mode, 1e-12 | `modal.backward_error` and `modal.residual_norm` per mode; diagnostics `FEA_MODAL_ACCURACY` and `FEA_MODAL_CONVERGENCE` |
+| `structural static`, `structural harmonic`, `structural transient`, `structural prestressed_harmonic` | relative residual of the solved equations, 1e-8 | `structural.residual_norm` |
+| `structural nonlinear` | relative residual of every Newton correction solve, 1e-8 | the largest correction residual in the numerical receipt |
+| `thermal` steady, transient and nonlinear steps | relative residual of every accepted linear solve, 1e-8 | the largest linear residual in the numerical receipt |
+| `electrical` static steps | relative residual of the lifted linear system, 1e-8 | `linear_relative_residual` in the numerical receipt |
+| `magnetic` static steps | relative physical and gauge residuals, 1e-8 | the numerical receipt |
+| `structural buckling` | relative residual of each mode | the buckling modes' backward errors are computed but not checked |
+
+The engineering checks are separate from this table and keep their own criteria: mesh convergence, modal mass capture, energy balance, Newton force balance and the fluid scaled residuals.
+
+The backward-error check for every algebraic solve is [not yet in the current release](pending:accuracy.backward-error-every-solve). Static, thermal, electrostatic, magnetostatic and harmonic solves, each transient step and each Newton linearization will check η = ‖b − A x‖ / (‖A‖ ‖x‖ + ‖b‖) at 1e-12 by default and publish it beside the relative residual. `algebraic_measure = relative_residual` will keep the current check.
+
+Setting `algebraic_measure` resets the tolerance to that measure's default, and `algebraic_relative_tolerance` then replaces it:
+
+```fea fragment
+analysis modes {
+    structural modal { modes = 6 }
+    accuracy {
+        algebraic_measure = relative_residual
+        algebraic_relative_tolerance = 1e-6
+    }
 }
 ```
 

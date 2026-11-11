@@ -61,8 +61,40 @@ pub enum ModalSolveSelection {
     /// min(authored ceiling, this machine's admitted memory when known); otherwise LOBPCG when
     /// its plan fits that ceiling.
     WithinCeiling { machine_memory_bytes: Option<u64> },
+    /// Plan this path alone, as an authored `solver = factorization | iterative` requires.
+    /// When its plan does not fit the effective ceiling, planning is refused with
+    /// `ResourcePlanningError::MemoryBudget`; no other path is tried.
+    Forced {
+        path: SubspaceSolvePath,
+        machine_memory_bytes: Option<u64>,
+    },
     /// Reproduce the path an admitted plan recorded.
     Recorded(SubspaceSolvePath),
+}
+
+impl ModalSolveSelection {
+    /// The selection the authored solver method asks for: `auto` keeps the ceiling choice, a
+    /// named method forces its path. A recorded or already forced selection is kept.
+    pub fn with_authored_method(self, method: runmat_analysis_core::ModalSolverMethod) -> Self {
+        let path = match method {
+            runmat_analysis_core::ModalSolverMethod::Auto => return self,
+            runmat_analysis_core::ModalSolverMethod::Factorization => {
+                SubspaceSolvePath::ShiftInvertFactorization
+            }
+            runmat_analysis_core::ModalSolverMethod::Iterative => {
+                SubspaceSolvePath::PreconditionedLobpcg
+            }
+        };
+        match self {
+            Self::WithinCeiling {
+                machine_memory_bytes,
+            } => Self::Forced {
+                path,
+                machine_memory_bytes,
+            },
+            other => other,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

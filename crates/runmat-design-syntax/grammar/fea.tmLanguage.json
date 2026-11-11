@@ -64,7 +64,7 @@
     },
     {
       "name": "constant.language.fea",
-      "match": "(?<![\\w])(?:thermal_energy_storage_rate_density|acoustic_particle_velocity|until_dependents_complete|electric_edge_circulation|magnetic_edge_circulation|magnetic_vector_potential|electric_current_density|magnetic_field_intensity|acoustic_port_intensity|electric_energy_density|boundary_introduced_by|shell_transverse_shear|electric_displacement|magnetic_flux_density|constraint_violation|shell_bending_moment|shell_membrane_force|sound_pressure_level|temperature_gradient|beam_bending_moment|beam_bending_stress|beam_torsion_moment|beam_torsion_stress|joule_power_density|modal_participation|acoustic_intensity|electric_potential|integration_point|acoustic_pressure|transmission_loss|wall_shear_stress|authored_samples|explicit_samples|beam_axial_force|beam_shear_force|contact_pressure|electric_current|volume_flow_rate|von_mises_stress|certified_bound|reference_point|electric_charge|modal_frequency|reaction_moment|shell_von_mises|latest_samples|electric_field|fluid_pressure|fluid_velocity|mass_flow_rate|reaction_force|persistent_id|applied_loads|error_bounded|strain_energy|acceleration|displacement|exactly_one|one_or_more|contact_gap|temperature|complex128|constraint|eigenvalue|quadratic|prestress|canonical|connector|interface|heat_flux|heat_rate|vorticity|readable|writable|lossless|residual|rotation|velocity|element|balance|linear|result|select|real64|global|strain|stress|basis|name|none|cell|edge|face|mode|node|tag|id)(?![\\w])"
+      "match": "(?<![\\w])(?:thermal_energy_storage_rate_density|acoustic_particle_velocity|until_dependents_complete|electric_edge_circulation|magnetic_edge_circulation|magnetic_vector_potential|electric_current_density|magnetic_field_intensity|acoustic_port_intensity|electric_energy_density|boundary_introduced_by|shell_transverse_shear|electric_displacement|magnetic_flux_density|constraint_violation|shell_bending_moment|shell_membrane_force|sound_pressure_level|temperature_gradient|beam_bending_moment|beam_bending_stress|beam_torsion_moment|beam_torsion_stress|joule_power_density|modal_participation|acoustic_intensity|electric_potential|relative_residual|integration_point|acoustic_pressure|transmission_loss|wall_shear_stress|authored_samples|explicit_samples|beam_axial_force|beam_shear_force|contact_pressure|electric_current|volume_flow_rate|von_mises_stress|certified_bound|reference_point|electric_charge|modal_frequency|reaction_moment|shell_von_mises|backward_error|latest_samples|electric_field|fluid_pressure|fluid_velocity|mass_flow_rate|reaction_force|persistent_id|applied_loads|factorization|error_bounded|strain_energy|acceleration|displacement|exactly_one|one_or_more|contact_gap|temperature|complex128|constraint|eigenvalue|quadratic|prestress|iterative|canonical|connector|interface|heat_flux|heat_rate|vorticity|readable|writable|lossless|residual|rotation|velocity|element|balance|linear|result|select|real64|global|strain|stress|basis|name|none|auto|cell|edge|face|mode|node|tag|id)(?![\\w])"
     },
     {
       "name": "support.type.property-name.fea",
@@ -264,6 +264,8 @@
           "acoustic_pressure",
           "applied_loads",
           "authored_samples",
+          "auto",
+          "backward_error",
           "balance",
           "basis",
           "beam_axial_force",
@@ -298,6 +300,7 @@
           "exactly_one",
           "explicit_samples",
           "face",
+          "factorization",
           "fluid_pressure",
           "fluid_velocity",
           "global",
@@ -306,6 +309,7 @@
           "id",
           "integration_point",
           "interface",
+          "iterative",
           "joule_power_density",
           "latest_samples",
           "linear",
@@ -330,6 +334,7 @@
           "readable",
           "real64",
           "reference_point",
+          "relative_residual",
           "residual",
           "result",
           "rotation",

@@ -29,9 +29,13 @@ pub(super) fn analysis_admit_modal_run_with_id(
     } else if basis
         .modes()
         .iter()
-        .map(|mode| mode.residual_norm())
+        .map(|mode| {
+            options
+                .convergence
+                .gated_residual(mode.residual_norm(), mode.backward_error())
+        })
         .fold(0.0_f64, f64::max)
-        > options.convergence.relative_residual_tolerance()
+        > options.convergence.algebraic_tolerance()
     {
         QualityGate::Warn
     } else {
@@ -57,8 +61,9 @@ pub(super) fn analysis_admit_modal_run_with_id(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ModalResidualExceeded,
             detail: format!(
-                "modal residual exceeds threshold {}",
-                options.convergence.relative_residual_tolerance()
+                "modal {} exceeds threshold {}",
+                options.convergence.algebraic_measure().label(),
+                options.convergence.algebraic_tolerance()
             ),
         });
     }

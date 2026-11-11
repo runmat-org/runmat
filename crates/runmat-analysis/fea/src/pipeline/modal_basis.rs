@@ -1,3 +1,4 @@
+mod accuracy;
 mod metrics;
 mod coordinates;
 pub use coordinates::{ModalBasisCoordinates, ModalShapeLayout};
@@ -72,6 +73,7 @@ pub struct ModalBasisMode {
     frequency_hz: f64,
     eigenvalue_rad2_per_s2: f64,
     residual_norm: f64,
+    backward_error: f64,
     modal_mass: f64,
     modal_stiffness: f64,
     relative_frequency_separation: f64,
@@ -151,6 +153,7 @@ pub(crate) struct ModalBasisInputs<'a> {
     pub frequencies_hz: &'a [f64],
     pub dof_shapes: &'a [Vec<f64>],
     pub residual_norms: &'a [f64],
+    pub backward_errors: &'a [f64],
     pub truncation_policy: ModalTruncationPolicy,
     pub available_mode_count: usize,
     pub boundary_probe_count: usize,
@@ -201,13 +204,16 @@ impl ModalBasisArtifact {
             frequencies_hz,
             dof_shapes,
             residual_norms,
+            backward_errors,
             truncation_policy,
             available_mode_count,
             boundary_probe_count,
             boundary_probe_frequency_hz,
         } = inputs;
         let count = frequencies_hz.len();
-        if count == 0 || dof_shapes.len() != count || residual_norms.len() != count {
+        if count == 0
+            || !accuracy::columns_match(count, dof_shapes, residual_norms, backward_errors)
+        {
             return Err(FeaRunError::Assembly(
                 "modal basis inputs must be non-empty and have identical mode counts".into(),
             ));
@@ -265,6 +271,7 @@ impl ModalBasisArtifact {
                 eigenvalue_rad2_per_s2: (2.0 * std::f64::consts::PI * frequencies_hz[index])
                     .powi(2),
                 residual_norm: residual_norms[index],
+                backward_error: backward_errors[index],
                 modal_mass,
                 modal_stiffness,
                 relative_frequency_separation: separation[index],
@@ -392,21 +399,12 @@ impl ModalBasisArtifact {
                 "modal basis does not belong to the supplied structural operator".into(),
             ));
         }
-        let frequencies = self
-            .modes
-            .iter()
-            .map(|mode| mode.frequency_hz)
-            .collect::<Vec<_>>();
         let dof_shapes = self
             .modes
             .iter()
             .map(|mode| mode.dof_shape.clone())
             .collect::<Vec<_>>();
-        let residuals = self
-            .modes
-            .iter()
-            .map(|mode| mode.residual_norm)
-            .collect::<Vec<_>>();
+        let (frequencies, residuals, backward_errors) = accuracy::mode_scalar_columns(&self.modes);
         let regenerated = Self::new(
             self.source_run.clone(),
             summary,
@@ -414,6 +412,7 @@ impl ModalBasisArtifact {
                 frequencies_hz: &frequencies,
                 dof_shapes: &dof_shapes,
                 residual_norms: &residuals,
+                backward_errors: &backward_errors,
                 truncation_policy: self.truncation.policy(),
                 available_mode_count: self.truncation.available_mode_count(),
                 boundary_probe_count: self.truncation.boundary_probe_count(),
@@ -500,6 +499,7 @@ impl ModalBasisArtifact {
                     || mode.eigenvalue_rad2_per_s2 < 0.0
                     || !valid_scalar(mode.residual_norm)
                     || mode.residual_norm < 0.0
+                    || !(valid_scalar(mode.backward_error) && mode.backward_error >= 0.0)
                     || !valid_scalar(mode.modal_mass)
                     || mode.modal_mass <= 0.0
                     || !valid_scalar(mode.modal_stiffness)

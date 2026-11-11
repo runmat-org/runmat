@@ -10,6 +10,7 @@ pub(super) fn failure(
         frequencies_hz: Vec::new(),
         mode_shapes: Vec::new(),
         residual_norms: Vec::new(),
+        backward_errors: Vec::new(),
         diagnostics: vec![FeaDiagnostic {
             code: "FEA_MODAL_SUBSPACE_CAPACITY".into(),
             severity: FeaDiagnosticSeverity::Error,
