@@ -150,8 +150,15 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         return crate::drawing::dependencies(path, text);
     }
     if path.ends_with(".circuit") || path.ends_with(".circuit.layout") {
-        // A circuit placed in an assembly draws its board: the layout, the circuit and its lock.
-        return runmat_circuit::runtime::dependencies(path, text);
+        // A circuit placed in an assembly draws its board: the layout, the circuit and its lock,
+        // and the STEP models its packages name (a board's STEP places them).
+        let mut out = runmat_circuit::runtime::dependencies(path, text);
+        out.extend(
+            runmat_circuit::board3d::model_paths(path, text)
+                .iter()
+                .map(|m| resolve_path(path, m, &Files::new())),
+        );
+        return out;
     }
     if !is_assembly(path) {
         // A part needs the files its imports read (STEP text the kernel is handed).
