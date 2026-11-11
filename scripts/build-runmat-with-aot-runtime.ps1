@@ -149,7 +149,7 @@ try {
   $manifest = Join-Path $buildRoot "runtime-archive.json"
   $notices = Join-Path $buildRoot "THIRD_PARTY_NOTICES.txt"
   $packArgs = @(
-    "run"
+    "run", "--profile", $profile
   ) + $lockedArgs + @('--target', $hostTarget) + @(
     "-p", "runmat-aot", "--bin", "runmat-aot-pack", "--",
     "--archive", $archive,

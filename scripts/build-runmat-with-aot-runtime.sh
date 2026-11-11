@@ -135,7 +135,8 @@ pack_deployment_command=(env)
 if [[ "$host_target" == *-apple-darwin ]]; then
   pack_deployment_command=("${darwin_command[@]}")
 fi
-pack_command=(cargo run --target "$host_target")
+# Reuse the selected profile for the helper's runtime/compiler dependencies.
+pack_command=(cargo run --profile "$profile" --target "$host_target")
 for locked_argument in "${locked_args[@]-}"; do
   [[ -n "$locked_argument" ]] || continue
   runtime_build+=("$locked_argument")
