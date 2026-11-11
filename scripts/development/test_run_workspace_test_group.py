@@ -21,6 +21,15 @@ SPEC.loader.exec_module(runner)
 
 
 class ScientificRoutingTests(unittest.TestCase):
+    def test_ci_retains_fingerprint_reasons_without_overwriting_explicit_logging(self):
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=True):
+            self.assertEqual(runner.test_environment()["CARGO_LOG"],
+                             "cargo::core::compiler::fingerprint=info")
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "CARGO_LOG": "warn"}, clear=True):
+            self.assertEqual(runner.test_environment()["CARGO_LOG"], "warn")
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}, clear=True):
+            self.assertNotIn("CARGO_LOG", runner.test_environment())
+
     def test_solver_feature_variants_reuse_distinct_rust_archives(self):
         manifest = Path(__file__).resolve().parents[2] / "crates/runmat-clarabel/Cargo.toml"
         import tomllib
