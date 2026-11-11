@@ -7,12 +7,12 @@ use crate::{
     assembly::solver_solid::SolidEnergyPreparation,
     contracts::{
         ComputeBackend, FeaModalRunResult, FeaRunError, FeaRunResult, ModalSolveOptions,
-        FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
-        FEA_FIELD_MODAL_EFFECTIVE_MASS, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-        FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
-        FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
-        FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
-        FEA_FIELD_MODAL_TOTAL_FREE_MASS,
+        FEA_FIELD_MODAL_BACKWARD_ERROR, FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS,
+        FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO, FEA_FIELD_MODAL_EFFECTIVE_MASS,
+        FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+        FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+        FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+        FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_MODAL_TOTAL_FREE_MASS,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
@@ -340,6 +340,7 @@ fn execute_modal_core(
             frequencies_hz: &modal.frequencies_hz,
             dof_shapes: &modal.mode_shapes,
             residual_norms: &modal.residual_norms,
+            backward_errors: &modal.backward_errors,
             truncation_policy: options.truncation,
             available_mode_count: modal.available_mode_count,
             boundary_probe_count: modal.boundary_probe_count,
@@ -505,6 +506,16 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
                 .modes()
                 .iter()
                 .map(|mode| mode.residual_norm())
+                .collect(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_BACKWARD_ERROR,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Mode),
+            vec![mode_count],
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.backward_error())
                 .collect(),
         ),
         AnalysisField::host_f64(

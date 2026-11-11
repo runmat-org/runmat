@@ -1,11 +1,16 @@
 //! Admitted Ritz-search controls shared by workload planning and execution.
 use crate::contracts::FeaRunError;
+use runmat_analysis_core::AlgebraicAccuracyMeasure;
 use serde::{Deserialize, Serialize};
 
+/// The modal qualification: every retained mode's `algebraic_measure` must lie at or below
+/// `algebraic_tolerance`. Each mode publishes both its normwise backward error and its relative
+/// residual; the measure selects which one gates.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModalConvergencePolicy {
-    relative_residual_tolerance: f64,
+    algebraic_measure: AlgebraicAccuracyMeasure,
+    algebraic_tolerance: f64,
     maximum_subspace_iterations: usize,
     /// Search ceiling for Ritz vectors, including boundary probes. A request admits the smaller
     /// of this ceiling and the subspace it works with (see `admitted_subspace_dimension`).
@@ -14,24 +19,40 @@ pub struct ModalConvergencePolicy {
 }
 
 impl ModalConvergencePolicy {
+    /// The backward error at [`AlgebraicAccuracyMeasure::BACKWARD_ERROR_TOLERANCE`].
     pub const fn production() -> Self {
         Self {
-            relative_residual_tolerance: 1.0e-8,
+            algebraic_measure: AlgebraicAccuracyMeasure::BackwardError,
+            algebraic_tolerance: AlgebraicAccuracyMeasure::BACKWARD_ERROR_TOLERANCE,
             maximum_subspace_iterations: 256,
             maximum_subspace_dimension: 256,
         }
     }
 
+    /// A preview qualification: the backward error at 1e-8.
     pub const fn exploratory() -> Self {
         Self {
-            relative_residual_tolerance: 5.0e-4,
+            algebraic_measure: AlgebraicAccuracyMeasure::BackwardError,
+            algebraic_tolerance: 1.0e-8,
             maximum_subspace_iterations: 64,
             maximum_subspace_dimension: 64,
         }
     }
 
-    pub const fn with_relative_residual_tolerance(mut self, tolerance: f64) -> Self {
-        self.relative_residual_tolerance = tolerance;
+    /// Gates the modes on `measure` at `tolerance`.
+    pub const fn with_algebraic_accuracy(
+        mut self,
+        measure: AlgebraicAccuracyMeasure,
+        tolerance: f64,
+    ) -> Self {
+        self.algebraic_measure = measure;
+        self.algebraic_tolerance = tolerance;
+        self
+    }
+
+    /// Keeps the measure and changes its tolerance.
+    pub const fn with_algebraic_tolerance(mut self, tolerance: f64) -> Self {
+        self.algebraic_tolerance = tolerance;
         self
     }
 
@@ -83,8 +104,32 @@ impl ModalConvergencePolicy {
         Ok(capacity)
     }
 
-    pub const fn relative_residual_tolerance(self) -> f64 {
-        self.relative_residual_tolerance
+    pub const fn algebraic_measure(self) -> AlgebraicAccuracyMeasure {
+        self.algebraic_measure
+    }
+
+    pub const fn algebraic_tolerance(self) -> f64 {
+        self.algebraic_tolerance
+    }
+
+    /// The figure of a mode this policy gates: its backward error or its relative residual.
+    pub const fn gated_residual(self, relative_residual: f64, backward_error: f64) -> f64 {
+        match self.algebraic_measure {
+            AlgebraicAccuracyMeasure::BackwardError => backward_error,
+            AlgebraicAccuracyMeasure::RelativeResidual => relative_residual,
+        }
+    }
+
+    /// The same measure in the sparse eigensolvers' terms.
+    pub(crate) const fn solver_measure(self) -> runmat_sparse_solvers::eigen::ResidualMeasure {
+        match self.algebraic_measure {
+            AlgebraicAccuracyMeasure::BackwardError => {
+                runmat_sparse_solvers::eigen::ResidualMeasure::BackwardError
+            }
+            AlgebraicAccuracyMeasure::RelativeResidual => {
+                runmat_sparse_solvers::eigen::ResidualMeasure::RelativeResidual
+            }
+        }
     }
 
     pub const fn maximum_subspace_iterations(self) -> usize {
@@ -92,12 +137,12 @@ impl ModalConvergencePolicy {
     }
 
     pub(crate) fn validate(self) -> Result<(), FeaRunError> {
-        if !self.relative_residual_tolerance.is_finite()
-            || self.relative_residual_tolerance <= 0.0
-            || self.relative_residual_tolerance >= 1.0
+        if !self.algebraic_tolerance.is_finite()
+            || self.algebraic_tolerance <= 0.0
+            || self.algebraic_tolerance >= 1.0
         {
             return Err(FeaRunError::InvalidModel(
-                "modal relative residual tolerance must be finite and lie strictly between zero and one"
+                "modal algebraic tolerance must be finite and lie strictly between zero and one"
                     .into(),
             ));
         }

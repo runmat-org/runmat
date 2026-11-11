@@ -47,3 +47,13 @@ pub struct AcousticFrequencyEntryEvidence {
 pub struct StructuralFrequencyResultsData {
     pub publication: runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
 }
+
+impl super::ModalResultsData {
+    /// Normwise backward error of each published mode, beside `residual_norms()`.
+    pub fn backward_errors(&self) -> Vec<f64> {
+        self.mode_indices()
+            .filter_map(|index| self.basis.modes().get(index))
+            .map(|mode| mode.backward_error())
+            .collect()
+    }
+}

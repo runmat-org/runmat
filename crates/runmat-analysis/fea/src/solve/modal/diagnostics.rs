@@ -11,18 +11,24 @@ pub(super) fn push_modal_quality_diagnostics(
     frequencies_hz: &[f64],
     mode_shapes: &[Vec<f64>],
     residual_norms: &[f64],
-    residual_tolerance: f64,
+    backward_errors: &[f64],
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
 ) {
     if !residual_norms.is_empty() {
         let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+        let max_backward_error = backward_errors.iter().copied().fold(0.0_f64, f64::max);
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MODAL_RESIDUAL".to_string(),
-            severity: if max_residual <= residual_tolerance {
+            severity: if convergence.gated_residual(max_residual, max_backward_error)
+                <= convergence.algebraic_tolerance()
+            {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
-            message: format!("max_modal_residual_norm={max_residual}"),
+            message: format!(
+                "max_modal_backward_error={max_backward_error} max_modal_residual_norm={max_residual}"
+            ),
         });
     }
 
@@ -173,5 +179,78 @@ mod tests {
         assert_eq!(metrics.well_separated_mode_pair_count, 1);
         assert_eq!(metrics.cluster_coverage_ratio, 1.0);
         assert!(metrics.min_relative_frequency_separation <= 1.0e-6);
+    }
+}
+
+/// Each mode's frequency, backward error and relative residual under the gate's measure.
+pub(super) fn modal_accuracy_diagnostic(
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    frequencies_hz: &[f64],
+    backward_errors: &[f64],
+    residual_norms: &[f64],
+) -> Option<FeaDiagnostic> {
+    if frequencies_hz.is_empty() {
+        return None;
+    }
+    let modes = frequencies_hz
+        .iter()
+        .zip(backward_errors)
+        .zip(residual_norms)
+        .enumerate()
+        .map(|(index, ((frequency, backward), relative))| {
+            format!(
+                "{{mode={} frequency_hz={frequency} backward_error={backward:e} relative_residual={relative:e}}}",
+                index + 1
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(FeaDiagnostic {
+        code: "FEA_MODAL_ACCURACY".into(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "measure={} tolerance={} modes=[{modes}]",
+            convergence.algebraic_measure().label(),
+            convergence.algebraic_tolerance(),
+        ),
+    })
+}
+
+/// The figures `FEA_MODAL_CONVERGENCE` reports for one modal search.
+pub(super) struct ModalConvergenceFigures {
+    pub requested_mode_count: usize,
+    pub solved_mode_count: usize,
+    pub subspace_dimension: usize,
+    pub iteration_count: usize,
+    pub maximum_gated_residual: f64,
+    pub maximum_backward_error: f64,
+    pub maximum_relative_residual: f64,
+    pub converged: bool,
+}
+
+pub(super) fn modal_convergence_diagnostic(
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    figures: ModalConvergenceFigures,
+) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_MODAL_CONVERGENCE".to_string(),
+        severity: if figures.converged {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "mode_count_requested={} mode_count_solved={} subspace_dimension={} iteration_count={} measure={} tolerance={} maximum_gated_residual={} maximum_backward_error={} maximum_relative_residual={} converged={}",
+            figures.requested_mode_count,
+            figures.solved_mode_count,
+            figures.subspace_dimension,
+            figures.iteration_count,
+            convergence.algebraic_measure().label(),
+            convergence.algebraic_tolerance(),
+            figures.maximum_gated_residual,
+            figures.maximum_backward_error,
+            figures.maximum_relative_residual,
+            figures.converged
+        ),
     }
 }

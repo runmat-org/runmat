@@ -70,6 +70,23 @@ fn modal_case(
     CanonicalStructuralConstraintPlan,
     crate::results::observation::ResolvedObservationPlan,
 ) {
+    modal_case_with(
+        requested_modes,
+        backend,
+        runmat_analysis_core::ModalSolverMethod::Auto,
+    )
+}
+
+fn modal_case_with(
+    requested_modes: usize,
+    backend: ComputeBackend,
+    solver_method: runmat_analysis_core::ModalSolverMethod,
+) -> (
+    StructuralModalWorkload,
+    runmat_meshing_core::SolverMeshArtifact,
+    CanonicalStructuralConstraintPlan,
+    crate::results::observation::ResolvedObservationPlan,
+) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let truncation = ModalTruncationPolicy::requested(requested_modes);
     let mut step = ProcedureStep::structural_modal("modes");
@@ -77,6 +94,14 @@ fn modal_case(
         requested_count: requested_modes,
     };
     step.observations.clear();
+    if solver_method != runmat_analysis_core::ModalSolverMethod::Auto {
+        step.settings = runmat_analysis_core::ProcedureSettings::StructuralModalBasis(
+            runmat_analysis_core::StructuralModalBasisSettings {
+                residual_vector_directions: Vec::new(),
+                solver_method,
+            },
+        );
+    }
     model.sequence.steps = vec![step];
     let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
     let constraints =

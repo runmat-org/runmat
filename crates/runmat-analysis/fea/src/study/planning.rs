@@ -169,6 +169,32 @@ fn linear_workload(
     Ok(workload)
 }
 
+/// The measure and tolerance of the step's algebraic residual criteria: one shared measure,
+/// the tightest relative tolerance.
+fn algebraic_residual_target(
+    step: &ProcedureStep,
+) -> Result<(runmat_analysis_core::AlgebraicAccuracyMeasure, f64), StructuralStudyPlanningError> {
+    let missing = || StructuralStudyPlanningError::MissingAlgebraicResidualTarget {
+        step_id: step.step_id.0.clone(),
+    };
+    let measure = step.accuracy.algebraic_measure().ok_or_else(missing)?;
+    let tolerance = step
+        .accuracy
+        .criteria
+        .iter()
+        .filter(|criterion| {
+            criterion.contribution == ErrorContributionKind::Algebraic
+                && criterion.evidence == measure.evidence()
+        })
+        .filter_map(|criterion| match criterion.tolerance {
+            AccuracyTolerance::Relative(value) => Some(value),
+            AccuracyTolerance::Absolute { .. } => None,
+        })
+        .reduce(f64::min)
+        .ok_or_else(missing)?;
+    Ok((measure, tolerance))
+}
+
 fn relative_accuracy_target(
     step: &ProcedureStep,
     contribution: ErrorContributionKind,

@@ -231,8 +231,8 @@ pub use problem::target::{
 };
 pub use study::accuracy::{
     AccuracyCriterion, AccuracyLimitAction, AccuracyPlan, AccuracyPlanId, AccuracyResourceCeiling,
-    AccuracyTarget, AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy,
-    RequiredAccuracyEvidence, UnavailableEvidencePolicy,
+    AccuracyTarget, AccuracyTolerance, AlgebraicAccuracyMeasure, ErrorContributionKind,
+    NumericalEquivalencePolicy, RequiredAccuracyEvidence, UnavailableEvidencePolicy,
 };
 pub use study::output::{
     sound_pressure_level_db, AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy,
@@ -245,13 +245,14 @@ pub use study::output::{
     SamplingPolicy, SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
     SolverObservationEvent, SpatialReduction, SOUND_PRESSURE_LEVEL_REFERENCE_PA,
 };
+pub use study::modal_solver::ModalSolverMethod;
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,
-    InitialStateConflictPolicy, ModalStaticCorrection, ProcedureSettings, ProcedureStep,
-    ProcedureStepId, ReferenceStatePolicy, RestartPolicy, SequenceBranch, SequenceBranchId,
-    SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId, StateInput,
-    StateKind, StateOutput, StatePersistence, StateSource, StateTransition, StateTransitionMethod,
-    StateUse, StepObjectActivation, StepObjectRef, StructuralKinematics,
+    InitialStateConflictPolicy, ModalStaticCorrection, ProcedureSettings,
+    ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RestartPolicy, SequenceBranch,
+    SequenceBranchId, SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId,
+    StateInput, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,
+    StateTransitionMethod, StateUse, StepObjectActivation, StepObjectRef, StructuralKinematics,
     StructuralModalBasisSettings, StructuralModalFrequencySettings, StructuralNonlinearSettings,
     StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
     ValidatedAnalysisSequence,

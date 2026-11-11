@@ -22,8 +22,8 @@ use crate::solve::dynamics::{DirectHarmonicPolicy, RandomResponseIntegrationPoli
 use crate::solve::transient::StructuralTimeStepPolicy;
 
 use super::{
-    linear_workload, relative_accuracy_target, unsupported, CompiledAnalysisStudy,
-    StructuralStudyPlanningError, StructuralStudyPlanningPolicy,
+    algebraic_residual_target, linear_workload, relative_accuracy_target, unsupported,
+    CompiledAnalysisStudy, StructuralStudyPlanningError, StructuralStudyPlanningPolicy,
 };
 
 pub(super) fn plan(
@@ -283,11 +283,9 @@ fn modal_convergence(
     step: &ProcedureStep,
     policy: StructuralStudyPlanningPolicy,
 ) -> Result<ModalConvergencePolicy, StructuralStudyPlanningError> {
+    let (measure, tolerance) = algebraic_residual_target(step)?;
     Ok(ModalConvergencePolicy::production()
-        .with_relative_residual_tolerance(relative_accuracy_target(
-            step,
-            ErrorContributionKind::Algebraic,
-        )?)
+        .with_algebraic_accuracy(measure, tolerance)
         .with_maximum_subspace_iterations(policy.numerics.maximum_modal_iterations)
         .with_maximum_subspace_dimension(policy.numerics.maximum_modal_subspace_dimension))
 }

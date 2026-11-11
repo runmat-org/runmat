@@ -38,6 +38,8 @@ export const VOCABULARY = [
     { id: "retained states", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/lower.rs", from: /./, to: /$^/, pattern: /statements, "([a-z_]+)", diagnostics/g },
     { id: "assessment evidence", scope: "constant.language.fea", authoring: "EnumValue" },
     { id: "modal static corrections", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/modal_reduction.rs", from: /fn static_correction_kind\(/, to: /_ => None/, pattern: /"([a-z_]+)" => Some\(ModalStaticCorrection/g },
+    { id: "modal solver methods", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/modal_reduction.rs", from: /fn modal_solver_method\(/, to: /_ => None/, pattern: /"([a-z_]+)" => Some\(ModalSolverMethod/g },
+    { id: "algebraic measures", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/accuracy.rs", from: /fn algebraic_measure\(/, to: /_ => None/, pattern: /"([a-z_]+)" => Some\(AlgebraicAccuracyMeasure/g },
     { id: "output policies", scope: "constant.language.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/output/policy.rs", from: /fn parse_precision\(/, to: /fn enum_name\(/, pattern: /^\s*"([a-z_0-9]+)"(?: if [^\n]*?)? =>/gm },
     ...SURFACES.map(({ kind, registry }) => ({ id: `${kind}s`, scope: "support.function.fea", ...registry })),
     { id: "field locations", scope: "constant.language.fea", ...REGISTRIES.find(registry => registry.id === "field locations") },

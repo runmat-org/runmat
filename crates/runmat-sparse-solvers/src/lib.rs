@@ -24,6 +24,7 @@
 //! Threading: work runs on the caller's installed Rayon pool (see `runmat-cpu-execution`). The
 //! crate never creates a global pool; outside an admitted pool everything runs serially.
 
+pub mod backward_error;
 pub mod control;
 pub mod csr;
 pub mod direct;

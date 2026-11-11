@@ -258,11 +258,11 @@ mod tests {
     #[test]
     fn convergence_policy_rejects_unbounded_or_empty_controls() {
         assert!(ModalConvergencePolicy::production()
-            .with_relative_residual_tolerance(f64::NAN)
+            .with_algebraic_tolerance(f64::NAN)
             .validate()
             .is_err());
         assert!(ModalConvergencePolicy::production()
-            .with_relative_residual_tolerance(1.0)
+            .with_algebraic_tolerance(1.0)
             .validate()
             .is_err());
         assert!(ModalConvergencePolicy::production()

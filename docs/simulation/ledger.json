@@ -2527,6 +2527,25 @@
       ]
     },
     {
+      "id": "accuracy.backward-error-every-solve",
+      "title": "Backward-error accuracy check on every algebraic solve",
+      "kind": "language",
+      "area": "language",
+      "status": "pending",
+      "acceptance": "Static, thermal, electrostatic, magnetostatic and harmonic solves, each transient step and each Newton linearization check the normwise backward error at 1e-12 by default and publish it beside the relative residual; `algebraic_measure = relative_residual` keeps the relative-residual check.",
+      "owner": "q-modal-scale",
+      "gaps": [
+        "G32"
+      ],
+      "witness": [
+        "runmat check <structural static with accuracy { algebraic_measure = backward_error }>.fea"
+      ],
+      "requirements": [],
+      "docs": [
+        "language/reference/procedures.md"
+      ]
+    },
+    {
       "id": "output.transmission_loss",
       "title": "Acoustic transmission loss output (`transmission_loss`) between inlet and outlet ports",
       "kind": "output",

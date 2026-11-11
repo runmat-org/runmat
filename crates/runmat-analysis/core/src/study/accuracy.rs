@@ -76,7 +76,13 @@ pub enum RequiredAccuracyEvidence {
     APosterioriEstimator,
     ConvergenceStudy,
     ConservationBalance,
+    /// A relative residual of the solved equations, normalized as each producer documents.
     ResidualBound,
+    /// The normwise backward error of the computed solution in the ∞-norm:
+    /// `‖b − A x‖ / (‖A‖ ‖x‖ + ‖b‖)` for a linear system and
+    /// `‖K x − θ M x‖ / ((‖K‖ + |θ| ‖M‖) ‖x‖)` for an eigenpair. See
+    /// [`AlgebraicAccuracyMeasure::BackwardError`].
+    BackwardErrorBound,
     ReferenceComparison,
     StatisticalConfidence,
     TransferBound,
@@ -152,7 +158,90 @@ impl AccuracyResourceCeiling {
     }
 }
 
+/// The measure the mandatory algebraic criterion of a step applies its tolerance to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlgebraicAccuracyMeasure {
+    /// Normwise backward error in the ∞-norm (Rigal–Gaches for linear systems; Tisseur 2000
+    /// for eigenpairs): the smallest relative change of the operators (and load) for which the
+    /// computed answer is exact. It is invariant to scaling and does not grow with the
+    /// conditioning of the mesh, so one tolerance means the same on every model. The default
+    /// tolerance, [`AlgebraicAccuracyMeasure::BACKWARD_ERROR_TOLERANCE`], is 1e-12: backward-
+    /// stable direct and converged iterative solvers return about the unit roundoff
+    /// (u ≈ 1.1e-16) in this measure, and the evaluation of `A x` itself is uncertain by up to
+    /// `m · u` for rows of `m` entries (a few 1e-14 for quadratic solid elements). 1e-12 sits
+    /// above that floor and keeps the qualified pair exact for operators within 1e-12 of the
+    /// assembled ones, far below the uncertainty of any material or geometric input.
+    BackwardError,
+    /// Euclidean residual relative to the terms that form it, `‖r‖ / ‖b‖` or
+    /// `‖K x − θ M x‖ / (‖K x‖ + |θ| ‖M x‖)`, with tolerance 1e-8 by default. Its floor in
+    /// double precision is about `u · κ`, so it can refuse a correct answer on a fine mesh.
+    RelativeResidual,
+}
+
+impl AlgebraicAccuracyMeasure {
+    pub const BACKWARD_ERROR_TOLERANCE: f64 = 1.0e-12;
+    pub const RELATIVE_RESIDUAL_TOLERANCE: f64 = 1.0e-8;
+
+    /// The evidence an algebraic criterion in this measure requires.
+    pub const fn evidence(self) -> RequiredAccuracyEvidence {
+        match self {
+            Self::BackwardError => RequiredAccuracyEvidence::BackwardErrorBound,
+            Self::RelativeResidual => RequiredAccuracyEvidence::ResidualBound,
+        }
+    }
+
+    pub const fn from_evidence(evidence: RequiredAccuracyEvidence) -> Option<Self> {
+        match evidence {
+            RequiredAccuracyEvidence::BackwardErrorBound => Some(Self::BackwardError),
+            RequiredAccuracyEvidence::ResidualBound => Some(Self::RelativeResidual),
+            _ => None,
+        }
+    }
+
+    pub const fn default_tolerance(self) -> f64 {
+        match self {
+            Self::BackwardError => Self::BACKWARD_ERROR_TOLERANCE,
+            Self::RelativeResidual => Self::RELATIVE_RESIDUAL_TOLERANCE,
+        }
+    }
+
+    /// The `.fea` spelling.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::BackwardError => "backward_error",
+            Self::RelativeResidual => "relative_residual",
+        }
+    }
+}
+
 impl AccuracyPlan {
+    /// The measure of the plan's mandatory algebraic residual criteria, when they share one.
+    pub fn algebraic_measure(&self) -> Option<AlgebraicAccuracyMeasure> {
+        let mut measures = self
+            .criteria
+            .iter()
+            .filter(|criterion| criterion.contribution == ErrorContributionKind::Algebraic)
+            .filter_map(|criterion| AlgebraicAccuracyMeasure::from_evidence(criterion.evidence));
+        let first = measures.next()?;
+        measures.all(|measure| measure == first).then_some(first)
+    }
+
+    /// Moves every algebraic residual criterion to `measure` with that measure's default
+    /// tolerance. Returns false, changing nothing, when the plan has no such criterion.
+    pub fn set_algebraic_measure(&mut self, measure: AlgebraicAccuracyMeasure) -> bool {
+        let mut changed = false;
+        for criterion in self.criteria.iter_mut().filter(|criterion| {
+            criterion.contribution == ErrorContributionKind::Algebraic
+                && AlgebraicAccuracyMeasure::from_evidence(criterion.evidence).is_some()
+        }) {
+            criterion.evidence = measure.evidence();
+            criterion.tolerance = AccuracyTolerance::Relative(measure.default_tolerance());
+            changed = true;
+        }
+        changed
+    }
+
     /// Baseline plan: a mandatory relative algebraic residual bound of 1e-8. Every solver produces
     /// that evidence, so a result without it is indeterminate and is not published; a study may
     /// opt into publishing such results, labeled indeterminate, with `MarkIndeterminate`.

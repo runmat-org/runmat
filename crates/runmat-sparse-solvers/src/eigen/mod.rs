@@ -21,6 +21,7 @@ mod inertia;
 mod lanczos;
 mod lobpcg;
 
+pub use crate::backward_error::{eigenpair_backward_error, ResidualMeasure};
 pub use inertia::{pencil_inertia_estimate, PencilInertia, PencilInertiaEstimate};
 pub use lanczos::Selection;
 pub use lobpcg::{lobpcg, lobpcg_block_size, lobpcg_working_value_count, LobpcgOptions};
@@ -93,9 +94,12 @@ pub struct EigenResult {
     pub values: Vec<f64>,
     /// `n × values.len()` column-major, normalized in the problem's inner product.
     pub vectors: Vec<f64>,
-    /// True relative residuals `‖A x − λ B x‖ / (‖A x‖ + |λ| ‖B x‖)`; for [`buckling`], the
+    /// True relative residuals `‖A x − λ B x‖₂ / (‖A x‖₂ + |λ| ‖B x‖₂)`; for [`buckling`], the
     /// relative load-factor error bound `‖K φ − λ (−K_G) φ‖_{K⁻¹} / ‖φ‖_K`.
     pub residuals: Vec<f64>,
+    /// Normwise backward errors `‖A x − λ B x‖_∞ / ((‖A‖_∞ + |λ| ‖B‖_∞) ‖x‖_∞)` of the same
+    /// pairs ([`eigenpair_backward_error`]); for [`buckling`], of the pencil `(K, −K_G)`.
+    pub backward_errors: Vec<f64>,
     pub converged: bool,
     pub restarts: usize,
     pub operator_applications: usize,
@@ -218,13 +222,15 @@ fn dense_generalized(a: CsrRef<'_, f64>, b: CsrRef<'_, f64>) -> SolverResult<(Ve
     Ok((values, x))
 }
 
+/// The relative residual (2-norm) and the normwise backward error (∞-norm) of each pair.
 fn true_residuals(
     a: CsrRef<'_, f64>,
     b: CsrRef<'_, f64>,
     values: &[f64],
     vectors: &[f64],
-) -> Vec<f64> {
+) -> (Vec<f64>, Vec<f64>) {
     let n = a.nrows();
+    let (a_norm, b_norm) = (a.norm_inf(), b.norm_inf());
     let mut ax = vec![0.0; n];
     let mut bx = vec![0.0; n];
     values
@@ -236,9 +242,18 @@ fn true_residuals(
             b.spmv(x, &mut bx);
             let (na, nb) = (par::norm2(&ax), par::norm2(&bx));
             par::axpy(-lambda, &bx, &mut ax);
-            par::norm2(&ax) / (na + lambda.abs() * nb).max(f64::MIN_POSITIVE)
+            (
+                par::norm2(&ax) / (na + lambda.abs() * nb).max(f64::MIN_POSITIVE),
+                eigenpair_backward_error(
+                    par::norm_inf(&ax),
+                    lambda,
+                    a_norm,
+                    b_norm,
+                    par::norm_inf(x),
+                ),
+            )
         })
-        .collect()
+        .unzip()
 }
 
 /// `K x = λ M x`: the `count` eigenvalues nearest above the shift (lowest modes by default).
@@ -371,12 +386,13 @@ pub fn modal_with_factor(
     for (c, &i) in order.iter().enumerate() {
         vectors[c * n..(c + 1) * n].copy_from_slice(&output.vectors[i * n..(i + 1) * n]);
     }
-    let residuals = true_residuals(k, m, &values, &vectors);
+    let (residuals, backward_errors) = true_residuals(k, m, &values, &vectors);
     Ok(EigenResult {
         converged: output.converged >= count,
         values,
         vectors,
         residuals,
+        backward_errors,
         restarts: output.restarts,
         operator_applications: output.operator_applications,
         shift,
@@ -429,12 +445,13 @@ fn dense_modal(
             vectors[c * n + j] = x[j] / norm;
         }
     }
-    let residuals = true_residuals(k, m, &values, &vectors);
+    let (residuals, backward_errors) = true_residuals(k, m, &values, &vectors);
     Ok(EigenResult {
         converged: values.len() == count,
         values,
         vectors,
         residuals,
+        backward_errors,
         restarts: 0,
         operator_applications: 0,
         shift,
@@ -655,11 +672,13 @@ fn solve_buckling(
         )
     };
     let residuals = buckling_residuals(k, negative_kg.as_ref(), solver, &values, &vectors)?;
+    let (_, backward_errors) = true_residuals(k, negative_kg.as_ref(), &values, &vectors);
     Ok(EigenResult {
         converged: lanczos_converged && values.len() == count,
         values,
         vectors,
         residuals,
+        backward_errors,
         restarts,
         operator_applications,
         shift: 0.0,
@@ -776,12 +795,14 @@ pub fn symmetric_extreme(
         for (c, &i) in order.iter().enumerate() {
             picked_vectors[c * n..(c + 1) * n].copy_from_slice(&vectors[i * n..(i + 1) * n]);
         }
-        let residuals = true_residuals(a, identity.as_ref(), &picked, &picked_vectors);
+        let (residuals, backward_errors) =
+            true_residuals(a, identity.as_ref(), &picked, &picked_vectors);
         return Ok(EigenResult {
             converged: true,
             values: picked,
             vectors: picked_vectors,
             residuals,
+            backward_errors,
             restarts: 0,
             operator_applications: 0,
             shift: 0.0,
@@ -806,12 +827,14 @@ pub fn symmetric_extreme(
     };
     let apply_b = |x: &[f64], y: &mut [f64], _cols: usize| y.copy_from_slice(x);
     let output = thick_restart_block_lanczos(&config, &mut apply_op, &apply_b, control)?;
-    let residuals = true_residuals(a, identity.as_ref(), &output.theta, &output.vectors);
+    let (residuals, backward_errors) =
+        true_residuals(a, identity.as_ref(), &output.theta, &output.vectors);
     Ok(EigenResult {
         converged: output.converged >= count,
         values: output.theta,
         vectors: output.vectors,
         residuals,
+        backward_errors,
         restarts: output.restarts,
         operator_applications: output.operator_applications,
         shift: 0.0,

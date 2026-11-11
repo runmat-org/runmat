@@ -264,6 +264,7 @@ pub const FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS: &str = "modal.cumulative_ef
 pub const FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO: &str = "modal.cumulative_mass_ratio";
 pub const FEA_FIELD_MODAL_TOTAL_FREE_MASS: &str = "modal.total_free_mass";
 pub const FEA_FIELD_MODAL_RESIDUAL_NORM: &str = "modal.residual_norm";
+pub const FEA_FIELD_MODAL_BACKWARD_ERROR: &str = "modal.backward_error";
 pub const FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION: &str =
     "modal.relative_frequency_separation";
 pub const FEA_FIELD_MODAL_M_ORTHOGONALITY: &str = "modal.m_orthogonality";

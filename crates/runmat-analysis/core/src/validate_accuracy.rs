@@ -183,6 +183,7 @@ fn validate_evidence(
         C::Algebraic | C::Nonlinear => matches!(
             criterion.evidence,
             E::ResidualBound
+                | E::BackwardErrorBound
                 | E::ConvergenceStudy
                 | E::ConservationBalance
                 | E::ReferenceComparison
@@ -220,7 +221,7 @@ fn validate_evidence(
         C::Precision | C::ExecutionEquivalence => {
             matches!(
                 criterion.evidence,
-                E::ReferenceComparison | E::ResidualBound
+                E::ReferenceComparison | E::ResidualBound | E::BackwardErrorBound
             )
         }
     };

@@ -10,6 +10,7 @@ mod formulation;
 mod identity;
 pub mod output;
 mod realization;
+pub mod modal_solver;
 pub mod sequence;
 mod sweep;
 

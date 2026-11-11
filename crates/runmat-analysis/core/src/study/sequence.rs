@@ -121,12 +121,12 @@ pub enum ProcedureSettings {
     StructuralModalFrequency(StructuralModalFrequencySettings),
 }
 
-/// Inertia residual vectors of a structural modal basis: for each global direction, the static
-/// response to a unit acceleration load in that direction with the retained modes removed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// A modal extraction's eigensolver and its inertia residual-vector directions (modal_solver.rs).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
 pub struct StructuralModalBasisSettings {
     pub residual_vector_directions: Vec<crate::SpectrumDirection>,
+    pub solver_method: super::modal_solver::ModalSolverMethod,
 }
 
 /// Static correction of a modal-reduced frequency sweep.
@@ -429,7 +429,7 @@ impl ProcedureStep {
     ) -> Self {
         let step_id = step_id.into();
         Self {
-            accuracy: AccuracyPlan::baseline(format!("{step_id}.accuracy")),
+            accuracy: Self::default_accuracy(&step_id, family, procedure),
             step_id: ProcedureStepId(step_id),
             family,
             procedure,
