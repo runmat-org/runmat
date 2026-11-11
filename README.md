@@ -36,7 +36,7 @@ RunMat is free for eligible individuals, education, open-source projects and sma
 
 Key Capabilities:
 
-- MATLAB Compatibility: Supports MATLAB-syntax scripts and projects, including arrays, functions, classes, packages, and [1,000+ documented built-in functions](https://runmat.com/docs/reference/builtins).
+- MATLAB Compatibility: Supports MATLAB-syntax scripts and projects, including arrays, functions, classes, packages, and [2,300+ documented built-in functions](https://runmat.com/docs/reference/builtins).
 - Native Compilation: [Compile `.m` scripts into standalone native executables](https://runmat.com/docs/runtime/getting-started/cli#compile) with `runmat compile`.
 - Code Checks and Tests: [Check code without executing it](https://runmat.com/docs/runtime/getting-started/cli#check) with `runmat check`, and [run MATLAB-style script, function, and class tests](https://runmat.com/docs/runtime/getting-started/cli#test-projects) with `runmat test`.
 - Integer Support: Work with signed and unsigned integer types from 8 to 64 bits.
@@ -263,6 +263,26 @@ grid on;
 ![RunMat 3D plotting demo](.github/assets/runmat-sandbox-3d-plotting.gif)
 
 See [Plotting System](docs/plotting/index.md).
+
+## Mechanical Design, Electrical Design and Simulation
+
+RunMat 0.7.1 includes file-based engineering workflows alongside MATLAB-syntax
+programs:
+
+- Mechanical design uses `.part`, `.assembly` and `.drawing` files for
+  parametric parts, assemblies, drawing views, dimensions and parts lists.
+  See [Mechanical Design](docs/design/mcad/get-started.md).
+- Electrical design uses `.circuit` and `.circuit.layout` files for schematics,
+  board layouts and circuit simulation. See
+  [Electrical Design](docs/design/ecad/get-started.md).
+- FEA studies define geometry, materials, loads, constraints and solver settings
+  in `.fea` files. See [Simulation](docs/simulation/index.md) for supported
+  physics, examples and simulation-work measurement.
+
+Mechanical design, electrical design and FEA are in beta. The guides describe
+the supported workflows and their current limits. FEA meshing and solving
+require sign-in, a connection to RunMat Server and an available simulation
+allowance; ordinary local `.m` execution works offline.
 
 ## Documentation
 
