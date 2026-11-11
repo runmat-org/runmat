@@ -306,13 +306,10 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             .when(bodies_exist())
             .edit(add_feature_variant("body_op", "op", "delete")),
         cmd("part.body-scale", "Scale body", "scale", P)
-            .desc("Scale bodies about a point.")
+            .desc("Scale bodies about the origin by one factor.")
             .inputs(vec![
                 picks("bodies", "Bodies", &[K::Body]),
-                choice("about", "About", &[("centroid", "Centroid"), ("origin", "Origin"), ("point", "Point")]),
-                pick("point", "Point", &[K::Point, K::Vertex]).shown("about", &["point"]),
                 qty("factor", "Factor", "scale", Some(1.0)).min(0.0),
-                flag("uniform", "Uniform", true),
             ])
             .when(bodies_exist())
             .preview()

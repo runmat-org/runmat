@@ -59,6 +59,11 @@ pub const UNBUILT: &[&str] = &[
     "assembly.smart-fasteners",
     "assembly.fastener-library",
     "assembly.hole-series",
+    // Mold: shut-off patches and the parting surface have model features, but the forms ask for
+    // what the features don't keep (a patch type; a surface grown from the parting line rather
+    // than a plane), so their forms wait for features that take them.
+    "mold.shut-off",
+    "mold.parting-surface",
     // Direct: relations kept while a face moves.
     "direct.live-relations",
     // Manage.

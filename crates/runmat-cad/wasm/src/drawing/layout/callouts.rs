@@ -427,7 +427,14 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                     if let Some(at) = manual {
                         ctx.out.placed.insert(id.clone(), at);
                         let prims = notes_block(&st, &id, at, &t);
-                        register(ctx, &id, &prims, notes_box(&st, at, &t));
+                        let b = notes_box(&st, at, &t);
+                        // `at` is a sheet position (mm from the sheet's lower left): a note past
+                        // the sheet's edge doesn't print.
+                        let [w, h] = ctx.size;
+                        if b.x0 < 0.0 || b.y0 < 0.0 || b.x1 > w || b.y1 > h {
+                            ctx.finding("note_off_sheet", &aid, format!("Note {aid} at [{:.0}, {:.0}] runs off the {w:.0} x {h:.0} mm sheet; `at` is a sheet position in mm from the lower left", at[0], at[1]));
+                        }
+                        register(ctx, &id, &prims, b);
                         ctx.push(prims);
                         continue;
                     }
