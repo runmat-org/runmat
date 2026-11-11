@@ -54,6 +54,19 @@ pub fn lower_text(text: &str) -> Result<Value, EditFailure> {
     }
 }
 
+/// What a lowered reference names: `edge`, `vertex` or `face`.
+pub fn topo(reference: &Value) -> &'static str {
+    match reference["ref"].as_str() {
+        Some("edges_between") => "edge",
+        Some("vertex_of") => "vertex",
+        Some("piece") => topo(&reference["base"]),
+        _ if reference["kind"] == "edge" => "edge",
+        _ if reference["kind"] == "vertex" => "vertex",
+        _ if reference["kind"] == "body" => "body",
+        _ => "face",
+    }
+}
+
 /// What a part's picks resolve against: its document, and (when a pick names a body by its
 /// index) its display.
 pub struct Picks<'a> {
@@ -164,16 +177,30 @@ impl<'a> Picks<'a> {
         Err(not_a_plane())
     }
 
-    /// An axis: a datum axis, or a linear edge.
+    /// An axis: a datum axis, a straight or circular edge, a cylindrical or conical face, or a
+    /// sketch line (`sketch.<sketch>.<line>`, such as a construction centerline).
     pub fn axis(&self, pick: &str) -> Result<Value, EditFailure> {
+        if let Some((sketch, entity)) = pick
+            .strip_prefix("sketch.")
+            .and_then(|rest| rest.split_once('.'))
+            .filter(|(s, e)| !e.contains('.') && self.kind_of(s) == Some("sketch"))
+        {
+            return Ok(json!({ "along": "sketch_line", "sketch": sketch, "entity": entity }));
+        }
         let v = lower_text(&self.text_of(pick)?)?;
         if v.get("along").is_some() {
             return Ok(v);
         }
         if v.get("ref").is_some() {
-            return Ok(json!({ "along": "edge", "edge": v }));
+            return Ok(match topo(&v) {
+                "edge" => json!({ "along": "edge", "edge": v }),
+                "face" => json!({ "along": "face", "face": v }),
+                other => return Err(model(format!("`{pick}` is a {other}, which gives no axis"))),
+            });
         }
-        Err(model(format!("`{pick}` isn't an axis or an edge")))
+        Err(model(format!(
+            "`{pick}` isn't an axis, an edge, a cylindrical face or a sketch line"
+        )))
     }
 
     /// A point: a datum point, a vertex, or a sketch point (a point entity, an arc's or circle's

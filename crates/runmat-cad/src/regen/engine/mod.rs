@@ -9,6 +9,7 @@ mod references;
 mod inputs;
 mod compile;
 mod apply;
+mod blend_edges;
 mod sketch_status;
 mod profiles;
 pub(crate) use profiles::profile_loops;
@@ -23,7 +24,7 @@ use crate::metering::{FeatureWork, NoUsageMeter, SolveOutcome, Stopwatch, UsageE
 use crate::model::datum::{add, cross, dot, normalize, scale, sub};
 use crate::model::*;
 use crate::pmi::{resolve_pmi_with, ResolvedPmi};
-use crate::refs::history::{OperandEntity, SurfaceKind, Topology};
+use crate::refs::history::{EdgeCurve, OperandEntity, SurfaceKind, Topology};
 use crate::refs::lock::{ItemPath, LockSection};
 use crate::refs::naming::{
     cad_names_for_import, edge_name, name_outputs, BodyNames, NamingContext, NamingOutput,

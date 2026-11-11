@@ -191,6 +191,7 @@ pub(super) fn build_topology(s: &mut FakeSolid) {
                         start: wa,
                         end: wb,
                         length: (wb[r.along] - wa[r.along]).abs(),
+                        curve: EdgeCurve::Line,
                     },
                     laminar: false,
                 },
@@ -222,6 +223,7 @@ pub(super) fn build_topology(s: &mut FakeSolid) {
             .filter(|(_, n)| **n == 1)
             .map(|(p, _)| *p)
             .collect();
+        let straight = ends.len() == 2 && members.iter().all(|m| split_runs[*m].along == r.along);
         let (wa, wb) = match ends.as_slice() {
             [a, b] => (world(*a), world(*b)),
             _ => {
@@ -236,6 +238,11 @@ pub(super) fn build_topology(s: &mut FakeSolid) {
                     start: wa,
                     end: wb,
                     length,
+                    curve: if straight {
+                        EdgeCurve::Line
+                    } else {
+                        EdgeCurve::Other
+                    },
                 },
                 laminar: false,
             },
@@ -406,6 +413,11 @@ pub(super) fn build_topology(s: &mut FakeSolid) {
                             start,
                             end: finish,
                             length,
+                            curve: if dec.role == Role::Chamfer {
+                                EdgeCurve::Line
+                            } else {
+                                EdgeCurve::Other
+                            },
                         },
                         laminar: false,
                     },

@@ -90,7 +90,6 @@ pub(super) fn rows(catalog: &Catalog) -> EditorRows {
                                     ("variable", "Variable radius fillet"),
                                     ("face", "Face fillet"),
                                     ("full_round", "Full round fillet"),
-                                    ("setback", "Setback fillet"),
                                 ],
                             ),
                             c("part.chamfer"),

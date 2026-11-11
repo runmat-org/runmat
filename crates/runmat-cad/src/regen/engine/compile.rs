@@ -189,27 +189,7 @@ impl<'a, 'b> Run<'a, 'b> {
                         self.axis(i, id, "edge", &AxisRef::Edge { edge: edge.clone() })?
                     }
                     AxisDef::OfFace { face } => {
-                        let r = self.single(i, id, "face", face, Some(TopoKind::Face))?;
-                        let h = *r.entities().iter().next().expect("one");
-                        match self.st.bodies[h.body as usize].topology.faces[h.index as usize]
-                            .geom
-                            .surface
-                        {
-                            SurfaceKind::Cylinder {
-                                axis_point,
-                                axis_direction,
-                                ..
-                            } => (axis_point, axis_direction),
-                            _ => {
-                                return Err(self.error(
-                                    id,
-                                    Some("face"),
-                                    DiagCode::RefKindMismatch,
-                                    format!("`{}` is not cylindrical", face),
-                                    Vec::new(),
-                                ))
-                            }
-                        }
+                        self.axis(i, id, "face", &AxisRef::Face { face: face.clone() })?
                     }
                     _ => unreachable!("handled by compile_family"),
                 };

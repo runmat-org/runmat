@@ -152,32 +152,31 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 flag("cosmetic_thread", "Cosmetic thread", true),
                 pick("face", "Face", &[K::Face]),
                 list("positions", "Positions", pick("position", "Position", &[K::SketchPoint, K::Vertex, K::Point]).drag(Manipulator::Point)),
-                flag("series", "Hole series across parts", false),
+                flag("series", "Through every body the hole crosses", false),
             ])
             .when(bodies_exist())
             .preview()
             .edit(add_feature("hole")),
         cmd("part.fillet", "Fillet", "fillet", P)
-            .desc("Round edges or blend faces: constant, variable, face, full round or setback.")
+            .desc("Round edges, faces or a feature's edges, or blend faces: constant, variable, face or full round.")
             .kw(&["round", "blend", "radius"])
             .inputs(vec![
-                choice("type", "Type", &[("constant", "Constant radius"), ("variable", "Variable radius"), ("face", "Face fillet"), ("full_round", "Full round"), ("setback", "Setback")]),
+                choice("type", "Type", &[("constant", "Constant radius"), ("variable", "Variable radius"), ("face", "Face fillet"), ("full_round", "Full round")]),
                 picks("edges", "Edges and faces", &[K::Edge, K::Face, K::Feature]),
-                length("radius", "Radius", 2.0).shown("type", &["constant", "face", "setback"]).drag(Manipulator::Radius),
+                length("radius", "Radius", 2.0).shown("type", &["constant", "face"]).drag(Manipulator::Radius),
                 list("radii", "Radii at vertices", length("radius", "Radius", 2.0)).shown("type", &["variable"]),
                 choice("profile", "Profile", &[("circular", "Circular"), ("conic", "Conic"), ("curvature", "Curvature continuous")]),
-                length("setback", "Setback distance", 3.0).shown("type", &["setback"]),
                 flag("tangent_propagation", "Tangent propagation", true),
             ])
             .when(bodies_exist())
             .preview()
             .edit(add_feature("fillet")),
         cmd("part.chamfer", "Chamfer", "chamfer", P)
-            .desc("Bevel edges or vertices by distance and angle or two distances.")
+            .desc("Bevel edges, faces, a feature's edges or vertices by distance and angle or two distances.")
             .kw(&["bevel"])
             .inputs(vec![
                 choice("type", "Type", &[("distance_angle", "Distance and angle"), ("distance_distance", "Two distances"), ("equal", "Equal distance"), ("vertex", "Vertex")]),
-                picks("edges", "Edges", &[K::Edge, K::Vertex, K::Face]),
+                picks("edges", "Edges, faces or features", &[K::Edge, K::Face, K::Feature, K::Vertex]),
                 length("distance", "Distance", 1.0).drag(Manipulator::Arrow),
                 length("distance2", "Second distance", 1.0).shown("type", &["distance_distance", "vertex"]),
                 angle("angle", "Angle", 45.0).shown("type", &["distance_angle"]),
@@ -194,7 +193,8 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 picks("open_faces", "Faces to remove", &[K::Face]).optional(),
                 length("thickness", "Thickness", 2.0).drag(Manipulator::Arrow),
                 flag("outward", "Shell outward", false),
-                list("face_thickness", "Other thicknesses", length("thickness", "Thickness", 3.0)).optional(),
+                picks("thick_faces", "Faces with their own thickness", &[K::Face]).optional(),
+                length("face_thickness", "Their thickness", 3.0).if_filled("thick_faces"),
             ])
             .when(bodies_exist())
             .preview()
@@ -256,7 +256,6 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             .inputs(vec![
                 pick("plane", "Mirror plane", &[K::Plane, K::Face]),
                 picks("seeds", "Features, faces or bodies", &[K::Feature, K::Face, K::Body]),
-                flag("merge", "Merge result", true),
             ])
             .when(bodies_exist())
             .preview()
@@ -278,7 +277,6 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             .inputs(vec![
                 pick("body", "Body", &[K::Body]),
                 pick("tool", "Split with", &[K::Plane, K::Face]),
-                flag("keep_all", "Keep all pieces", true),
             ])
             .when(bodies_exist())
             .preview()

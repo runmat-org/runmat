@@ -307,8 +307,8 @@ This file is generated from the command catalog.
   - Required: `faces` (picks: face); `motion` (one of `translate`, `rotate`, `normal`, default `translate`); `distance` (number in mm, default 1); `direction` (pick: edge or axis or plane) when `motion` is translate; `axis` (pick: axis or edge) when `motion` is rotate; `angle` (number in deg, default 0) when `motion` is rotate
 - `direct.offset-face`: Offset faces along their normals.
   - Required: `faces` (picks: face); `distance` (number in mm, default 1)
-- `direct.pull`: Push or pull faces and edges; adds or removes material.
-  - Required: `faces` (picks: face or edge); `distance` (number in mm, default 1)
+- `direct.pull`: Push or pull faces; adds or removes material.
+  - Required: `faces` (picks: face); `distance` (number in mm, default 1)
 - `direct.replace-face`: Replace faces with another face or surface.
   - Required: `faces` (picks: face); `with` (pick: face)
 
@@ -590,8 +590,8 @@ This file is generated from the command catalog.
 - `part.boundary`: Make a solid from curves in two directions.
   - Required: `direction1` (picks: sketch or curve or edge); `op` (one of `add`, `remove`, `intersect`, `new`, default `add`)
   - Optional: `direction2` (picks: sketch or curve or edge); `merge` (pick: body) when `op` is add or remove or intersect
-- `part.chamfer`: Bevel edges or vertices by distance and angle or two distances.
-  - Required: `type` (one of `distance_angle`, `distance_distance`, `equal`, `vertex`, default `distance_angle`); `edges` (picks: edge or vertex or face); `distance` (number in mm, default 1); `distance2` (number in mm, default 1) when `type` is distance_distance or vertex; `angle` (number in deg, default 45) when `type` is distance_angle
+- `part.chamfer`: Bevel edges, faces, a feature's edges or vertices by distance and angle or two distances.
+  - Required: `type` (one of `distance_angle`, `distance_distance`, `equal`, `vertex`, default `distance_angle`); `edges` (picks: edge or face or feature or vertex); `distance` (number in mm, default 1); `distance2` (number in mm, default 1) when `type` is distance_distance or vertex; `angle` (number in deg, default 45) when `type` is distance_angle
   - Optional: `flip` (true or false, default false)
 - `part.coordinate-system`: Add a coordinate system from an origin and axes, or on a planar face.
   - Required: `type` (one of `axes`, `face`, default `axes`); `origin` (pick: vertex or point) when `type` is axes; `z` (pick: edge or axis) when `type` is axes; `face` (pick: face) when `type` is face
@@ -628,8 +628,8 @@ This file is generated from the command catalog.
 - `part.extrude`: Extend a profile along a direction to add, cut or intersect material.
   - Required: `profile` (picks: sketch region or sketch or face); `op` (one of `add`, `remove`, `intersect`, `new`, default `add`); `from` (one of `sketch_plane`, `surface`, `vertex`, `offset`, default `sketch_plane`); `from_face` (pick: face) when `from` is surface; `from_vertex` (pick: vertex or point) when `from` is vertex; `from_offset` (number in mm, default 5) when `from` is offset; `end` (one of `blind`, `through_all`, `up_to_next`, `up_to_vertex`, `up_to_face`, `up_to_plane`, `offset_from_face`, `up_to_body`, `mid_plane`, default `blind`); `distance` (number in mm, default 10) when `end` is blind or mid_plane or offset_from_face; `up_to` (pick: face or vertex or body or plane) when `end` is up_to_vertex or up_to_face or up_to_plane or offset_from_face or up_to_body; `second_end` (one of `blind`, `through_all`, `up_to_next`, `up_to_vertex`, `up_to_face`, `up_to_plane`, `offset_from_face`, `up_to_body`, `mid_plane`, default `blind`) when `second_direction` is true; `second_distance` (number in mm, default 10) when `second_direction` is true; `second_up_to` (pick: face or vertex or body or plane) when `second_direction` is true; `draft_angle` (number in deg, default 0) when `draft` is true; `thin_thickness` (number in mm, default 1) when `thin` is true; `thin_side` (one of `one`, `mid`, `two`, default `one`) when `thin` is true
   - Optional: `flip` (true or false, default false); `second_direction` (true or false, default false); `draft` (true or false, default false); `draft_outward` (true or false, default false) when `draft` is true; `thin` (true or false, default false); `merge` (pick: body) when `op` is add or remove or intersect
-- `part.fillet`: Round edges or blend faces: constant, variable, face, full round or setback.
-  - Required: `type` (one of `constant`, `variable`, `face`, `full_round`, `setback`, default `constant`); `edges` (picks: edge or face or feature); `radius` (number in mm, default 2) when `type` is constant or face or setback; `radii` (list of number in mm, default 2) when `type` is variable; `profile` (one of `circular`, `conic`, `curvature`, default `circular`); `setback` (number in mm, default 3) when `type` is setback
+- `part.fillet`: Round edges, faces or a feature's edges, or blend faces: constant, variable, face or full round.
+  - Required: `type` (one of `constant`, `variable`, `face`, `full_round`, default `constant`); `edges` (picks: edge or face or feature); `radius` (number in mm, default 2) when `type` is constant or face; `radii` (list of number in mm, default 2) when `type` is variable; `profile` (one of `circular`, `conic`, `curvature`, default `circular`)
   - Optional: `tangent_propagation` (true or false, default true)
 - `part.hide`: Hide the selected items in the view, or show them again.
   - Runs on the `selection`: `feature`, `sketch`, `body`
@@ -648,7 +648,6 @@ This file is generated from the command catalog.
   - Optional: `flip` (true or false, default false)
 - `part.mirror`: Mirror features, faces or bodies about a plane.
   - Required: `plane` (pick: plane or face); `seeds` (picks: feature or face or body)
-  - Optional: `merge` (true or false, default true)
 - `part.move-down`: Move the feature one place later in the tree.
   - Runs on the `selection`: `feature`
 - `part.move-up`: Move the feature one place earlier in the tree.
@@ -682,8 +681,8 @@ This file is generated from the command catalog.
 - `part.section-here`: Cut the view through the selected body, face or plane.
   - Runs on the `selection`: `face`, `plane`, `body`
 - `part.shell`: Hollow a body, with different thicknesses on chosen faces.
-  - Required: `body` (pick: body); `thickness` (number in mm, default 2)
-  - Optional: `open_faces` (picks: face); `outward` (true or false, default false); `face_thickness` (list of number in mm, default 3)
+  - Required: `body` (pick: body); `thickness` (number in mm, default 2); `face_thickness` (number in mm, default 3) when `thick_faces` is set
+  - Optional: `open_faces` (picks: face); `outward` (true or false, default false); `thick_faces` (picks: face)
 - `part.show-references`: Show what this item uses and what uses it.
   - Runs on the `selection`: `feature`, `sketch`, `region`, `input`
 - `part.sketch`: Start a sketch on a plane or planar face.
@@ -691,7 +690,6 @@ This file is generated from the command catalog.
 - `part.sketch-3d`: Start a sketch in space for paths and routes.
 - `part.split`: Split a body with a plane, face or surface.
   - Required: `body` (pick: body); `tool` (pick: plane or face)
-  - Optional: `keep_all` (true or false, default true)
 - `part.suppress`: Turn the feature off without deleting it.
   - Runs on the `selection`: `feature`, `sketch`
 - `part.sweep`: Move a profile along a path, with guide curves, twist and tangency.

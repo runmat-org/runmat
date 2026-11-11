@@ -60,7 +60,9 @@ impl<'a> Visit<'a> {
     pub fn axis(&mut self, param: &str, a: &'a AxisRef) {
         match a {
             AxisRef::Edge { edge } => self.reference(param, edge),
+            AxisRef::Face { face } => self.reference(param, face),
             AxisRef::Datum { datum } => self.datum(datum),
+            AxisRef::SketchLine { sketch, .. } => self.features.push(sketch.clone()),
         }
     }
     pub fn point(&mut self, param: &str, p: &'a PointRef) {

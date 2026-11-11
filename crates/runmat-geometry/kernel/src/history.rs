@@ -210,6 +210,24 @@ pub struct EdgeGeom {
     pub start: [f64; 3],
     pub end: [f64; 3],
     pub length: f64,
+    /// The edge's curve: a line, a circle or arc (with its centre and axis), or another curve.
+    #[serde(default)]
+    pub curve: EdgeCurve,
+}
+
+/// What kind of curve an edge lies on. A circle's `normal` is its axis direction, with the
+/// sign the kernel's curve gives; an arc of a circle reports the full circle's centre.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum EdgeCurve {
+    Line,
+    Circle {
+        center: [f64; 3],
+        normal: [f64; 3],
+        radius: f64,
+    },
+    #[default]
+    Other,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

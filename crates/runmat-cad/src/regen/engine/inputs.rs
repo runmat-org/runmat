@@ -214,9 +214,84 @@ impl<'a, 'b> Run<'a, 'b> {
                 let r = self.single(i, f, param, edge, Some(TopoKind::Edge))?;
                 let h = *r.entities().iter().next().expect("exactly one");
                 let g = self.st.bodies[h.body as usize].topology.edges[h.index as usize].geom;
-                Ok((g.start, normalize(sub(g.end, g.start))))
+                match g.curve {
+                    EdgeCurve::Line => Ok((g.start, normalize(sub(g.end, g.start)))),
+                    EdgeCurve::Circle { center, normal, .. } => Ok((center, normalize(normal))),
+                    EdgeCurve::Other => Err(self.error(
+                        f,
+                        Some(param),
+                        DiagCode::RefKindMismatch,
+                        format!(
+                            "`{}` is neither straight nor circular, so it gives no axis; pick a \
+                             straight edge, a circular edge, a cylindrical face or a datum axis",
+                            edge
+                        ),
+                        Vec::new(),
+                    )),
+                }
+            }
+            AxisRef::Face { face } => {
+                let r = self.single(i, f, param, face, Some(TopoKind::Face))?;
+                let h = *r.entities().iter().next().expect("exactly one");
+                self.face_axis(&h).ok_or_else(|| {
+                    self.error(
+                        f,
+                        Some(param),
+                        DiagCode::RefKindMismatch,
+                        format!(
+                            "`{}` is neither cylindrical nor bounded by a circle, so it gives no \
+                             axis; pick a cylindrical or conical face, a circular edge or a datum axis",
+                            face
+                        ),
+                        Vec::new(),
+                    )
+                })
+            }
+            AxisRef::SketchLine { sketch, entity } => {
+                self.gate_feature(i, f, sketch, param)?;
+                let line = self.st.sketches.get(sketch).and_then(|(solved, frame)| {
+                    let at = |role| solved.point(entity, role).map(|p| frame.to_world(p));
+                    match (at(PointRole::Start), at(PointRole::End), at(PointRole::Center)) {
+                        (Some(a), Some(b), None) if a != b => Some((a, normalize(sub(b, a)))),
+                        _ => None,
+                    }
+                });
+                line.ok_or_else(|| {
+                    self.error(
+                        f,
+                        Some(param),
+                        DiagCode::RefKindMismatch,
+                        format!(
+                            "`sketch.{}.{}` is not a line of that sketch, so it gives no axis; \
+                             pick a sketch line, such as a construction centerline",
+                            sketch, entity
+                        ),
+                        Vec::new(),
+                    )
+                })
             }
         }
+    }
+
+    /// A face's axis: a cylinder's own, else the axis of a circle on its boundary (a cone, a
+    /// revolved or a turned face). `None` for a face with neither.
+    pub(super) fn face_axis(&self, h: &EntityHandle) -> Option<([f64; 3], [f64; 3])> {
+        let topo = &self.st.bodies[h.body as usize].topology;
+        if let SurfaceKind::Cylinder {
+            axis_point,
+            axis_direction,
+            ..
+        } = topo.faces[h.index as usize].geom.surface
+        {
+            return Some((axis_point, normalize(axis_direction)));
+        }
+        topo.edges
+            .iter()
+            .filter(|e| e.faces.contains(&h.index))
+            .find_map(|e| match e.geom.curve {
+                EdgeCurve::Circle { center, normal, .. } => Some((center, normalize(normal))),
+                _ => None,
+            })
     }
 
     pub(super) fn point(

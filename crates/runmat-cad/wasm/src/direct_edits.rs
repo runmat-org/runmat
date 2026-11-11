@@ -55,7 +55,16 @@ pub fn direct_kind(
     values: &Values,
     picks: &Picks,
 ) -> Result<Option<(&'static str, Value)>, EditFailure> {
-    let faces = || picks.references(&some(values, "faces", "the faces")?);
+    // Direct edits move faces: an edge or vertex pick is refused, naming it.
+    let faces = || -> Result<Vec<Value>, EditFailure> {
+        let refs = picks.references(&some(values, "faces", "the faces")?)?;
+        for (pick, r) in picks_of(values, "faces").iter().zip(&refs) {
+            if crate::picks::topo(r) != "face" {
+                return Err(model(format!("`{pick}` isn't a face; pick the faces to move")));
+            }
+        }
+        Ok(refs)
+    };
     let offset = || -> Result<Value, EditFailure> {
         Ok(json!({ "motion": "offset", "distance": value(values, "distance", "mm")? }))
     };

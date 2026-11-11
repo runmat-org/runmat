@@ -667,6 +667,19 @@ KBody body_payload(const Tracked& t, const TopoDS_Shape& piece, bool sheet) {
     push3(ke.geom, p1.XYZ());
     BRepAdaptor_Curve c(e);
     ke.geom.push_back(GCPnts_AbscissaPoint::Length(c));
+    // The curve kind (0 line, 1 circle, 2 other), then a circle's centre, axis and radius.
+    double curve[8] = {2, 0, 0, 0, 0, 0, 0, 0};
+    if (c.GetType() == GeomAbs_Line) {
+      curve[0] = 0;
+    } else if (c.GetType() == GeomAbs_Circle) {
+      const gp_Circ circ = c.Circle();
+      curve[0] = 1;
+      curve[1] = circ.Location().X(); curve[2] = circ.Location().Y(); curve[3] = circ.Location().Z();
+      curve[4] = circ.Axis().Direction().X(); curve[5] = circ.Axis().Direction().Y();
+      curve[6] = circ.Axis().Direction().Z();
+      curve[7] = circ.Radius();
+    }
+    for (double x : curve) ke.geom.push_back(x);
     k.edges.push_back(std::move(ke));
   }
   TopTools_IndexedDataMapOfShapeListOfShape vertex_edges;
@@ -1078,6 +1091,17 @@ Tracked do_chamfer(const Exec& x, const KInstr& in) {
     for (const TopoDS_Shape& g : mk.Generated(b.edges[i])) {
       if (g.ShapeType() == TopAbs_FACE && faces.Contains(g))
         add_origins(out.faces, g, label(static_cast<std::uint32_t>(edge_base + static_cast<std::int64_t>(i))));
+    }
+  }
+  // Corner patches (three chamfered edges meeting at a vertex) take the vertex they cut.
+  const std::size_t vb_at = static_cast<std::size_t>(4 + 3 * n);
+  if (in.ints.size() > vb_at) {
+    const std::int64_t vertex_base = in.ints[vb_at];
+    for (std::size_t i = 0; i < b.vertices.size(); ++i) {
+      for (const TopoDS_Shape& g : mk.Generated(b.vertices[i])) {
+        if (g.ShapeType() == TopAbs_FACE && faces.Contains(g))
+          add_origins(out.faces, g, label(static_cast<std::uint32_t>(vertex_base + static_cast<std::int64_t>(i))));
+      }
     }
   }
   require_labels(out, "the chamfer");

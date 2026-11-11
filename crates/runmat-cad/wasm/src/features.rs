@@ -384,17 +384,26 @@ fn fillet(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
                 }
                 out["variable"] = Value::Array(variable);
             }
-            if kind == "setback" {
-                let distance = value(values, "setback", "mm")?;
-                out["setbacks"] = vertices
-                    .iter()
-                    .map(|v| Ok(json!({ "vertex": picks.reference(v)?, "distance": distance })))
-                    .collect::<Result<Vec<_>, EditFailure>>()?
-                    .into();
+            if !vertices.is_empty() {
+                return Err(model(
+                    "a fillet rounds edges, faces or a feature's edges; pick those, not vertices",
+                ));
             }
             Ok(out)
         }
     }
+}
+
+/// A shell's walls with their own thickness: the picked faces, at the form's other thickness.
+fn shell_faces(values: &Values, picks: &Picks) -> Result<Vec<Value>, EditFailure> {
+    let faces = picks_of(values, "thick_faces");
+    if faces.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(vec![json!({
+        "faces": picks.references(&faces)?,
+        "thickness": value(values, "face_thickness", "mm")?,
+    })])
 }
 
 fn hole(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
@@ -440,6 +449,10 @@ fn hole(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
         _ if kind == "pipe_tap" => "npt",
         _ => "iso",
     };
+    if flag(values, "series") {
+        // Through every body the hole's axis crosses, in order, ending in the same form.
+        out["series"] = json!({ "bodies": [], "end": out["form"].clone() });
+    }
     if kind == "simple" && values.get("diameter").is_some() {
         out["diameter"] = value(values, "diameter", "mm")?;
     } else {
@@ -569,6 +582,7 @@ pub fn feature_kind(
                     "body": body,
                     "open_faces": picks.references(&open)?,
                     "thickness": value(values, "thickness", "mm")?,
+                    "faces": shell_faces(values, picks)?,
                     "outward": flag(values, "outward"),
                 }),
             )
@@ -846,6 +860,8 @@ pub fn feature_kind(
 
 mod curves;
 mod details;
+#[cfg(test)]
+mod picked_tests;
 
 #[cfg(test)]
 mod tests {

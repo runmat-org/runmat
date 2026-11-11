@@ -1073,8 +1073,8 @@ impl FeatureKind {
             }
         }
         fn axis<'a>(out: &mut Vec<(String, &'a Reference)>, name: &str, a: &'a AxisRef) {
-            if let AxisRef::Edge { edge } = a {
-                out.push((name.to_owned(), edge));
+            if let AxisRef::Edge { edge: r } | AxisRef::Face { face: r } = a {
+                out.push((name.to_owned(), r));
             }
         }
         fn point<'a>(out: &mut Vec<(String, &'a Reference)>, name: &str, p: &'a PointRef) {

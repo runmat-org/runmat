@@ -20,7 +20,7 @@ use runmat_geometry_kernel::analysis::{
 };
 use runmat_geometry_kernel::frame::Frame;
 use runmat_geometry_kernel::history::{
-    BodyRecord, BoundaryRecord, EdgeGeom, EdgeTopo, Evolution, FaceGeom, FaceRecord, FaceTopo,
+    BodyRecord, BoundaryRecord, EdgeCurve, EdgeGeom, EdgeTopo, Evolution, FaceGeom, FaceRecord, FaceTopo,
     HistorySource, KernelTag, OpHistory, OperandEntity, SurfaceKind, Topology, VertexTopo,
 };
 use runmat_geometry_kernel::ids::SketchEntityId;
@@ -424,6 +424,19 @@ fn gen(role: Role, tag: KernelTag, ordinal: Option<u32>) -> HistorySource {
 
 fn of_label(l: &FaceLabel) -> HistorySource {
     gen(l.role, l.tag.clone(), l.ordinal)
+}
+
+/// An edge payload's curve: kind 0 line, 1 circle (centre, axis, radius), else another curve.
+fn edge_curve(g: &[f64]) -> EdgeCurve {
+    match g.get(7..15) {
+        Some([k, ..]) if *k == 0.0 => EdgeCurve::Line,
+        Some([k, cx, cy, cz, nx, ny, nz, r]) if *k == 1.0 => EdgeCurve::Circle {
+            center: [*cx, *cy, *cz],
+            normal: [*nx, *ny, *nz],
+            radius: *r,
+        },
+        _ => EdgeCurve::Other,
+    }
 }
 
 fn not_supported(what: impl Into<String>) -> KernelError {
@@ -2597,6 +2610,8 @@ impl OcctKernel {
                     reals.push(a);
                     reals.push(b);
                 }
+                // Corner patches where three chamfered edges meet take the vertex they cut.
+                ints.push(l.vertex_labels(operand, Role::Chamfer)?);
                 let r = l.push(9, ints, reals);
                 l.output(r, false, OutputSpec::default());
                 l.keep_others(operand)
@@ -3865,6 +3880,7 @@ impl OcctKernel {
                         start: [g[0], g[1], g[2]],
                         end: [g[3], g[4], g[5]],
                         length: g[6],
+                        curve: edge_curve(g),
                     },
                     laminar: e.laminar,
                 });
