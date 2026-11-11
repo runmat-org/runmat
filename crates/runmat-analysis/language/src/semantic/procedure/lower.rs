@@ -305,12 +305,7 @@ fn lower_procedure(
                     diagnostics,
                 )?,
             };
-            super::modal_reduction::extraction(
-                declaration,
-                statements,
-                &mut step,
-                diagnostics,
-            )?;
+            super::modal_reduction::extraction(declaration, statements, &mut step, diagnostics)?;
             step
         }
         ("structural", "transient") => {
@@ -359,12 +354,7 @@ fn lower_procedure(
                     diagnostics,
                 )?,
             };
-            super::modal_reduction::extraction(
-                declaration,
-                statements,
-                &mut step,
-                diagnostics,
-            )?;
+            super::modal_reduction::extraction(declaration, statements, &mut step, diagnostics)?;
             step
         }
         ("structural", "buckling") => {
