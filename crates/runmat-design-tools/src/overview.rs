@@ -21,6 +21,7 @@
 //! trace each line on the overview to the tool call that produced it.
 
 mod facts;
+pub mod layout;
 mod links;
 mod steps;
 
@@ -150,6 +151,8 @@ pub struct OverviewOutput {
     pub next_steps: Vec<NextStep>,
     /// The checks that ran, in order.
     pub checks: Vec<String>,
+    /// The project's folders and libraries, and where new files go.
+    pub project: layout::ProjectLayout,
 }
 
 pub fn overview(input: &OverviewInput, files: &Files) -> Result<OverviewOutput, ToolError> {
@@ -171,6 +174,7 @@ pub fn overview(input: &OverviewInput, files: &Files) -> Result<OverviewOutput, 
         open_decisions,
         next_steps,
         checks: ran.0,
+        project: layout::layout(path, files),
     })
 }
 

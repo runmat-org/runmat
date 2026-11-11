@@ -61,8 +61,24 @@ pub struct CatalogPart {
     /// Designator prefix (`U`, `R`); empty takes one from the category.
     #[serde(default)]
     pub prefix: String,
-    /// A footprint-generator string.
+    /// A footprint-generator string, or a footprint file read in place for interop; empty when
+    /// [`CatalogPart::footprint`] names a declared footprint.
+    #[serde(default)]
     pub package: String,
+    /// The `footprint` declaration the part's `package` names by identifier
+    /// (`package = gps_lcc18`), from the file or a library it uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footprint: Option<String>,
+    /// The `symbol` declaration the part draws with; without one the symbol is generated from
+    /// the pins. Part pins map to the symbol's pins by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    /// The part's 3D body, an MCAD `.part` or a STEP file, over its footprint's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// Pads the part leaves without a pin on purpose (`nc = ["9"]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nc: Vec<String>,
     pub pins: Vec<CatalogPin>,
     /// Parametrics as written quantities (`vin_max = "36 V"`) or text.
     #[serde(default)]
@@ -133,7 +149,7 @@ impl CatalogPart {
         if self.mpn.trim().is_empty() {
             return Err("a part needs its `mpn`".into());
         }
-        if is_footprint_file(&self.package) {
+        if self.footprint.is_some() || is_footprint_file(&self.package) {
             return self.check_pins(None);
         }
         let package = footprint::from_string(&self.package)
@@ -179,9 +195,45 @@ pub fn is_footprint_file(package: &str) -> bool {
     package.to_ascii_lowercase().ends_with(".kicad_mod")
 }
 
+/// The `footprint` and `symbol` declarations in scope where parts are declared: the file's own
+/// and those of the libraries it uses, by name.
+#[derive(Clone, Copy, Default)]
+pub struct Declared<'a> {
+    pub footprints: Option<&'a BTreeMap<String, Package>>,
+    pub symbols: Option<&'a BTreeMap<String, super::Symbol>>,
+}
+
 /// A part's package: generated from its string, or read from its footprint file through `file`
 /// (the file's text by the path as written).
 pub fn package_of(part: &CatalogPart, file: &dyn Fn(&str) -> Option<String>) -> Result<Package, String> {
+    package_in(part, Declared::default(), file)
+}
+
+/// [`package_of`], with a footprint named by identifier found among `declared`, and the part's
+/// own `body` over the footprint's model.
+pub fn package_in(part: &CatalogPart, declared: Declared<'_>, file: &dyn Fn(&str) -> Option<String>) -> Result<Package, String> {
+    let mut package = base_package(part, declared, file)?;
+    if let Some(body) = &part.body {
+        package.model = Some(super::Model3d {
+            path: body.clone(),
+            offset: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+            origin: "footprint".into(),
+        });
+        package.uuid = make::uuid("package", &format!("{}|{body}", package.name));
+    }
+    Ok(package)
+}
+
+fn base_package(part: &CatalogPart, declared: Declared<'_>, file: &dyn Fn(&str) -> Option<String>) -> Result<Package, String> {
+    if let Some(name) = &part.footprint {
+        return declared
+            .footprints
+            .and_then(|f| f.get(name))
+            .cloned()
+            .ok_or_else(|| format!("part `{}`: no footprint `{name}` is declared here or in a library this file uses", part.mpn));
+    }
     if !is_footprint_file(&part.package) {
         return footprint::from_string(&part.package)
             .ok_or_else(|| format!("part `{}`: `{}` is not a package the footprint generator makes, nor a footprint file", part.mpn, part.package));
@@ -201,9 +253,25 @@ pub fn add_to_pool(pool: &mut Pool, part: &CatalogPart) -> Result<Uuid, String> 
 
 /// [`add_to_pool`], reading footprint files through `file`.
 pub fn add_to_pool_with(pool: &mut Pool, part: &CatalogPart, file: &dyn Fn(&str) -> Option<String>) -> Result<Uuid, String> {
+    add_to_pool_in(pool, part, Declared::default(), file)
+}
+
+/// [`add_to_pool_with`], with footprints and symbols named by identifier found among `declared`.
+pub fn add_to_pool_in(pool: &mut Pool, part: &CatalogPart, declared: Declared<'_>, file: &dyn Fn(&str) -> Option<String>) -> Result<Uuid, String> {
     part.check()?;
-    let package = package_of(part, file)?;
+    let package = package_in(part, declared, file)?;
     part.check_on(&package)?;
+    let symbol = match &part.symbol {
+        Some(name) => {
+            let symbol = declared
+                .symbols
+                .and_then(|s| s.get(name))
+                .ok_or_else(|| format!("part `{}`: no symbol `{name}` is declared here or in a library this file uses", part.mpn))?;
+            super::checks::pins_match_symbol(part, name, symbol)?;
+            Some(symbol.clone())
+        }
+        None => None,
+    };
     let entity_name = part.entity_name();
     let unit = pool.add_unit(Unit {
         uuid: make::uuid("unit", &entity_name),
@@ -227,6 +295,11 @@ pub fn add_to_pool_with(pool: &mut Pool, part: &CatalogPart, file: &dyn Fn(&str)
         gates: vec![Gate { name: "A".into(), unit, swap_group: 0 }],
         tags: if part.category.is_empty() { vec![] } else { vec![part.category.clone()] },
     });
+    if let Some(mut symbol) = symbol {
+        symbol.uuid = make::uuid("symbol", &part.mpn);
+        symbol.unit = unit;
+        pool.symbols.insert(symbol.uuid, symbol);
+    }
     let package = pool.add_package(package);
     let mut params = BTreeMap::new();
     for (k, v) in &part.params {
@@ -280,12 +353,17 @@ pub fn supply_of(hit: &CatalogHit) -> Vec<SupplyRecord> {
 
 /// The built-in pool plus a design's declared parts (a declared part replaces a built-in one of
 /// the same MPN).
-pub fn pool_with(mut pool: Pool, parts: &BTreeMap<String, CatalogPart>, file: &dyn Fn(&str) -> Option<String>) -> Result<Pool, String> {
+pub fn pool_with(pool: Pool, parts: &BTreeMap<String, CatalogPart>, file: &dyn Fn(&str) -> Option<String>) -> Result<Pool, String> {
+    pool_in(pool, parts, Declared::default(), file)
+}
+
+/// [`pool_with`], with footprints and symbols named by identifier found among `declared`.
+pub fn pool_in(mut pool: Pool, parts: &BTreeMap<String, CatalogPart>, declared: Declared<'_>, file: &dyn Fn(&str) -> Option<String>) -> Result<Pool, String> {
     for part in parts.values() {
         if let Some(old) = pool.part(&part.mpn).map(|p| p.uuid) {
             pool.parts.remove(&old);
         }
-        add_to_pool_with(&mut pool, part, file)?;
+        add_to_pool_in(&mut pool, part, declared, file)?;
     }
     Ok(pool)
 }
@@ -314,6 +392,7 @@ mod tests {
             params: [("vin_max".to_string(), "60 V".to_string()), ("topology".to_string(), "synchronous buck".to_string())].into(),
             datasheet: Some("https://example.com/buck.pdf".into()),
             spice: None,
+            ..Default::default()
         }
     }
 

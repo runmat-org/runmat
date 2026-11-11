@@ -93,6 +93,9 @@ pub struct DialectSpec {
     pub label: &'static str,
     /// Words that head a file-level declaration.
     pub declarations: &'static [&'static str],
+    /// Words that head a file-level value declaration, `<word> <name> = <value>`
+    /// (`footprint lcc18 = { … }` in a `.circuit` library).
+    pub value_declarations: &'static [&'static str],
     /// The generic forms this dialect takes.
     pub forms: &'static [GenericForm],
     /// The `.fea` statement shapes and diagnostics, unchanged until the `.fea` semantic
@@ -117,6 +120,7 @@ pub const DIALECTS: &[DialectSpec] = &[
             "execution",
             "table",
         ],
+        value_declarations: &[],
         forms: &[],
         fea_statements: true,
     },
@@ -125,6 +129,7 @@ pub const DIALECTS: &[DialectSpec] = &[
         extension: "part",
         label: "Part",
         declarations: &["part"],
+        value_declarations: &[],
         forms: DESIGN_FORMS,
         fea_statements: false,
     },
@@ -133,6 +138,7 @@ pub const DIALECTS: &[DialectSpec] = &[
         extension: "assembly",
         label: "Assembly",
         declarations: &["assembly"],
+        value_declarations: &[],
         forms: DESIGN_FORMS,
         fea_statements: false,
     },
@@ -141,6 +147,7 @@ pub const DIALECTS: &[DialectSpec] = &[
         extension: "drawing",
         label: "Drawing",
         declarations: &["drawing"],
+        value_declarations: &[],
         forms: DESIGN_FORMS,
         fea_statements: false,
     },
@@ -149,6 +156,7 @@ pub const DIALECTS: &[DialectSpec] = &[
         extension: "circuit",
         label: "Circuit",
         declarations: &["circuit", "sheet"],
+        value_declarations: &["footprint", "symbol", "part"],
         forms: DESIGN_FORMS,
         fea_statements: false,
     },
@@ -157,6 +165,7 @@ pub const DIALECTS: &[DialectSpec] = &[
         extension: "circuit.layout",
         label: "Board layout",
         declarations: &["layout"],
+        value_declarations: &[],
         forms: DESIGN_FORMS,
         fea_statements: false,
     },

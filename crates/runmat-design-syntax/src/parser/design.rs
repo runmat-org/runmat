@@ -70,6 +70,14 @@ impl FeaParser {
                     } else if word == GenericForm::Use.word() {
                         seen_item = true;
                         self.parse_use_declaration(start, end, None);
+                    } else if dialect.spec().value_declarations.contains(&word.as_str())
+                        && self.is_value_statement(&significant)
+                    {
+                        seen_item = true;
+                        if let Some(range) = range {
+                            self.parse_value_tail(&significant, range.span);
+                            self.tree.node(NodeKind::Declaration, range.start, range.end);
+                        }
                     } else if self.at(start, FeaTokenKind::Keyword(FeaKeyword::Import)) {
                         seen_item = true;
                         if self.parse_import(start, end).is_some() {
@@ -386,32 +394,7 @@ impl FeaParser {
                 NodeKind::Link
             }
             _ if self.is_value_statement(&significant) => {
-                self.tree
-                    .node(NodeKind::Name, significant[1], significant[1] + 1);
-                let equal = significant
-                    .iter()
-                    .position(|index| self.at(*index, FeaTokenKind::Equal));
-                if significant
-                    .get(2)
-                    .is_some_and(|index| self.at(*index, FeaTokenKind::Colon))
-                {
-                    let type_end = equal.unwrap_or(significant.len());
-                    if type_end > 3 {
-                        self.tree
-                            .node_over(NodeKind::Type, &significant[3..type_end]);
-                    } else {
-                        self.diagnostics.push(FeaSyntaxDiagnostic {
-                            kind: FeaSyntaxDiagnosticKind::ExpectedToken,
-                            span: self.token(significant[2]).span,
-                            message: "expected a type after `:`".into(),
-                        });
-                    }
-                } else if let Some(extra) = significant.get(2).filter(|_| equal != Some(2)) {
-                    self.invalid_after_expression(*extra);
-                }
-                if let Some(equal) = equal {
-                    self.design_expression(&significant[equal + 1..], span);
-                }
+                self.parse_value_tail(&significant, span);
                 NodeKind::ValueStatement
             }
             _ if relation.is_some() => {
@@ -437,6 +420,36 @@ impl FeaParser {
             }
         };
         self.tree.node(kind, range.start, range.end);
+    }
+
+    /// The part of a value statement after its word: `<name> [: <type>] [= <value>]`.
+    fn parse_value_tail(&mut self, significant: &[usize], span: Span) {
+        self.tree
+            .node(NodeKind::Name, significant[1], significant[1] + 1);
+        let equal = significant
+            .iter()
+            .position(|index| self.at(*index, FeaTokenKind::Equal));
+        if significant
+            .get(2)
+            .is_some_and(|index| self.at(*index, FeaTokenKind::Colon))
+        {
+            let type_end = equal.unwrap_or(significant.len());
+            if type_end > 3 {
+                self.tree
+                    .node_over(NodeKind::Type, &significant[3..type_end]);
+            } else {
+                self.diagnostics.push(FeaSyntaxDiagnostic {
+                    kind: FeaSyntaxDiagnosticKind::ExpectedToken,
+                    span: self.token(significant[2]).span,
+                    message: "expected a type after `:`".into(),
+                });
+            }
+        } else if let Some(extra) = significant.get(2).filter(|_| equal != Some(2)) {
+            self.invalid_after_expression(*extra);
+        }
+        if let Some(equal) = equal {
+            self.design_expression(&significant[equal + 1..], span);
+        }
     }
 
     /// `<word> <identifier> (: … | = … | end)`, or any `let`/`input`/`property` statement.

@@ -79,8 +79,12 @@ pub fn folders(doc: &str, from: &str) -> Vec<String> {
     out
 }
 
-/// The folder listings (`<folder>/`) a host reads so the uses of `doc` can resolve.
+/// The folder listings (`<folder>/`) a host reads so the uses of `doc` can resolve; for a
+/// library file (`use "lib/parts.circuit"`), the file itself.
 pub fn folder_dependencies(doc: &str, from: &str) -> Vec<String> {
+    if from.to_ascii_lowercase().ends_with(CIRCUIT_SUFFIX) {
+        return vec![resolve_path(doc, from)];
+    }
     folders(doc, from)
         .into_iter()
         .map(|f| if f.ends_with('/') { f } else { format!("{f}/") })
@@ -162,5 +166,12 @@ mod tests {
         assert_eq!(locate("/p/top.circuit", "circuit", "esc", "", &f), Err("no `circuit esc` in this folder".into()));
         assert_eq!(folder_dependencies("/p/esc/main.circuit", "parts"), ["/p/esc/+parts/", "/p/+parts/", "/+parts/"]);
         assert!(locate("/p/a.circuit.layout", "circuit", "esc", "./esc/main.circuit", &f).unwrap_err().starts_with("name the design"));
+    }
+
+    #[test]
+    fn a_library_use_depends_on_its_file() {
+        // The browser server marks a `use "<lib>.circuit"` line "not loaded yet" while this path
+        // is pending.
+        assert_eq!(folder_dependencies("/p/electrical/fc/fc.circuit", "../library/parts.circuit"), ["/p/electrical/library/parts.circuit"]);
     }
 }

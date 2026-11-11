@@ -1497,12 +1497,51 @@
           "href": "/docs/ecad/files"
         },
         {
+          "title": "Footprints",
+          "href": "/docs/ecad/footprints"
+        },
+        {
           "title": "The design language",
           "href": "/docs/design-language"
         },
         {
           "title": "Values, units and expressions",
           "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-footprints",
+      "route": "/docs/ecad/footprints",
+      "title": "Footprints",
+      "summary": "RunMat ECAD footprints. Name a standard package with a generator string and get its IPC-7351B land pattern, or declare a custom footprint in a library .circuit file and use it by name.",
+      "keywords": [
+        "footprints",
+        "land patterns",
+        "IPC-7351",
+        "footprint generator",
+        "QFN footprint",
+        "custom footprint",
+        "footprint library",
+        "symbols",
+        "library .circuit"
+      ],
+      "group": "ECAD reference",
+      "order": 10,
+      "narrative": "docs/design/ecad/footprints.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The parts library",
+          "href": "/docs/ecad/parts-library"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "Import",
+          "href": "/docs/ecad/import"
         }
       ]
     }

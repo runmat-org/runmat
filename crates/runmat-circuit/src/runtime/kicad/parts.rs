@@ -103,6 +103,7 @@ pub(crate) fn declare_parts(design: &mut Design, pool: &Pool, packages: &BTreeMa
                 params: BTreeMap::new(),
                 datasheet,
                 spice: None,
+                ..Default::default()
             });
             c.part = PartRef::Part(name);
         }

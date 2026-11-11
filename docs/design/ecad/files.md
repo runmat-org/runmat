@@ -1,10 +1,10 @@
 ---
 description: Reference for RunMat ECAD files. Every statement a .circuit schematic and a .circuit.layout board can hold, sheets and hierarchy, repeated channels, components and library parts, nets, buses and net classes, variants, electrical rules and design-review suites, with examples that check.
-keywords: [.circuit file, .circuit.layout file, schematic file format, PCB file format, text schematic, hierarchical schematic, net classes, variants, ERC, design review, code-first PCB]
+keywords: [.circuit file, library .circuit, footprint declaration, .circuit.layout file, schematic file format, PCB file format, text schematic, hierarchical schematic, net classes, variants, ERC, design review, code-first PCB]
 ---
 # ECAD file reference
 
-RunMat ECAD keeps a schematic in a `.circuit` file and its board in a `.circuit.layout` file beside it. The schematic holds the design intent: components, connections, net classes, variants and simulations. The board holds where everything goes: outline, stackup, footprints, copper and rules. This page covers every `.circuit` statement and the board's top level; [Board layout](/docs/ecad/layout) covers the board in full.
+RunMat ECAD keeps a schematic in a `.circuit` file and its board in a `.circuit.layout` file beside it. A `.circuit` file with no `circuit` block is a library of footprints, symbols and parts that other files use. The schematic holds the design intent: components, connections, net classes, variants and simulations. The board holds where everything goes: outline, stackup, footprints, copper and rules. This page covers every `.circuit` statement and the board's top level; [Board layout](/docs/ecad/layout) covers the board in full.
 
 ## A complete circuit
 
@@ -83,7 +83,9 @@ layout sensor {
 | `net_class <name> = { … }` | rules shared by a class of nets | [Nets](/docs/ecad/circuit/nets-and-classes) |
 | `interface <name> = { members, diff_pairs }` | a bundle type for harnesses | [Nets](/docs/ecad/circuit/nets-and-classes) |
 | `variant <name> = { base, overrides }` | a build variant | [Variants](/docs/ecad/circuit/variants) |
-| `part "<mpn>" = { … }` | a library part embedded in the file | [Components](/docs/ecad/circuit/components-and-parts) |
+| `part "<mpn>" = { … }` | a part declared in the file | [Parts library](/docs/ecad/parts-library#part-declarations) |
+| `footprint <name> = { … }` | a footprint declared in the file | [Footprints](/docs/ecad/footprints#custom-footprints) |
+| `symbol <name> = { … }` | a schematic symbol declared in the file | [Footprints](/docs/ecad/footprints#symbols) |
 | `sheet <name> { … }` | a schematic sheet | [Sheets](/docs/ecad/circuit/sheets-and-channels) |
 | `simulation <name> { … }` | a simulation section | [Simulation sections and measures](/docs/ecad/circuit/simulation) |
 
@@ -103,6 +105,31 @@ Inside a sheet:
 | `blanket <name> = { nets, class, <params> }` | one class and set of parameters over several nets, such as `blanket rails = { nets = [VIN, GND], class = power }`; a net's own `class` wins |
 | `text <name> = "<words>"` | a note drawn on the sheet, such as `text note1 = "5 V in from J1"`; it has no electrical meaning |
 
+## Library files and `use`
+
+A library `.circuit` holds `footprint`, `symbol` and `part` declarations at file level and no `circuit` block. A circuit or another library brings them into scope with `use "<path>.circuit"`, with the path relative to the file:
+
+```circuit fragment
+runmat 0.7
+std 1
+
+use "../library/parts.circuit"
+```
+
+`use` lines go at the top of the file. Other `use` forms name designs in other folders: `use circuit power from "./power"` and `use sheet buck from "./power" as reg`. See [Footprints](/docs/ecad/footprints#libraries) for how library names resolve.
+
+## Project layout
+
+A new project uses the standard layout, and a project that already has its own folders keeps them:
+
+| Folder | Holds |
+|---|---|
+| `mechanical/<subsystem>/` | parts, assemblies and their `.m` functions |
+| `electrical/<board>/` | a board's `.circuit` beside its `.circuit.layout` and lock |
+| `electrical/library/` | library `.circuit` files: `footprints/<name>.circuit`, and parts in `parts/` or `parts.circuit` |
+| `simulation/` | `.fea` studies |
+| `drawings/` | `.drawing` files |
+
 Endpoints are `U1.VIN`, `"C1.1"`, `net.GND`, `"net.+3V3"`, `port.IN`, `bus.D.D0`, `harness.USB.DP` and `instance.pwr.VIN`; see [Names and selectors](/docs/design-language/names-and-selectors#pins-nets-and-designators).
 
 ## Reference pages
@@ -116,4 +143,5 @@ Endpoints are `U1.VIN`, `"C1.1"`, `net.GND`, `"net.+3V3"`, `port.IN`, `bus.D.D0`
 | [Rules and checks](/docs/ecad/circuit/rules-and-checks) | the electrical rules, the design-review suites, the board checks, the command line |
 | [Simulation sections and measures](/docs/ecad/circuit/simulation) | sources, models, analyses, measures and limits |
 | [Board layout](/docs/ecad/layout) | every `.circuit.layout` statement and the design rules |
+| [Footprints](/docs/ecad/footprints) | generator strings, `footprint` and `symbol` declarations, library files |
 | [Fabrication outputs and netlists](/docs/ecad/fabrication) | the fabrication set and netlists |

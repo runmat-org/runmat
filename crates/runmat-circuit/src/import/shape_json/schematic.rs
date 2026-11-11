@@ -145,6 +145,7 @@ pub fn read(doc: &Document, name: &str, footprint_dir: &str, packages: &BTreeMap
                     params,
                     datasheet: None,
                     spice: None,
+                    ..Default::default()
                 };
                 design.parts.entry(mpn.clone()).or_insert(part);
                 let mut c = ComponentDecl::new(&designator, PartRef::Part(mpn));

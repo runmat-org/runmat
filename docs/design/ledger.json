@@ -145,12 +145,29 @@
       "acceptance": "A corpus of KiCad projects reads in and writes back with hierarchy, symbols, footprints, net classes and rules intact, and the not-carried report is empty or explained."
     },
     {
-      "id": "design.ecad.use-library",
-      "title": "Shared part libraries",
-      "kind": "language",
+      "id": "design.ecad.footprint-wizard",
+      "title": "Footprint wizard and footprint editor",
+      "kind": "feature",
       "area": "ecad",
       "status": "pending",
-      "acceptance": "A circuit writes use library <name> to read part declarations from a shared library package, and part declarations propagate through circuits it uses."
+      "acceptance": "The wizard builds a footprint from a family and datasheet dimensions on the same generator as package strings, saves a generator string when no value was edited and a footprint declaration when one was, and reopens with its values; the footprint editor edits pads, courtyard, silkscreen and fab with undo."
+    },
+    {
+      "id": "design.ecad.library-import",
+      "title": "Footprint, symbol and part library import and export",
+      "kind": "exchange",
+      "area": "ecad",
+      "status": "pending",
+      "acceptance": "A .kicad_mod, a .pretty folder, a .kicad_sym and an XML part library import to library .circuit files with a source note on each declaration, and export writes them back; round-trip tests cover a sample of each."
+    },
+    {
+      "id": "design.ecad.use-library",
+      "title": "Library .circuit files and use",
+      "kind": "language",
+      "area": "ecad",
+      "status": "release",
+      "acceptance": "A .circuit with no circuit block is a library of footprint, symbol and part declarations; use \"<path>.circuit\" brings them into scope, libraries use other libraries, and duplicate names, cycles and missing files are errors that name the files.",
+      "landed_in": "0.7.1"
     },
     {
       "id": "design.ecad.field-solved-impedance",

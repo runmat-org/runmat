@@ -54,9 +54,13 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 **KiCad round-trip gate.** A corpus of KiCad projects reads in and writes back with hierarchy, symbols, footprints, net classes and rules intact, and the not-carried report is empty or explained.
 
-### design.ecad.use-library
+### design.ecad.footprint-wizard
 
-**Shared part libraries.** A circuit writes use library &lt;name&gt; to read part declarations from a shared library package, and part declarations propagate through circuits it uses.
+**Footprint wizard and footprint editor.** The wizard builds a footprint from a family and datasheet dimensions on the same generator as package strings, saves a generator string when no value was edited and a footprint declaration when one was, and reopens with its values; the footprint editor edits pads, courtyard, silkscreen and fab with undo.
+
+### design.ecad.library-import
+
+**Footprint, symbol and part library import and export.** A .kicad_mod, a .pretty folder, a .kicad_sym and an XML part library import to library .circuit files with a source note on each declaration, and export writes them back; round-trip tests cover a sample of each.
 
 ### design.ecad.field-solved-impedance
 

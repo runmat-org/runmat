@@ -233,8 +233,47 @@ pub(super) fn fittings(map: &BTreeMap<String, Fitting>) -> Print {
     Ok(record(&entries?))
 }
 
+/// A design's `footprint`, `symbol` and `part` declarations, in that order.
+fn declarations(design: &Design) -> Result<Vec<String>, PrintError> {
+    let mut out = Vec::new();
+    for (k, f) in &design.footprints {
+        out.push(super::footprint_decl::statement(k, f)?);
+    }
+    for (k, s) in &design.symbols {
+        out.push(super::symbol_decl::statement(k, s)?);
+    }
+    for (k, part) in &design.parts {
+        if &part.mpn != k {
+            return Err(PrintError(format!("part `{k}` is keyed by another MPN")));
+        }
+        out.push(super::part_decl::statement(part)?);
+    }
+    Ok(out)
+}
+
+/// A library `.circuit`: its `use` lines, then its declarations at file level.
+fn print_library(design: &Design) -> Print {
+    let mut out = String::from("runmat 0.7\nstd 1\n");
+    if !design.uses.is_empty() {
+        out.push('\n');
+    }
+    for u in &design.uses {
+        out.push_str(&use_text(u));
+        out.push('\n');
+    }
+    for statement in declarations(design)? {
+        out.push('\n');
+        out.push_str(&statement);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 /// Prints a design as `.circuit` source (sheets in name order, declarations in model order).
 pub fn print_circuit(design: &Design) -> Print {
+    if design.library {
+        return print_library(design);
+    }
     let mut body: Vec<String> = Vec::new();
     if design.root != "main" {
         body.push(format!("root = {}", name(&design.root)));
@@ -276,12 +315,7 @@ pub fn print_circuit(design: &Design) -> Print {
         }
         body.push(format!("variant {} = {}", name(k), record(&entries)));
     }
-    for (k, part) in &design.parts {
-        if &part.mpn != k {
-            return Err(PrintError(format!("part `{k}` is keyed by another MPN")));
-        }
-        body.push(super::part_decl::statement(part)?);
-    }
+    body.extend(declarations(design)?);
     for (k, sheet) in &design.sheets {
         if &sheet.name != k {
             return Err(PrintError(format!("sheet `{k}` is keyed by another name")));
