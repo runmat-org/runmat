@@ -3,6 +3,7 @@ mod capacity;
 mod compiler;
 mod local_energy;
 mod proof_workspace;
+mod solve_path;
 use runmat_analysis_core::{IndependentDomain, ProcedureStep, ProcedureStepId};
 use runmat_execution::resource::AcceleratorRequest;
 

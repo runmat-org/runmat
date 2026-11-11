@@ -14,6 +14,10 @@ fn resource(error: ResourcePlanningError) -> AnalysisPublicationError {
         | ResourcePlanningError::AccuracyCeiling { .. }
         | ResourcePlanningError::Inventory(_)
         | ResourcePlanningError::MemoryBudget { .. }
+        | ResourcePlanningError::ModalSubspaceCapacity { .. }
+        | ResourcePlanningError::ModalSolveCeiling { .. }
+        | ResourcePlanningError::StaticSolveCeiling { .. }
+        | ResourcePlanningError::ThermalSolveCeiling { .. }
         | ResourcePlanningError::CanonicalWireCapacity { .. }
         | ResourcePlanningError::Capability(_)
         | ResourcePlanningError::Accelerator { .. }) => limit(limited.to_string()),

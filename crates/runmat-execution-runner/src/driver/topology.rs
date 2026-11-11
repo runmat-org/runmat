@@ -345,17 +345,20 @@ impl Driver {
                 })
                 .take(2)
                 .collect::<Vec<_>>();
-            return Err(RunnerError::Invalid(format!(
-                "task resource request cannot be satisfied by the target pool: requested \
-                 {} millicores, {} memory bytes, {} scratch bytes; pool limit {} millicores, \
-                 {} memory bytes, {} scratch bytes, missing capabilities {missing_capabilities:?}; \
-                 {workers:?}",
-                request.cpu_millicores,
-                request.memory_bytes,
-                request.scratch_bytes,
-                limit.cpu_millicores,
-                limit.memory_bytes,
-                limit.scratch_bytes,
+            return Err(RunnerError::PoolCapacity(Box::new(
+                crate::error::PoolCapacityRefusal {
+                    requested_cpu_millicores: request.cpu_millicores,
+                    requested_memory_bytes: request.memory_bytes,
+                    requested_scratch_bytes: request.scratch_bytes,
+                    pool_cpu_millicores: limit.cpu_millicores,
+                    pool_memory_bytes: limit.memory_bytes,
+                    pool_scratch_bytes: limit.scratch_bytes,
+                    missing_capabilities: missing_capabilities
+                        .iter()
+                        .map(|capability| format!("{capability:?}"))
+                        .collect(),
+                    workers,
+                },
             )));
         }
         if self.snapshot.tasks.contains_key(&submission.request.id) {

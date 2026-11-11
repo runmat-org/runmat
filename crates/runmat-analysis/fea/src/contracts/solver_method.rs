@@ -19,6 +19,9 @@ pub enum SolverMethod {
     SparseDirectLu,
     /// Shift-invert thick-restart block Lanczos on `(K − σM)⁻¹M` with a Sturm check.
     ShiftInvertBlockLanczos,
+    /// Block LOBPCG with an AMG preconditioner of `K`, no retained factorization, and
+    /// factor-free inertia counts for coercivity and the Sturm check.
+    PreconditionedLobpcg,
     /// Block Lanczos on `K⁻¹(−K_G)` in the `K` inner product (linear buckling).
     BucklingBlockLanczos,
     NewmarkAverageAccelerationPcg,
@@ -48,6 +51,7 @@ impl SolverMethod {
             Self::SparseDirectLdlt => "sparse_direct_ldlt",
             Self::SparseDirectLu => "sparse_direct_lu",
             Self::ShiftInvertBlockLanczos => "shift_invert_block_lanczos",
+            Self::PreconditionedLobpcg => "preconditioned_lobpcg",
             Self::BucklingBlockLanczos => "buckling_block_lanczos",
             Self::NewmarkAverageAccelerationPcg => "newmark_average_acceleration_pcg",
             Self::StructuralModalTransientNewmarkDenseFactorization => {

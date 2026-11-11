@@ -17,7 +17,7 @@ pub mod testing;
 pub use collective::{BlockedCollective, CollectiveCompletion, CollectiveCoordinator};
 pub use distributed::{DistributedStore, OwnedPartition};
 pub use driver::{Driver, DriverAction, DriverCommand, DriverConfig, DriverEvent, DriverSnapshot};
-pub use error::{RunnerError, RunnerResult};
+pub use error::{PoolCapacityRefusal, RunnerError, RunnerResult};
 pub use gang::GangCoordinator;
 pub use pool::{PoolSpec, WorkerSpec};
 pub use task::{

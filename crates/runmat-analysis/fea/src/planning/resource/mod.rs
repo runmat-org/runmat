@@ -197,7 +197,7 @@ pub use contract::{
     AcousticFrequencyAssemblyResourceDemand, AssemblyResourcePolicy, ByteCount,
     CheckpointArtifactPolicy, ConstraintResourceFacts, Count, ExcitationWorkspaceResourceFacts,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanIdentity,
-    FeaResourcePlanningInput, FieldRecoveryResourceFacts, NumericalScalar,
+    FeaResourcePlanningInput, FieldRecoveryResourceFacts, ModalSolveSelection, NumericalScalar,
     ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
     ObservationPartitionPayloadLayout, ObservationPartitionResourceDemand,
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
@@ -212,9 +212,9 @@ pub use contract::{
     StructuralRandomResponseAssemblyResourceDemand, StructuralRandomResponseIntervalResourceDemand,
     StructuralTransientBlockResourceDemand, StructuralTransientFieldRecoveryResourceDemand,
     StructuralTransientResultAssemblyResourceDemand, StructuralTransientScopeResourceDemand,
-    ThermalFieldSourceResourceFacts, ThermalSolveResourceDemand, TopologyResourceFacts,
-    WorkerResourcePolicy, RESIDENT_MEMORY_RESOURCE, RESOURCE_ESTIMATION_MODEL_REVISION,
-    RESOURCE_PLAN_MAX_ENCODED_BYTES,
+    SubspaceSolvePath, ThermalFieldSourceResourceFacts, ThermalSolveResourceDemand,
+    TopologyResourceFacts, WorkerResourcePolicy, RESIDENT_MEMORY_RESOURCE,
+    RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 pub use estimate::build_resource_plan;
 pub use frequency::{
@@ -232,6 +232,7 @@ pub use local_execution::{
 };
 pub use modal::{
     build_structural_modal_resource_plan, build_structural_modal_resource_plan_from_compilation,
+    build_structural_modal_resource_plan_selecting, recorded_modal_solve_path,
     structural_modal_receipt_payload_bytes_upper_bound,
     structural_modal_result_output_resource_facts,
     structural_modal_result_payload_bytes_upper_bound,

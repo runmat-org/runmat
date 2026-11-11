@@ -37,6 +37,11 @@ impl LinearPreparationReuse {
         self.certificate.as_ref()
     }
 
+    /// Drops the retained factorization and keeps the certificate it produced.
+    pub(crate) fn release_factor(&mut self) {
+        self.factor = None;
+    }
+
     pub(crate) fn clear(&mut self) {
         self.certificate = None;
         self.factor = None;
@@ -100,7 +105,10 @@ impl LinearPreparationReuse {
         source: Option<&NullspaceEliminationEvidence>,
         admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
         before_factor: O,
-    ) -> Result<PreparedSolverAdmissibility, crate::algebra::coercivity::NumericalCapacityError<CoercivityError, A>>
+    ) -> Result<
+        PreparedSolverAdmissibility,
+        crate::algebra::coercivity::NumericalCapacityError<CoercivityError, A>,
+    >
     where
         O: FnMut(
             crate::algebra::coercivity::NumericalCapacityPhase,
@@ -174,15 +182,25 @@ impl LinearPreparationReuse {
                 // a disproof: the sparse Cholesky proof decides, and its factor serves the solve.
                 Err(CoercivityError::EnergyIndeterminate { .. }) => {
                     PreparedSolverAdmissibility::prove_admitted_with_owner(
-                        matrix, rhs, source, admission, before_factor,
-                    ).await?
+                        matrix,
+                        rhs,
+                        source,
+                        admission,
+                        before_factor,
+                    )
+                    .await?
                 }
                 Err(error) => return Err(error.into()),
             }
         } else {
             PreparedSolverAdmissibility::prove_admitted_with_owner(
-                matrix, rhs, source, admission, before_factor,
-            ).await?
+                matrix,
+                rhs,
+                source,
+                admission,
+                before_factor,
+            )
+            .await?
         };
         self.certificate = Some(evidence.coercivity().clone());
         self.factor = evidence.factor().cloned();

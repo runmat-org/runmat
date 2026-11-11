@@ -224,6 +224,10 @@ impl StructuralPrestressedModalStudyCoordinator {
             inventory_limits: self.producer.inventory_limits(),
             required_capabilities: self.required_capabilities.clone(),
             accelerator_requests: self.accelerator_requests.clone(),
+            solve_selection:
+                runmat_analysis_fea::planning::resource::ModalSolveSelection::WithinCeiling {
+                    machine_memory_bytes: None,
+                },
         })?;
         self.phase = ConsumerPhase::Awaiting(prepared.host.workload.identity.digest());
         Ok(prepared)

@@ -110,6 +110,10 @@ fn native_scalar_modal_preserves_cold_basis_receipts_fields_and_rejects_missing_
             inventory_limits: limits,
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
+            solve_selection:
+                runmat_analysis_fea::planning::resource::ModalSolveSelection::WithinCeiling {
+                    machine_memory_bytes: None,
+                },
         })
         .unwrap();
         // Original modal closures include the plan itself. Preserve the exact compiler

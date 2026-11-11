@@ -15,5 +15,7 @@ pub fn solve_modal_system(
         convergence,
         backend,
         &mut crate::algebra::LinearPreparationReuse::default(),
+        SubspaceSolvePath::ShiftInvertFactorization,
+        None,
     )
 }
