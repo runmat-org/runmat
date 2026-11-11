@@ -132,12 +132,8 @@ fn circuit_fixture() {
     let dir = std::env::var("RUNMAT_DESKTOP_FIXTURES")
         .map(PathBuf::from)
         .ok();
-    // `RUNMAT_PRIVATE_DIR` names the private checkout (a lane's own worktree), else the
-    // `runmat-private-cad` beside this one.
-    let sibling = std::env::var_os("RUNMAT_PRIVATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../runmat-private-cad"))
-        .join("desktop/src/app/components/circuit/fixtures");
+    let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../runmat-private-cad/desktop/src/app/components/circuit/fixtures");
     if let Some(dir) = dir {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("io.circuit.json"), &json).unwrap();
