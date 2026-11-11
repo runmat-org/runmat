@@ -20,7 +20,21 @@ fn files() -> Files {
         ("/p/pin.part", PIN),
     ]
     .map(|(p, t)| (p.to_owned(), t.to_owned()))
-    .into()
+    .into_iter()
+    .chain(EDITED.with(|e| e.borrow().clone()))
+    .collect()
+}
+
+thread_local! {
+    /// Part files the test's edits changed (a mate publishes the faces it anchors to), read
+    /// back by [`files`] so later compiles see them.
+    static EDITED: std::cell::RefCell<Files> = std::cell::RefCell::new(Files::new());
+}
+
+fn remember(path: &str, text: &str) {
+    if path.ends_with(".part") {
+        EDITED.with(|e| e.borrow_mut().insert(path.to_owned(), text.to_owned()));
+    }
 }
 
 struct Compiled {
@@ -92,6 +106,9 @@ fn run(text: &str, request: Value) -> String {
         serde_json::from_str(&edit_json("/p/rig.assembly", text, &files(), &request.to_string()))
             .unwrap();
     assert_eq!(out["ok"], true, "{out}");
+    for f in out["files"].as_array().unwrap().iter().skip(1) {
+        remember(f["path"].as_str().unwrap(), f["text"].as_str().unwrap());
+    }
     out["files"][0]["text"].as_str().unwrap().to_owned()
 }
 

@@ -18,7 +18,21 @@ const TOP: &str = "/p/rig.assembly";
 fn files() -> Files {
     [("/p/plate.part", PLATE), ("/p/block.part", BLOCK), ("/p/pin.part", PIN)]
         .map(|(p, t)| (p.to_owned(), t.to_owned()))
-        .into()
+        .into_iter()
+        .chain(EDITED.with(|e| e.borrow().clone()))
+        .collect()
+}
+
+thread_local! {
+    /// Part files the test's edits changed (a mate publishes the faces it anchors to), read
+    /// back by [`files`] so later compiles see them.
+    static EDITED: std::cell::RefCell<Files> = std::cell::RefCell::new(Files::new());
+}
+
+fn remember(path: &str, text: &str) {
+    if path.ends_with(".part") {
+        EDITED.with(|e| e.borrow_mut().insert(path.to_owned(), text.to_owned()));
+    }
 }
 
 struct Compiled {
@@ -86,7 +100,11 @@ fn bottom(f: &Frame) -> bool {
 fn run_with(text: &str, files: &Files, request: Value) -> Vec<(String, String)> {
     let out: Value = serde_json::from_str(&edit_json(TOP, text, files, &request.to_string())).unwrap();
     assert_eq!(out["ok"], true, "{out}");
-    out["files"].as_array().unwrap().iter().map(|f| (f["path"].as_str().unwrap().to_owned(), f["text"].as_str().unwrap().to_owned())).collect()
+    let changed: Vec<(String, String)> = out["files"].as_array().unwrap().iter().map(|f| (f["path"].as_str().unwrap().to_owned(), f["text"].as_str().unwrap().to_owned())).collect();
+    for (path, text) in changed.iter().skip(1) {
+        remember(path, text);
+    }
+    changed
 }
 
 fn run(text: &str, request: Value) -> String {

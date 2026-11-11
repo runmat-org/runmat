@@ -17,6 +17,7 @@
 //! assembly change here.
 
 use super::frames::{dot, edge_frame, face_frame, norm, sub, to_world, Frame, FrameKind};
+use super::anchors::Publisher;
 use super::mate::field;
 use super::{model, parse_pick, Compiled};
 use crate::features::picks_of;
@@ -70,20 +71,20 @@ fn set_flip(document: &mut AssemblyDocument, at: usize, to: Option<bool>) -> Res
 }
 
 /// The X axis of connector `name` in assembly coordinates, and the floating component it sits
-/// on, when it has an explicit or origin anchor on a top-level component.
+/// on, when it has an explicit, origin or published anchor on a top-level component.
 fn connector_x(document: &AssemblyDocument, compiled: &Compiled, name: &str) -> Option<(String, [f64; 3])> {
     let c = document.connector(name)?;
     let [segment] = c.occurrence.0.as_slice() else {
         return None;
     };
+    let (prototype, t) = compiled.placed_named(&segment.name)?;
     let local = match &c.anchor {
         AnchorRef::Origin => [1.0, 0.0, 0.0],
         AnchorRef::Explicit { offset: OffsetExpr { rotation: RotationExpr::Basis { x, .. }, .. } } => *x,
         AnchorRef::Explicit { offset: OffsetExpr { rotation: RotationExpr::Identity, .. } } => [1.0, 0.0, 0.0],
+        AnchorRef::Published { name } => compiled.published_frame(prototype, name.as_str())?.x,
         _ => return None,
     };
-    let uuid = compiled.rows.iter().find(|r| r["path"].as_str() == Some(segment.name.as_str()))?["uuid"].as_str()?.to_owned();
-    let (_, t) = compiled.placed(&uuid)?;
     (t.len() >= 9).then(|| (segment.name.clone(), [0, 1, 2].map(|i| t[3 * i] * local[0] + t[3 * i + 1] * local[1] + t[3 * i + 2] * local[2])))
 }
 
@@ -140,7 +141,7 @@ pub(super) fn limits(values: &Values, flag: &str, ends: [&str; 2], unit: &str) -
 pub(super) const ANGLE: [&str; 2] = ["min", "max"];
 pub(super) const TRAVEL: [&str; 2] = ["near", "far"];
 
-pub(super) fn edit(document: &mut AssemblyDocument, compiled: &Compiled, selection: &[String], values: &Values) -> Result<String, EditFailure> {
+pub(super) fn edit(document: &mut AssemblyDocument, compiled: &Compiled, publisher: &mut Publisher, selection: &[String], values: &Values) -> Result<String, EditFailure> {
     let names = mate_names(selection)?;
     let [name] = names.as_slice() else {
         return Err(model("select one mate to edit"));
@@ -188,7 +189,7 @@ pub(super) fn edit(document: &mut AssemblyDocument, compiled: &Compiled, selecti
                 },
             }
         }
-        other => super::mate::advanced(document, compiled, values, other, Some(&old))?
+        other => super::mate::advanced(document, compiled, publisher, values, other, Some(&old))?
             .ok_or_else(|| model(format!("there is no `{other}` mate")))?,
     };
     let changed_kind = kind.name() != old.name();
@@ -241,7 +242,7 @@ fn candidates(compiled: &Compiled, uuid: &str) -> Vec<Candidate> {
     out
 }
 
-pub(super) fn smart(document: &mut AssemblyDocument, compiled: &Compiled, values: &Values) -> Result<String, EditFailure> {
+pub(super) fn smart(document: &mut AssemblyDocument, compiled: &Compiled, publisher: &mut Publisher, values: &Values) -> Result<String, EditFailure> {
     let component = picks_of(values, "component")
         .into_iter()
         .next()
@@ -285,6 +286,7 @@ pub(super) fn smart(document: &mut AssemblyDocument, compiled: &Compiled, values
                 });
             ("concentric", best)
         }
+        FrameKind::Point | FrameKind::Frame => return Err(model("drop the component onto a face or an axis")),
     };
     let best = best.ok_or_else(|| {
         model(match kind {
@@ -293,6 +295,6 @@ pub(super) fn smart(document: &mut AssemblyDocument, compiled: &Compiled, values
         })
     })?;
     let request = json!({ "type": kind, "first": [onto], "second": [best.id], "flip": false });
-    let summary = super::mate::mate(document, compiled, request.as_object().expect("an object"))?;
+    let summary = super::mate::mate(document, compiled, publisher, request.as_object().expect("an object"))?;
     Ok(format!("Smart mate: {}", summary.trim_start_matches("Mated ")))
 }

@@ -323,6 +323,8 @@ pub(super) fn direction(compiled: &Compiled, id: &str) -> Result<(V3, V3), EditF
             .body(prototype, body)
             .and_then(|b| b["edges"].as_array()?.iter().find(|e| e["index"].as_u64() == Some(edge as u64)))
             .and_then(edge_frame),
+        Entity::Datum { feature } => compiled.reference(prototype, &feature).and_then(super::frames::datum_frame).filter(|f| f.kind != super::frames::FrameKind::Point),
+        Entity::Vertex { .. } => None,
     }
     .ok_or_else(|| model("the direction pick has no direction"))?;
     let world = to_world(frame, &transform);

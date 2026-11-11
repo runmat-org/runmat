@@ -68,8 +68,9 @@ pub(super) const MATE_TYPES: &[(&str, &str)] = &[
     ("universal_joint", "Universal joint"),
 ];
 
-/// What a mate's connector can be picked on.
-pub(super) const CONNECTOR_PICKS: &[SelectKind] = &[K::MateConnector, K::Face, K::Edge, K::Vertex, K::Occurrence];
+/// What a mate's connector can be picked on: a component's mate connector, face, edge, vertex
+/// or datum plane, axis or point (published from its part), or the whole component.
+pub(super) const CONNECTOR_PICKS: &[SelectKind] = &[K::MateConnector, K::Face, K::Edge, K::Vertex, K::Plane, K::Axis, K::Point, K::Occurrence];
 
 /// The fields the advanced mates add to Mate and Edit mate: width's two other faces, the
 /// symmetry plane, the cam's profile, the path's edges and the universal joint's point. In

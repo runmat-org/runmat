@@ -2,6 +2,7 @@
 
 pub mod part_cache;
 mod prototype_reuse;
+mod published_frames;
 mod published_paths;
 pub mod values_host;
 
@@ -360,7 +361,8 @@ pub fn regen_diagnostics(path: &str, part: &RegeneratedPart) -> Vec<Diagnostic> 
         .collect()
 }
 
-/// The datum frames, planes, axes and points a part publishes, from its regeneration, and its
+/// The datum frames, planes, axes and points a part publishes, from its regeneration, its
+/// published single faces and vertices as frames (what a mate's connectors anchor to), and its
 /// published edge sets as paths: what an assembly attaches to (a skeleton's interface) and what
 /// a cam or path mate follows.
 fn published_datums(
@@ -391,6 +393,7 @@ fn published_datums(
         };
         out.insert(p.name.clone(), g);
     }
+    out.extend(published_frames::published_frames(part));
     out.extend(published_paths::published_paths(part));
     out
 }

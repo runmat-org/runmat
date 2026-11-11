@@ -6,6 +6,10 @@
 //!   the axis, and the radius.
 //! - A circular edge: its centre, Z along the circle's normal, and the radius.
 //! - A straight edge: its midpoint, Z along the edge.
+//! - A vertex: its point, with the world axes.
+//! - A datum plane, axis, point or frame (a mate connector too), from the lines the display draws
+//!   it with: a plane's square (X along its first side, Z its normal), an axis's line, a point's
+//!   cross, a frame's three axis lines.
 
 use serde_json::Value;
 
@@ -17,6 +21,10 @@ pub enum FrameKind {
     Plane,
     /// A line through `origin` along `z` (a cylinder's or circle's axis, a straight edge).
     Axis,
+    /// A point at `origin` (a vertex, a datum point).
+    Point,
+    /// A whole frame (a mate connector or coordinate system).
+    Frame,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -60,15 +68,8 @@ pub fn unit(a: V3) -> V3 {
     }
 }
 
-/// A unit vector perpendicular to `z`, along the world axis that leans least on it.
-pub fn perpendicular(z: V3) -> V3 {
-    let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-    let least = axes
-        .into_iter()
-        .min_by(|a, b| dot(*a, z).abs().total_cmp(&dot(*b, z).abs()))
-        .unwrap_or([1.0, 0.0, 0.0]);
-    unit(sub(least, scale(z, dot(least, z))))
-}
+pub use runmat_cad::assembly::polyline_frame::perpendicular;
+use runmat_cad::assembly::polyline_frame::{fit_circle, polyline_frame};
 
 fn points(values: &Value) -> Vec<V3> {
     let flat: Vec<f64> = values
@@ -76,52 +77,6 @@ fn points(values: &Value) -> Vec<V3> {
         .map(|a| a.iter().filter_map(Value::as_f64).collect())
         .unwrap_or_default();
     flat.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
-}
-
-/// The circle through `points` (all roughly in the plane through `centre` normal to `z`): its
-/// centre and radius, by an algebraic least-squares fit in the plane.
-fn fit_circle(points: &[V3], centre: V3, z: V3) -> Option<(V3, f64)> {
-    let u = perpendicular(z);
-    let v = cross(z, u);
-    // x² + y² + D x + E y + F = 0, least squares.
-    let (mut m, mut r) = ([[0.0_f64; 3]; 3], [0.0_f64; 3]);
-    for p in points {
-        let d = sub(*p, centre);
-        let (x, y) = (dot(d, u), dot(d, v));
-        let row = [x, y, 1.0];
-        let rhs = -(x * x + y * y);
-        for i in 0..3 {
-            for j in 0..3 {
-                m[i][j] += row[i] * row[j];
-            }
-            r[i] += row[i] * rhs;
-        }
-    }
-    let [d, e, f] = solve3(m, r)?;
-    let (cx, cy) = (-d / 2.0, -e / 2.0);
-    let radius2 = cx * cx + cy * cy - f;
-    (radius2 > 0.0).then(|| (add(centre, add(scale(u, cx), scale(v, cy))), radius2.sqrt()))
-}
-
-fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
-    let det = |m: [[f64; 3]; 3]| {
-        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
-            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
-            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
-    };
-    let d = det(m);
-    if d.abs() < 1e-300 {
-        return None;
-    }
-    let mut out = [0.0; 3];
-    for (k, slot) in out.iter_mut().enumerate() {
-        let mut mk = m;
-        for i in 0..3 {
-            mk[i][k] = r[i];
-        }
-        *slot = det(mk) / d;
-    }
-    Some(out)
 }
 
 /// The frame of display face `face` (positions, triangles).
@@ -183,42 +138,55 @@ pub fn face_frame(face: &Value) -> Option<Frame> {
     })
 }
 
-/// The frame of display edge `edge` (a polyline of points).
+/// The frame of display edge `edge` (a polyline of points): see
+/// [`polyline_frame`](runmat_cad::assembly::polyline_frame::polyline_frame).
 pub fn edge_frame(edge: &Value) -> Option<Frame> {
-    let p = points(&edge["points"]);
-    let (first, last) = (*p.first()?, *p.last()?);
-    let chord = sub(last, first);
-    let straight = p.len() == 2
-        || p.iter().all(|q| {
-            let d = sub(*q, first);
-            norm(cross(d, unit(chord))) <= 1e-6 * norm(chord).max(1e-9)
-        });
-    if straight && norm(chord) > 0.0 {
-        let z = unit(chord);
-        return Some(Frame {
-            kind: FrameKind::Axis,
-            origin: scale(add(first, last), 0.5),
-            z,
-            x: perpendicular(z),
-            radius: None,
-        });
-    }
-    // A circle or arc: its plane's normal by Newell's method, then the fitted centre.
-    let mean = scale(p.iter().fold([0.0; 3], |s, q| add(s, *q)), 1.0 / p.len() as f64);
-    let mut n = [0.0; 3];
-    for (i, a) in p.iter().enumerate() {
-        let b = p[(i + 1) % p.len()];
-        n = add(n, cross(sub(*a, mean), sub(b, mean)));
-    }
-    let z = unit(n);
-    let (centre, radius) = fit_circle(&p, mean, z)?;
+    let f = polyline_frame(&points(&edge["points"]))?;
     Some(Frame {
         kind: FrameKind::Axis,
-        origin: centre,
-        z,
-        x: perpendicular(z),
-        radius: Some(radius),
+        origin: f.origin,
+        z: f.z,
+        x: f.x,
+        radius: f.radius,
     })
+}
+
+/// The frame of display vertex `vertex`.
+pub fn vertex_frame(vertex: &Value) -> Option<Frame> {
+    let p = points(&vertex["point"]);
+    Some(Frame {
+        kind: FrameKind::Point,
+        origin: *p.first()?,
+        z: [0.0, 0.0, 1.0],
+        x: [1.0, 0.0, 0.0],
+        radius: None,
+    })
+}
+
+/// The frame of display reference `reference` (`{ id, kind, lines }`): a datum plane, axis,
+/// point, frame or mate connector.
+pub fn datum_frame(reference: &Value) -> Option<Frame> {
+    let lines: Vec<Vec<V3>> = reference["lines"].as_array()?.iter().map(points).collect();
+    let first = lines.first()?;
+    let frame = |kind, origin, z: V3, x: V3| Some(Frame { kind, origin, z: unit(z), x: unit(x), radius: None });
+    match reference["kind"].as_str()? {
+        "plane" if first.len() >= 4 => {
+            let x = sub(first[1], first[0]);
+            let y = sub(first[3], first[0]);
+            let centre = scale(add(first[0], first[2]), 0.5);
+            frame(FrameKind::Plane, centre, cross(x, y), x)
+        }
+        "axis" if first.len() >= 2 => {
+            let z = sub(first[1], first[0]);
+            frame(FrameKind::Axis, scale(add(first[0], first[1]), 0.5), z, perpendicular(unit(z)))
+        }
+        "point" if first.len() >= 2 => frame(FrameKind::Point, scale(add(first[0], first[1]), 0.5), [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
+        "frame" | "connector" if lines.len() >= 3 && lines.iter().all(|l| l.len() >= 2) => {
+            let origin = first[0];
+            frame(FrameKind::Frame, origin, sub(lines[2][1], origin), sub(first[1], origin))
+        }
+        _ => None,
+    }
 }
 
 /// `frame` in world coordinates under a display transform (row-major rotation, then translation).
