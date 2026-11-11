@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -18,6 +16,9 @@ mod truncation;
 use diagnostics::push_modal_quality_diagnostics;
 mod preparation;
 pub use preparation::solve_modal_system;
+pub(crate) use preparation::ModalSolveInput;
+mod result;
+pub use result::ModalSolveResult;
 use truncation::resolve_truncation_boundary;
 
 pub(crate) const MODAL_BOUNDARY_PROBE_WIDTH: usize = 4;
@@ -28,115 +29,27 @@ pub(crate) const MODAL_LANCZOS_BLOCK_SIZE: usize = runmat_sparse_solvers::eigen:
 /// `p`, so a resolved cluster at the truncation boundary adds at most `p − 1` modes.
 pub(crate) const MODAL_BOUNDARY_CLUSTER_ALLOWANCE: usize = MODAL_LANCZOS_BLOCK_SIZE - 1;
 
-/// Eigensolver options for one modal search of `subspace_dimension` vectors. The resource
-/// planner sizes the search's working set from these same options.
-pub(crate) fn modal_eigen_options(
-    subspace_dimension: usize,
-    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
-) -> runmat_sparse_solvers::eigen::EigenOptions {
-    runmat_sparse_solvers::eigen::EigenOptions {
-        count: subspace_dimension,
-        shift: Some(0.0),
-        block_size: MODAL_LANCZOS_BLOCK_SIZE,
-        tolerance: modal_lanczos_tolerance(convergence),
-        max_restarts: convergence.maximum_subspace_iterations().max(1),
-        sturm_check: true,
-        ..Default::default()
-    }
-}
-/// Ritz-estimate tolerance of the shift-invert Lanczos: a tenth of the policy's tolerance,
-/// capped at 1e-10. The Lanczos stops on its Ritz estimates, and the published gate is measured
-/// on the returned pairs afterwards; a Ritz estimate converged to 1e-10 leaves backward errors
-/// near 1e-12 on small models, so the stopping rule follows the gate's tolerance.
-fn modal_lanczos_tolerance(
-    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
-) -> f64 {
-    (0.1 * convergence.algebraic_tolerance()).min(1.0e-10)
-}
-
-/// LOBPCG options for one modal search of `subspace_dimension` vectors on the factor-free
-/// path. The resource planner sizes the path's working set from these same options.
-///
-/// The iteration stops at half the policy's tolerance, in the policy's measure, so the true
-/// residuals it reports pass the policy; it may take up to four LOBPCG steps per admitted Lanczos restart
-/// because each step applies the preconditioner once per unconverged vector instead of a
-/// factor solve.
-pub(crate) fn modal_lobpcg_options(
-    subspace_dimension: usize,
-    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
-) -> runmat_sparse_solvers::eigen::IterativeModalOptions {
-    runmat_sparse_solvers::eigen::IterativeModalOptions {
-        lobpcg: runmat_sparse_solvers::eigen::LobpcgOptions {
-            count: subspace_dimension,
-            guard: MODAL_LANCZOS_BLOCK_SIZE,
-            tolerance: 0.5 * convergence.algebraic_tolerance(),
-            measure: convergence.solver_measure(),
-            max_iterations: convergence
-                .maximum_subspace_iterations()
-                .max(1)
-                .saturating_mul(4),
-        },
-        ordering: runmat_sparse_solvers::ordering::Ordering::Auto,
-    }
-}
-
-/// Whether the full space holds only translational solid DOFs, three per node in node-major
-/// order, and the constraint reduction keeps each node's three DOFs together.
-fn keeps_whole_translational_nodes(summary: &AssemblySummary, free_dofs: &[usize]) -> bool {
-    summary.dof_count > 0
-        && summary.structural_rotational_dof_count == 0
-        && summary.structural_translational_dof_count == summary.dof_count
-        && summary.dof_count == 3 * summary.structural_node_count
-        && !free_dofs.is_empty()
-        && free_dofs.len() % 3 == 0
-        && free_dofs.chunks_exact(3).all(|triple| {
-            triple[0] % 3 == 0 && triple[1] == triple[0] + 1 && triple[2] == triple[0] + 2
-        })
-}
+mod options;
+use options::keeps_whole_translational_nodes;
+pub(crate) use options::{modal_eigen_options, modal_lobpcg_options};
 
 pub(crate) const MODAL_MASS_ORTHOGONALIZATION_PASSES: usize = 2;
 /// (frequency in Hz, expanded shape, relative residual, backward error).
 type ModalCandidate = (f64, Vec<f64>, f64, f64);
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ModalSolveResult {
-    pub converged: bool,
-    pub frequencies_hz: Vec<f64>,
-    pub mode_shapes: Vec<Vec<f64>>,
-    /// Relative residual `‖K x − λ M x‖₂ / (‖K x‖₂ + λ ‖M x‖₂)` of each mode on the reduced
-    /// pencil.
-    pub residual_norms: Vec<f64>,
-    /// Normwise backward error `‖K x − λ M x‖_∞ / ((‖K‖_∞ + λ ‖M‖_∞) ‖x‖_∞)` of each mode on the
-    /// reduced pencil.
-    #[serde(default)]
-    pub backward_errors: Vec<f64>,
-    pub diagnostics: Vec<FeaDiagnostic>,
-    pub solver_method: SolverMethod,
-    pub solver_backend: LinearAlgebraBackendKind,
-    pub preconditioner: SolverPreconditioner,
-    pub solver_host_sync_count: u32,
-    pub device_apply_k_count: u32,
-    pub device_apply_k_attempt_count: u32,
-    pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
-    pub available_mode_count: usize,
-    pub boundary_probe_count: usize,
-    pub boundary_probe_frequency_hz: Option<f64>,
-    /// The admitted subspace dimension when the search reached it with the truncation boundary
-    /// still unresolved: the boundary cluster needs more vectors than the plan reserved.
-    #[serde(default)]
-    pub boundary_unresolved_at_capacity: Option<usize>,
-}
-
 pub(crate) fn solve_modal_system_reusing(
-    summary: &AssemblySummary,
-    requested_mode_count: usize,
-    eigenspace_relative_tolerance: f64,
-    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
-    backend: ComputeBackend,
+    input: ModalSolveInput<'_>,
     reuse: &mut crate::algebra::LinearPreparationReuse,
-    path: SubspaceSolvePath,
-    node_coordinates_m: Option<&[[f64; 3]]>,
 ) -> ModalSolveResult {
+    let ModalSolveInput {
+        summary,
+        requested_mode_count,
+        eigenspace_relative_tolerance,
+        convergence,
+        backend,
+        path,
+        node_coordinates_m,
+    } = input;
     let (solver_method, path_preconditioner) = match path {
         SubspaceSolvePath::ShiftInvertFactorization => (
             SolverMethod::ShiftInvertBlockLanczos,

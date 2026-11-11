@@ -148,18 +148,24 @@ impl ExactSelectionProjection {
                 .iter()
                 .find_map(|ordinal| source_regions.get(ordinal).copied());
             // Face-local color/material and source-face ordinals never become body evidence.
-            let label = metadata
+            let owner_path = metadata
                 .and_then(|region| region.cad_ownership.as_ref())
-                .and_then(|ownership| {
-                    ownership
-                        .owner_path
-                        .iter()
-                        .rev()
-                        .find(|label| entity.assembly_path.contains(&label.label_entry))
-                })
+                .map(|ownership| ownership.owner_path.as_slice())
+                .unwrap_or_default();
+            let label = owner_path
+                .iter()
+                .rev()
+                .find(|label| entity.assembly_path.contains(&label.label_entry))
                 .cloned();
-            let name = label
-                .as_ref()
+            // A body takes its product's name, or its occurrence's when the product is unnamed,
+            // as the exact import names solids (`select name` resolves the same either way).
+            let product = owner_path
+                .iter()
+                .rev()
+                .find(|label| label.kind == runmat_geometry_core::CadSemanticKind::Body)
+                .filter(|label| !label.name.is_empty());
+            let name = product
+                .or(label.as_ref())
                 .filter(|label| !label.name.is_empty())
                 .map(|label| label.name.clone())
                 .unwrap_or_else(|| "Solid".into());

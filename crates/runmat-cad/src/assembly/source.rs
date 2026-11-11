@@ -156,9 +156,19 @@ pub enum PublishedGeometry {
 
 impl PublishedGeometry {
     /// The frame this publishes, when it is one (an axis gives a frame with Z along it; a point
-    /// a frame with world axes).
+    /// a frame with world axes; a single edge, as a one-chain path, its
+    /// [`polyline_frame`](crate::assembly::polyline_frame::polyline_frame)).
     pub fn frame(&self) -> Option<Frame> {
         match self {
+            PublishedGeometry::Path { chains } if chains.len() == 1 => {
+                let f = crate::assembly::polyline_frame::polyline_frame(&chains[0].points)?;
+                Some(Frame {
+                    origin: f.origin,
+                    x: f.x,
+                    y: cross(f.z, f.x),
+                    z: f.z,
+                })
+            }
             PublishedGeometry::Frame { frame } | PublishedGeometry::Plane { frame } => Some(*frame),
             PublishedGeometry::Axis { point, direction } => {
                 let t = constraint_basis(*direction);

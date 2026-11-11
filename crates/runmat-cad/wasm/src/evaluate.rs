@@ -25,8 +25,12 @@ pub struct Overlap {
     pub b: String,
     /// What selecting each selects (`occurrence:<uuid>`, as the Outline and canvas name them).
     pub items: [String; 2],
-    /// The common volume (m^3).
+    /// The common volume (m^3), summed over every pair of their bodies that overlap.
     pub volume: f64,
+    /// The first pair of bodies found overlapping, by reference (`feature.studs.body(3)`), when
+    /// the parts have several bodies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bodies: Option<[String; 2]>,
 }
 
 /// Two occurrences closer than the asked clearance without sharing material.
@@ -55,6 +59,10 @@ pub struct Interference {
     pub clearance: f64,
     /// Pairs the kernel could not answer, with its message.
     pub errors: Vec<String>,
+    /// Bodies left out because their material is compressible fill (batt or loose-fill
+    /// insulation), which a run through the cavity displaces.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub fill_bodies: usize,
     /// The occurrences whose pairs were checked, when the check was limited to a change's
     /// occurrences; empty when every pair was.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -79,6 +87,10 @@ struct Placement<'a> {
     bbox: Aabb,
     /// The occurrence is one of the changed ones (always true without a `changed` list).
     changed: bool,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// Overlaps smaller than this are treated as contact (m^3; 1e-3 mm^3).
@@ -130,15 +142,12 @@ pub fn assembly_clearance_of(
     let is_changed = |p: &str| {
         changed.is_none_or(|c| c.iter().any(|n| p == n || p.starts_with(&format!("{n}/"))))
     };
-    // Content key → the regenerated body and its box in the part's frame. The kernels stay alive
-    // while their bodies are queried.
-    let mut kernels = Vec::new();
-    let mut loaded: BTreeMap<String, Option<(BodyHandle, Aabb)>> = BTreeMap::new();
+    // Content key → the regenerated body and its box in the part's frame, kept between calls
+    // (`bodies`), so a seating checks its neighbours without regenerating them each time.
+    let mut loaded: BTreeMap<String, Option<std::rc::Rc<bodies::Body>>> = BTreeMap::new();
+    let fill = std::cell::Cell::new(0usize);
     let mut errors = Vec::new();
-    let mut load = |p: &Placement,
-                    kernels: &mut Vec<Box<dyn crate::kernel::DesignKernel>>,
-                    errors: &mut Vec<String>|
-     -> Option<(BodyHandle, Aabb)> {
+    let mut load = |p: &Placement, errors: &mut Vec<String>| -> Option<std::rc::Rc<bodies::Body>> {
         let slot = format!(
             "{}#{}",
             p.file,
@@ -147,12 +156,33 @@ pub fn assembly_clearance_of(
         if let Some(entry) = loaded.get(&slot) {
             return entry.clone();
         }
+        if let Some(kept) = p.key.and_then(|_| bodies::get(&slot)) {
+            fill.set(fill.get() + kept.fill);
+            errors.extend(kept.problems.iter().cloned());
+            loaded.insert(slot, Some(kept.clone()));
+            return Some(kept);
+        }
         let entry = match p.source {
             Source::Board => match crate::board_solid::board_body(&p.file, files) {
                 Ok(board) => {
-                    errors.extend(board.problems.iter().map(|q| format!("{}: {q}", p.file)));
-                    kernels.push(board.kernel);
-                    Some((board.body, board.bbox))
+                    let problems: Vec<String> = board
+                        .problems
+                        .iter()
+                        .map(|q| format!("{}: {q}", p.file))
+                        .collect();
+                    errors.extend(problems.iter().cloned());
+                    let solids = vec![bodies::Solid {
+                        handle: board.body,
+                        bbox: board.bbox,
+                        name: "board".into(),
+                    }];
+                    Some(bodies::Body {
+                        kernel: board.kernel,
+                        solids,
+                        bbox: board.bbox,
+                        fill: 0,
+                        problems,
+                    })
                 }
                 Err(e) => {
                     errors.push(format!("{}: {e}", p.path));
@@ -163,17 +193,56 @@ pub fn assembly_clearance_of(
                 let (result, kernel) = regenerate_configured(document, configuration);
                 let display =
                     part_display(&result, kernel.as_ref(), &TessellationOptions::default());
-                let index = display.bodies.first()?.index as usize;
-                let body = result.state.bodies.get(index)?.handle.clone();
-                let bounds = display.bounds.as_ref()?;
-                let bbox = Aabb {
-                    min: bounds.min.map(f64::from),
-                    max: bounds.max.map(f64::from),
-                };
-                kernels.push(kernel);
-                Some((body, bbox))
+                // Every body of the part, less compressible fill (batts, loose fill).
+                let mut fill = std::collections::BTreeSet::new();
+                for (m, o) in document.materials.iter().zip(&result.materials) {
+                    if runmat_cad::model::materials::is_compressible_fill(&m.material.0) {
+                        fill.extend(runmat_cad::appearance::assigned_bodies(&result, o));
+                    }
+                }
+                let mut solids = Vec::new();
+                for d in display.bodies.iter().filter(|d| !d.flat_pattern) {
+                    let index = d.index as usize;
+                    if fill.contains(&index) {
+                        continue;
+                    }
+                    let Some(handle) = result.state.bodies.get(index).map(|b| b.handle.clone())
+                    else {
+                        continue;
+                    };
+                    let mut bbox = Aabb::EMPTY;
+                    for f in &d.faces {
+                        for p in f.positions.chunks_exact(3) {
+                            for (i, coordinate) in p.iter().enumerate() {
+                                bbox.min[i] = bbox.min[i].min(f64::from(*coordinate));
+                                bbox.max[i] = bbox.max[i].max(f64::from(*coordinate));
+                            }
+                        }
+                    }
+                    let name = d
+                        .reference
+                        .clone()
+                        .unwrap_or_else(|| format!("body {index}"));
+                    solids.push(bodies::Solid { handle, bbox, name });
+                }
+                if solids.is_empty() {
+                    return None;
+                }
+                let bbox = solids.iter().fold(Aabb::EMPTY, |b, s| b.union(&s.bbox));
+                Some(bodies::Body {
+                    kernel,
+                    solids,
+                    bbox,
+                    fill: fill.len(),
+                    problems: Vec::new(),
+                })
             }),
         };
+        let entry = entry.map(|e| match p.key {
+            Some(_) => bodies::put(&slot, e),
+            None => std::rc::Rc::new(e),
+        });
+        fill.set(fill.get() + entry.as_ref().map_or(0, |b| b.fill));
         loaded.insert(slot, entry.clone());
         entry
     };
@@ -206,7 +275,7 @@ pub fn assembly_clearance_of(
         let local = match key.and_then(cache::bbox) {
             Some(bbox) => Some(bbox),
             None => {
-                let bbox = load(&placement, &mut kernels, &mut errors).map(|(_, bbox)| bbox);
+                let bbox = load(&placement, &mut errors).map(|b| b.bbox);
                 if let (Some(k), Some(b)) = (key, bbox) {
                     cache::set_bbox(k, b);
                 }
@@ -247,29 +316,10 @@ pub fn assembly_clearance_of(
             let found = match pair.and_then(cache::pair) {
                 Some(found) => Ok(found),
                 None => {
-                    let bodies = load(a, &mut kernels, &mut out.errors).zip(load(
-                        b,
-                        &mut kernels,
-                        &mut out.errors,
-                    ));
-                    match (bodies, kernels.first()) {
-                        (Some(((body_a, _), (body_b, _))), Some(kernel)) => kernel
-                            .proximity(
-                                &Placed {
-                                    body: &body_a,
-                                    transform: a.world,
-                                },
-                                &Placed {
-                                    body: &body_b,
-                                    transform: b.world,
-                                },
-                            )
-                            .map(|p| cache::Found {
-                                volume: p.common_volume,
-                                distance: p.distance,
-                            })
-                            .map_err(|e| format!("{e:?}")),
-                        _ => continue,
+                    let pair_bodies = load(a, &mut out.errors).zip(load(b, &mut out.errors));
+                    match pair_bodies {
+                        Some((body_a, body_b)) => body_pairs(&body_a, a, &body_b, b, clearance),
+                        None => continue,
                     }
                 }
             };
@@ -279,11 +329,19 @@ pub fn assembly_clearance_of(
                         cache::set_pair(k, p);
                     }
                     if p.volume > CONTACT_VOLUME {
+                        let bodies = p.first.and_then(|(i, j)| {
+                            let (ba, bb) =
+                                load(a, &mut out.errors).zip(load(b, &mut out.errors))?;
+                            let (sa, sb) = (ba.solids.get(i as usize)?, bb.solids.get(j as usize)?);
+                            (ba.solids.len() > 1 || bb.solids.len() > 1)
+                                .then(|| [sa.name.clone(), sb.name.clone()])
+                        });
                         out.overlaps.push(Overlap {
                             a: a.path.clone(),
                             b: b.path.clone(),
                             items: [a.item.clone(), b.item.clone()],
                             volume: p.volume,
+                            bodies,
                         });
                     } else if clearance > 0.0 && p.distance < clearance {
                         out.near.push(Near {
@@ -298,6 +356,7 @@ pub fn assembly_clearance_of(
             }
         }
     }
+    out.fill_bodies = fill.get();
     Ok(out)
 }
 
@@ -309,6 +368,67 @@ pub fn content_key(file: &str, digest: &str, files: &Files) -> Option<u64> {
 /// The part-frame box an interference check found for the body with content `key`.
 pub fn cached_bbox(key: u64) -> Option<Aabb> {
     cache::bbox(key)
+}
+
+/// The regenerated bodies interference checks keep between calls on this thread, by content
+/// key, each with the kernel that made it. A seating checks the neighbours of each part it
+/// places, call after call (a curved shell, a board, the arms), and regenerating them is most
+/// of a check's time. A check of a whole assembly holds every body at once anyway, so keeping
+/// them costs no more than that peak; the least recently used go first once more are kept.
+mod bodies {
+    use super::{Aabb, BodyHandle};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// One solid body of a part, with its box in the part's frame and its reference.
+    pub struct Solid {
+        pub handle: BodyHandle,
+        pub bbox: Aabb,
+        pub name: String,
+    }
+
+    pub struct Body {
+        pub kernel: Box<dyn crate::kernel::DesignKernel>,
+        /// Every solid body, less compressible fill.
+        pub solids: Vec<Solid>,
+        /// The box around `solids`, in the part's frame.
+        pub bbox: Aabb,
+        /// Bodies left out as compressible fill.
+        pub fill: usize,
+        /// What regenerating it reported (a board's), repeated on every check that uses it.
+        pub problems: Vec<String>,
+    }
+
+    /// Bodies kept: about two assemblies the size of the camera drone (63 parts).
+    const KEPT: usize = 160;
+
+    thread_local! {
+        static KEPT_BODIES: RefCell<Vec<(String, Rc<Body>)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn get(slot: &str) -> Option<Rc<Body>> {
+        KEPT_BODIES.with(|k| {
+            let mut k = k.borrow_mut();
+            let at = k.iter().position(|(s, _)| s == slot)?;
+            let entry = k.remove(at);
+            let body = entry.1.clone();
+            k.push(entry);
+            Some(body)
+        })
+    }
+
+    pub fn put(slot: &str, body: Body) -> Rc<Body> {
+        let body = Rc::new(body);
+        KEPT_BODIES.with(|k| {
+            let mut k = k.borrow_mut();
+            k.retain(|(s, _)| s != slot);
+            if k.len() >= KEPT {
+                k.remove(0);
+            }
+            k.push((slot.to_owned(), body.clone()));
+        });
+        body
+    }
 }
 
 /// What interference checks keep between calls on this thread, by content.
@@ -323,6 +443,8 @@ mod cache {
     pub struct Found {
         pub volume: f64,
         pub distance: f64,
+        /// The first overlapping pair of bodies, as indexes into each part's solids.
+        pub first: Option<(u32, u32)>,
     }
 
     /// Entries kept before the cache starts over (a pair answer is a few dozen bytes).
@@ -425,6 +547,58 @@ mod cache {
 }
 
 /// A box grown by `by` on every side.
+/// Every pair of solids of `body_a` (placed as `a`) and `body_b` (as `b`) whose boxes come
+/// within `clearance`, through the kernel: the summed common volume, the least distance, and
+/// the first pair that overlaps.
+fn body_pairs(
+    body_a: &bodies::Body,
+    a: &Placement,
+    body_b: &bodies::Body,
+    b: &Placement,
+    clearance: f64,
+) -> Result<cache::Found, String> {
+    let world_b: Vec<Aabb> = body_b
+        .solids
+        .iter()
+        .map(|s| s.bbox.transformed(&b.world))
+        .collect();
+    let mut found = cache::Found {
+        volume: 0.0,
+        distance: f64::INFINITY,
+        first: None,
+    };
+    for (i, sa) in body_a.solids.iter().enumerate() {
+        let box_a = grown(&sa.bbox.transformed(&a.world), clearance);
+        if box_a.intersection(&b.bbox).is_empty() {
+            continue;
+        }
+        for (j, sb) in body_b.solids.iter().enumerate() {
+            if box_a.intersection(&world_b[j]).is_empty() {
+                continue;
+            }
+            let p = body_a
+                .kernel
+                .proximity(
+                    &Placed {
+                        body: &sa.handle,
+                        transform: a.world,
+                    },
+                    &Placed {
+                        body: &sb.handle,
+                        transform: b.world,
+                    },
+                )
+                .map_err(|e| format!("{e:?}"))?;
+            found.volume += p.common_volume;
+            found.distance = found.distance.min(p.distance);
+            if p.common_volume > CONTACT_VOLUME && found.first.is_none() {
+                found.first = Some((i as u32, j as u32));
+            }
+        }
+    }
+    Ok(found)
+}
+
 fn grown(b: &Aabb, by: f64) -> Aabb {
     Aabb {
         min: b.min.map(|v| v - by),

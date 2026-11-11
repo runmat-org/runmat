@@ -3,30 +3,11 @@
   "cohort": "driver-recovery-physics",
   "policy_sha256": "71379c3bce11f6f26e0e017aa44b64cf12688b11dfac22f26fa55ae2969271f8",
   "measured": {
-    "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
-    "target": "linux-x86_64",
-    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
-    "command": [
-      "cargo",
-      "test",
-      "--locked",
-      "--offline",
-      "--release",
-      "--all-features",
-      "-p",
-      "runmat-execution-runner-native",
-      "--lib",
-      "remote::driver_replacement_tests::",
-      "--",
-      "--test-threads=1"
-    ],
-    "log_sha256": "743fdd928001aea024a7bbe00b458e666a463d13f2b61d3e3bac74011222e88a",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.driver-recovery-physics.log",
+    "source_revision": "d8e06ca2ca8e68847e01c19268715c53a07a5cd5",
     "passed": 18,
     "failed": 0,
     "ignored": 0,
     "filtered_out": 464,
-    "exit_code": 0,
     "case_names": [
       "remote::driver_replacement_tests::active_analysis_attempt_retries_after_actual_driver_replacement",
       "remote::driver_replacement_tests::actual_driver_restarts_from_server_checkpoint_on_a_different_worker",
@@ -47,34 +28,70 @@
       "remote::driver_replacement_tests::restored_analysis_retry_observes_cancellation_before_publication",
       "remote::driver_replacement_tests::thermal::authored_matrix_variants_typecheck_with_explicit_physical_loads"
     ],
-    "selected_filter": "remote::driver_replacement_tests::",
-    "inputs": {
-      "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
-      "files": 26022,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
+    "log_sha256": "45fea41aac999d9840f301ceafe7731f1a89825661ee4364dbf2881bc3ceedda",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/final-d8e06ca2ca.driver-recovery-physics.log",
     "artifacts": [
       {
-        "sha256": "008d6e46cd36f64349ef7585c7b5dc4a234abd729f6c03e1da986472073e51b1",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.artifacts/driver-recovery-physics-harness"
+        "sha256": "81d101bd12c41f5344c794f6786cfc15884f01ac993e5f29b953946b05b3a1dd",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/final-d8e06ca2ca.artifacts/driver-recovery-physics-harness",
+        "bytes": 572078288
       }
-    ]
+    ],
+    "exit_code": 0,
+    "target": "linux-x86_64",
+    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat-execution-runner-native",
+      "--lib",
+      "remote::driver_replacement_tests::",
+      "--",
+      "--test-threads=1"
+    ],
+    "profile": {
+      "release": true,
+      "debug": 0,
+      "strip": "symbols",
+      "cargo_build_jobs": 8,
+      "incremental": false
+    },
+    "selected_filter": "remote::driver_replacement_tests::",
+    "inputs": {
+      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
+      "files": 26096,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "source_verification": {
+      "at": "2026-11-11T13:18:39.787Z",
+      "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+      "stage": "/home/nallana/rm1293/incoming/final-d8e06ca2ca",
+      "status": "verified",
+      "files": 27232
+    },
+    "source_scope": "Content-verified public snapshot; transfer protects .env namespaces and excludes them from its inventory."
   },
   "conservation": {
     "measured_inputs": {
-      "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
-      "files": 26022,
+      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
+      "files": 26096,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "191a0d69177f984ae19be5f12918ff0bf37b4b16cdceb4c9442ba41bca8904a5",
-      "files": 26026,
+      "sha256": "e76f801975ecc2a2304c8f383cbe5a876f5e179af2316f146c77f74f7500b4b4",
+      "files": 26096,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The follow-up delta from 2012f077cf is confined to standalone Design/meshing integration tests, their XSD validator and optional corpus routing. Earlier conserved production-adapter and test changes remain individually declared below with their existing qualification evidence. This follow-up changes no numerical library, production execution code, dependency lockfile, authored study, required scientific command or performance threshold. The long boolean STEP corpus is explicitly manual under the existing release disposition, with its failure retained; required cohorts keep their original commands and measured outcomes.",
+    "reason": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts.",
     "review": {
-      "path": "qualification/scientific/reviews/design-ci-tests-20261110-driver-recovery-physics.json",
-      "sha256": "a80438f2a9ec157a67795d7b8b6c779bafbb8f500979dfaf45e924f53d8a46f8"
+      "path": "qualification/scientific/reviews/d8e06-final-integration.json",
+      "sha256": "ce104205f132542dc28348ab1a8b9fc9b4e1f295f0ee1dc5fd4c560305632899"
     }
   }
 }

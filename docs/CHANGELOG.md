@@ -50,16 +50,18 @@ _November 10, 2026_
 #### Added
 
 * Added text-based `.circuit` schematics and `.circuit.layout` boards with hierarchical sheets, component variants, stackups, routing, copper pours, and electrical and design-rule checks.
+* Added reusable footprint, symbol, and part declarations in library `.circuit` files, imported with `use`. Standard package strings generate their land patterns; custom footprints can be declared once and referenced by name.
 * Added circuit simulation sections with analyses, waveform probes, and measures checked against declared limits. Supported analyses include operating point, DC, AC, transient, noise, temperature, and seeded Monte Carlo runs.
 * Added fabrication exports including Gerber X2, Excellon drills, IPC-D-356A netlists, BOMs, pick-and-place files, IPC-2581C, and ODB++. Fabrication settings can be saved in the board.
 * Added design inspection, rendering, checks, import/export, and staged source-edit tools for design documents, plus `runmat-design` commands for supported checks and exports.
 
 #### Changed
 
-* KiCad imports report content that does not carry over; the general KiCad round-trip qualification gate remains open. Shared part libraries, board enclosure clearance checks, board-driven thermal/vibration studies, assembly-drawing polarity marks, and board-integrated field-solved impedance remain pending.
+* KiCad imports report content that does not carry over; the general KiCad round-trip qualification gate remains open. Board enclosure clearance checks, board-driven thermal/vibration studies, assembly-drawing polarity marks, and board-integrated field-solved impedance remain pending.
 
 #### Fixed
 
+* Fixed spurious transient current and voltage from floating-point cancellation when differentiating unchanged charge and flux histories.
 * Reduced repeated via-contact searches during PCB stub and delay analysis by sharing one spatial index across each batch, while preserving exact contact checks across board layers.
 
 ### Finite-Element Analysis
@@ -75,6 +77,7 @@ _November 10, 2026_
 #### Changed
 
 * Unified study commands under `runmat check`, `runmat plan`, `runmat run`, and `runmat snapshot`; the `runmat fea` command group has been removed.
+* Added a factor-free preconditioned LOBPCG modal solve path, budget-sized search subspaces, and inertia-based eigenvalue completeness checks. Modal resource planning accounts for the selected solver working set.
 * Extended steady thermal conduction with a multigrid solve path and resource planning derived from the admitted run budget. Thermal placement limits remain separate from the authored study identity.
 * Improved tetrahedral boundary recovery, geometry-tolerance handling, and local sizing around opposed faces and narrow gaps. Tet10 curved-node repair tracks the geometry that changes.
 * Added saved histories for sampled study outputs, including acoustic frequency histories.

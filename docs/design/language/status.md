@@ -40,7 +40,7 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 ### design.ecad.board-studies
 
-**Board studies through the pcb source.** A .fea study reads a board's stackup, copper and component power through its pcb source and runs thermal and vibration studies of it.
+**Board studies through the pcb source.** Board » Analysis » New study writes a .fea study beside the layout that reads the board's stackup, copper, pads and component power through FEA's pcb geometry source, and FEA checks and runs its thermal, IR drop and warpage studies. Until the source lands, FEA's check answers "pcb geometry source is not yet available" and the Desktop shows the study as planned, with the release flag.
 
 ### design.ecad.fab.assembly-drawing
 
@@ -54,19 +54,19 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 **KiCad round-trip gate.** A corpus of KiCad projects reads in and writes back with hierarchy, symbols, footprints, net classes and rules intact, and the not-carried report is empty or explained.
 
-### design.ecad.use-library
+### design.ecad.footprint-wizard
 
-**Shared part libraries.** A circuit writes use library &lt;name&gt; to read part declarations from a shared library package, and part declarations propagate through circuits it uses.
+**Footprint wizard and footprint editor.** The wizard builds a footprint from a family and datasheet dimensions on the same generator as package strings, saves a generator string when no value was edited and a footprint declaration when one was, and reopens with its values; the footprint editor edits pads, courtyard, silkscreen and fab with undo.
+
+### design.ecad.library-import
+
+**Footprint, symbol and part library import and export.** A .kicad_mod, a .pretty folder, a .kicad_sym and an XML part library import to library .circuit files with a source note on each declaration, and export writes them back; round-trip tests cover a sample of each.
 
 ### design.ecad.field-solved-impedance
 
 **Field-solved trace impedance beside the closed form.** A board study solves each controlled line's cross-section (from the pcb source's lines) for Z0, Zdiff, delay and per-length L and C, and the layer-stack view shows the solved value beside the closed form.
 
 ## Tools
-
-### design.tools.cli-check-mcad
-
-**runmat-design check on parts, assemblies and drawings.** runmat-design check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error.
 
 ### design.tools.runmat-check-design
 

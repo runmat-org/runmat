@@ -544,7 +544,11 @@ impl Grid {
                 }
             }
         }
-        let n = 64;
+        // About four triangles per cell over the model's box: an assembly's hundreds of
+        // thousands of triangles on a fixed 64 × 64 grid put thousands in each cell, and every
+        // sample tests each of them. The cells only narrow the candidates; the result is the same.
+        let triangles: usize = model.faces.iter().map(|f| f.tris.len()).sum();
+        let n = ((triangles as f64 / 4.0).sqrt() as usize).clamp(64, 512);
         let cell = ((hi[0] - lo[0]).max(hi[1] - lo[1]) / n as f64).max(1e-6);
         let mut grid = Grid {
             lo,
@@ -782,6 +786,10 @@ fn lines_of(model: &Model, axes: &Axes) -> ViewLines {
                 };
                 [r(s[0]), r(s[1]), r(e[0]), r(e[1])]
             };
+            // A segment already drawn visible adds nothing: don't sample it again.
+            if seen.get(&k) == Some(&true) {
+                continue;
+            }
             let steps = ((len / 0.5).ceil() as usize).clamp(1, 128);
             // Classify each piece by its midpoint, then join runs.
             let mut run: Option<(bool, Vec<f64>)> = None;

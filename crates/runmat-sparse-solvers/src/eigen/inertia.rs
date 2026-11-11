@@ -197,8 +197,8 @@ fn analyze_schedule(
         rows * rows
     };
     let mut children: Vec<Vec<usize>> = vec![Vec::new(); count];
-    for s in 0..count {
-        if let Some(p) = parent[s] {
+    for (s, &parent_node) in parent.iter().enumerate() {
+        if let Some(p) = parent_node {
             children[p].push(s);
         }
     }

@@ -121,13 +121,14 @@ pub(super) fn execute_structural_modal_extraction(
     })?;
     let expected_resource_plan =
         runmat_analysis_fea::planning::resource::build_structural_modal_resource_plan_selecting(
-        Some(&mesh),
-        &compiled,
-        &observations,
-        &workload,
-        prestress_state.as_ref(),
-        &resource_plan.request.accelerators,
-        PreparedStructuralModalResourceFacts {
+        runmat_analysis_fea::planning::resource::StructuralModalResourcePlanningInput {
+        mesh: Some(&mesh),
+        compilation: &compiled,
+        observations: &observations,
+        workload: &workload,
+        prestress_state: prestress_state.as_ref(),
+        accelerator_requests: &resource_plan.request.accelerators,
+        prepared: PreparedStructuralModalResourceFacts {
             local_execution:
                 runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
                     resource_plan.request.cpu_millicores,
@@ -146,6 +147,7 @@ pub(super) fn execute_structural_modal_extraction(
                     Digest::from_bytes(*mesh.canonical_digest.bytes()),
                 )?,
             output_set: projected_output_set_resource_facts(),
+        },
         },
         runmat_analysis_fea::planning::resource::ModalSolveSelection::Recorded(path),
     )

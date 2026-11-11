@@ -23,7 +23,12 @@
 //! center all lie in front of it (which holds where the smoothness test is too strict for the
 //! depth's precision, such as ribs under a wing skin seen at a grazing angle). Creases and
 //! silhouettes keep their own edges: there the samples aren't smooth, and an extrapolated side
-//! meets the edge itself or the background.
+//! meets the edge itself or the background. A multisampled depth texel is read as the mean of
+//! its samples, which is the depth at the pixel's center on a plane; one sample sits up to 0.4 px
+//! off it, which on a steeply receding skin is deeper than the structure under it. A probe that
+//! reaches past the texture's border carries the border's depth rate on instead of repeating the
+//! border pixel. An edge just under a skin's outline still draws along the outline (it lies within
+//! a fraction of a pixel of it and meets the background there).
 
 /// The share of view depth a depth-tested edge stroke moves toward the camera.
 pub const EDGE_DEPTH_SHARE: f32 = 1.5e-5;
@@ -89,16 +94,14 @@ pub fn source_for(shader: EdgeStrokeShader) -> String {
     let (probe_binding, probe_fragment) = match shader.depth_probe {
         None => (String::new(), String::new()),
         Some(multisampled) => {
-            let (kind, sample) = if multisampled {
-                ("texture_depth_multisampled_2d", ", 0")
+            let binding = if multisampled {
+                PROBE_BINDING_MULTISAMPLED
             } else {
-                ("texture_depth_2d", ", 0")
+                PROBE_BINDING
             };
             let nearer = if shader.reversed_z { ">" } else { "<" };
             (
-                PROBE_BINDING
-                    .replace("DEPTH_KIND", kind)
-                    .replace("SAMPLE_ARG", sample),
+                format!("{binding}{PROBE_DEPTH_AT}"),
                 PROBE_FRAGMENT.replace("NEARER", nearer),
             )
         }
@@ -132,13 +135,48 @@ fn place(inst: InstanceInput, p: vec3<f32>) -> vec3<f32> {
 "#;
 
 const PROBE_BINDING: &str = r#"
-@group(2) @binding(0) var scene_depth: DEPTH_KIND;
+@group(2) @binding(0) var scene_depth: texture_depth_2d;
 
+// The depth at the center of a pixel inside the texture.
+fn texel_depth(q: vec2<i32>) -> f32 {
+    return textureLoad(scene_depth, q, 0);
+}
+"#;
+
+// A multisampled pixel's samples sit off its center: sample 0 of WebGPU's 4× pattern is 0.125 px
+// left of and 0.375 px above it. On a surface that recedes from the eye by several millimetres per
+// pixel (a fuselage's upper side seen obliquely at an overview zoom), sample 0 alone puts the
+// surface that much deeper on one side of the screen, behind the frames and stringers 3 mm under
+// it, so they showed through on the half that recedes upward. The pattern's mean is the center,
+// so the mean of the samples is the plane's depth at the center.
+const PROBE_BINDING_MULTISAMPLED: &str = r#"
+@group(2) @binding(0) var scene_depth: texture_depth_multisampled_2d;
+
+// The depth at the center of a pixel inside the texture: the mean of its samples.
+fn texel_depth(q: vec2<i32>) -> f32 {
+    let n = textureNumSamples(scene_depth);
+    var sum = 0.0;
+    for (var i = 0u; i < n; i = i + 1u) {
+        sum = sum + textureLoad(scene_depth, q, i32(i));
+    }
+    return sum / f32(max(n, 1u));
+}
+"#;
+
+const PROBE_DEPTH_AT: &str = r#"
+// The depth at a pixel's center. Past the texture's border it carries the depth's rate at the
+// border on (the border pixel and its mirror inside), so a probe that reaches off screen still
+// sees a sloped surface as sloped; a clamped read would make it flat there, and a line under a
+// receding skin at the view's edge would show.
 fn load_depth(p: vec2<i32>) -> f32 {
     let size = vec2<i32>(textureDimensions(scene_depth)) - vec2<i32>(1, 1);
-    return textureLoad(scene_depth, clamp(p, vec2<i32>(0, 0), size)SAMPLE_ARG);
+    let q = clamp(p, vec2<i32>(0, 0), size);
+    if all(q == p) {
+        return texel_depth(p);
+    }
+    let mirror = clamp(2 * q - p, vec2<i32>(0, 0), size);
+    return 2.0 * texel_depth(q) - texel_depth(mirror);
 }
-
 // The depth at a framebuffer position, bilinear between pixel centers.
 fn depth_at(p: vec2<f32>) -> f32 {
     let f = p - vec2<f32>(0.5, 0.5);

@@ -41,12 +41,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod annotate;
 mod autoroute;
+mod board_study;
 mod coupled;
 pub mod delta;
 mod edit;
 mod fabrication;
 mod kicad;
 mod library_edit;
+pub mod libraries;
 pub mod modules;
 pub mod values;
 mod rules;
@@ -290,8 +292,9 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         }
         out.push(lock_path_for(path));
         out.push(layout_path_for(path));
-        // The footprint files its `part` declarations open in place.
+        // The footprint files its `part` declarations open in place, and the libraries it uses.
         if let Some(design) = parse_circuit(path, text).design {
+            out.extend(libraries::library_dependencies(path, &design));
             // The folders its computed values call functions from.
             if values::has_calls(&design) {
                 out.extend(values::value_folders(path, &design));
@@ -356,7 +359,75 @@ pub fn dependency_files(path: &str, text: &str, files: &Files) -> Vec<String> {
 /// declared part's footprint file is read from `files`, relative to the circuit.
 fn pool(design: &Design, circuit_path: &str, files: &Files) -> Result<Pool, String> {
     let file = |p: &str| files.get(&resolve_path(circuit_path, p)).cloned();
-    crate::library::catalog::pool_with(crate::fixture::standard_pool(), &design.parts, &file)
+    let declared = crate::library::catalog::Declared {
+        footprints: Some(&design.footprints),
+        symbols: Some(&design.symbols),
+    };
+    crate::library::catalog::pool_in(
+        crate::fixture::standard_pool(),
+        &design.parts,
+        declared,
+        &file,
+    )
+}
+
+/// A library `.circuit` compiled on its own: its used libraries resolve and its declarations
+/// pass the library checks. `None` when `path` isn't a library (or doesn't parse; the design
+/// compile reports that).
+fn compile_library(path: &str, text: &str, files: &Files) -> Option<CompileOutput> {
+    if is_layout(path) {
+        return None;
+    }
+    let own = parse_circuit(path, text).design.filter(|d| d.library)?;
+    let mut diagnostics = Vec::new();
+    match libraries::resolve(path, text, &own, files) {
+        Ok((scope, _)) => {
+            for message in libraries::library_findings(path, &own, &scope, files) {
+                let at = finding_span(text, &message);
+                diagnostics.push(Diagnostic::error(path, Some(text), at.0, at.1, message));
+            }
+        }
+        Err(e) => diagnostics.push(library_error(path, text, files, e)),
+    }
+    Some(CompileOutput {
+        index: None,
+        diagnostics,
+    })
+}
+
+/// The declaration a library finding names (`footprint `x``, `part `X``), as a byte range of
+/// `text`: its name where it is declared, else the file's start.
+fn finding_span(text: &str, message: &str) -> (usize, usize) {
+    let named = message.split('`').nth(1).unwrap_or("");
+    let kind = message.split_whitespace().next().unwrap_or("");
+    let written = if kind == "part" {
+        format!("part \"{named}\"")
+    } else {
+        format!("{kind} {named}")
+    };
+    text.find(&written)
+        .map(|i| (i, i + written.len()))
+        .unwrap_or((0, 0))
+}
+
+/// A library error as a diagnostic in `path`: where it happened when that is `path`, else on
+/// `path`'s first library `use` line, naming the file it happened in.
+fn library_error(path: &str, text: &str, files: &Files, e: libraries::LibraryError) -> Diagnostic {
+    if e.file == path {
+        return Diagnostic::error(path, Some(text), e.start, e.end, e.message);
+    }
+    let _ = files;
+    let at = text
+        .find("use \"")
+        .map(|i| (i, text[i..].find('\n').map_or(text.len(), |n| i + n)))
+        .unwrap_or((0, 0));
+    Diagnostic::error(
+        path,
+        Some(text),
+        at.0,
+        at.1,
+        format!("{}: {}", e.file, e.message),
+    )
 }
 
 struct Layout {
@@ -601,8 +672,32 @@ fn load_with(
         }
         return Err(out);
     }
-    let mut design = own.clone();
+    if own.library {
+        return Err(vec![Diagnostic::error(
+            &circuit_path,
+            Some(&circuit_text),
+            0,
+            0,
+            format!("{circuit_path} is a library: it holds footprints, symbols and parts, and no circuit"),
+        )]);
+    }
+    let mut design = match libraries::resolve(&circuit_path, &circuit_text, &own, files) {
+        Ok((scope, _)) => scope,
+        Err(e) => return Err(vec![library_error(&circuit_path, &circuit_text, files, e)]),
+    };
     let mut used_errors: Vec<Diagnostic> = Vec::new();
+    for (name, f) in &own.footprints {
+        for message in crate::library::checks::footprint_findings(name, f) {
+            let at = finding_span(&circuit_text, &message);
+            used_errors.push(Diagnostic::error(
+                &circuit_path,
+                Some(&circuit_text),
+                at.0,
+                at.1,
+                message,
+            ));
+        }
+    }
     let loader = |u: &crate::ir::CircuitUse| -> Result<Design, String> {
         let (kind, name) = u.symbol.as_ref().ok_or("a whole folder holds no design")?;
         let p = modules::locate(&circuit_path, kind, name, &u.from, files)?;
@@ -697,6 +792,9 @@ pub struct CompileOutput {
 /// Compiles the circuit `path` belongs to: the schematic's netlist, ERC and review, and the
 /// board's DRC and both ECO directions when it has a board.
 pub fn compile(path: &str, text: &str, files: &Files, options: &CompileOptions) -> CompileOutput {
+    if let Some(out) = compile_library(path, text, files) {
+        return out;
+    }
     let project = match load(path, text, files, options) {
         Ok(p) => p,
         Err(diagnostics) => {
@@ -758,6 +856,9 @@ pub fn compile(path: &str, text: &str, files: &Files, options: &CompileOptions) 
 /// stay with [`compile`] and the board view; a layout's board rules are still checked.
 /// Every diagnostic is in `path`'s own file (findings elsewhere are left to that file).
 pub fn check(path: &str, text: &str, files: &Files, options: &CompileOptions) -> CompileOutput {
+    if let Some(out) = compile_library(path, text, files) {
+        return out;
+    }
     let project = match load(path, text, files, options) {
         Ok(p) => p,
         Err(diagnostics) => {

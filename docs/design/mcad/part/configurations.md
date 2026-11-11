@@ -39,6 +39,7 @@ part bracket {
 | `<input> = <value>` | An input's value: `width = 120 mm`. |
 | `suppress = [feature.<name>, …]` | Features left out of the history in this configuration. |
 | `features = { <feature> = { <parameter> = <value> } }` | A feature's own parameters: `features = { body = { distance = 12 mm } }`. |
+| `features = { <feature> = { suppressed = false } }` | Brings back a feature the part writes with `suppressed = true`, so a member of the family can add a feature the default leaves out. |
 | `part_number` | The part number in this configuration: a dash number, or the other hand of a mirrored part. |
 | `description` | The description in this configuration. |
 | `properties` | Other properties in this configuration. |

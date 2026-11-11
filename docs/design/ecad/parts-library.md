@@ -1,6 +1,6 @@
 ---
 description: The RunMat parts library. Find orderable parts with their pins, packages, parameters, datasheets and SPICE models, embed them in a circuit as part declarations, and preview their symbols and footprints.
-keywords: [parts library, component library, MPN, part search, footprints, symbols, SPICE models, datasheets, embedded part definitions]
+keywords: [parts library, component library, MPN, part search, footprints, symbols, SPICE models, datasheets, embedded part definitions, library .circuit]
 ---
 # The parts library
 
@@ -48,13 +48,26 @@ part "BUCK-60V-3A" = {
 | Field | Meaning |
 |---|---|
 | `manufacturer`, `description`, `category`, `datasheet` | what the part is |
-| `package` | a footprint generator string (`"SOT23-6"`), or a `.kicad_mod` file read in place |
+| `package` | the footprint: a generator string for a standard package (`"QFN24_4mm_P0.5_EP2.6"`), or the name of a `footprint` declaration (`package = gps_lcc12`); see [Footprints](/docs/ecad/footprints) |
+| `symbol` | optional: the name of a `symbol` declaration the part draws with; without it the symbol is generated from the pins |
+| `body` | optional: the part's 3D body, a STEP file or an MCAD `.part`, over its footprint's own |
 | `params` | parameters for selection and checks |
 | `pins` | each pin's name, pad and electrical type (`passive`, `power_in`, `power_out`, `input`, `output`, `bidirectional`, `no_connect`, …); pins sharing a name become one pin on several pads |
+| `nc` | pads the part leaves without a pin on purpose, such as `nc = ["7", "8"]` |
 | `spice` | the SPICE model: `model` (a subcircuit or model name), `library`, and `nodes` in model-pin order |
 
 A declared part replaces a built-in part of the same MPN. A part with a `spice` model simulates with no `model` statement in the simulation section; a section's own `model` wins, so one section can run a switching model and another an averaged one of the same part.
 
+## Footprints
+
+A part's `package` string names a standard package, and RunMat generates its land pattern from the IPC-7351B equations, so a standard part needs no footprint file: `"R0402"`, `"SOIC8"`, `"QFN24_4mm_P0.5_EP2.6"`, `"SOT23-6"`, `"PinHeader1x04"`. [Footprints](/docs/ecad/footprints) lists every family with its string and pad numbering.
+
+A package no family covers, such as a module or an odd connector, gets a `footprint` declaration in a library file under `electrical/library/footprints/`, and the part names it: `package = gps_lcc12`.
+
+## Libraries
+
+A `.circuit` file with no `circuit` block is a library of `footprint`, `symbol` and `part` declarations. A circuit uses one with `use "../library/parts.circuit"`, and its parts are then placed by MPN like built-in ones. Before declaring a new part, check whether a library the project uses already has it. [Footprints](/docs/ecad/footprints#libraries) covers how names resolve and the checks a library passes.
+
 ## Part data from vendors
 
-Vendor data comes through the RunMat server, which holds any vendor keys and caches results. An organization can connect its own vendor accounts to search live stock and pricing, under each vendor's terms; those vendors appear in Search for the organization's members. Library packages that a team shares between projects (`use library`) [not yet in the current release](pending:design.ecad.use-library).
+Vendor data comes through the RunMat server, which holds any vendor keys and caches results. An organization can connect its own vendor accounts to search live stock and pricing, under each vendor's terms; those vendors appear in Search for the organization's members.

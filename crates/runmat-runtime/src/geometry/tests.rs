@@ -18,7 +18,6 @@ fn two_box_preview_picks_vertical_edge_near_top_corner() {
     let asset = geometry_load(path, &bytes).unwrap();
     let scene = geometry_preview_scene(&asset, "two boxes", GeometryPreviewSceneOptions::default())
         .unwrap();
-    let chunk = &scene.chunks[0];
     let mut camera = runmat_plot::core::Camera::new();
     camera.position = glam::Vec3::new(16.0, 8.0, 8.0);
     camera.target = glam::Vec3::new(10.5, 1.0, 1.5);
@@ -47,8 +46,14 @@ fn two_box_preview_picks_vertical_edge_near_top_corner() {
             position: pos,
             mode: runmat_plot::GeometryScenePickMode::Edge,
         });
+        let pick = pick.expect("expected a hit on the translated box");
+        let chunk = scene
+            .chunks
+            .iter()
+            .find(|chunk| chunk.chunk_id == pick.chunk_id)
+            .expect("the picked chunk belongs to the preview scene");
         let Some(runmat_plot::GeometrySceneTopologySelection::Edge { vertex_indices, .. }) =
-            pick.and_then(|hit| hit.topology_selection)
+            pick.topology_selection
         else {
             panic!("expected a vertical edge at z={z}");
         };

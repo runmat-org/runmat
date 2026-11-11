@@ -683,3 +683,55 @@ fn each_output_body_draws_in_its_own_color() {
     assert!(colors.contains(&copper), "{colors:?}");
     assert!(colors.contains(&air), "{colors:?}");
 }
+
+/// One output and a `material` statement naming a feature that makes three bodies (three loops
+/// in one sketch): each of the three draws in the statement's material, the output body in the
+/// part's own appearance.
+const BODY_MATERIALS: &str = r##"runmat 0.7
+std 1
+
+part wall {
+    sketch skin_s on origin.xy {
+        s1 = line(start = [0 mm, 0 mm], end = [100 mm, 0 mm])
+        s2 = line(start = [100 mm, 0 mm], end = [100 mm, 10 mm])
+        s3 = line(start = [100 mm, 10 mm], end = [0 mm, 10 mm])
+        s4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])
+    }
+    feature skin = extrude(profile = sketch.skin_s, distance = 2 mm)
+    sketch fill_s on origin.xy {
+        a1 = line(start = [0 mm, 20 mm], end = [20 mm, 20 mm])
+        a2 = line(start = [20 mm, 20 mm], end = [20 mm, 30 mm])
+        a3 = line(start = [20 mm, 30 mm], end = [0 mm, 30 mm])
+        a4 = line(start = [0 mm, 30 mm], end = [0 mm, 20 mm])
+        b1 = line(start = [40 mm, 20 mm], end = [60 mm, 20 mm])
+        b2 = line(start = [60 mm, 20 mm], end = [60 mm, 30 mm])
+        b3 = line(start = [60 mm, 30 mm], end = [40 mm, 30 mm])
+        b4 = line(start = [40 mm, 30 mm], end = [40 mm, 20 mm])
+        c1 = line(start = [80 mm, 20 mm], end = [100 mm, 20 mm])
+        c2 = line(start = [100 mm, 20 mm], end = [100 mm, 30 mm])
+        c3 = line(start = [100 mm, 30 mm], end = [80 mm, 30 mm])
+        c4 = line(start = [80 mm, 30 mm], end = [80 mm, 20 mm])
+    }
+    feature fill = extrude(profile = sketch.fill_s, distance = 5 mm, mode = new)
+    output skin = { body = feature.skin.body, material = "material.stucco_finish_coat" }
+    material = { body = feature.fill.body, material = "material.fiberglass_batt" }
+}
+"##;
+
+#[test]
+fn a_material_statement_colors_every_body_it_names() {
+    let d = compile("/p/wall.part", BODY_MATERIALS);
+    assert_eq!(d.bodies.len(), 4);
+    let batt = runmat_cad::appearance::material_appearance(Some("material.fiberglass_batt")).1;
+    let colored: Vec<_> = d.bodies.iter().filter(|b| b.color == Some(batt)).collect();
+    assert_eq!(
+        colored.len(),
+        3,
+        "{:?}",
+        d.bodies.iter().map(|b| b.color).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        d.appearance,
+        Some(runmat_cad::appearance::material_appearance(Some("material.stucco_finish_coat")).1)
+    );
+}

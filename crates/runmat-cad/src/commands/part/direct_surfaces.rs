@@ -104,10 +104,10 @@ pub(super) fn direct() -> Vec<CommandDescriptor> {
             offset("value", "Value", 0.0).drag(Manipulator::Arrow),
         ]),
         d("direct.pull", "Pull", "pull", "move_faces")
-            .desc("Push or pull faces and edges; adds or removes material.")
+            .desc("Push or pull faces; adds or removes material.")
             .kw(&["push pull", "press pull"])
             .inputs(vec![
-                picks("faces", "Faces or edges", &[K::Face, K::Edge]),
+                picks("faces", "Faces", &[K::Face]),
                 offset("distance", "Distance", 1.0).drag(Manipulator::Arrow),
             ]),
         cmd("direct.live-relations", "Live relations", "relations", P)

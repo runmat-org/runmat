@@ -13,6 +13,7 @@
 //! | `design.export` | STEP, STL, 3MF, glTF, DXF and DWG (drawing sheets and flat patterns), PDF (drawing sheets), KiCad out, a board's fabrication set, and KiCad, SPICE, EDIF and IPC-D-356A netlists. |
 //! | `design.overview` | What a file is, its state from the checks above, the files linked to it and their status, the decisions its guides still need, and two or three next steps. |
 //! | `design.propose_edit` | Source text or a catalog command with its values, as a staged change with its diff and the diagnostics after it. |
+//! | `design.seat_part` | Seats a component against another (a face, a ray's surface or a connector) with a mate, as a staged change with the solved pose, its interference and its clearance. |
 //!
 //! Every tool is a pure function of its input and the workspace [`Files`] (path → text) the
 //! caller read. [`dependencies`] lists what a file needs; the caller reads those files, and
@@ -27,6 +28,7 @@ use std::collections::BTreeMap;
 pub mod check;
 pub mod ci;
 pub mod circuit_values;
+pub mod commands;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod workspace;
 pub mod edit;
@@ -41,6 +43,7 @@ pub mod overview;
 pub mod render;
 pub mod rules;
 pub mod scene;
+pub mod seat;
 pub mod simulate;
 
 pub use locate::{Locator, Range};
@@ -290,7 +293,12 @@ pub fn catalog() -> Vec<ToolDefinition> {
         definition::<edit::ProposeEditInput, edit::StagedChange>(
             "design.propose_edit",
             "Propose design edit",
-            "Use this to change a design or add a design file: give the new source text (a path that doesn't exist yet creates that file), replacements on the current text, or a catalog command (for example part.extrude, part.fillet, board.route) with its values and selection. Returns a staged change: the feature and dimension diff or the schematic-to-board change rows, the diagnostics after it, and the patch that keeps it and the patch that undoes it.",
+            "Use this to change a design or add a design file: give the new source text (a path that doesn't exist yet creates that file), replacements on the current text, or a catalog command (for example part.extrude, part.fillet, board.route) with its values and selection. Returns a staged change: the feature and dimension diff or the schematic-to-board change rows, the diagnostics after it, and the patch that keeps it and the patch that undoes it. An edit that adds a part occurrence, connector or fasten, coincident or concentric mate to an assembly that already places parts is refused: place parts with design.seat_part.",
+        ),
+        definition::<seat::SeatInput, seat::SeatOutput>(
+            "design.seat_part",
+            "Seat part in assembly",
+            "Use this to place a component in an assembly in one call: an occurrence it has, or a part file inserted as a new one, against another component's face, axis or connector, or where a ray from a point meets that component's surface (a curved shell). Writes the connectors and a fasten (or coincident or concentric) mate, solves, and returns a staged change with the component's pose, its interference with every other component and its clearance to named neighbours.",
         ),
     ];
     let render = definition::<scene::RenderInput, scene::RenderOutput>(
@@ -321,6 +329,7 @@ pub fn call(name: &str, input: Value, files: &Files) -> ToolResult {
         "design.propose_edit" => out(edit::propose(&parse(input)?, files)?),
         "design.simulate" => out(simulate::simulate(&parse(input)?, files)?),
         "design.overview" => out(overview::overview(&parse(input)?, files)?),
+        "design.seat_part" => out(seat::seat(&parse(input)?, files)?),
         "design.render" => render_call(input, files),
         other => Err(ToolError::new(
             "unknown_tool",
@@ -446,7 +455,7 @@ mod tests {
         names.sort();
         names.dedup();
         assert_eq!(names.len(), tools.len());
-        assert_eq!(names.len(), 10);
+        assert_eq!(names.len(), 11);
         for t in &tools {
             assert!(t.name.starts_with("design."));
             assert!(t.description.starts_with("Use this"));

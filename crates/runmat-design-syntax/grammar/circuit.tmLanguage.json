@@ -49,7 +49,7 @@
     },
     {
       "name": "storage.type.circuit",
-      "match": "(?<![\\w])(?:simulation|component|diff_pair|interface|net_class|tolerance|analysis|instance|blanket|circuit|connect|harness|measure|variant|no_erc|option|source|model|param|probe|sheet|part|port|root|text|bus|net)(?![\\w])"
+      "match": "(?<![\\w])(?:simulation|component|diff_pair|footprint|interface|net_class|tolerance|analysis|instance|blanket|circuit|connect|harness|measure|variant|no_erc|option|source|symbol|model|param|probe|sheet|part|port|root|text|bus|net)(?![\\w])"
     },
     {
       "name": "keyword.other.circuit",
@@ -136,6 +136,7 @@
           "component",
           "connect",
           "diff_pair",
+          "footprint",
           "harness",
           "instance",
           "interface",
@@ -153,6 +154,7 @@
           "sheet",
           "simulation",
           "source",
+          "symbol",
           "text",
           "tolerance",
           "variant"

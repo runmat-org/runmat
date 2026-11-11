@@ -17,8 +17,11 @@
 //!
 //! Families: chip passives (01005…2512), SOIC/SOP/SSOP/TSSOP, QFP, QFN/DFN (with exposed
 //! pad), BGA (with depopulation), SOT-23-3/5/6, SOT-223, pin headers and generic
-//! through-hole connectors. Each package gets pads, courtyard, silk and fab outlines, a pin-1
+//! through-hole connectors, SMD connectors and mounting holes. Each package gets pads, courtyard, silk and fab outlines, a pin-1
 //! mark, a body for 3D placeholders and a model reference by name.
+
+mod strings;
+pub use strings::{canonical, describe, from_string, Description, Parameter};
 
 use super::{Body, CopperSpan, Graphic, Model3d, Package, PadDef, PadShape};
 use crate::geom::poly::{rect_ring, Ring};
@@ -1032,82 +1035,6 @@ pub fn smd_connector(
         None,
         mounting.iter().all(|m| m.2.is_none()),
     )
-}
-
-/// Parses a compact footprint string (the footprinter-style DSL):
-/// `R0402`, `C0603`, `soic8`, `soic16w`, `tssop20`, `qfp48_7mm_p0.5`, `qfn32_5mm_p0.5_ep3.3`,
-/// `bga256_16x16_p1.0_ball0.5`, `sot23-5`, `sot223`, `pinheader2x05_p2.54`. An optional
-/// `@A`/`@B`/`@C` suffix picks the density (default B).
-pub fn from_string(s: &str) -> Option<Package> {
-    let (body, density) = match s.rsplit_once('@') {
-        Some((b, "A")) => (b, Density::A),
-        Some((b, "C")) => (b, Density::C),
-        Some((b, _)) => (b, Density::B),
-        None => (s, Density::B),
-    };
-    let lower = body.to_ascii_lowercase();
-    let num = |t: &str| t.parse::<f64>().ok();
-    let field = |prefix: &str| {
-        lower.split('_').find_map(|t| {
-            t.strip_prefix(prefix)
-                .and_then(|v| v.trim_end_matches("mm").parse::<f64>().ok())
-        })
-    };
-    for kind in ["led", "r", "c", "l", "d", "f"] {
-        if let Some(code) = lower.strip_prefix(kind) {
-            if code.chars().all(|c| c.is_ascii_digit()) && !code.is_empty() {
-                return chip(&kind.to_ascii_uppercase(), code, density);
-            }
-        }
-    }
-    if let Some(rest) = lower.strip_prefix("soic") {
-        let wide = rest.ends_with('w');
-        let n = rest.trim_end_matches('w').parse().ok()?;
-        return Some(soic(n, !wide, density));
-    }
-    if let Some(rest) = lower.strip_prefix("tssop") {
-        return Some(tssop(rest.parse().ok()?, density));
-    }
-    if let Some(rest) = lower.strip_prefix("qfp") {
-        let n = rest.split('_').next()?.parse().ok()?;
-        let b = lower
-            .split('_')
-            .nth(1)
-            .and_then(|t| num(t.trim_end_matches("mm")))?;
-        return Some(qfp(n, b, field("p")?, density));
-    }
-    if let Some(rest) = lower.strip_prefix("qfn") {
-        let n = rest.split('_').next()?.parse().ok()?;
-        let b = lower
-            .split('_')
-            .nth(1)
-            .and_then(|t| num(t.trim_end_matches("mm")))?;
-        return Some(qfn(n, b, field("p")?, field("ep"), density));
-    }
-    if let Some(rest) = lower.strip_prefix("bga") {
-        let mut it = rest.split('_');
-        let _n: u32 = it.next()?.parse().ok()?;
-        let (r, c) = it.next()?.split_once('x')?;
-        let (r, c): (u32, u32) = (r.parse().ok()?, c.parse().ok()?);
-        let p = field("p")?;
-        let ball = field("ball").unwrap_or(p * 0.5);
-        let b = (c as f64 * p + p, r as f64 * p + p);
-        return Some(bga(r, c, p, ball, b, |_, _| true, density));
-    }
-    if let Some(rest) = lower.strip_prefix("sot23") {
-        let n = rest.trim_start_matches('-').parse().unwrap_or(3);
-        return sot23(n, density);
-    }
-    if lower == "sot223" {
-        return Some(sot223(density));
-    }
-    if let Some(rest) = lower.strip_prefix("pinheader") {
-        let dims = rest.split('_').next()?;
-        let (c, r) = dims.split_once('x')?;
-        let pitch = field("p").unwrap_or(2.54);
-        return Some(pin_header(r.parse().ok()?, c.parse().ok()?, pitch));
-    }
-    None
 }
 
 #[cfg(test)]

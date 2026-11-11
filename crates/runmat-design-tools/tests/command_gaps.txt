@@ -1,0 +1,183 @@
+annotate.annotation-view part
+annotate.auto-dimension part
+annotate.coating part
+annotate.datum part
+annotate.dimension part
+annotate.gdt part
+annotate.note part
+annotate.surface-finish part
+annotate.weld-symbol part
+annotate.weld-symbol part type=fillet
+annotate.weld-symbol part type=groove
+annotate.weld-symbol part type=plug
+annotate.weld-symbol part type=spot
+assembly.configurations assembly
+assembly.contacts assembly
+assembly.copy-with-mates assembly
+assembly.document-settings assembly
+assembly.envelope assembly
+assembly.feature assembly
+assembly.feature assembly type=cut
+assembly.feature assembly type=hole
+assembly.feature assembly type=weld
+assembly.hole-alignment assembly
+assembly.hole-check assembly
+assembly.interface-check assembly
+assembly.mate-connector assembly
+assembly.options assembly
+assembly.options-effectivity assembly
+assembly.publish assembly
+assembly.representation assembly
+assembly.skeleton assembly
+assembly.update-pins assembly
+assembly.visualization assembly
+board.align circuit
+board.align circuit.layout
+board.place circuit
+board.place circuit.layout
+board.rules circuit
+board.rules circuit.layout
+circuit.change-part circuit
+circuit.change-part circuit.layout
+circuit.delete circuit
+circuit.delete circuit.layout
+circuit.edit-value circuit
+circuit.edit-value circuit.layout
+circuit.fitted circuit
+circuit.fitted circuit.layout
+circuit.footprint circuit
+circuit.footprint circuit.layout
+circuit.net-class circuit
+circuit.net-class circuit.layout
+circuit.net-length circuit
+circuit.net-length circuit.layout
+circuit.rename-net circuit
+circuit.rename-net circuit.layout
+circuit.swap-pins circuit
+circuit.swap-pins circuit.layout
+direct.instant-3d part
+drawing.check drawing
+drawing.edit-view drawing
+evaluate.check-geometry part
+evaluate.cost part
+evaluate.curvature part
+evaluate.deviation part
+evaluate.dfm part
+evaluate.section-properties part
+evaluate.thickness part
+evaluate.zebra part
+explode.auto assembly
+library.create-part circuit
+library.create-part circuit.layout
+library.manufacturer-search circuit
+library.manufacturer-search circuit.layout
+manage.document-settings part
+manage.recognize-features part
+manage.replace-reference part
+mold.parting-line part
+mold.parting-surface part
+mold.parting-surface part type=normal
+mold.parting-surface part type=perpendicular
+mold.parting-surface part type=tangent
+mold.scale part
+mold.shut-off part
+mold.shut-off part type=contact
+mold.shut-off part type=none
+mold.shut-off part type=tangent
+mold.undercut part
+motion.animation assembly
+motion.basic assembly
+motion.collision assembly
+motion.drag assembly
+motion.mate-controller assembly
+motion.to-fea assembly
+part.body-scale part
+part.edit-feature part
+part.edit-sketch-plane part
+part.library part
+part.parents-children part
+part.rename part
+part.rollback-end part
+part.rollback-here part
+part.show-references part
+sheet-metal.bend-table part
+sheet-metal.gauge part
+simulate.defeature part
+simulate.region part
+simulate.representation part
+sketch.arc assembly
+sketch.arc assembly type=center
+sketch.arc assembly type=tangent
+sketch.arc assembly type=three_point
+sketch.auto-constrain assembly
+sketch.chamfer assembly
+sketch.check assembly
+sketch.check part
+sketch.circle assembly
+sketch.circle assembly type=center
+sketch.circle assembly type=three_point
+sketch.constraint assembly
+sketch.construction assembly
+sketch.dimension assembly
+sketch.dimension assembly type=horizontal
+sketch.dimension assembly type=ordinate
+sketch.dimension assembly type=path_length
+sketch.dimension assembly type=smart
+sketch.dimension assembly type=vertical
+sketch.ellipse assembly
+sketch.ellipse assembly type=conic
+sketch.ellipse assembly type=full
+sketch.ellipse assembly type=parabola
+sketch.ellipse assembly type=partial
+sketch.ellipse part
+sketch.ellipse part type=conic
+sketch.ellipse part type=full
+sketch.ellipse part type=parabola
+sketch.ellipse part type=partial
+sketch.extend assembly
+sketch.fillet assembly
+sketch.line assembly
+sketch.line assembly type=centerline
+sketch.line assembly type=line
+sketch.line assembly type=midpoint
+sketch.mirror assembly
+sketch.offset assembly
+sketch.pattern assembly
+sketch.point assembly
+sketch.polygon assembly
+sketch.polygon part
+sketch.rectangle assembly
+sketch.rectangle assembly type=center
+sketch.rectangle assembly type=corner
+sketch.rectangle assembly type=parallelogram
+sketch.rectangle assembly type=three_point
+sketch.slot assembly
+sketch.slot assembly type=arc
+sketch.slot assembly type=center
+sketch.slot assembly type=straight
+sketch.spline assembly
+sketch.spline assembly type=control_points
+sketch.spline assembly type=equation
+sketch.spline assembly type=style
+sketch.spline assembly type=through_points
+sketch.spline part
+sketch.spline part type=control_points
+sketch.spline part type=equation
+sketch.spline part type=style
+sketch.spline part type=through_points
+sketch.split assembly
+sketch.text assembly
+sketch.text part
+sketch.transform assembly
+sketch.transform assembly type=copy
+sketch.transform assembly type=move
+sketch.transform assembly type=rotate
+sketch.transform assembly type=scale
+sketch.trim assembly
+sketch.trim assembly type=corner
+sketch.trim assembly type=inside
+sketch.trim assembly type=outside
+sketch.trim assembly type=power
+study.new assembly
+study.new part
+weldment.profile-library part

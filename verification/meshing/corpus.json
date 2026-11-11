@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_revision": 7,
+  "corpus_revision": 8,
   "fixture_root": "crates/runmat-geometry/io/tests/fixtures",
   "entries": [
     {
@@ -494,6 +494,18 @@
       "features": ["assembly", "shared-interface", "edge-tolerance-admission"],
       "expected": { "outcome": "success", "topology": "two authored solids; pcurve gaps within a 0.1 mm request are admitted and recorded", "mass_properties": "not independently asserted by the import witness", "regions": 2, "mesh_error_bounds": "import tolerance regression only; the separate over-bound witness preserves defects beyond a 0.1 micrometre request" },
       "test": { "source": "crates/runmat-geometry/io/tests/edge_tolerance_admission.rs", "name": "gaps_within_the_request_tolerance_are_admitted_and_recorded" }
+    },
+    {
+      "id": "drone-esc-thermal",
+      "path": "drone_esc_thermal.step",
+      "sha256": "a5524adc742c3ae2e7ef6a9f17fd2bc4f70782b2a778c03bd531dc174031d099",
+      "tier": "extended",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository drone ESC thermal-study export", "exporter": "Open CASCADE STEP processor", "exporter_version": "7.8", "license": "RunMat repository license" },
+      "features": ["assembly", "persistent-labels", "product-names"],
+      "expected": { "outcome": "success", "topology": "three bodies named esc_board_thermal, esc_heatsink and thermal_pad; authored fins face name survives import", "mass_properties": "product-name and face-name witness; independent mass properties are unmeasured", "regions": 3, "mesh_error_bounds": "import/preview identity witness; volume-meshing error bounds are unmeasured" },
+      "test": { "source": "crates/runmat-geometry/io/tests/step_face_names.rs", "name": "assembly_step_preview_names_bodies_by_product" }
     }
   ]
 }

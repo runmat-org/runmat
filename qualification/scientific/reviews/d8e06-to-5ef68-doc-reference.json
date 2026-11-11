@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
+    "files": 26096,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "a092825f0d4c1def8fbdc3995a3b83a48f6b5a3ab237a4a82d67ecb5f898f220",
+    "files": 26096,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "circuit-large-board-performance",
+    "authored-cli-physics",
+    "driver-recovery-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-design-commands/src/reference.rs",
+      "before": [
+        "100644",
+        "blob",
+        "c716dce8f15c60df2ea67efc067c7c2699929af9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "bd799d7d3e9e4996b35a38676f7fc9c3b8849e85"
+      ],
+      "reason": "The scientific input delta adds front matter to the generated design command reference. Dispatch, numerical implementations, required scientific tests and the 500 ms threshold are unchanged. The documentation suite and exact Rust generator comparison pass."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/final-command-reference.json",
+      "sha256": "824f47c2e2244ca98b631893f58691680aad0c717e9c314da5a38a8f08d86af0"
+    }
+  ]
+}

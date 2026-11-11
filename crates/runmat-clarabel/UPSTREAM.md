@@ -2,7 +2,7 @@
 
 This publishable `runmat-clarabel` package retains Clarabel.rs's source layout,
 numerical implementations, upstream authors and Apache-2.0 license. The RunMat
-package version is 0.6.2; the numerical upstream release is **Clarabel 0.11.1**.
+package version is 0.7.1; the numerical upstream release is **Clarabel 0.11.1**.
 The original solver banner/version remains 0.11.1, not the RunMat package version.
 
 Upstream: https://github.com/oxfordcontrol/Clarabel.rs/tree/v0.11.1
@@ -27,6 +27,11 @@ syntax required by the workspace compiler, and equivalent standard-library
 idioms required by workspace Clippy. Workspace profiles
 and dependency resolution are selected at the workspace root rather than by
 ignored nested package settings.
+The default artifact is a Rust library. Mixed Rust-library and `cdylib` outputs
+use shared, unhashed filenames, causing feature/profile variants to overwrite
+one another in a shared Cargo target directory. Shared-library consumers select
+`cargo rustc --lib --crate-type cdylib` with their required optional features.
+The Python/Julia source and feature definitions remain available.
 Rust source formatting follows the workspace toolchain; these mechanical
 whitespace/layout changes do not alter the numerical algorithm or literals.
 The existing synchronous solve body is a single private macro shared by the

@@ -193,8 +193,17 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(rig.contains("path1"), "{rig}");
+        // The mate's faces are published too (the pin's from its part): every changed part goes in.
         let mut with = files();
-        with.insert("/p/plate.part".into(), part.to_owned());
+        for f in changed
+            .iter()
+            .filter(|f| f["path"].as_str().is_some_and(|p| p.ends_with(".part")))
+        {
+            with.insert(
+                f["path"].as_str().unwrap().into(),
+                f["text"].as_str().unwrap().into(),
+            );
+        }
         let (_, _, problems) =
             compile_assembly("/p/rig.assembly", rig, &with).expect("compiles with the path");
         let errors: Vec<_> = problems.iter().filter(|d| d.severity == "error").collect();

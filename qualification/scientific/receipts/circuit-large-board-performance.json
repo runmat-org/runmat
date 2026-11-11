@@ -3,7 +3,7 @@
   "cohort": "circuit-large-board-performance",
   "policy_sha256": "71379c3bce11f6f26e0e017aa44b64cf12688b11dfac22f26fa55ae2969271f8",
   "measured": {
-    "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
+    "source_revision": "d8e06ca2ca8e68847e01c19268715c53a07a5cd5",
     "target": "macos-aarch64",
     "hardware": "Apple M5 Max, 48 GiB RAM",
     "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
@@ -24,11 +24,11 @@
     "profile": {
       "release": true,
       "debug": 0,
-      "cargo_build_jobs": 4,
+      "cargo_build_jobs": 1,
       "incremental": false
     },
-    "log_sha256": "cd3f83f6598d25adec54fe44ec3cbc58c61c2e8d2532c87e4952715b2062234d",
-    "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.tmp-rm1064/integration-071-777b5146bf-circuit-main-official.log",
+    "log_sha256": "45a5ad3b911963d897b55b3ac5954155d446e1cf8cf7da453e2c34a0eca9c1f4",
+    "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-d8e06-main-circuit-scale.log",
     "passed": 1,
     "failed": 0,
     "ignored": 0,
@@ -39,16 +39,17 @@
     ],
     "selected_filter": null,
     "inputs": {
-      "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
-      "files": 26022,
+      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
+      "files": 26096,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "artifacts": [
       {
-        "sha256": "1dc9e21a511fddcf8a44d282d0872c1170b2e8bc547fe48ecd06c18a5e6d8f9e",
-        "location": "Main:/Users/nallana/Source/runmat-acc-2/.tmp-rm1064/integration-071-circuit-artifacts/runtime_scale-777b5146bf-macos-aarch64"
+        "sha256": "7d4d728f92e1e66c433fd17c8a8225bb7c36e89556a8e280fabf8d90382db0c8",
+        "location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/runtime_scale-d8e06-macos-aarch64"
       }
-    ]
+    ],
+    "log_note": "Raw output retains permission diagnostics from a separate task-owned gate waiter that initially shared this log. That waiter was stopped. The admitted Cargo invocation returned exit 0; the named benchmark passed. The executed artifact is retained separately."
   },
   "scope": "The unchanged 500 ms edit budget passed on the recorded reference Mac. This receipt does not establish that budget on other processors.",
   "comparison_runs": [
@@ -77,19 +78,19 @@
   ],
   "conservation": {
     "measured_inputs": {
-      "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
-      "files": 26022,
+      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
+      "files": 26096,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "191a0d69177f984ae19be5f12918ff0bf37b4b16cdceb4c9442ba41bca8904a5",
-      "files": 26026,
+      "sha256": "e76f801975ecc2a2304c8f383cbe5a876f5e179af2316f146c77f74f7500b4b4",
+      "files": 26096,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The follow-up delta from 2012f077cf is confined to standalone Design/meshing integration tests, their XSD validator and optional corpus routing. Earlier conserved production-adapter and test changes remain individually declared below with their existing qualification evidence. This follow-up changes no numerical library, production execution code, dependency lockfile, authored study, required scientific command or performance threshold. The long boolean STEP corpus is explicitly manual under the existing release disposition, with its failure retained; required cohorts keep their original commands and measured outcomes.",
+    "reason": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts.",
     "review": {
-      "path": "qualification/scientific/reviews/design-ci-tests-20261110-circuit-large-board-performance.json",
-      "sha256": "2272985b1dac48cab0afefb7d31f119d8051764ae6b762db3f18549c61888ec2"
+      "path": "qualification/scientific/reviews/d8e06-final-integration.json",
+      "sha256": "ce104205f132542dc28348ab1a8b9fc9b4e1f295f0ee1dc5fd4c560305632899"
     }
   }
 }

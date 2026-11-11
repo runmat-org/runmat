@@ -36,6 +36,10 @@ def test_environment() -> dict[str, str]:
     # Match profile.test for binaries exercised by integration tests. Cargo's
     # artifact fingerprints select reusable copies from the existing cache.
     environment.setdefault("CARGO_PROFILE_DEV_LTO", "off")
+    if environment.get("GITHUB_ACTIONS") == "true":
+        # Retain Cargo's dirty-fingerprint reasons so an invalidated large
+        # dependency can be diagnosed from this run without another build lap.
+        environment.setdefault("CARGO_LOG", "cargo::core::compiler::fingerprint=info")
     return environment
 
 

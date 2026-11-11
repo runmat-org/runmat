@@ -414,6 +414,11 @@ pub struct CircuitUse {
 }
 
 impl CircuitUse {
+    /// Whether the line uses a library file: `use "<path>.circuit"`.
+    pub fn is_library_file(&self) -> bool {
+        self.symbol.is_none() && self.from.to_ascii_lowercase().ends_with(".circuit")
+    }
+
     /// The kinds a circuit takes from other files.
     pub const KINDS: &'static [&'static str] =
         &["circuit", "sheet", "interface", "net_class", "library"];
@@ -441,6 +446,13 @@ pub struct Design {
     pub simulations: BTreeMap<String, crate::simulation::SimulationDef>,
     /// The file's `part` declarations, by MPN: catalog parts embedded where they are used.
     pub parts: BTreeMap<String, crate::library::catalog::CatalogPart>,
+    /// The file's `footprint` declarations, by name.
+    pub footprints: BTreeMap<String, crate::library::Package>,
+    /// The file's `symbol` declarations, by name.
+    pub symbols: BTreeMap<String, crate::library::Symbol>,
+    /// A library: a `.circuit` with no `circuit` block, holding only `footprint`, `symbol` and
+    /// `part` declarations (and the `use` lines of the libraries it builds on).
+    pub library: bool,
 }
 
 impl Design {

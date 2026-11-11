@@ -889,7 +889,7 @@ impl<'a, 'b> Run<'a, 'b> {
         id: &FeatureId,
         fl: &Fillet,
     ) -> Result<Compiled, Halt> {
-        let set = self.list(i, id, "edges", &fl.edges, Some(TopoKind::Edge))?;
+        let set = self.blend_edges(i, id, "edges", &fl.edges)?;
         let radius = self.value(id, "radius", &fl.radius, Dimension::LENGTH)?;
         let mut variable = Vec::new();
         for (k, r) in fl.variable.iter().enumerate() {
@@ -1085,7 +1085,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 tools: None,
             });
         }
-        let set = self.list(i, id, "edges", &c.edges, Some(TopoKind::Edge))?;
+        let set = self.blend_edges(i, id, "edges", &c.edges)?;
         let size = match &c.form {
             ChamferForm::Equal { distance } => ChamferSize::Equal {
                 distance: len(self, "form.distance", distance)?,

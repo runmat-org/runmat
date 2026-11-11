@@ -9,6 +9,7 @@ mod references;
 mod inputs;
 mod compile;
 mod apply;
+mod blend_edges;
 mod sketch_status;
 mod profiles;
 pub(crate) use profiles::profile_loops;
@@ -23,7 +24,7 @@ use crate::metering::{FeatureWork, NoUsageMeter, SolveOutcome, Stopwatch, UsageE
 use crate::model::datum::{add, cross, dot, normalize, scale, sub};
 use crate::model::*;
 use crate::pmi::{resolve_pmi_with, ResolvedPmi};
-use crate::refs::history::{OperandEntity, SurfaceKind, Topology};
+use crate::refs::history::{EdgeCurve, OperandEntity, SurfaceKind, Topology};
 use crate::refs::lock::{ItemPath, LockSection};
 use crate::refs::naming::{
     cad_names_for_import, edge_name, name_outputs, BodyNames, NamingContext, NamingOutput,
@@ -53,6 +54,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod families;
 mod features;
 mod patterns;
+mod split_dressup;
 mod sheet;
 
 pub struct RegenContext<'a> {
@@ -101,6 +103,9 @@ pub struct PartState {
     pub names: NameTable,
     /// Tool operations each tool feature applied, for patterns and mirrors of features.
     pub tools: BTreeMap<FeatureId, Vec<ToolOp>>,
+    /// Each fillet and chamfer's operation and the geometry of the edges it blended, so a
+    /// pattern or mirror of it finds the same edges at each instance.
+    pub dressups: BTreeMap<FeatureId, (KernelOp, Vec<crate::refs::history::EdgeGeom>)>,
     pub table: FeatureTable,
     /// Typed records of geometry-free features and derived data (reference curves, threads,
     /// sheet metal rules and developments, mold analyses), by feature.

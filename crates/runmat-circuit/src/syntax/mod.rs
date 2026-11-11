@@ -41,11 +41,15 @@ pub mod board;
 pub mod board_edit;
 pub mod circuit_edit;
 pub mod layout;
+pub mod footprint_decl;
 pub mod part_decl;
+pub mod symbol_decl;
 pub mod simulation;
 pub mod simulation_print;
 pub mod simulation_spans;
 mod forms;
+mod declared;
+use declared::read_declared;
 mod printer;
 pub use forms::*;
 pub use printer::*;
@@ -96,11 +100,15 @@ pub mod words {
     pub const OPTION: &str = "option";
     /// A catalog part embedded in the circuit (`part "<mpn>" = { … }`).
     pub const PART: &str = "part";
+    /// A footprint declared in the file (`footprint <name> = { … }`).
+    pub const FOOTPRINT: &str = "footprint";
+    /// A schematic symbol declared in the file (`symbol <name> = { … }`).
+    pub const SYMBOL: &str = "symbol";
     /// Every statement word, for completion and the highlighter.
     pub const ALL: &[&str] = &[
         CIRCUIT, SHEET, ROOT, PARAM, NET_CLASS, INTERFACE, VARIANT, PORT, COMPONENT, NET, BUS,
         HARNESS, INSTANCE, CONNECT, NO_ERC, DIFF_PAIR, BLANKET, TEXT, SIMULATION, SOURCE, MODEL,
-        TOLERANCE, ANALYSIS, PROBE, MEASURE, OPTION, PART,
+        TOLERANCE, ANALYSIS, PROBE, MEASURE, OPTION, PART, FOOTPRINT, SYMBOL,
     ];
 }
 
@@ -184,8 +192,23 @@ pub fn parse_circuit(path: &str, source: &str) -> ParsedCircuit {
     let mut design: Option<Design> = None;
     let mut loose_sheets = Vec::new();
     let mut uses: Vec<crate::ir::CircuitUse> = Vec::new();
+    let mut declared = Design::default();
     for item in syntax.file().items() {
         match item {
+            Item::Declaration(declaration)
+                if [words::FOOTPRINT, words::SYMBOL, words::PART]
+                    .contains(&declaration.keyword().as_str()) =>
+            {
+                let name = declaration.name().map(|n| n.text()).unwrap_or_default();
+                read_declared(
+                    &mut reader,
+                    &mut declared,
+                    &declaration.keyword(),
+                    name,
+                    declaration.value(),
+                    declaration.span(),
+                );
+            }
             Item::Declaration(declaration) if declaration.keyword() == words::CIRCUIT => {
                 if design.is_some() {
                     reader
@@ -210,15 +233,43 @@ pub fn parse_circuit(path: &str, source: &str) -> ParsedCircuit {
             )),
         }
     }
+    let library = design.is_none() && loose_sheets.is_empty();
     let mut design = design.unwrap_or_else(|| {
-        reader.diagnostics.push(diagnostic(
-            Span::default(),
-            "expected a `circuit <name> { … }` declaration",
-        ));
+        if !library {
+            reader.diagnostics.push(diagnostic(
+                Span::default(),
+                "expected a `circuit <name> { … }` declaration",
+            ));
+        }
         Design::new(&Dialect::Circuit.stem(path))
     });
+    design.library = library;
     for sheet in loose_sheets {
         read_sheet(&mut reader, &mut design, &sheet);
+    }
+    for (name, f) in declared.footprints {
+        if design.footprints.insert(name.clone(), f).is_some() {
+            reader.diagnostics.push(diagnostic(
+                Span::default(),
+                format!("footprint `{name}` is declared twice"),
+            ));
+        }
+    }
+    for (name, s) in declared.symbols {
+        if design.symbols.insert(name.clone(), s).is_some() {
+            reader.diagnostics.push(diagnostic(
+                Span::default(),
+                format!("symbol `{name}` is declared twice"),
+            ));
+        }
+    }
+    for (name, p) in declared.parts {
+        if design.parts.insert(name.clone(), p).is_some() {
+            reader.diagnostics.push(diagnostic(
+                Span::default(),
+                format!("part `{name}` is declared twice"),
+            ));
+        }
     }
     design.uses = uses;
     ParsedCircuit {
@@ -249,10 +300,26 @@ fn read_use(
                 ),
             ));
         }
+    } else if u.is_library_file() {
+        if u.alias.is_some() {
+            return Err(diagnostic(
+                declaration.span(),
+                format!(
+                    "a library brings its declarations in by their own names: write `use \"{}\"`",
+                    u.from
+                ),
+            ));
+        }
+        if earlier.iter().any(|e| e.from == u.from) {
+            return Err(diagnostic(
+                declaration.span(),
+                format!("\"{}\" is already used", u.from),
+            ));
+        }
     } else if u.alias.is_none() {
         return Err(diagnostic(
             declaration.span(),
-            "a whole folder is used under a name: `use \"<folder>\" as <name>`",
+            "a whole folder is used under a name: `use \"<folder>\" as <name>`; a library file is used as `use \"<path>.circuit\"`",
         ));
     }
     if let Some(name) = u.local_name() {
@@ -443,19 +510,8 @@ fn read_circuit(reader: &mut Reader<'_>, declaration: &ast::Declaration) -> Desi
                             design.variants.insert(name, variant);
                         }
                     }
-                    words::PART => {
-                        use std::collections::btree_map::Entry;
-                        match design.parts.entry(name) {
-                            Entry::Occupied(entry) => reader.diagnostics.push(diagnostic(
-                                span,
-                                format!("part `{}` is declared twice", entry.key()),
-                            )),
-                            Entry::Vacant(entry) => {
-                                if let Some(part) = reader.note(part_decl::read(entry.key().clone(), value.value(), span)) {
-                                    entry.insert(part);
-                                }
-                            }
-                        }
+                    words::PART | words::FOOTPRINT | words::SYMBOL => {
+                        read_declared(reader, &mut design, &word, name, value.value(), span)
                     }
                     other => reader.diagnostics.push(diagnostic(
                         span,
@@ -465,7 +521,7 @@ fn read_circuit(reader: &mut Reader<'_>, declaration: &ast::Declaration) -> Desi
             }
             _ => reader.diagnostics.push(diagnostic(
                 span,
-                "expected a sheet, a simulation, `root`, `param`, `net_class`, `interface`, `variant` or `part`",
+                "expected a sheet, a simulation, `root`, `param`, `net_class`, `interface`, `variant`, `part`, `footprint` or `symbol`",
             )),
         }
     }

@@ -30,6 +30,24 @@ const DENSITIES: &[(&[&str], f64)] = &[
         &["carbon_fiber", "carbon_fibre", "cfrp", "prepreg", "carbon"],
         1600.0,
     ),
+    // Building insulation before the glass-fibre composites: a fibreglass batt is mostly air.
+    (&["batt", "mineral_wool", "glass_wool", "rock_wool"], 20.0),
+    (&["xps", "extruded_polystyrene"], 35.0),
+    (
+        &["eps", "expanded_polystyrene", "polystyrene", "foam_board"],
+        20.0,
+    ),
+    // Construction materials (residential practice): normal-weight concrete, compacted
+    // crushed-stone base, cement plaster, gypsum board, asphalt shingles, sheathing and lumber;
+    // before the board and composite entries their names share words with (`gypsum_board`).
+    (&["concrete", "grout"], 2400.0),
+    (&["gravel", "crushed_stone", "aggregate"], 1600.0),
+    (&["stucco", "cement_plaster", "mortar"], 1860.0),
+    (&["gypsum", "drywall"], 700.0),
+    (&["asphalt", "shingle"], 1100.0),
+    (&["osb", "oriented_strand"], 620.0),
+    (&["lvl", "lsl", "glulam", "engineered_lumber"], 600.0),
+    (&["douglas_fir", "hem_fir", "spf", "lumber"], 530.0),
     (&["fiberglass", "fibreglass", "gfrp", "composite"], 1850.0),
     (&["fr4", "fr_4", "board"], 1850.0),
     // Glass-filled polyamide (PA6/PA66 with 30 % glass) before plain glass and nylon.
@@ -91,9 +109,31 @@ pub const LIBRARY: &[(&str, &str)] = &[
     ("material.fr4", "FR-4"),
     ("material.silicone_rubber", "Silicone rubber"),
     ("material.oak", "Oak"),
+    ("material.concrete", "Concrete, normal weight"),
+    ("material.douglas_fir_lumber", "Douglas fir-larch lumber"),
+    ("material.osb", "Oriented strand board (OSB)"),
+    ("material.gypsum_board", "Gypsum board"),
+    ("material.xps_foam", "Extruded polystyrene (XPS)"),
 ];
 
 /// A library material's label (`material.steel_1018` → `Steel 1018`), when it is in [`LIBRARY`].
+/// Whether `material` is compressible fill: fibrous batt or loose-fill insulation. A cable, pipe
+/// or box set in an insulated cavity displaces the fill (the installer splits or cuts the batt
+/// around it), so interference checks leave fill bodies out.
+pub fn is_compressible_fill(material: &str) -> bool {
+    let m = material.to_ascii_lowercase();
+    [
+        "batt",
+        "loose_fill",
+        "glass_wool",
+        "mineral_wool",
+        "rock_wool",
+        "cellulose",
+    ]
+    .iter()
+    .any(|k| m.contains(k))
+}
+
 pub fn library_label(material: &str) -> Option<&'static str> {
     let name = material.strip_prefix("material.").unwrap_or(material);
     LIBRARY
@@ -177,6 +217,12 @@ mod tests {
         assert_eq!(material_density("glass"), Some(2500.0));
         assert_eq!(material_density("S235"), Some(7850.0));
         assert_eq!(material_density("material.unobtainium"), None);
+        // Building materials: a gypsum board is not a circuit board, a batt is not a laminate.
+        assert_eq!(material_density("material.gypsum_board"), Some(700.0));
+        assert_eq!(material_density("material.fiberglass_batt"), Some(20.0));
+        assert_eq!(material_density("material.concrete_4000psi"), Some(2400.0));
+        assert_eq!(material_density("material.douglas_fir_lumber"), Some(530.0));
+        assert_eq!(material_density("material.xps_foam"), Some(35.0));
     }
 
     #[test]

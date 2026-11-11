@@ -167,7 +167,7 @@ fn set_property(
         .ok_or_else(|| model(format!("the part has no feature `{feature}`")))?;
     let at = field_path(&kind, field).ok_or_else(|| {
         model(format!(
-            "`{field}` is set in the source editor in this build"
+            "`{field}` is edited in the source, not in Properties"
         ))
     })?;
     let (json, scope) = field_value(field, value)?;
@@ -196,7 +196,7 @@ fn set_input_property(
         .ok_or_else(|| model("no property to set"))?;
     if field != "value" {
         return Err(model(format!(
-            "`{field}` is set in the source editor in this build"
+            "`{field}` is edited in the source, not in Properties"
         )));
     }
     let edit = match value {

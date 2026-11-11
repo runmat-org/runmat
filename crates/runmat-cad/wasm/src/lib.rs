@@ -48,6 +48,7 @@ pub mod features;
 pub mod hlr;
 pub mod kernel;
 pub mod mass;
+pub mod measure;
 pub mod picks;
 pub mod probe;
 mod repairs;

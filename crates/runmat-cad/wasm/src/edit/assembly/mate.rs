@@ -1,5 +1,8 @@
-//! `assembly.mate`: a mate between two picks, each a component's face, edge or the whole
-//! component, written as a mate connector per pick plus the mate.
+//! `assembly.mate`: a mate between two picks, each a component's face, edge, vertex, part
+//! datum (plane, axis, point, frame or mate connector), a connector the assembly has, or the
+//! whole component, written as a mate connector per pick plus the mate. Each connector anchors
+//! to what the component's part publishes ([`super::anchors`]), so the mate follows the part's
+//! edits.
 //!
 //! The standard mates map onto the connector mates the solver has:
 //!
@@ -7,6 +10,9 @@
 //! |---------------|-----------------------------------------|-------------------------------------|
 //! | coincident    | two planar faces                        | `planar`                            |
 //! |               | two axes (cylinders, circles, lines)    | `cylindrical`                       |
+//! |               | two points (vertices, datum points)     | `ball`                              |
+//! |               | a point and a plane                     | `distance` 0 (plane to point)       |
+//! |               | two connectors or frames                | `fasten`                            |
 //! | concentric    | two axes                                | `cylindrical`                       |
 //! | distance      | two planar faces                        | `distance` (plane to point) + `parallel` |
 //! |               | anything else                           | `distance` (point to point)         |
@@ -24,7 +30,11 @@
 //! path the first pick's part publishes), linear coupler (`ratio`), hinge (angle limits) and
 //! universal joint (`joint_point`).
 
-use super::frames::{cross, dot, edge_frame, face_frame, norm, to_world, Frame, FrameKind, V3};
+use super::anchors::{Anchor, Publisher};
+use super::frames::{
+    cross, datum_frame, dot, edge_frame, face_frame, norm, to_world, vertex_frame, Frame,
+    FrameKind, V3,
+};
 use super::mate_edits::{limits, ANGLE, TRAVEL};
 use super::{model, parse_pick, Compiled, Entity};
 use crate::features::{picks_of, value};
@@ -33,6 +43,7 @@ use runmat_cad::assembly::model::{
     MateKind, OffsetExpr, RelPath, RotationExpr, TangentSpec, TargetExpr,
 };
 use runmat_cad::ids::PublishName;
+use runmat_cad::refs::TopoKind;
 use runmat_cad::syntax::edit::EditFailure;
 use runmat_cad::value::ValueExpr;
 use serde_json::{Map, Value};
@@ -93,23 +104,66 @@ fn round_unit(v: V3) -> [f64; 3] {
     })
 }
 
-/// A pick resolved: the component's name and the frame on it (None for the whole component).
+/// A pick resolved: the component's name, the frame on it (None for the whole component) and
+/// what its connector anchors to.
 struct Resolved {
     occurrence: String,
     frame: Option<Frame>,
     /// The frame in assembly coordinates, where the component sits now.
     world: Option<Frame>,
+    anchor: Anchor,
 }
 
-fn resolve(compiled: &Compiled, id: &str, what: &str) -> Result<Resolved, EditFailure> {
-    let pick = parse_pick(id)
-        .ok_or_else(|| model(format!("pick a face, edge or component for {what}")))?;
+/// The entity `list` (`faces`, `edges`, `vertices`) of a body, by index.
+fn entity<'a>(body: Option<&'a Value>, list: &str, index: usize) -> Option<&'a Value> {
+    body?[list]
+        .as_array()?
+        .iter()
+        .find(|e| e["index"].as_u64() == Some(index as u64))
+}
+
+fn resolve(
+    document: &AssemblyDocument,
+    compiled: &Compiled,
+    id: &str,
+    what: &str,
+) -> Result<Resolved, EditFailure> {
+    // A connector the assembly declares: reused as it is.
+    if let Some(name) = id.strip_prefix("connector:") {
+        let c = document
+            .connector(name)
+            .ok_or_else(|| model(format!("the assembly has no connector `{name}`")))?;
+        let [segment] = c.occurrence.0.as_slice() else {
+            return Err(model(format!(
+                "connector `{name}` isn't on a component of this assembly"
+            )));
+        };
+        let kind = Frame {
+            kind: FrameKind::Frame,
+            origin: [0.0; 3],
+            z: [0.0, 0.0, 1.0],
+            x: [1.0, 0.0, 0.0],
+            radius: None,
+        };
+        return Ok(Resolved {
+            occurrence: segment.name.clone(),
+            frame: Some(kind),
+            world: None,
+            anchor: Anchor::Connector(name.to_owned()),
+        });
+    }
+    let pick = parse_pick(id).ok_or_else(|| {
+        model(format!(
+            "pick a face, edge, vertex, datum or component for {what}"
+        ))
+    })?;
     let occurrence = compiled.occurrence_name(&pick.uuid)?;
-    let Some(entity) = pick.entity else {
+    let Some(picked) = pick.entity else {
         return Ok(Resolved {
             occurrence,
             frame: None,
             world: None,
+            anchor: Anchor::Origin,
         });
     };
     let (prototype, transform) = compiled.placed(&pick.uuid).ok_or_else(|| {
@@ -117,35 +171,56 @@ fn resolve(compiled: &Compiled, id: &str, what: &str) -> Result<Resolved, EditFa
             "`{occurrence}` isn't drawn, so its faces can't be mated"
         ))
     })?;
-    let frame = match entity {
-        Entity::Face { body, face } => compiled
-            .body(prototype, body)
-            .and_then(|b| {
-                b["faces"]
-                    .as_array()?
-                    .iter()
-                    .find(|f| f["index"].as_u64() == Some(face as u64))
-            })
-            .and_then(face_frame),
-        Entity::Edge { body, edge } => compiled
-            .body(prototype, body)
-            .and_then(|b| {
-                b["edges"]
-                    .as_array()?
-                    .iter()
-                    .find(|e| e["index"].as_u64() == Some(edge as u64))
-            })
-            .and_then(edge_frame),
-    }
-    .ok_or_else(|| {
+    let file = compiled.prototype_file(prototype);
+    let (frame, named) = match &picked {
+        Entity::Face { body, face } => {
+            let e = entity(compiled.body(prototype, *body), "faces", *face);
+            (e.and_then(face_frame), e.map(|e| (TopoKind::Face, e)))
+        }
+        Entity::Edge { body, edge } => {
+            let e = entity(compiled.body(prototype, *body), "edges", *edge);
+            (e.and_then(edge_frame), e.map(|e| (TopoKind::Edge, e)))
+        }
+        Entity::Vertex { body, vertex } => {
+            let e = entity(compiled.body(prototype, *body), "vertices", *vertex);
+            (e.and_then(vertex_frame), e.map(|e| (TopoKind::Vertex, e)))
+        }
+        Entity::Datum { feature } => (
+            compiled.reference(prototype, feature).and_then(datum_frame),
+            None,
+        ),
+    };
+    let frame = frame.ok_or_else(|| {
         model(format!(
             "the picked {what} on `{occurrence}` has no frame to mate to"
         ))
     })?;
+    let anchor = match (&picked, named, file) {
+        (Entity::Datum { feature }, _, Some(file)) => Anchor::Datum {
+            file,
+            feature: feature.clone(),
+        },
+        (_, Some((kind, e)), Some(file)) if e["reference"].is_string() => Anchor::Entity {
+            file,
+            kind,
+            reference: e["reference"].as_str().unwrap_or_default().to_owned(),
+        },
+        (Entity::Datum { .. }, _, None) => {
+            return Err(model(format!(
+                "`{occurrence}`'s part file isn't known, so its datum can't be published"
+            )))
+        }
+        _ => Anchor::Frozen {
+            origin: frame.origin,
+            x: frame.x,
+            z: frame.z,
+        },
+    };
     Ok(Resolved {
         occurrence,
         frame: Some(frame),
         world: Some(to_world(frame, &transform)),
+        anchor,
     })
 }
 
@@ -156,33 +231,61 @@ fn fresh(taken: impl Fn(&str) -> bool, stem: &str) -> String {
         .expect("an unused name")
 }
 
-/// Adds a connector on `pick` and answers its name.
-fn connector(document: &mut AssemblyDocument, pick: &Resolved, flip: bool) -> String {
+/// Adds a connector on `pick` and answers its name. A face, edge, vertex or datum is published
+/// from its part ([`Publisher`]) and the connector anchors to that name; a connector the
+/// assembly has is reused (a flipped copy when `flip` asks for the other way).
+fn connector(
+    document: &mut AssemblyDocument,
+    publisher: &mut Publisher,
+    pick: &Resolved,
+    flip: bool,
+) -> Result<String, EditFailure> {
+    if let Anchor::Connector(existing) = &pick.anchor {
+        if !flip {
+            return Ok(existing.clone());
+        }
+    }
     let stem = format!("{}_c", pick.occurrence);
     let name = fresh(|n| document.connectors.iter().any(|c| c.name == n), &stem);
-    let anchor = match pick.frame {
-        None => AnchorRef::Origin,
-        Some(frame) => AnchorRef::Explicit {
-            offset: OffsetExpr {
-                translation: frame.origin.map(|c| quantity(mm(c), "mm")),
-                rotation: RotationExpr::Basis {
-                    x: round_unit(frame.x),
-                    z: round_unit(frame.z),
-                },
+    let frozen = |origin: [f64; 3], x: [f64; 3], z: [f64; 3]| AnchorRef::Explicit {
+        offset: OffsetExpr {
+            translation: origin.map(|c| quantity(mm(c), "mm")),
+            rotation: RotationExpr::Basis {
+                x: round_unit(x),
+                z: round_unit(z),
             },
         },
     };
-    document.connectors.push(MateConnector {
-        name: name.clone(),
-        occurrence: RelPath::new(&[&pick.occurrence]),
-        anchor,
-        offset: None,
-        flip,
-        at: None,
-        z: None,
-        x: None,
-    });
-    name
+    let made = match &pick.anchor {
+        Anchor::Connector(existing) => {
+            let mut copy = document
+                .connector(existing)
+                .cloned()
+                .ok_or_else(|| model(format!("the assembly has no connector `{existing}`")))?;
+            copy.name = name.clone();
+            copy.flip = !copy.flip;
+            copy
+        }
+        anchor => {
+            let anchor = match (anchor, publisher.name_of(anchor)?) {
+                (_, Some(published)) => AnchorRef::Published { name: published },
+                (Anchor::Frozen { origin, x, z }, None) => frozen(*origin, *x, *z),
+                _ => AnchorRef::Origin,
+            };
+            MateConnector {
+                name: name.clone(),
+                occurrence: RelPath::new(&[&pick.occurrence]),
+                anchor,
+                offset: None,
+                flip,
+                at: None,
+                z: None,
+                x: None,
+            }
+        }
+    };
+    document.connectors.push(made);
+    Ok(name)
 }
 
 /// The angle field as radians, when it is a plain number of degrees.
@@ -201,6 +304,7 @@ fn kind_of(frame: &Option<Frame>) -> Option<FrameKind> {
 pub(super) fn mate(
     document: &mut AssemblyDocument,
     compiled: &Compiled,
+    publisher: &mut Publisher,
     values: &Values,
 ) -> Result<String, EditFailure> {
     let kind = values
@@ -216,8 +320,8 @@ pub(super) fn mate(
         .into_iter()
         .next()
         .ok_or_else(|| model("pick the second face, edge or component"))?;
-    let mut a = resolve(compiled, &first, "the first pick")?;
-    let mut b = resolve(compiled, &second, "the second pick")?;
+    let mut a = resolve(document, compiled, &first, "the first pick")?;
+    let mut b = resolve(document, compiled, &second, "the second pick")?;
     if a.occurrence == b.occurrence {
         return Err(model("pick faces or edges on two different components"));
     }
@@ -239,9 +343,21 @@ pub(super) fn mate(
             angle: None,
             distance: None,
         },
+        "coincident" if both(FrameKind::Point) => MateKind::Ball,
+        "coincident" if both(FrameKind::Frame) => MateKind::Fasten,
+        // A point on a plane: the plane's connector first, its distance to the point zero.
+        "coincident" if matches!((kind_of(&a.frame), kind_of(&b.frame)), (Some(FrameKind::Plane), Some(FrameKind::Point)) | (Some(FrameKind::Point), Some(FrameKind::Plane))) => {
+            if kind_of(&a.frame) == Some(FrameKind::Point) {
+                std::mem::swap(&mut a, &mut b);
+            }
+            MateKind::Distance {
+                measure: DistanceMeasure::PlanePoint,
+                target: exact(quantity(0.0, "mm")),
+            }
+        }
         "coincident" => {
             return Err(model(
-                "a coincident mate joins two planar faces or two axes",
+                "a coincident mate joins two planes, two axes, two points, a point and a plane, or two connectors",
             ))
         }
         "concentric" if both(FrameKind::Axis) => MateKind::Cylindrical {
@@ -279,19 +395,8 @@ pub(super) fn mate(
                 std::mem::swap(&mut a, &mut b);
             }
             let radius = match (kind_of(&a.frame), b.frame) {
-                (
-                    Some(FrameKind::Plane),
-                    Some(Frame {
-                        kind: FrameKind::Axis,
-                        radius: Some(r),
-                        ..
-                    }),
-                ) => r,
-                _ => {
-                    return Err(model(
-                        "a tangent mate joins a planar face and a cylindrical face",
-                    ))
-                }
+                (Some(FrameKind::Plane), Some(Frame { kind: FrameKind::Axis, radius: Some(r), .. })) => r,
+                _ => return Err(model("a tangent mate joins a planar face and a cylindrical face")),
             };
             MateKind::Tangent {
                 kind: TangentSpec::PlaneCylinder {
@@ -327,18 +432,15 @@ pub(super) fn mate(
         other => {
             if other == "width" {
                 // The tab's other face is on the tab, the groove's on the groove's component.
-                for (id, on, what) in [
-                    ("first2", &a.occurrence, "groove"),
-                    ("second2", &b.occurrence, "tab"),
-                ] {
+                for (id, on, what) in [("first2", &a.occurrence, "groove"), ("second2", &b.occurrence, "tab")] {
                     if let Some(p) = picks_of(values, id).into_iter().next() {
-                        if &resolve(compiled, &p, "the other face")?.occurrence != on {
+                        if &resolve(document, compiled, &p, "the other face")?.occurrence != on {
                             return Err(model(format!("pick the {what}'s other face on `{on}`")));
                         }
                     }
                 }
             }
-            advanced(document, compiled, values, other, None)?
+            advanced(document, compiled, publisher, values, other, None)?
                 .ok_or_else(|| model(format!("there is no `{other}` mate")))?
         }
     };
@@ -376,8 +478,8 @@ pub(super) fn mate(
             }
         }
     }
-    let ca = connector(document, &a, false);
-    let cb = connector(document, &b, flip);
+    let ca = connector(document, publisher, &a, false)?;
+    let cb = connector(document, publisher, &b, flip)?;
     let name = fresh(|n| document.mates.iter().any(|m| m.name == n), &kind);
     for (i, k) in std::iter::once(mate_kind).chain(extra).enumerate() {
         let mate_name = if i == 0 {
@@ -410,16 +512,16 @@ pub(super) fn mate(
 fn extra_connector(
     document: &mut AssemblyDocument,
     compiled: &Compiled,
+    publisher: &mut Publisher,
     values: &Values,
     id: &str,
     what: &str,
 ) -> Result<Option<String>, EditFailure> {
     match picks_of(values, id).into_iter().next() {
-        Some(p) => Ok(Some(connector(
-            document,
-            &resolve(compiled, &p, what)?,
-            false,
-        ))),
+        Some(p) => {
+            let pick = resolve(document, compiled, &p, what)?;
+            Ok(Some(connector(document, publisher, &pick, false)?))
+        }
         None => Ok(None),
     }
 }
@@ -439,6 +541,7 @@ fn published(values: &Values, id: &str, what: &str) -> Result<PublishName, EditF
 pub(super) fn advanced(
     document: &mut AssemblyDocument,
     compiled: &Compiled,
+    publisher: &mut Publisher,
     values: &Values,
     kind: &str,
     keep: Option<&MateKind>,
@@ -452,6 +555,7 @@ pub(super) fn advanced(
             let a2 = extra_connector(
                 document,
                 compiled,
+                publisher,
                 values,
                 "first2",
                 "the groove's other face",
@@ -460,6 +564,7 @@ pub(super) fn advanced(
             let b2 = extra_connector(
                 document,
                 compiled,
+                publisher,
                 values,
                 "second2",
                 "the tab's other face",
@@ -475,8 +580,15 @@ pub(super) fn advanced(
                 Some(MateKind::Symmetric { plane }) => Some(plane.clone()),
                 _ => None,
             };
-            let plane =
-                extra_connector(document, compiled, values, "plane", "the symmetry plane")?.or(old);
+            let plane = extra_connector(
+                document,
+                compiled,
+                publisher,
+                values,
+                "plane",
+                "the symmetry plane",
+            )?
+            .or(old);
             MateKind::Symmetric {
                 plane: plane.ok_or_else(|| model("pick the symmetry plane"))?,
             }

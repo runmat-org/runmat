@@ -71,6 +71,22 @@ impl FakeKernel {
             KernelOp::ReplaceFaces { faces, with } => self.replace_faces(faces, *with, operands),
             KernelOp::Scale { center, factors } => self.scale(*center, *factors, operands),
             KernelOp::Surface(s) => self.surface(s, operands),
+            KernelOp::Indent { clearance } if clearance.abs() < 1e-12 => self.execute(
+                &KernelOp::Boolean {
+                    combine: Combine::Cut,
+                    keep_tools: true,
+                },
+                operands,
+            ),
+            KernelOp::Indent { .. } => Err(KernelError::NotSupported {
+                what: "fake kernel: an indent with a clearance".into(),
+            }),
+            KernelOp::SplitWith { .. } => Err(KernelError::NotSupported {
+                what: "fake kernel: splitting by a curved face or a body".into(),
+            }),
+            KernelOp::PatternFaces { .. } => Err(KernelError::NotSupported {
+                what: "fake kernel: patterning faces".into(),
+            }),
             _ => return None,
         })
     }

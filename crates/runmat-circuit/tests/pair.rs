@@ -144,3 +144,67 @@ fn a_pair_with_no_way_through_is_refused_and_adds_nothing() {
     assert_eq!(b.tracks.len(), tracks);
     let _ = BItem::Edge;
 }
+
+/// The pair board with its left end a four-pad connector that carries each net on two pads
+/// (as a USB-C receptacle carries D+ and D-), each net's two pads tied by a short track.
+fn connector_pair_board() -> (Board, NetId, NetId) {
+    let (mut b, p, n) = pair_board();
+    let r1 = b.footprint_by_ref("R1").map(|f| f.id).unwrap();
+    b.footprints.remove(&r1);
+    let id = b.place(
+        "J1",
+        footprint::from_string("SMDConn4_P1").unwrap(),
+        Point::mm(6.0, 15.0),
+        90.0,
+        Side::Top,
+    );
+    let f = b.footprints.get_mut(&id).unwrap();
+    for (pad, net) in [("1", p), ("2", p), ("3", n), ("4", n)] {
+        f.pad_nets.insert(pad.into(), net);
+    }
+    let at = |b: &Board, name: &str| {
+        b.all_pads()
+            .into_iter()
+            .find(|q| q.footprint == id && q.name == name)
+            .unwrap()
+            .center
+    };
+    let (a1, a2, a3, a4) = (at(&b, "1"), at(&b, "2"), at(&b, "3"), at(&b, "4"));
+    b.add_track(Some(p), 0, mm(0.2), a1, a2);
+    b.add_track(Some(n), 0, mm(0.2), a3, a4);
+    (b, p, n)
+}
+
+#[test]
+fn a_part_that_carries_a_pair_net_on_several_pads_is_one_end_of_the_pair() {
+    let (mut b, p, n) = connector_pair_board();
+    let routed = route_pair(&mut b, p, n, 0, mm(0.2), mm(0.15)).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!routed.p_tracks.is_empty() && !routed.n_tracks.is_empty());
+    // The pair joins the connector to R2 and the board stays DRC clean.
+    let open: Vec<_> = route::ratsnest(&b)
+        .into_iter()
+        .filter(|a| a.net == p || a.net == n)
+        .collect();
+    assert!(open.is_empty(), "{open:?}");
+    let findings = drc(&b, &[(p, n)]);
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+#[test]
+fn a_pair_net_on_three_parts_is_refused_as_not_point_to_point() {
+    let (mut b, p, n) = connector_pair_board();
+    let id = b.place(
+        "R3",
+        footprint::from_string("R0603").unwrap(),
+        Point::mm(20.0, 26.0),
+        0.0,
+        Side::Top,
+    );
+    b.footprints
+        .get_mut(&id)
+        .unwrap()
+        .pad_nets
+        .insert("1".into(), p);
+    let err = route_pair(&mut b, p, n, 0, mm(0.2), mm(0.15)).unwrap_err();
+    assert!(err.contains("USB_DP") && err.contains("3 part(s)"), "{err}");
+}

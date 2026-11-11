@@ -20,6 +20,12 @@ use runmat_design_syntax::{parse_source, Dialect};
 use serde_json::{json, Value};
 use std::cell::OnceCell;
 
+/// The plane forms a plane field takes, with an example, for messages that ask for a plane.
+pub const PLANE_PICK_FORMS: &str = "A plane field takes an origin plane (`origin.xy`, `origin.yz` or `origin.zx`; \
+the Outline's `origin:top`, `origin:right` or `origin:front`), a datum plane (`plane.<name>` or `feature:<name>`) \
+or a planar face (`feature.<name>.face.<face>`, such as `feature.body.face.end`). \
+Example: `{\"command\": \"part.sketch\", \"values\": {\"plane\": \"origin.xy\"}}`.";
+
 fn model(message: impl Into<String>) -> EditFailure {
     EditFailure::Model(message.into())
 }
@@ -45,6 +51,19 @@ pub fn lower_text(text: &str) -> Result<Value, EditFailure> {
         Some(Ok(json)) => Ok(json.to_value()),
         Some(Err(e)) => Err(model(format!("`{text}`: {}", e.message))),
         None => Err(model(format!("`{text}` isn't a reference"))),
+    }
+}
+
+/// What a lowered reference names: `edge`, `vertex` or `face`.
+pub fn topo(reference: &Value) -> &'static str {
+    match reference["ref"].as_str() {
+        Some("edges_between") => "edge",
+        Some("vertex_of") => "vertex",
+        Some("piece") => topo(&reference["base"]),
+        _ if reference["kind"] == "edge" => "edge",
+        _ if reference["kind"] == "vertex" => "vertex",
+        _ if reference["kind"] == "body" => "body",
+        _ => "face",
     }
 }
 
@@ -147,26 +166,45 @@ impl<'a> Picks<'a> {
 
     /// A plane: a datum plane, or a planar face.
     pub fn plane(&self, pick: &str) -> Result<Value, EditFailure> {
-        let v = lower_text(&self.text_of(pick)?)?;
+        let not_a_plane = || {
+            model(format!(
+                "`{pick}` isn't a plane or a face. {PLANE_PICK_FORMS}"
+            ))
+        };
+        let v = lower_text(&self.text_of(pick)?).map_err(|_| not_a_plane())?;
         if v.get("on").is_some() {
             return Ok(v);
         }
         if v.get("ref").is_some() {
             return Ok(json!({ "on": "face", "face": v }));
         }
-        Err(model(format!("`{pick}` isn't a plane or a face")))
+        Err(not_a_plane())
     }
 
-    /// An axis: a datum axis, or a linear edge.
+    /// An axis: a datum axis, a straight or circular edge, a cylindrical or conical face, or a
+    /// sketch line (`sketch.<sketch>.<line>`, such as a construction centerline).
     pub fn axis(&self, pick: &str) -> Result<Value, EditFailure> {
+        if let Some((sketch, entity)) = pick
+            .strip_prefix("sketch.")
+            .and_then(|rest| rest.split_once('.'))
+            .filter(|(s, e)| !e.contains('.') && self.kind_of(s) == Some("sketch"))
+        {
+            return Ok(json!({ "along": "sketch_line", "sketch": sketch, "entity": entity }));
+        }
         let v = lower_text(&self.text_of(pick)?)?;
         if v.get("along").is_some() {
             return Ok(v);
         }
         if v.get("ref").is_some() {
-            return Ok(json!({ "along": "edge", "edge": v }));
+            return Ok(match topo(&v) {
+                "edge" => json!({ "along": "edge", "edge": v }),
+                "face" => json!({ "along": "face", "face": v }),
+                other => return Err(model(format!("`{pick}` is a {other}, which gives no axis"))),
+            });
         }
-        Err(model(format!("`{pick}` isn't an axis or an edge")))
+        Err(model(format!(
+            "`{pick}` isn't an axis, an edge, a cylindrical face or a sketch line"
+        )))
     }
 
     /// A point: a datum point, a vertex, or a sketch point (a point entity, an arc's or circle's

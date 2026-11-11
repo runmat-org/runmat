@@ -238,6 +238,7 @@ impl Params for Pattern {
         match &self.seeds {
             PatternSeeds::Features { features } => features.iter().for_each(|f| v.feature(f)),
             PatternSeeds::Bodies { bodies } => v.references("bodies", bodies),
+            PatternSeeds::Faces { faces } => v.references("faces", faces),
         }
         match &self.layout {
             PatternLayout::Linear {

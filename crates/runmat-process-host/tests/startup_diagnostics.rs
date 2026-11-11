@@ -15,7 +15,12 @@ fn detached_startup_child() {
     // without depending on its starter's pipe or runtime lifetime.
     std::thread::sleep(std::time::Duration::from_millis(100));
     std::io::stderr().write_all(b"after readiness").unwrap();
-    std::fs::write(marker, b"original child finished after handoff").unwrap();
+    // Publish completion after the full marker is written. A reader can observe
+    // a newly created file before write_all has supplied its contents.
+    let marker = std::path::PathBuf::from(marker);
+    let pending = marker.with_extension("pending");
+    std::fs::write(&pending, b"original child finished after handoff").unwrap();
+    std::fs::rename(pending, marker).unwrap();
 }
 
 #[tokio::test]

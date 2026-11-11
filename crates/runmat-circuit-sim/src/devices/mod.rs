@@ -86,6 +86,23 @@ impl States {
             }
         }
     }
+    /// Evaluate the derivative from charge differences. Expanding the history
+    /// into `a0*q + hist` loses small currents when charge is large relative to
+    /// the timestep, including a nonzero current for an unchanged charge.
+    pub fn derivative<const N: usize>(&self, s: usize, q: Dual<N>) -> Dual<N> {
+        let [_, q1, q2, _] = self.q[s];
+        let h = self.h[0];
+        match self.method {
+            Method::Euler => (q - q1) / h,
+            Method::Trapezoidal => (q - q1) * (2.0 / h) - self.i[s][1],
+            Method::Gear2 => {
+                let w = h / self.h[1];
+                let a0 = (1.0 + 2.0 * w) / ((1.0 + w) * h);
+                let a2 = w * w / ((1.0 + w) * h);
+                (q - q1) * a0 + a2 * (q2 - q1)
+            }
+        }
+    }
     /// After an accepted step: shift the history.
     pub fn accept(&mut self) {
         for (q, i) in self.q.iter_mut().zip(self.i.iter_mut()) {
@@ -254,9 +271,8 @@ impl Load<'_> {
                 self.states.i[s][0] = 0.0;
             }
             Mode::Tran => {
-                let (a0, hist) = self.states.coefficients(s);
                 self.states.q[s][0] = q.v;
-                let i = q * a0 + hist;
+                let i = self.states.derivative(s, q);
                 self.states.i[s][0] = i.v;
                 self.current_at(a, b, i, ctrl, vals);
             }
@@ -286,7 +302,7 @@ impl Load<'_> {
                 let (a0, hist) = self.states.coefficients(s);
                 let phi: f64 = terms.iter().map(|&(c, k)| k * self.v(c)).sum();
                 self.states.q[s][0] = phi;
-                self.states.i[s][0] = a0 * phi + hist;
+                self.states.i[s][0] = self.states.derivative(s, Dual::<0>::constant(phi)).v;
                 self.ops += 4 * terms.len() as u64 + 3;
                 for &(c, k) in terms {
                     self.mat(row, c, -a0 * k);

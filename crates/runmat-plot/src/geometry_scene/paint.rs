@@ -24,11 +24,14 @@ pub(super) const HOVER_PAINT: RegionPaint = RegionPaint::Tint {
     edge: GEOMETRY_HOVER_EDGE_COLOR,
 };
 
-/// How a region is colored: filled with one color (role highlights, staged and preview
-/// geometry), or tinted so the shading still reads (selection and hover).
+/// How a region is colored: tinted by a role highlight's alpha, colored by an analysis, or tinted
+/// so the shading still reads (selection and hover).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum RegionPaint {
-    Fill([f32; 4]),
+    /// A role highlight (a study's support, load or thermal tint): the face color moves toward
+    /// the highlight's color by the highlight's alpha and keeps its own alpha, so the lit shading
+    /// shows through. Alpha 1 fills. The edges take the highlight color.
+    Highlight([f32; 4]),
     /// An analysis color: the faces take it at their own alpha (so display modes still apply)
     /// and the edges stay as drawn.
     Face([f32; 4]),
@@ -42,7 +45,15 @@ pub(super) enum RegionPaint {
 impl RegionPaint {
     pub(super) fn face(self, base: [f32; 4]) -> [f32; 4] {
         match self {
-            Self::Fill(color) => color,
+            Self::Highlight(color) => {
+                let amount = color[3].clamp(0.0, 1.0);
+                [
+                    base[0] + (color[0] - base[0]) * amount,
+                    base[1] + (color[1] - base[1]) * amount,
+                    base[2] + (color[2] - base[2]) * amount,
+                    base[3],
+                ]
+            }
             Self::Face(color) => [color[0], color[1], color[2], base[3].min(color[3])],
             Self::Tint { face, amount, .. } => {
                 let amount = tint_on(base, amount);
@@ -60,7 +71,7 @@ impl RegionPaint {
     /// overlays stay hidden.
     pub(super) fn edge(self, base: [f32; 4]) -> [f32; 4] {
         let color = match self {
-            Self::Fill(color) => color,
+            Self::Highlight(color) => color,
             Self::Face(_) => return base,
             Self::Tint { edge, .. } => edge,
         };
@@ -71,7 +82,7 @@ impl RegionPaint {
     /// stand out by weight as well as color; hover a little less.
     pub(super) fn edge_weight(self) -> f32 {
         match self {
-            Self::Fill(_) | Self::Face(_) => 1.0,
+            Self::Highlight(_) | Self::Face(_) => 1.0,
             Self::Tint { amount, .. } if amount >= GEOMETRY_SELECTED_TINT => SELECTED_EDGE_WEIGHT,
             Self::Tint { .. } => HOVER_EDGE_WEIGHT,
         }

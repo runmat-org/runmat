@@ -826,6 +826,9 @@ pub(super) fn add(catalog: &mut Catalog) {
             "Choose the layer new annotations go on.",
         )
         .inputs(vec![text("layer", "Layer", Some("Notes"))])
+        .when(unavailable(
+            "Annotation layers aren't in the drawing format yet",
+        ))
         .edit(view_action("layer")),
         drw(
             "drawing.zoom",

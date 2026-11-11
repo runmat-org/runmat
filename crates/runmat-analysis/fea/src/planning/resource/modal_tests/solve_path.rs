@@ -22,13 +22,15 @@ fn modal_plan_selects_the_factorization_when_it_fits_lobpcg_otherwise_and_refuse
     .unwrap();
     let plan = |selection| {
         build_structural_modal_resource_plan_selecting(
-            Some(&mesh),
-            &compiled,
-            &observations,
-            &workload,
-            None,
-            &[],
-            prepared(&mesh, &constraints, &workload),
+            crate::planning::resource::StructuralModalResourcePlanningInput {
+                mesh: Some(&mesh),
+                compilation: &compiled,
+                observations: &observations,
+                workload: &workload,
+                prestress_state: None,
+                accelerator_requests: &[],
+                prepared: prepared(&mesh, &constraints, &workload),
+            },
             selection,
         )
     };
@@ -105,13 +107,15 @@ fn authored_modal_solver_method_is_planned_alone_and_refused_with_the_memory_bud
         .unwrap();
         let plan = |selection| {
             build_structural_modal_resource_plan_selecting(
-                Some(&mesh),
-                &compiled,
-                &observations,
-                &workload,
-                None,
-                &[],
-                prepared(&mesh, &constraints, &workload),
+                crate::planning::resource::StructuralModalResourcePlanningInput {
+                    mesh: Some(&mesh),
+                    compilation: &compiled,
+                    observations: &observations,
+                    workload: &workload,
+                    prestress_state: None,
+                    accelerator_requests: &[],
+                    prepared: prepared(&mesh, &constraints, &workload),
+                },
                 selection,
             )
         };
@@ -121,6 +125,15 @@ fn authored_modal_solver_method_is_planned_alone_and_refused_with_the_memory_bud
         })
         .unwrap();
         assert_eq!(forced, recorded, "{method:?}");
+        assert_eq!(
+            plan(ModalSolveSelection::Forced {
+                path,
+                machine_memory_bytes: None,
+            })
+            .unwrap(),
+            forced,
+            "{method:?}"
+        );
         assert_eq!(recorded_modal_solve_path(&forced), Some(path));
         let need = forced
             .request

@@ -66,6 +66,8 @@ enum Entry {
     Assembly(Rc<AssemblyPart>),
     Configured(Rc<ConfiguredPart>),
     Board(Rc<PartDisplay>),
+    /// A drawing view's projected lines (`drawing::progress`).
+    View(Rc<serde_json::Value>),
 }
 
 struct Slot {
@@ -149,13 +151,24 @@ fn tessellation_key(t: &TessellationOptions) -> String {
     )
 }
 
+/// What a drawing view's digest starts with (`drawing::progress::view_key`). The page fetches a
+/// view's entry from its stores like any other, but never asks a helper host to make one: only
+/// a compile that projects the view makes it.
+pub const VIEW_DIGEST_PREFIX: &str = "view-";
+
 /// A short name for the entry under `key`, for a caller that holds its display: equal keys give
 /// equal digests, and any change to a key gives another (a 64-bit hash and the key's length).
+/// A view's digest starts with [`VIEW_DIGEST_PREFIX`].
 pub fn digest(key: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     key.hash(&mut h);
-    format!("{:016x}-{:x}", h.finish(), key.len())
+    let kind = if key.starts_with("view\0") {
+        VIEW_DIGEST_PREFIX
+    } else {
+        ""
+    };
+    format!("{kind}{:016x}-{:x}", h.finish(), key.len())
 }
 
 /// The key of part `path` with `text`, regenerated for an assembly.
@@ -204,6 +217,7 @@ fn get(key: &str) -> Option<Entry> {
                 Entry::Assembly(p) => Entry::Assembly(Rc::clone(p)),
                 Entry::Configured(p) => Entry::Configured(Rc::clone(p)),
                 Entry::Board(p) => Entry::Board(Rc::clone(p)),
+                Entry::View(p) => Entry::View(Rc::clone(p)),
             }
         });
         if found.is_some() {
@@ -308,6 +322,8 @@ struct StoredRef<'a> {
     configured: Option<&'a ConfiguredPart>,
     #[serde(skip_serializing_if = "Option::is_none")]
     board: Option<&'a PartDisplay>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    view: Option<&'a serde_json::Value>,
 }
 
 /// [`StoredRef`] read back.
@@ -317,6 +333,7 @@ struct Stored {
     assembly: Option<AssemblyPart>,
     configured: Option<ConfiguredPart>,
     board: Option<PartDisplay>,
+    view: Option<serde_json::Value>,
 }
 
 /// One stored entry: the JSON's length and the bytes' length (`u32`, little-endian), the JSON,
@@ -349,6 +366,7 @@ pub fn take_fresh() -> Vec<(String, Vec<u8>)> {
                     assembly: None,
                     configured: None,
                     board: None,
+                    view: None,
                 };
                 let stored = match &slot.entry {
                     Entry::Assembly(p) => StoredRef {
@@ -361,6 +379,10 @@ pub fn take_fresh() -> Vec<(String, Vec<u8>)> {
                     },
                     Entry::Board(p) => StoredRef {
                         board: Some(&**p),
+                        ..none
+                    },
+                    Entry::View(p) => StoredRef {
+                        view: Some(&**p),
                         ..none
                     },
                 };
@@ -396,14 +418,20 @@ pub fn seed(mut frames: &[u8]) -> usize {
         let bytes = &frames[start..end];
         let stored: Option<Stored> = wire::revive(bytes, || serde_json::from_slice(json).ok());
         if let Some(stored) = stored {
-            let entry = match (stored.assembly, stored.configured, stored.board) {
-                (Some(p), None, None) => {
+            let entry = match (
+                stored.assembly,
+                stored.configured,
+                stored.board,
+                stored.view,
+            ) {
+                (Some(p), None, None, None) => {
                     Some((display_bytes(&p.display), Entry::Assembly(Rc::new(p))))
                 }
-                (None, Some(p), None) => {
+                (None, Some(p), None, None) => {
                     Some((display_bytes(&p.display), Entry::Configured(Rc::new(p))))
                 }
-                (None, None, Some(d)) => Some((display_bytes(&d), Entry::Board(Rc::new(d)))),
+                (None, None, Some(d), None) => Some((display_bytes(&d), Entry::Board(Rc::new(d)))),
+                (None, None, None, Some(v)) => Some((json_size(&v), Entry::View(Rc::new(v)))),
                 _ => None,
             };
             if let Some((size, entry)) = entry {
@@ -465,6 +493,41 @@ pub fn board_part<E>(
     let bytes = display_bytes(&display);
     put(key, Entry::Board(Rc::new(display.clone())), bytes);
     Ok(display)
+}
+
+/// A drawing view's projected lines under `key` (`drawing::progress::view_key`), made by `make`
+/// when the cache doesn't hold them. `None` when a [`probe`] leaves them out.
+pub fn view_lines(
+    key: String,
+    make: impl FnOnce() -> serde_json::Value,
+) -> Option<serde_json::Value> {
+    if let Some(Entry::View(v)) = get(&key) {
+        return Some((*v).clone());
+    }
+    if skip(&key) {
+        return None;
+    }
+    let lines = make();
+    let bytes = json_size(&lines);
+    put(key, Entry::View(Rc::new(lines.clone())), bytes);
+    Some(lines)
+}
+
+/// Whether the cache holds the entry under `key`.
+pub fn holds(key: &str) -> bool {
+    let d = digest(key);
+    CACHE.with(|c| c.borrow().slots.contains_key(&d))
+}
+
+/// Lists `key` as a miss when a [`probe`] runs and the cache doesn't hold it, so the page fetches
+/// the entry with the others (a drawing's views that this stage doesn't project yet).
+pub fn want(key: &str) {
+    let _ = skip(key);
+}
+
+/// A JSON value's size as text, for the cache's budget.
+fn json_size(value: &serde_json::Value) -> usize {
+    serde_json::to_string(value).map_or(1024, |t| t.len() + 64)
 }
 
 /// An evaluator that notes whether the regeneration asked it for anything.

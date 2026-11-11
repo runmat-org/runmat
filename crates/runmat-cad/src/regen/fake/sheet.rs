@@ -276,6 +276,7 @@ impl FakeSheet {
                     start: first.unwrap_or([0.0; 3]),
                     end: last.unwrap_or([0.0; 3]),
                     length,
+                    curve: EdgeCurve::Other,
                 },
                 laminar,
             });

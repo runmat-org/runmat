@@ -75,6 +75,42 @@ const FAMILIES: &[(&str, &[&str], [f32; 4])] = &[
         &["aluminum", "aluminium", "al_6061", "al_7075", "al_2024"],
         [0.78, 0.8, 0.83, 1.0],
     ),
+    // Building materials, before the composites and plastics their names overlap with
+    // (a fibreglass batt, polyethylene sheet stays plastic).
+    (
+        "insulation",
+        &["batt", "mineral_wool", "glass_wool", "rock_wool"],
+        [0.93, 0.8, 0.5, 1.0],
+    ),
+    (
+        "foam",
+        &[
+            "xps",
+            "eps",
+            "polystyrene",
+            "extruded_polystyrene",
+            "expanded_polystyrene",
+            "foam_board",
+        ],
+        [0.58, 0.76, 0.88, 1.0],
+    ),
+    (
+        "concrete",
+        &["concrete", "grout", "mortar"],
+        [0.66, 0.66, 0.64, 1.0],
+    ),
+    (
+        "gravel",
+        &["gravel", "crushed_stone", "aggregate"],
+        [0.52, 0.5, 0.47, 1.0],
+    ),
+    (
+        "plaster",
+        &["stucco", "cement_plaster", "gypsum", "drywall"],
+        [0.9, 0.88, 0.82, 1.0],
+    ),
+    ("asphalt", &["asphalt", "shingle"], [0.3, 0.3, 0.32, 1.0]),
+    ("osb", &["osb", "oriented_strand"], [0.8, 0.66, 0.42, 1.0]),
     (
         "carbon",
         &["carbon_fiber", "carbon_fibre", "cfrp"],
@@ -114,7 +150,20 @@ const FAMILIES: &[(&str, &[&str], [f32; 4])] = &[
     ),
     (
         "wood",
-        &["wood", "oak", "pine", "plywood", "birch"],
+        &[
+            "wood",
+            "oak",
+            "pine",
+            "plywood",
+            "birch",
+            "lumber",
+            "douglas_fir",
+            "hem_fir",
+            "spf",
+            "lvl",
+            "lsl",
+            "glulam",
+        ],
         [0.72, 0.56, 0.38, 1.0],
     ),
 ];
@@ -196,9 +245,52 @@ pub fn apply_document_appearance(
 
 /// Gives each output's body its own color (the output's `color`, else its material's
 /// appearance) when the part has more than one output, so a study part's solid, fluid and air
-/// bodies read apart. A body that already carries a color keeps it; a one-output part draws in
+/// bodies read apart; then gives every body a `material = { body, material }` statement names
+/// that material's appearance, so a wall's batts, plates and foam read apart in one part. A body
+/// that already carries a color keeps it; a one-output part with no material statements draws in
 /// the part's appearance as before.
 pub fn color_output_bodies(
+    doc: &crate::model::PartDocument,
+    result: &crate::regen::engine::RegenResult,
+    display: &mut crate::display::PartDisplay,
+) {
+    color_outputs(doc, result, display);
+    for (m, o) in doc.materials.iter().zip(&result.materials) {
+        let rgba = material_appearance(Some(m.material.0.as_str())).1;
+        for b in assigned_bodies(result, o) {
+            if let Some(body) = display.bodies.iter_mut().find(|d| d.index as usize == b) {
+                body.color.get_or_insert(rgba);
+            }
+        }
+    }
+}
+
+/// Every live body a material statement resolved to: each body carrying all the names of one
+/// resolved entity, so a feature that makes several bodies (a multi-loop extrude, a split) colors
+/// them all.
+pub fn assigned_bodies(
+    result: &crate::regen::engine::RegenResult,
+    o: &crate::regen::engine::ItemOutcome,
+) -> Vec<usize> {
+    if !o.ok {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for names in &o.entities {
+        let want: std::collections::BTreeSet<_> = names.iter().collect();
+        if want.is_empty() {
+            continue;
+        }
+        for (b, body) in result.state.bodies.iter().enumerate() {
+            if want.iter().all(|n| body.names.body.contains(*n)) && !out.contains(&b) {
+                out.push(b);
+            }
+        }
+    }
+    out
+}
+
+fn color_outputs(
     doc: &crate::model::PartDocument,
     result: &crate::regen::engine::RegenResult,
     display: &mut crate::display::PartDisplay,
@@ -262,6 +354,19 @@ mod tests {
         assert_eq!(material_appearance(Some("glass_filled_nylon")).0, "plastic");
         assert_eq!(material_appearance(Some("PA66-GF30")).0, "plastic");
         assert_eq!(material_appearance(Some("glass_filled_nylon")).1[3], 1.0);
+        assert_eq!(
+            material_appearance(Some("material.fiberglass_batt")).0,
+            "insulation"
+        );
+        assert_eq!(material_appearance(Some("material.concrete")).0, "concrete");
+        assert_eq!(
+            material_appearance(Some("material.douglas_fir_lumber")).0,
+            "wood"
+        );
+        assert_eq!(
+            material_appearance(Some("material.polyethylene_sheet")).0,
+            "plastic"
+        );
         assert_eq!(srgb_hex([1.0, 0.0, 0.0, 1.0]), "#FF0000FF");
     }
 
