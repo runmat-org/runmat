@@ -277,6 +277,7 @@ impl<'a, 'b> Run<'a, 'b> {
                         profile,
                         path,
                         path_curves,
+                        follow_path: s.follow_path,
                     },
                     combine,
                 );

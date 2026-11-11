@@ -333,7 +333,15 @@ impl FakeKernel {
                 profile,
                 path,
                 path_curves,
+                follow_path,
             } => {
+                // A profile that follows a straight path is the translated profile; the grid
+                // kernel builds no profile turning through a bend.
+                if *follow_path && super::sheet::turns(path) {
+                    return Err(KernelError::NotSupported {
+                        what: "a sweep that follows a turning path".into(),
+                    });
+                }
                 let to_world = Transform::from_frame(&profile.frame);
                 let inv = to_world.inverse();
                 let local: Vec<[f64; 3]> = path.iter().map(|p| inv.apply(*p)).collect();

@@ -148,6 +148,11 @@ Tracked build_revolve(const Profile& p, const gp_Ax1& axis, double angle,
                       std::uint32_t start_label, std::uint32_t end_label);
 Tracked build_sweep(const Profile& p, const std::vector<gp_Pnt>& path, std::uint32_t start_label,
                     std::uint32_t end_label);
+// exact_sweep_follow.cc: the profile follows the path; one labelled profile copy per path
+// curve, `curve_ends[k]` the index of the path point that ends curve k.
+Tracked build_sweep_follow(const std::vector<const Profile*>& copies, const std::vector<gp_Pnt>& path,
+                           const std::vector<std::size_t>& curve_ends, std::uint32_t start_label,
+                           std::uint32_t end_label);
 Tracked build_loft(const std::vector<const Profile*>& sections, std::uint32_t start_label,
                    std::uint32_t end_label);
 // A boundary surface's curve: the edge, the face it bounds (for a tangent or curvature

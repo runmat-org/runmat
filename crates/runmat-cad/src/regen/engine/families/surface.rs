@@ -186,6 +186,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     },
                     path: path_points,
                     path_curves,
+                    follow_path: false,
                 };
                 op(
                     KernelOp::Surface(SurfaceOp::Swept {

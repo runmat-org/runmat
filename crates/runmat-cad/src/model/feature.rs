@@ -288,6 +288,10 @@ pub struct Sweep {
     pub path: ProfileRef,
     #[serde(default)]
     pub mode: BodyMode,
+    /// The profile keeps its angle to the path, turning through its bends and corners (a
+    /// pipe or cable run). Without it the profile stays parallel to itself.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub follow_path: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
