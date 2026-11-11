@@ -935,7 +935,14 @@ fn section_entry(
         return Value::Null;
     };
     let _ = views;
-    let Some(p0) = point_of(display, plane) else {
+    use runmat_cad::model::{DatumRef, PlaneRef};
+    let p0 = match plane {
+        PlaneRef::Face { face } => point_of(display, face),
+        // Every origin plane passes through the model's origin.
+        PlaneRef::Datum { datum: DatumRef::OriginPlane { .. } } => Some([0.0; 3]),
+        PlaneRef::Datum { .. } => None,
+    };
+    let Some(p0) = p0 else {
         return Value::Null;
     };
     let axes = section_axes(parent);

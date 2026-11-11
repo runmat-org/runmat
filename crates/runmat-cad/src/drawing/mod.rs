@@ -206,10 +206,12 @@ pub enum ViewKind {
         from: String,
         direction: ProjectDirection,
     },
-    /// A cut by a plane through the model (a face or datum plane reference) seen from `from`.
+    /// A cut through the model seen from `from`: the cutting line crosses the parent view
+    /// through a point of `plane`, a face (`feature.body.face.end`) or an origin plane
+    /// (`origin.xy`, `origin.yz`, `origin.zx`, through the model's origin).
     Section {
         from: String,
-        plane: Reference,
+        plane: crate::model::PlaneRef,
         label: String,
         #[serde(default)]
         aligned: bool,
@@ -286,7 +288,7 @@ impl ViewKind {
     pub fn references(&self) -> Vec<(&'static str, &Reference)> {
         match self {
             ViewKind::Standard { frame: Some(f), .. } => vec![("frame", f)],
-            ViewKind::Section { plane, .. } => vec![("plane", plane)],
+            ViewKind::Section { plane: crate::model::PlaneRef::Face { face }, .. } => vec![("plane", face)],
             ViewKind::Detail { center, .. } => vec![("center", center)],
             ViewKind::Auxiliary { edge, .. } => vec![("edge", edge)],
             ViewKind::Break { gaps, .. } => gaps
@@ -735,6 +737,19 @@ pub fn check_drawing_with(
                     DiagCode::DrawingReference,
                     s(param),
                     format!("view `{}` {}: `{}` {}", v.name, param, r, m),
+                );
+            }
+        }
+        if let ViewKind::Section { plane: crate::model::PlaneRef::Datum { datum }, .. } = &v.kind {
+            if !matches!(datum, crate::model::DatumRef::OriginPlane { .. }) {
+                err(
+                    &mut rep,
+                    DiagCode::DrawingReference,
+                    s("plane"),
+                    format!(
+                        "view `{}` plane: a section cuts through a face or an origin plane (`origin.xy`, `origin.yz`, `origin.zx`); datum features are not supported yet",
+                        v.name
+                    ),
                 );
             }
         }
