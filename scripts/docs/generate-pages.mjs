@@ -1,7 +1,8 @@
 // Generates the docs pages derived from the capability ledger (docs/simulation/ledger.json), so no
 // one edits status or evidence by hand:
 //   docs/simulation/validation/<area>.md     per family: the reference checks, grouped by analysis type
-//   docs/simulation/validation/status.md     one row per family: analysis types checked, check count, last run
+//   docs/simulation/validation/status.md     one row per family: analysis types checked, reference checks,
+//                                            automated tests (test-counts.mjs), last run
 //   docs/simulation/language/reference/procedures.md   the family × procedure table between its markers
 // Test results and run dates come from the evidence catalog (`evidence_report`), which lists the
 // tests whose `// witness:` tags name each check; receipts come from examples/catalog.json.
@@ -12,6 +13,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { VALIDATION_AREAS, loadLedger } from "./ledger.mjs";
+import { countTests, formatCount, maskTestCounts } from "./test-counts.mjs";
 
 const COMMAND = "node scripts/docs/generate-pages.mjs";
 const FAMILY_AREA = { conjugate_heat_transfer: "conjugate-heat-transfer", fluid_structure_interaction: "fluid-structure-interaction" };
@@ -114,31 +116,37 @@ export function familyPage(source, area) {
     return lines.join("\n");
 }
 
-export function statusPage(source) {
+export function statusPage(source, tests = countTests(source)) {
     const root = join(source, "docs/simulation");
     const { ledger } = loadLedger(source);
-    const tests = checkTests(root);
+    const evidence = checkTests(root);
     const receipts = receiptIndex(root);
     const lines = HEADER(
-        "Which analysis types of each RunMat physics family have a reference check, how many checks each family has, and when they last ran.",
-        ["validation status", "reference checks", "verification", "FEA accuracy"],
+        "Which analysis types of each RunMat physics family have a reference check, how many reference checks and automated tests each family has, and when they last ran.",
+        ["validation status", "reference checks", "automated tests", "verification", "FEA accuracy"],
         "release-status", "Status");
     lines.push(
-        `Reference checks for RunMat ${ledger.release}, by physics family. Each family page lists its checks with the problem, reference, tolerance and result. The last run is the latest evidence-report run or receipt date among the family's checks.`,
+        `Validation for RunMat ${ledger.release}, by physics family. Each family page lists its reference checks with the problem, reference, tolerance and result.`,
         "",
-        "| Family | Analysis types with a reference check | Checks | Last run |",
-        "| --- | --- | ---: | --- |",
+        `Reference checks are published benchmark problems compared against a known answer within a stated tolerance. Automated tests are the unit, regression and qualification tests in the RunMat source for that family. Another <!-- tests -->${formatCount(tests.shared)}<!-- /tests --> tests cover meshing, the sparse solvers and study planning, which every family uses. Last run is the latest evidence-report run or receipt date among the family's reference checks.`,
+        "",
+        "| Family | Analysis types with a reference check | Reference checks | Automated tests | Last run |",
+        "| --- | --- | ---: | ---: | --- |",
     );
     for (const [area, label] of Object.entries(VALIDATION_AREAS)) {
         const checks = ledger.checks.filter(check => check.area === area && check.status !== "planned");
         const analyses = [...new Set(checks.map(check => check.analysis))].join(", ");
-        const last = checks.map(check => checkEvidence(check, tests, receipts).last).filter(Boolean).sort().at(-1);
+        const last = checks.map(check => checkEvidence(check, evidence, receipts).last).filter(Boolean).sort().at(-1);
         const planned = ledger.checks.filter(check => check.area === area && check.status === "planned").map(check => check.title);
-        lines.push(`| [${label}](./${area}.md) | ${analyses || `None yet; planned: ${planned.join("; ")}`} | ${checks.length} | ${last ?? "none"} |`);
+        lines.push(`| [${label}](./${area}.md) | ${analyses || `None yet; planned: ${planned.join("; ")}`} | ${checks.length} | ${formatCount(tests[area] ?? 0)} | ${last ?? "none"} |`);
     }
     lines.push("", "Which procedures each family runs in this release is in the [procedure reference](../language/reference/procedures.md#families-and-procedures).", "");
     return lines.join("\n");
 }
+
+/** Compares a committed page with the generator; Status ignores its automated-test counts, which the docs export refreshes at publish time. */
+export const pageIsCurrent = (path, current, expected) =>
+    path.endsWith("validation/status.md") ? maskTestCounts(current) === maskTestCounts(expected) : current === expected;
 
 /** The family × procedure table generated into the procedure reference between its markers. */
 export const PROCEDURE_TABLE = { file: "docs/simulation/language/reference/procedures.md", start: "<!-- ledger:families-and-procedures -->", end: "<!-- /ledger:families-and-procedures -->" };
@@ -176,7 +184,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     for (const [path, text] of Object.entries(generatedPages(source))) {
         let current = "";
         try { current = readFileSync(join(source, path), "utf8"); } catch { /* new page */ }
-        if (current === text) continue;
+        if (pageIsCurrent(path, current, text)) continue;
         if (process.argv.includes("--check")) { console.log(`${path} is stale; run ${COMMAND}`); stale += 1; }
         else { writeFileSync(join(source, path), text); console.log(`wrote ${path}`); }
     }
