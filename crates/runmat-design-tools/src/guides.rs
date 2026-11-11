@@ -131,6 +131,16 @@ pub struct Requirement {
     pub decision: String,
 }
 
+/// Project files a guide works from. The Guide tab offers a guide only when every need is met,
+/// counting every file in the project, not just the open tabs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Need {
+    /// A file counts when its name ends with one of these extensions.
+    pub extensions: Vec<String>,
+    /// How many such files the project must hold.
+    pub at_least: usize,
+}
+
 /// How a guide knows it is done.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Completion {
@@ -153,6 +163,9 @@ pub struct Guide {
     /// The file extension it writes.
     pub extension: String,
     pub opens_from: Vec<EntryPoint>,
+    /// Inputs the project must already hold; empty means the guide is always offered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<Need>,
     pub decisions: Vec<Decision>,
     pub completion: Completion,
     /// The model the guide's turns use unless Settings overrides it.
@@ -171,6 +184,18 @@ pub struct GuideCatalog {
     pub controls: Vec<ControlKind>,
     pub guides: Vec<Guide>,
     pub suggestions: Vec<Suggestion>,
+}
+
+impl Guide {
+    /// Offer this guide only when the project holds at least `at_least` files with one of
+    /// `extensions`.
+    fn needing(mut self, extensions: &[&str], at_least: usize) -> Self {
+        self.needs.push(Need {
+            extensions: extensions.iter().map(|e| (*e).to_owned()).collect(),
+            at_least,
+        });
+        self
+    }
 }
 
 impl GuideCatalog {
@@ -436,6 +461,7 @@ pub fn catalog() -> GuideCatalog {
         target: target.into(),
         extension: extension.into(),
         opens_from,
+        needs: Vec::new(),
         decisions,
         completion: Completion {
             tool: tool.into(),
@@ -527,7 +553,7 @@ pub fn catalog() -> GuideCatalog {
             vec![needs("features", 1, "process")],
             "general",
             "Make this part manufacturable",
-        ),
+        ).needing(&[".part"], 1),
         guide(
             "assembly_from_parts",
             "Assembly from parts",
@@ -549,7 +575,7 @@ pub fn catalog() -> GuideCatalog {
             vec![needs("occurrences", 2, "parts"), needs("mates", 1, "mates")],
             "general",
             "Build an assembly from these parts",
-        ),
+        ).needing(&[".part"], 1),
         guide(
             "drawing_for_release",
             "Drawing for release",
@@ -573,7 +599,7 @@ pub fn catalog() -> GuideCatalog {
             vec![needs("sheets", 1, "sheet"), needs("views", 1, "views"), needs("annotations", 1, "critical")],
             "general",
             "Make a release drawing of this part",
-        ),
+        ).needing(&[".part", ".assembly"], 1),
         guide(
             "schematic_capture",
             "Schematic capture",
@@ -623,7 +649,7 @@ pub fn catalog() -> GuideCatalog {
             vec![needs("footprints", 1, "placement"), needs_none("unplaced components", "placement")],
             "general",
             "Bring up a board from this schematic",
-        ),
+        ).needing(&[".circuit"], 1),
         guide(
             "engineering_change",
             "Engineering change (ECO)",
@@ -643,7 +669,7 @@ pub fn catalog() -> GuideCatalog {
             vec![needs_none("eco differences", "differences")],
             "general",
             "Update the board from the schematic",
-        ),
+        ).needing(&[".circuit.layout"], 1),
         guide(
             "coupled_study",
             "Coupled study",
@@ -663,7 +689,7 @@ pub fn catalog() -> GuideCatalog {
             vec![],
             "fea",
             "Set up a thermal study of this board",
-        ),
+        ).needing(&[".circuit.layout"], 1),
     ];
     let suggestions = suggestions::catalog();
     GuideCatalog {
