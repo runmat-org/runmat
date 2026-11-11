@@ -50,6 +50,7 @@ _November 10, 2026_
 
 * Improved hidden-line processing for general-arrangement drawings of large assemblies. Drawing parts lists use the indented bill of materials, and balloons can identify subassemblies.
 * Fixed radius and diameter arrows to end on the arc, and added a finding for notes placed outside the sheet. Mold Scale, Parting line, Undercut, and Scale body commands execute their modeling operations.
+* Fixed the Sketch command on selected planes and faces so it creates the sketch feature for the editor to open.
 
 #### Changed
 
@@ -88,6 +89,7 @@ _November 10, 2026_
 
 * Unified study commands under `runmat check`, `runmat plan`, `runmat run`, and `runmat snapshot`; the `runmat fea` command group has been removed.
 * Added a factor-free preconditioned LOBPCG modal solve path, budget-sized search subspaces, and inertia-based eigenvalue completeness checks. Modal resource planning accounts for the selected solver working set.
+* Modal studies can select automatic, factorization, or iterative solving and choose their algebraic accuracy measure. Results publish normwise backward error alongside relative residuals, and eigenpair qualification uses the selected measure.
 * Extended steady thermal conduction with a multigrid solve path and resource planning derived from the admitted run budget. Thermal placement limits remain separate from the authored study identity.
 * Improved tetrahedral boundary recovery, geometry-tolerance handling, and local sizing around opposed faces and narrow gaps. Tet10 curved-node repair tracks the geometry that changes.
 * Added saved histories for sampled study outputs, including acoustic frequency histories.
