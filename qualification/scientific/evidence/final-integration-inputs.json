@@ -1,7 +1,51 @@
 {
   "schema_version": 1,
-  "accepted_source_revision": "be3584a98f23f7ced34793221ff3c2e06cdb7835",
+  "accepted_source_revision": "eb79824ba98605d06539a2d872405be2635da766",
   "checks": [
+    {
+      "name": "Design seating and through-bore placement with OCCT after lint repairs",
+      "passed": 9,
+      "failed": 0,
+      "log_sha256": "b3b8a6424f43e74945e50c0980666ff8554c36a00029b93b3c4989679ee23aab",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-design-seat-occt-lint-repair.log"
+    },
+    {
+      "name": "Design seating and through-bore placement with the grid kernel after lint repairs",
+      "passed": 9,
+      "failed": 0,
+      "log_sha256": "cf7d517affbbb5ee45034087c3bd4ee1a18b7a164f0c616ef8c4eced34af13ba",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-design-seat-grid-lint-repair.log"
+    },
+    {
+      "name": "Complete first-party lint census",
+      "target": "aarch64-apple-darwin",
+      "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+      "exit_code": 0,
+      "structured_warnings": 0,
+      "structured_errors": 0,
+      "all_targets": true,
+      "all_features": true,
+      "excluded_packages": [
+        "runmat-clarabel",
+        "runmat-analysis-fea"
+      ],
+      "log_sha256": "f76150ac04582e3243ce5712a4fe35d86c1a6da5ce72923f7fe125bca976f48c",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-first-party-lint-census.jsonl",
+      "scope": "Diagnostic collection uses --cap-lints warn so dependent crates are checked in the same pass. Zero warning/error diagnostics are required. CI retains its unchanged strict -D warnings command; this is host-scoped lint evidence, not a cross-platform test result."
+    },
+    {
+      "name": "Existing FEA lint debt verification",
+      "target": "aarch64-apple-darwin",
+      "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+      "cargo_exit_code": 101,
+      "verifier_exit_code": 0,
+      "distinct_sites": 179,
+      "emissions": 265,
+      "ledger_sha256": "918bb417ab88d82367425555c7d260b0e8739245a5cc2b54ae55e418414f8df5",
+      "log_sha256": "dcf600d7e14d5b5fb02dc0a1338b6a48559734a731adceaf382efb099fa0a398",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-fea-lint-debt.jsonl",
+      "scope": "Every diagnostic matches the existing reviewed RM-1287 ledger. No new lint exception was added."
+    },
     {
       "name": "CAD browser library regressions after mechanical strict-Clippy repairs",
       "passed": 196,
@@ -173,5 +217,5 @@
     }
   ],
   "windows_source_scope": "The focused transfer verifier checked 27,226 files and omitted eight Rust source files under directories named target. This evidence retains that partial source-verification scope. Final Windows CI uses the complete Git checkout; the corrected Linux verifier checks every canonical source file.",
-  "scope": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts."
+  "scope": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts."
 }

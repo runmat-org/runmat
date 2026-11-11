@@ -6,7 +6,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "23a15c466637b093edf315b6c3c8254f050b5b6fde70801bd7148cd61afc0bd8",
+    "sha256": "e76f801975ecc2a2304c8f383cbe5a876f5e179af2316f146c77f74f7500b4b4",
     "files": 26096,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -157,6 +157,34 @@
       "reason": "Generated command-reference front matter; dispatch and numerical behavior are unchanged. Canonical generator and documentation tests pass."
     },
     {
+      "path": "crates/runmat-design-tools/src/seat.rs",
+      "before": [
+        "100644",
+        "blob",
+        "2ed3a0b56488d430d932058c50129c9358002600"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "a5a74c497d5a6106f2d1a54c326fc4dab2da2875"
+      ],
+      "reason": "PoseStatus derives Copy and Serialize with fixed snake_case enum tags. Passing its copied value to serde_json::to_value uses the same derived serialization as passing its reference. Status fields, geometry, arithmetic and allocated JSON output are unchanged; all nine seat cases pass with both OCCT and the grid kernel."
+    },
+    {
+      "path": "crates/runmat-design-tools/src/seat/through.rs",
+      "before": [
+        "100644",
+        "blob",
+        "bfc3fc2428591e2aaf10a459ccb817c495e71a09"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c175383ff67a44329bc328c958ed9bc722f94ebf"
+      ],
+      "reason": "Array::map calls the same mm(f64) formatter for the same three coordinates in the same order. Replacing its capture-free forwarding closure with the function item changes no formatted value, chain selection, tolerance or allocation. All nine seat cases pass on OCCT and the grid kernel, including through-bore placement and refusals."
+    },
+    {
       "path": "crates/runmat-design-tools/tests/command_registry.rs",
       "before": [
         "100644",
@@ -272,7 +300,7 @@
   "qualification_evidence": [
     {
       "path": "qualification/scientific/evidence/final-integration-inputs.json",
-      "sha256": "a7fca46d5fad5fc487be932181f37aba754edb6adbb4b75d501c8e3a0ccf5cd5"
+      "sha256": "5dd6a9821e76e9a064ebf76cf6bace1b6e1f912950465d68893cd3416bf12c62"
     }
   ]
 }
