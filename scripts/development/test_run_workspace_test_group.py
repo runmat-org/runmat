@@ -250,6 +250,21 @@ class ScientificRoutingTests(unittest.TestCase):
         self.assertFalse(cohort["required"])
         self.assertIn("outstanding beta resource limitation", cohort["exception"])
 
+    def test_full_airliner_memory_check_requires_a_manual_receipt(self):
+        name = "the_airliner_general_arrangement_compiles_within_the_host_memory"
+        policy_path = Path(__file__).resolve().parents[2] / "qualification/scientific/policy.json"
+        cohort = next(c for c in json.loads(policy_path.read_text())["cohorts"]
+                      if c["id"] == "cad-airliner-drawing-memory")
+        self.assertTrue(cohort["required"])
+        self.assertEqual(cohort["expected_passed"], 1)
+        self.assertEqual(cohort["required_target"], "linux-x86_64")
+        self.assertEqual(cohort["ordinary_skip"], [name])
+        self.assertIn(name, runner.scientific_filters("geometry-analysis"))
+        self.assertNotIn(name, runner.scientific_filters("tooling-distributed"))
+        self.assertIn("cad_airliner_drawing", cohort["command"])
+        self.assertNotIn("--ignored", cohort["command"])
+        self.assertNotIn("--skip", cohort["command"])
+
     def test_extended_commands_do_not_depend_on_skip_policy(self):
         with patch.object(runner, "scientific_filters", side_effect=AssertionError("read skip policy")):
             for group in runner.GROUPS:

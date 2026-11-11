@@ -47,6 +47,16 @@
       "description": "Full 50k-plus primitive board edit, fresh-compile equivalence, delta and timing qualification. Preserve the 500 ms release budget; ordinary CI runs bounded functional regressions and verifies this receipt."
     },
     {
+      "id": "cad-airliner-drawing-memory",
+      "required_target": "linux-x86_64",
+      "expected_passed": 1,
+      "group": "geometry-analysis",
+      "required": true,
+      "command": ["cargo", "test", "--locked", "--offline", "--all-features", "-p", "runmat-circuit", "-p", "runmat-cad", "-p", "runmat-cad-wasm", "-p", "runmat-design-commands", "-p", "runmat-design-tools", "-p", "runmat-geometry-io", "-p", "runmat-geometry-kernel", "-p", "runmat-geometry-wasm-host", "--test", "cad_airliner_drawing", "--", "--nocapture", "--test-threads=1"],
+      "ordinary_skip": ["the_airliner_general_arrangement_compiles_within_the_host_memory"],
+      "description": "Full 3,200-occurrence general-arrangement drawing through the native browser-host adapter, with staged views and the unchanged Rust-heap ceiling. Run offline and retain a required receipt; ordinary CI keeps bounded drawing, assembly and exact-kernel regressions. This does not replace actual browser artifact acceptance."
+    },
+    {
       "id": "extended-transient-rod",
       "group": "geometry-analysis",
       "required": false,
