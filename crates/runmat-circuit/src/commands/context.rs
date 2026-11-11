@@ -108,7 +108,6 @@ pub(super) fn add(catalog: &mut Catalog) {
         "replace",
         vec![
             labeled("circuit.change-part", "From the pool…"),
-            labeled("library.manufacturer-search", "Find alternates…"),
         ],
     );
     let footprint = menu(

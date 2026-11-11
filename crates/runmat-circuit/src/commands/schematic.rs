@@ -398,17 +398,6 @@ pub(super) fn add(c: &mut Catalog) {
         ])
         .edit(edit(EditOp::CreateFile, Section::Components).item("pool_entry")),
         sch(
-            "library.manufacturer-search",
-            "Manufacturer search",
-            "search",
-            "Search manufacturer parts with stock and pricing.",
-        )
-        .inputs(vec![
-            text("query", "Search", Some("TPS62130")),
-            text("manufacturer", "Manufacturer", None).optional(),
-        ])
-        .edit(analyze("manufacturer_search")),
-        sch(
             "simulate.run",
             "Run simulation",
             "simulate",
@@ -669,7 +658,6 @@ pub(super) fn tab() -> DomainTab {
                     e("library.place"),
                     e("library.open-part"),
                     e("library.create-part"),
-                    e("library.manufacturer-search"),
                 ],
             )],
         ),
