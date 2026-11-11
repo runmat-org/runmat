@@ -146,13 +146,20 @@ fn tessellation_key(t: &TessellationOptions) -> String {
     )
 }
 
+/// What a drawing view's digest starts with (`drawing::progress::view_key`). The page fetches a
+/// view's entry from its stores like any other, but never asks a helper host to make one: only
+/// a compile that projects the view makes it.
+pub const VIEW_DIGEST_PREFIX: &str = "view-";
+
 /// A short name for the entry under `key`, for a caller that holds its display: equal keys give
 /// equal digests, and any change to a key gives another (a 64-bit hash and the key's length).
+/// A view's digest starts with [`VIEW_DIGEST_PREFIX`].
 pub fn digest(key: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     key.hash(&mut h);
-    format!("{:016x}-{:x}", h.finish(), key.len())
+    let kind = if key.starts_with("view\0") { VIEW_DIGEST_PREFIX } else { "" };
+    format!("{kind}{:016x}-{:x}", h.finish(), key.len())
 }
 
 /// The key of part `path` with `text`, regenerated for an assembly.

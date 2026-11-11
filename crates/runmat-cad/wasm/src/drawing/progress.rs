@@ -230,4 +230,14 @@ mod tests {
         assert_ne!(view_key(&model_key("/p/a.part", "part a { }", None, None), &views, "top", 1.0), top);
         assert_ne!(view_key(&model_key("/p/a.part", "part a {}", Some("long"), None), &views, "top", 1.0), top);
     }
+
+    #[test]
+    fn a_view_digest_says_it_is_a_view() {
+        use crate::runtime::part_cache::{assembly_key, digest, VIEW_DIGEST_PREFIX};
+        let views = json!([{ "name": "front", "kind": { "view": "standard", "orientation": "front" } }]);
+        let view = digest(&view_key(&model_key("/p/a.part", "part a {}", None, None), &views, "front", 1.0));
+        assert!(view.starts_with(VIEW_DIGEST_PREFIX), "{view}");
+        let part = digest(&assembly_key("/p/a.part", "part a {}", &Default::default()));
+        assert!(!part.starts_with(VIEW_DIGEST_PREFIX), "{part}");
+    }
 }
