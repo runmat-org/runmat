@@ -21,11 +21,23 @@
 //!
 //! The parts the views show are regenerated once for the stages: the last few regenerated parts
 //! are kept ([`regenerated_part`]) by path, text and configuration.
+//!
+//! A stage's sheet shows only what the finished drawing will show there:
+//! - The sheet stage reads each part's declared properties from its text
+//!   ([`declared_properties`]), so the title block's part number and material and a note's
+//!   `{material}` read as they will without the part being regenerated.
+//! - What annotates a pending view (dimensions, callouts, frames, datums, balloons, the tables it
+//!   feeds) waits for the view's lines ([`hold_back_pending`]). Placement is unchanged:
+//!   the layout runs on everything and only the drawing of these items is held back, so nothing
+//!   moves when a view arrives. A note with no leader stands on the sheet and shows at once.
 
 use crate::runtime::{regenerate_part_in, Diagnostic, Files, RegeneratedPart};
-use serde_json::Value;
+use runmat_cad::drawing::{AnnotationKind, DrawingDocument, TableKind};
+use runmat_cad::ids::ConfigurationName;
+use runmat_cad::syntax::parse_part;
+use serde_json::{Map, Value};
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 /// Changes when a projection's output changes for the same input (the line format, thinning).
@@ -149,6 +161,61 @@ pub fn regenerated_part(path: &str, text: &str, configuration: Option<&str>) -> 
     Ok(part)
 }
 
+/// Part `path`'s declared properties (part number, material, its properties) in
+/// `configuration`, read from its text without regenerating it: the same text the regenerated
+/// part's [`super::props::output_properties`] gives.
+pub fn declared_properties(path: &str, text: &str, configuration: Option<&str>) -> Option<BTreeMap<String, String>> {
+    let document = parse_part(path, text).document?;
+    let document = match configuration {
+        Some(name) => document.in_configuration(Some(&ConfigurationName::new(name))),
+        None => document,
+    };
+    Some(super::props::output_properties(&document))
+}
+
+/// A staged compile's sheet layouts without what annotates a view that isn't drawn yet (not in
+/// `drawn`, the views projected so far): its annotations, except a note with no leader, and the
+/// tables it feeds (parts, holes, bends, welds, cut list). Their primitives, placed dimensions, spots and findings are
+/// dropped; everything else stays where the layout put it.
+pub fn hold_back_pending(layouts: &mut Value, document: &DrawingDocument, drawn: &Map<String, Value>) {
+    let waiting = |view: &str| !drawn.contains_key(view);
+    let mut ids: BTreeSet<String> = BTreeSet::new();
+    for a in &document.annotations {
+        let stands_alone = matches!(&a.kind, AnnotationKind::Note { leader: None, .. });
+        if waiting(&a.view) && !stands_alone {
+            ids.insert(format!("annotation:{}", a.id));
+            ids.insert(a.id.clone());
+        }
+    }
+    for t in &document.tables {
+        if let TableKind::Bom { view, .. }
+        | TableKind::Hole { view, .. }
+        | TableKind::Bend { view, .. }
+        | TableKind::Weld { view, .. }
+        | TableKind::CutList { view, .. } = &t.kind
+        {
+            if waiting(view) {
+                ids.insert(format!("table:{}", t.name));
+            }
+        }
+    }
+    if ids.is_empty() {
+        return;
+    }
+    let held = |v: &Value, key: &str| v[key].as_str().is_some_and(|id| ids.contains(id));
+    for layout in layouts.as_object_mut().into_iter().flat_map(|o| o.values_mut()) {
+        let Some(o) = layout.as_object_mut() else { continue };
+        for (key, field) in [("primitives", "id"), ("dimensions", "id"), ("findings", "item")] {
+            if let Some(Value::Array(items)) = o.get_mut(key) {
+                items.retain(|item| !held(item, field));
+            }
+        }
+        if let Some(Value::Object(placed)) = o.get_mut("placed") {
+            placed.retain(|id, _| !ids.contains(id));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +271,60 @@ mod tests {
         let moved = DRAWING.replace("at = [100, 200]", "at = [120, 210]");
         let again = compile(Stage::Views(BTreeSet::new()), &moved);
         assert_eq!(drawn(&again), ["front", "top"]);
+    }
+
+    const BRACKET: &str = include_str!("../../../tests/corpus/documents/bracket.part");
+    const NOTED: &str = "runmat 0.7\nstd 1\n\ndrawing bracket {\n    format a3 = {\n        size = { size = iso, name = A3 },\n        title_block = [\n            { label = \"Part number\", source = { source = property, name = part_number } },\n            { label = \"Material\", source = { source = property, name = material } }\n        ]\n    }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view front = standard(orientation = front, sheet = \"1\", model = { part = bracket }, at = [100, 100], display = hidden_lines)\n    view top = projected(from = front, direction = up, sheet = \"1\", model = { part = bracket }, at = [100, 200], display = hidden_lines)\n    annotation thick = dimension(style = linear, references = [feature.body.face.start, feature.body.face.end], view = front)\n    annotation length = dimension(style = linear, references = [feature.body.face.side(s1.l1), feature.body.face.side(s1.l3)], view = top)\n    annotation notes = note(text = \"MATERIAL: {material}. MARK {part_number}.\", view = top, at = [30, 40])\n}\n";
+
+    fn compile_noted(stage: Stage) -> Value {
+        let files: Files = [("/p/bracket.part".to_string(), BRACKET.to_string())].into();
+        let out = with_stage(stage, || crate::drawing::compile_json("/p/bracket.drawing", NOTED, &files));
+        serde_json::from_str(&out).unwrap()
+    }
+
+    fn cells(out: &Value) -> Vec<Value> {
+        out["projection"]["data"]["title_layouts"]["1"]["cells"].as_array().unwrap().iter().map(|c| c["value"]["text"].clone()).collect()
+    }
+
+    fn prims<'a>(out: &'a Value, id: &str) -> Vec<&'a Value> {
+        out["projection"]["data"]["layouts"]["1"]["primitives"].as_array().unwrap().iter().filter(|p| p["id"] == id).collect()
+    }
+
+    fn dimensions(out: &Value) -> Vec<String> {
+        let mut ids: Vec<String> = out["projection"]["data"]["layouts"]["1"]["dimensions"].as_array().unwrap().iter().filter_map(|d| d["id"].as_str().map(str::to_owned)).collect();
+        ids.sort();
+        ids
+    }
+
+    /// A stage's sheet shows only what the finished drawing shows there: the title block and a
+    /// note read the part's properties from the sheet stage on, and a view's dimensions wait
+    /// for its lines.
+    #[test]
+    fn a_staged_sheet_reads_the_parts_properties_and_holds_a_pending_views_annotations() {
+        crate::runtime::part_cache::clear();
+        let full = compile_noted(Stage::Full);
+        assert_eq!(cells(&full), [json!("BR-100"), json!("Aluminum")], "{}", full["projection"]["data"]["title_layouts"]);
+        assert_eq!(dimensions(&full), ["length", "thick"]);
+        let note = prims(&full, "annotation:notes");
+        assert!(note.iter().any(|p| p["shape"]["text"].as_str().is_some_and(|t| t.contains("MATERIAL: Aluminum. MARK BR-100."))), "{note:?}");
+
+        crate::runtime::part_cache::clear();
+        let sheet = compile_noted(Stage::Sheet);
+        assert!(sheet["projection"]["data"]["hlr"].as_object().is_some_and(|h| h.is_empty()));
+        assert_eq!(cells(&sheet), cells(&full), "the title block reads the part's properties before it is regenerated");
+        assert_eq!(prims(&sheet, "annotation:notes"), note, "a note with no leader shows at once, as it will");
+        for id in ["thick", "length"] {
+            assert!(prims(&sheet, &format!("annotation:{id}")).is_empty(), "{id} waits for its view");
+        }
+        assert!(dimensions(&sheet).is_empty());
+        let placed = &sheet["projection"]["data"]["layouts"]["1"]["placed"];
+        assert!(placed.get("annotation:thick").is_none() && placed.get("annotation:notes").is_some(), "{placed}");
+
+        let first = compile_noted(Stage::Views(["front".to_string()].into()));
+        assert_eq!(drawn(&first), ["front"]);
+        assert_eq!(dimensions(&first), ["thick"], "the front view's dimension comes with its lines, the top view's waits");
+        assert!(!prims(&first, "annotation:thick").is_empty() && prims(&first, "annotation:length").is_empty());
+        assert_eq!(prims(&first, "annotation:thick"), prims(&full, "annotation:thick"));
     }
 
     #[test]

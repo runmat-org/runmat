@@ -237,9 +237,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         severity: "warning".into(),
         message,
     };
-    // The sheet stage paints the sheets before any model is regenerated.
-    let drawn = if stage == progress::Stage::Sheet { Vec::new() } else { model_files(path, text, files) };
-    for file in drawn {
+    for file in model_files(path, text, files) {
         let at = resolve_path(path, &file, files);
         let Some(source) = files.get(&at) else {
             problems.push(warn(format!(
@@ -247,6 +245,14 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             )));
             continue;
         };
+        // The sheet stage paints the sheets before any model is regenerated. A part's declared
+        // properties come from its text, so the title block and notes read as they will.
+        if stage == progress::Stage::Sheet {
+            if let Some(props) = at.ends_with(".part").then(|| progress::declared_properties(&at, source, configuration)).flatten() {
+                models.properties.insert(file.clone(), props);
+            }
+            continue;
+        }
         if at.ends_with(".assembly") {
             model_keys.insert(file.clone(), progress::model_key(&at, source, None, Some(files)));
             match compile_assembly(&at, source, files) {
@@ -617,7 +623,11 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         o.insert("hole_tables".into(), holes::hole_tables(&document, &exact, displays));
     }
     // The sheets laid out once, here: the Desktop's sheet and every export draw this layout.
-    let layouts = layout::layouts(&data, displays);
+    let mut layouts = layout::layouts(&data, displays);
+    // A staged sheet draws nothing for a view still to come but its label (progress.rs).
+    if stage.partial() {
+        progress::hold_back_pending(&mut layouts, &document, data["hlr"].as_object().unwrap_or(&serde_json::Map::new()));
+    }
     if let Value::Object(o) = &mut data {
         o.insert("layouts".into(), layouts);
     }
