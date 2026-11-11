@@ -129,7 +129,7 @@ pub fn color_output_bodies(
 /// Every live body a material statement resolved to: each body carrying all the names of one
 /// resolved entity, so a feature that makes several bodies (a multi-loop extrude, a split) colors
 /// them all.
-fn assigned_bodies(
+pub fn assigned_bodies(
     result: &crate::regen::engine::RegenResult,
     o: &crate::regen::engine::ItemOutcome,
 ) -> Vec<usize> {

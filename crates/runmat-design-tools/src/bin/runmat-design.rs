@@ -273,6 +273,9 @@ fn run(args: &[String]) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    // Every command regenerates on the Desktop's kernel (OCCT, with the `occt` feature), including
+    // the parts an assembly check or export regenerates through the runtime.
+    runmat_design_tools::kernel::install();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("check") {
         return check(&args[1..]);

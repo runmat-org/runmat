@@ -149,7 +149,7 @@ impl CatalogPart {
         if self.mpn.trim().is_empty() {
             return Err("a part needs its `mpn`".into());
         }
-        if self.footprint.is_some() || is_footprint_file(&self.package) {
+        if self.footprint.is_some() || is_footprint_file(&self.package) || has_no_package(self) {
             return self.check_pins(None);
         }
         let package = footprint::from_string(&self.package)
@@ -187,6 +187,16 @@ impl CatalogPart {
     fn entity_name(&self) -> String {
         format!("catalog:{}", self.mpn)
     }
+}
+
+/// The `package` of a part with no footprint (`package = none`): a device wired in the field,
+/// such as a breaker, a receptacle or a light fixture, drawn on a schematic-only design.
+pub const NO_PACKAGE: &str = "none";
+
+/// Whether `part` has no footprint (`package = none`). Its pins take no pads; it has an empty
+/// package, so it shows on schematics, netlists and the BOM, and a board has nothing to place.
+pub fn has_no_package(part: &CatalogPart) -> bool {
+    part.footprint.is_none() && part.package == NO_PACKAGE
 }
 
 /// Whether a part's `package` names a footprint file (`libs/Power.pretty/SOT-23-6.kicad_mod`)
@@ -233,6 +243,20 @@ fn base_package(part: &CatalogPart, declared: Declared<'_>, file: &dyn Fn(&str) 
             .and_then(|f| f.get(name))
             .cloned()
             .ok_or_else(|| format!("part `{}`: no footprint `{name}` is declared here or in a library this file uses", part.mpn));
+    }
+    if has_no_package(part) {
+        return Ok(Package {
+            uuid: make::uuid("package", NO_PACKAGE),
+            name: NO_PACKAGE.into(),
+            description: "No footprint: wired in the field".into(),
+            pads: vec![],
+            courtyard: vec![],
+            silk: vec![],
+            fab: vec![],
+            model: None,
+            body: None,
+            smd: false,
+        });
     }
     if !is_footprint_file(&part.package) {
         return footprint::from_string(&part.package)

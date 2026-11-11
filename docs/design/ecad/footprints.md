@@ -208,6 +208,24 @@ symbol buffer = {
 
 A pin's `at` is the end that wires connect to, and `dir` is the way the pin runs from there toward the body: `right`, `up`, `left` or `down`. `length` is 2.54 mm unless given. A part names the symbol with `symbol = buffer`. Every part pin needs a symbol pin of the same name, and every symbol pin needs a part pin.
 
+## Parts with no footprint
+
+A device wired in the field, such as a breaker, a receptacle or a light fixture, has no land pattern. Declare it with `package = none`. Its pins take no pads, it shows on schematics, in netlists and in the BOM, and ERC checks its connections; a board has nothing to place for it. A circuit made only of such parts is schematic only and needs no `.circuit.layout`:
+
+```circuit fragment
+part "RCPT-20A-TR" = {
+    manufacturer = "Sample Catalog",
+    description = "Duplex receptacle, NEMA 5-20R, tamper resistant",
+    category = receptacle,
+    package = none,
+    pins = [
+        { name = HOT, type = passive },
+        { name = NEU, type = passive },
+        { name = GND, type = passive }
+    ]
+}
+```
+
 ## 3D bodies
 
 A footprint's `body` gives its 3D body. A part can give its own with `body = "<file>"`, a STEP file or an MCAD `.part`, which replaces the footprint's model for that part only.

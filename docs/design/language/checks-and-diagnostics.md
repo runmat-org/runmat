@@ -83,7 +83,7 @@ runmat-design check board/*.circuit --json
 
 `runmat check <file>.circuit` and `runmat test` run the same circuit checks beside `.m` and `.fea` files, with the same `--no-simulate` option.
 
-`runmat-design check` also checks `.part`, `.assembly` and `.drawing` files with the editor's check: it regenerates the part, resolves the assembly's occurrences, mates and patterns, or compiles the drawing's views, prints each diagnostic with its line, and exits with status 1 on any error. `--interference` also checks an assembly for parts that share material, the Evaluate tab's interference check, and fails on any overlap; parts that only touch don't count:
+`runmat-design check` also checks `.part`, `.assembly` and `.drawing` files with the editor's check: it regenerates the part, resolves the assembly's occurrences, mates and patterns, or compiles the drawing's views, prints each diagnostic with its line, and exits with status 1 on any error. `--interference` also checks an assembly for parts that share material, the Evaluate tab's interference check, and fails on any overlap; parts that only touch don't count. Every body of a multi-body part is checked, and each overlap names the first pair of bodies found. Bodies of compressible fill (batt and loose-fill insulation) are left out and counted, because a cable, pipe or box in an insulated cavity displaces the fill:
 
 ```sh
 runmat-design check house/house.assembly --interference --root house

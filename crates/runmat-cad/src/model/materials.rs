@@ -114,6 +114,14 @@ pub const LIBRARY: &[(&str, &str)] = &[
 ];
 
 /// A library material's label (`material.steel_1018` → `Steel 1018`), when it is in [`LIBRARY`].
+/// Whether `material` is compressible fill: fibrous batt or loose-fill insulation. A cable, pipe
+/// or box set in an insulated cavity displaces the fill (the installer splits or cuts the batt
+/// around it), so interference checks leave fill bodies out.
+pub fn is_compressible_fill(material: &str) -> bool {
+    let m = material.to_ascii_lowercase();
+    ["batt", "loose_fill", "glass_wool", "mineral_wool", "rock_wool", "cellulose"].iter().any(|k| m.contains(k))
+}
+
 pub fn library_label(material: &str) -> Option<&'static str> {
     let name = material.strip_prefix("material.").unwrap_or(material);
     LIBRARY
