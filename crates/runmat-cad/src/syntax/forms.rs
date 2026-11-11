@@ -162,6 +162,7 @@ const SEEDS: Shorthand = Shorthand {
     forms: &[
         ("features", &["features"], &["features"]),
         ("bodies", &["bodies"], &["bodies"]),
+        ("faces", &["faces"], &["faces"]),
     ],
 };
 

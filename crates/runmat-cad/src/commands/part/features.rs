@@ -243,7 +243,7 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 flag("equal_spacing", "Equal spacing", true).shown("layout", &["circular"]),
                 pick("curve", "Curve", &[K::Curve, K::Edge, K::Sketch]).shown("layout", &["curve"]),
                 pick("sketch", "Sketch points", &[K::Sketch]).shown("layout", &["sketch"]),
-                text("table", "Table", Some("coordinates.csv")).shown("layout", &["table"]),
+                text("table", "Instances", Some("b: 20, 0, 0; c: 40, 0, 0")).shown("layout", &["table", "variable"]),
                 pick("boundary", "Fill boundary", &[K::Face, K::Sketch]).shown("layout", &["fill"]),
                 list("skip", "Instances to skip", count("instance", "Instance", 1, 1)).optional(),
             ])
@@ -276,7 +276,7 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             .desc("Split a body with a plane, face or surface.")
             .inputs(vec![
                 pick("body", "Body", &[K::Body]),
-                pick("tool", "Split with", &[K::Plane, K::Face]),
+                pick("tool", "Split with", &[K::Plane, K::Face, K::Body]),
             ])
             .when(bodies_exist())
             .preview()
@@ -334,11 +334,10 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 pick("target", "Target body", &[K::Body]),
                 pick("tool", "Tool body", &[K::Body]),
                 length("clearance", "Clearance", 0.5),
-                length("thickness", "Thickness", 1.0),
             ])
             .when(bodies_exist())
             .preview()
-            .edit(add_feature("boolean").variant("kind", "subtract")),
+            .edit(add_feature_variant("body_op", "op", "indent")),
         cmd("part.plane", "Plane", "plane", P)
             .desc("Add a reference plane: offset, angle, 3-point, mid, normal to curve or tangent to surface.")
             .kw(&["datum plane", "reference plane", "workplane"])

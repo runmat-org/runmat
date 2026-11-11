@@ -2820,6 +2820,65 @@ impl OcctKernel {
                 }
                 Ok(())
             }
+            KernelOp::PatternFaces { faces, instances } => {
+                let operand = single_operand(faces)?;
+                let slot = l.operand(operand)?;
+                let mut ints = vec![slot, operand as i64, faces.len() as i64];
+                ints.extend(faces.iter().map(|f| f.entity as i64));
+                ints.push(instances.len() as i64);
+                let mut reals = Vec::new();
+                for inst in instances {
+                    let ii = l.instance(&inst.key);
+                    ints.push(ii);
+                    reals.extend(transform_reals(&inst.transform));
+                }
+                let r = l.push(45, ints, reals);
+                l.output(r, false, OutputSpec::default());
+                l.keep_others(operand)
+            }
+            KernelOp::SplitWith { faces } => {
+                let target = l.operand(0)?;
+                let (tool, tool_operand) = if faces.is_empty() {
+                    if n < 2 {
+                        return Err(failed("a split needs a tool body or faces"));
+                    }
+                    (l.operand(1)?, 1)
+                } else {
+                    let op = single_operand(faces)?;
+                    (l.operand(op)?, op as i64)
+                };
+                let label = l.label(gen(Role::SplitFace, KernelTag::None, None));
+                let mut ints = vec![target, tool, tool_operand, faces.len() as i64];
+                ints.extend(faces.iter().map(|f| f.entity as i64));
+                ints.push(label);
+                let r = l.push(46, ints, vec![]);
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        material: Some(vec![0]),
+                        ..Default::default()
+                    },
+                );
+                l.keep_operands(1..n)
+            }
+            KernelOp::Indent { clearance } => {
+                if n < 2 {
+                    return Err(failed("an indent needs a target body and a tool body"));
+                }
+                let target = l.operand(0)?;
+                let tool = l.operand(1)?;
+                let r = l.push(47, vec![target, tool], vec![*clearance]);
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        material: Some(vec![0]),
+                        ..Default::default()
+                    },
+                );
+                l.keep_operands(1..n)
+            }
             KernelOp::Transform { transform } => {
                 for i in 0..n as u32 {
                     let s = l.operand(i)?;

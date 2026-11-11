@@ -623,6 +623,8 @@ pub enum PatternSeeds {
     Features { features: Vec<FeatureId> },
     /// Copy these bodies at each instance.
     Bodies { bodies: Vec<Reference> },
+    /// Repeat the material these faces of one body bound (a boss or a pocket) at each instance.
+    Faces { faces: Vec<Reference> },
 }
 
 // Authored data, built once per edit; variant sizes do not matter here.
@@ -786,6 +788,35 @@ pub enum BodyOp {
         dx: ValueExpr,
         dy: ValueExpr,
         dz: ValueExpr,
+    },
+    /// Turn bodies about an axis.
+    Rotate {
+        bodies: Vec<Reference>,
+        axis: AxisRef,
+        angle: ValueExpr,
+    },
+    /// Copies of bodies, the originals kept: copy `k` (1 to `count`) is moved `k` times by the
+    /// offset, then turned `k` times by `angle` about `axis`.
+    Copy {
+        bodies: Vec<Reference>,
+        dx: ValueExpr,
+        dy: ValueExpr,
+        dz: ValueExpr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<AxisRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        count: Option<ValueExpr>,
+    },
+    /// Press `tool` into `target`: the tool, grown by `clearance`, is cut from the target and
+    /// the tool body is kept.
+    Indent {
+        target: Reference,
+        #[serde(rename = "tool_body")]
+        tool: Reference,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clearance: Option<ValueExpr>,
     },
 }
 
@@ -1051,6 +1082,22 @@ impl FeatureKind {
                 ptrs.push(dy);
                 ptrs.push(dz);
             }
+            FeatureKind::BodyOp(BodyOp::Rotate { angle, .. }) => ptrs.push(angle),
+            FeatureKind::BodyOp(BodyOp::Copy {
+                dx,
+                dy,
+                dz,
+                angle,
+                count,
+                ..
+            }) => {
+                ptrs.push(dx);
+                ptrs.push(dy);
+                ptrs.push(dz);
+                ptrs.extend(angle.iter());
+                ptrs.extend(count.iter());
+            }
+            FeatureKind::BodyOp(BodyOp::Indent { clearance, .. }) => ptrs.extend(clearance.iter()),
             _ => {}
         }
         ptrs
@@ -1137,8 +1184,10 @@ impl FeatureKind {
                 mode(&mut out, &l.mode);
             }
             FeatureKind::Mirror(m) => {
-                if let PatternSeeds::Bodies { bodies } = &m.seeds {
-                    list(&mut out, "bodies", bodies);
+                match &m.seeds {
+                    PatternSeeds::Bodies { bodies } => list(&mut out, "bodies", bodies),
+                    PatternSeeds::Faces { faces } => list(&mut out, "faces", faces),
+                    PatternSeeds::Features { .. } => {}
                 }
                 plane(&mut out, "plane", &m.plane);
             }
@@ -1153,6 +1202,20 @@ impl FeatureKind {
             FeatureKind::BodyOp(op) => match op {
                 BodyOp::Delete { bodies } | BodyOp::Translate { bodies, .. } => {
                     list(&mut out, "bodies", bodies)
+                }
+                BodyOp::Rotate { bodies, axis: a, .. } => {
+                    list(&mut out, "bodies", bodies);
+                    axis(&mut out, "axis", a);
+                }
+                BodyOp::Copy { bodies, axis: a, .. } => {
+                    list(&mut out, "bodies", bodies);
+                    if let Some(a) = a {
+                        axis(&mut out, "axis", a);
+                    }
+                }
+                BodyOp::Indent { target, tool, .. } => {
+                    out.push(("target".into(), target));
+                    out.push(("tool_body".into(), tool));
                 }
             },
             FeatureKind::Import(_) => {}
@@ -1245,6 +1308,8 @@ impl FeatureKind {
                 plane(&mut out, &m.plane);
             }
             FeatureKind::Split(s) => plane(&mut out, &s.tool),
+            FeatureKind::BodyOp(BodyOp::Rotate { axis: a, .. }) => axis(&mut out, a),
+            FeatureKind::BodyOp(BodyOp::Copy { axis: Some(a), .. }) => axis(&mut out, a),
             FeatureKind::Boolean(_) | FeatureKind::BodyOp(_) | FeatureKind::Import(_) => {}
             _ => {}
         }

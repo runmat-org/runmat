@@ -53,6 +53,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 tools,
             } => {
                 let record = self.pending_record.take();
+                let dressup = self.dressup_of(&op, &operands);
                 let bodies = std::mem::take(&mut self.st.bodies);
                 let ran = self.execute(
                     id,
@@ -79,6 +80,9 @@ impl<'a, 'b> Run<'a, 'b> {
                 }
                 if let Some(t) = tools {
                     self.st.tools.insert(id.clone(), t);
+                }
+                if let Some(d) = dressup {
+                    self.st.dressups.insert(id.clone(), d);
                 }
                 if let Some(r) = record {
                     self.st.records.insert(id.clone(), r);

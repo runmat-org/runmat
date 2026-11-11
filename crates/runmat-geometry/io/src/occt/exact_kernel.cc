@@ -1535,6 +1535,61 @@ Tracked do_split(const Tracked& src, const gp_Ax3& frame, std::uint32_t pos_labe
   return out;
 }
 
+// ---- split by faces or a body
+
+// The face's surface over bounds grown by `grow` in each direction that isn't closed, so a
+// face that ends inside the body (a boss's cylinder) still cuts through it.
+TopoDS_Face extended_face(const TopoDS_Face& f, double grow) {
+  Handle(Geom_Surface) s = BRep_Tool::Surface(f);
+  double u0, u1, v0, v1;
+  BRepTools::UVBounds(f, u0, u1, v0, v1);
+  double su0, su1, sv0, sv1;
+  s->Bounds(su0, su1, sv0, sv1);
+  if (s->IsUPeriodic() || s->IsUClosed()) {
+    u0 = su0;
+    u1 = su1;
+  } else {
+    u0 = std::max(su0, u0 - grow);
+    u1 = std::min(su1, u1 + grow);
+  }
+  if (s->IsVPeriodic() || s->IsVClosed()) {
+    v0 = sv0;
+    v1 = sv1;
+  } else {
+    v0 = std::max(sv0, v0 - grow);
+    v1 = std::min(sv1, v1 + grow);
+  }
+  BRepBuilderAPI_MakeFace mf(s, u0, u1, v0, v1, 1e-7);
+  if (!mf.IsDone()) fail("the split face's surface could not be extended");
+  return mf.Face();
+}
+
+// Split `src` by `tools` (extended faces or a body); the new faces take `label`.
+Tracked do_split_with(const Tracked& src, const TopTools_ListOfShape& tools, std::uint32_t face_label) {
+  BRepAlgoAPI_Splitter sp;
+  TopTools_ListOfShape args;
+  args.Append(src.shape);
+  sp.SetArguments(args);
+  sp.SetTools(tools);
+  sp.SetRunParallel(Standard_False);
+  sp.Build();
+  if (!sp.IsDone() || sp.HasErrors()) fail("the split failed");
+  Tracked split;
+  split.shape = sp.Shape();
+  split.sheet = src.sheet;
+  propagate(src, sp, split);
+  Tracked out = separate_solids(split);
+  int pieces = 0;
+  for (TopExp_Explorer sx(out.shape, TopAbs_SOLID); sx.More(); sx.Next()) {
+    ++pieces;
+    for (TopExp_Explorer ex(sx.Current(), TopAbs_FACE); ex.More(); ex.Next())
+      if (origins_of(out.faces, ex.Current()).empty()) add_origins(out.faces, ex.Current(), label(face_label));
+  }
+  if (pieces < 2 && !src.sheet) fail("the split tool doesn't cross the body");
+  require_labels(out, "the split");
+  return out;
+}
+
 // ---- cut a solid with a sheet
 
 namespace {
@@ -2704,6 +2759,14 @@ Tracked build_planar_sheet(const Profile& p, std::uint32_t face_label);
 Tracked split_keep(const Tracked& src, const KInstr& in, const Body& operand);
 Tracked prism_to_body(const Profile& p, const KInstr& in, const Body& operand);
 Tracked import_step(const KInstr& in, KResult& result);
+// Implemented in exact_pattern_faces.cc.
+Tracked pattern_faces(const Tracked& src, const std::vector<TopoDS_Face>& faces,
+                      const std::vector<std::pair<gp_Trsf, std::int64_t>>& instances);
+Tracked indent_cut(const Tracked& target, const Tracked& tool, double clearance);
+// Moves a tracked body for one pattern instance; exact_pattern_faces.cc calls it.
+Tracked transform_instance(const Tracked& src, const gp_Trsf& t, std::int64_t instance) {
+  return do_transform(src, t, instance);
+}
 
 // ------------------------------------------------------------------------- the interpreter
 
@@ -2825,6 +2888,31 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
         case 33: t = do_full_round(x.slot(I[0]), lab(I[1]), R.data()); break;
         case 32: t = do_cut_with_sheet(x.slot(I[0]), x.slot(I[1]), I[2] != 0, lab(I[3])); break;
         case 31: t = prism_to_body(x.profile(I[0]), in, x.operand(I[3])); break;
+        case 45: {
+          std::vector<TopoDS_Face> faces;
+          for (std::int64_t k = 0; k < I[2]; ++k) faces.push_back(x.face(I[1], I[3 + k]));
+          const std::int64_t base = 3 + I[2];
+          std::vector<std::pair<gp_Trsf, std::int64_t>> instances;
+          for (std::int64_t k = 0; k < I[base]; ++k)
+            instances.emplace_back(trsf_from(R.data() + 12 * k), I[base + 1 + k]);
+          t = pattern_faces(x.slot(I[0]), faces, instances);
+          break;
+        }
+        case 46: {
+          const Tracked& src = x.slot(I[0]);
+          TopTools_ListOfShape tools;
+          if (I[3] == 0) {
+            tools.Append(x.slot(I[1]).shape);
+          } else {
+            Bnd_Box box;
+            BRepBndLib::Add(src.shape, box);
+            const double grow = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent()) * 2.0 + 1.0;
+            for (std::int64_t k = 0; k < I[3]; ++k) tools.Append(extended_face(x.face(I[2], I[4 + k]), grow));
+          }
+          t = do_split_with(src, tools, lab(I[4 + I[3]]));
+          break;
+        }
+        case 47: t = indent_cut(x.slot(I[0]), x.slot(I[1]), R[0]); break;
         default: unsupported("unknown kernel instruction");
       }
       x.slots.push_back(std::move(t));

@@ -54,6 +54,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod families;
 mod features;
 mod patterns;
+mod split_dressup;
 mod sheet;
 
 pub struct RegenContext<'a> {
@@ -102,6 +103,9 @@ pub struct PartState {
     pub names: NameTable,
     /// Tool operations each tool feature applied, for patterns and mirrors of features.
     pub tools: BTreeMap<FeatureId, Vec<ToolOp>>,
+    /// Each fillet and chamfer's operation and the geometry of the edges it blended, so a
+    /// pattern or mirror of it finds the same edges at each instance.
+    pub dressups: BTreeMap<FeatureId, (KernelOp, Vec<crate::refs::history::EdgeGeom>)>,
     pub table: FeatureTable,
     /// Typed records of geometry-free features and derived data (reference curves, threads,
     /// sheet metal rules and developments, mold analyses), by feature.

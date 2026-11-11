@@ -573,7 +573,7 @@ This file is generated from the command catalog.
   - Required: `bodies` (picks: body); `keep` (one of `delete`, `keep`, default `delete`)
   - Runs on the `selection`: `body`
 - `part.body-indent`: Press one body into another, leaving a clearance.
-  - Required: `target` (pick: body); `tool` (pick: body); `clearance` (number in mm, default 0.5); `thickness` (number in mm, default 1)
+  - Required: `target` (pick: body); `tool` (pick: body); `clearance` (number in mm, default 0.5)
 - `part.body-move`: Move, rotate or copy bodies.
   - Required: `bodies` (picks: body); `dx` (number in mm, default 0); `dy` (number in mm, default 0); `dz` (number in mm, default 0); `angle` (number in deg, default 0); `copies` (whole number, default 1) when `copy` is true
   - Optional: `axis` (pick: axis or edge); `copy` (true or false, default false)
@@ -655,7 +655,7 @@ This file is generated from the command catalog.
 - `part.parents-children`: List what the item is built on and what is built on it.
   - Runs on the `selection`: `feature`
 - `part.pattern`: Repeat features, faces or bodies: linear, circular, curve, sketch, table, fill or variable.
-  - Required: `layout` (one of `linear`, `circular`, `curve`, `sketch`, `table`, `fill`, `variable`, default `linear`); `seeds` (picks: feature or face or body); `direction` (pick: edge or axis or plane or face) when `layout` is linear or fill; `spacing` (number in mm, default 10) when `layout` is linear or fill; `instances` (whole number, default 3) when `layout` is linear or circular or curve; `direction2` (pick: edge or axis or plane) when `second_direction` is true; `spacing2` (number in mm, default 10) when `second_direction` is true; `instances2` (whole number, default 2) when `second_direction` is true; `axis` (pick: axis or edge or face) when `layout` is circular; `angle` (number in deg, default 360) when `layout` is circular; `curve` (pick: curve or edge or sketch) when `layout` is curve; `sketch` (pick: sketch) when `layout` is sketch; `table` (text) when `layout` is table; `boundary` (pick: face or sketch) when `layout` is fill
+  - Required: `layout` (one of `linear`, `circular`, `curve`, `sketch`, `table`, `fill`, `variable`, default `linear`); `seeds` (picks: feature or face or body); `direction` (pick: edge or axis or plane or face) when `layout` is linear or fill; `spacing` (number in mm, default 10) when `layout` is linear or fill; `instances` (whole number, default 3) when `layout` is linear or circular or curve; `direction2` (pick: edge or axis or plane) when `second_direction` is true; `spacing2` (number in mm, default 10) when `second_direction` is true; `instances2` (whole number, default 2) when `second_direction` is true; `axis` (pick: axis or edge or face) when `layout` is circular; `angle` (number in deg, default 360) when `layout` is circular; `curve` (pick: curve or edge or sketch) when `layout` is curve; `sketch` (pick: sketch) when `layout` is sketch; `table` (text) when `layout` is table or variable; `boundary` (pick: face or sketch) when `layout` is fill
   - Optional: `second_direction` (true or false, default false) when `layout` is linear; `equal_spacing` (true or false, default true) when `layout` is circular; `skip` (list of whole number, default 1)
 - `part.plane`: Add a reference plane: offset, angle, 3-point, mid, normal to curve or tangent to surface.
   - Required: `type` (one of `offset`, `angle`, `three_point`, `mid`, `normal_to_curve`, `tangent_to_face`, default `offset`); `base` (pick: plane or face) when `type` is offset or angle or mid; `distance` (number in mm, default 10) when `type` is offset; `count` (whole number, default 1) when `type` is offset; `axis` (pick: axis or edge) when `type` is angle; `angle` (number in deg, default 45) when `type` is angle; `points` (picks: vertex or point or sketch point) when `type` is three_point; `other` (pick: plane or face) when `type` is mid; `curve` (pick: curve or edge) when `type` is normal_to_curve; `at` (pick: vertex or point) when `type` is normal_to_curve; `face` (pick: face) when `type` is tangent_to_face
@@ -689,7 +689,7 @@ This file is generated from the command catalog.
   - Required: `plane` (pick: plane or face)
 - `part.sketch-3d`: Start a sketch in space for paths and routes.
 - `part.split`: Split a body with a plane, face or surface.
-  - Required: `body` (pick: body); `tool` (pick: plane or face)
+  - Required: `body` (pick: body); `tool` (pick: plane or face or body)
 - `part.suppress`: Turn the feature off without deleting it.
   - Runs on the `selection`: `feature`, `sketch`
 - `part.sweep`: Move a profile along a path, with guide curves, twist and tangency.

@@ -680,6 +680,9 @@ impl CadKernel for FakeKernel {
             | KernelOp::DeleteFaces { .. }
             | KernelOp::ReplaceFaces { .. }
             | KernelOp::Scale { .. }
+            | KernelOp::Indent { .. }
+            | KernelOp::SplitWith { .. }
+            | KernelOp::PatternFaces { .. }
             | KernelOp::Surface(_) => unreachable!("dispatched first"),
         }
     }
