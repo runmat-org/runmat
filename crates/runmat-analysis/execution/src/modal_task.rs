@@ -13,7 +13,7 @@ use runmat_analysis_fea::{
         build_structural_modal_resource_plan_selecting,
         structural_modal_receipt_payload_bytes_upper_bound,
         structural_modal_result_output_resource_facts, FeaResourcePlan, ModalSolveSelection,
-        PreparedStructuralModalResourceFacts,
+        PreparedStructuralModalResourceFacts, StructuralModalResourcePlanningInput,
     },
     post::fields::structural_observable_field_definitions,
     results::observation::{resolve_structural_observation_plan, ObservationLimits},
@@ -198,26 +198,28 @@ pub fn prepare_structural_modal_task(
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan = build_structural_modal_resource_plan_selecting(
-        Some(&preparation.mesh),
-        &compiled,
-        &observations,
-        &preparation.workload,
-        preparation.prestress_state.as_ref(),
-        &preparation.accelerator_requests,
-        PreparedStructuralModalResourceFacts {
-            local_execution: preparation.local_execution,
-            inputs: prepared_input_resource_facts(&numerical_inputs)?,
-            result_output,
-            receipt_output: projected_output_resource_facts(
-                structural_modal_receipt_payload_bytes_upper_bound(),
-            )?,
-            state_profiles_output: crate::structural_state_profiles_output_facts(
-                preparation.workload.model(),
-                preparation.workload.procedure_step()?,
-                &[runmat_analysis_fea::execution::SemanticStatePublicationSource::ModalBasis],
-                topology_digest,
-            )?,
-            output_set: projected_output_set_resource_facts(),
+        StructuralModalResourcePlanningInput {
+            mesh: Some(&preparation.mesh),
+            compilation: &compiled,
+            observations: &observations,
+            workload: &preparation.workload,
+            prestress_state: preparation.prestress_state.as_ref(),
+            accelerator_requests: &preparation.accelerator_requests,
+            prepared: PreparedStructuralModalResourceFacts {
+                local_execution: preparation.local_execution,
+                inputs: prepared_input_resource_facts(&numerical_inputs)?,
+                result_output,
+                receipt_output: projected_output_resource_facts(
+                    structural_modal_receipt_payload_bytes_upper_bound(),
+                )?,
+                state_profiles_output: crate::structural_state_profiles_output_facts(
+                    preparation.workload.model(),
+                    preparation.workload.procedure_step()?,
+                    &[runmat_analysis_fea::execution::SemanticStatePublicationSource::ModalBasis],
+                    topology_digest,
+                )?,
+                output_set: projected_output_set_resource_facts(),
+            },
         },
         preparation.solve_selection,
     )

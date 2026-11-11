@@ -22,13 +22,15 @@ fn modal_plan_selects_the_factorization_when_it_fits_lobpcg_otherwise_and_refuse
     .unwrap();
     let plan = |selection| {
         build_structural_modal_resource_plan_selecting(
-            Some(&mesh),
-            &compiled,
-            &observations,
-            &workload,
-            None,
-            &[],
-            prepared(&mesh, &constraints, &workload),
+            crate::planning::resource::StructuralModalResourcePlanningInput {
+                mesh: Some(&mesh),
+                compilation: &compiled,
+                observations: &observations,
+                workload: &workload,
+                prestress_state: None,
+                accelerator_requests: &[],
+                prepared: prepared(&mesh, &constraints, &workload),
+            },
             selection,
         )
     };

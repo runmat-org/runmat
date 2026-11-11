@@ -236,7 +236,7 @@ pub use modal::{
     build_structural_modal_resource_plan_selecting, recorded_modal_solve_path,
     structural_modal_receipt_payload_bytes_upper_bound,
     structural_modal_result_output_resource_facts,
-    structural_modal_result_payload_bytes_upper_bound,
+    structural_modal_result_payload_bytes_upper_bound, StructuralModalResourcePlanningInput,
 };
 mod acoustic_frequency_assembly;
 pub use acoustic_frequency_assembly::build_acoustic_frequency_assembly_resource_plan;
