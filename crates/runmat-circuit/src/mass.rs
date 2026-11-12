@@ -102,20 +102,32 @@ fn box_inertia(m: f64, [a, b, c]: [f64; 3]) -> [[f64; 3]; 3] {
     ]
 }
 
-/// A mass written as a quantity's text: `0.35 g`, `2 mg`, `0.01 kg`.
+/// A mass written as a quantity's text (`0.35 g`, `2 mg`, `0.01 kg`), in kg. The unit comes
+/// from the registry, where `g` is the gram because a mass is expected.
 fn mass_text(t: &str) -> Option<f64> {
     let t = t.trim();
     let split = t
         .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == 'e' || c == '-' || c == '+'))
         .unwrap_or(t.len());
     let v: f64 = t[..split].trim().parse().ok()?;
-    let scale = match t[split..].trim() {
-        "kg" => 1.0,
-        "g" => 1e-3,
-        "mg" => 1e-6,
-        _ => return None,
-    };
-    Some(v * scale)
+    let mass = runmat_types::PhysicalDimension::MASS;
+    let unit = runmat_types::physical::parse_unit_expecting(t[split..].trim(), mass).ok()?;
+    (unit.dimension() == mass && unit.angle_power() == 0)
+        .then(|| unit.to_canonical(v).ok())
+        .flatten()
+}
+
+/// A `mass` param in kg (the readers take `mass = 0.35 g` as grams; [`crate::units::param_quantity`]).
+fn param_mass(param: &crate::ir::Param) -> Option<f64> {
+    match &param.value {
+        crate::ir::ParamValue::Quantity { nominal, .. }
+            if nominal.dim == runmat_rules::Dim::MASS =>
+        {
+            Some(nominal.value)
+        }
+        crate::ir::ParamValue::Text(t) => mass_text(t),
+        crate::ir::ParamValue::Quantity { .. } | crate::ir::ParamValue::Bool(_) => None,
+    }
 }
 
 /// Combines items into the board's total about its centre of mass.
@@ -241,16 +253,7 @@ pub fn board_mass(board: &Board, netlist: Option<&Netlist>, pool: Option<&Pool>)
                 )
             })
             .unwrap_or((0.0, 0.0, 1e-3));
-        let library =
-            part_of(&f.reference).and_then(|p| match p.params.get("mass").map(|q| &q.value) {
-                Some(crate::ir::ParamValue::Quantity { nominal, .. })
-                    if nominal.dim == runmat_rules::Dim::MASS =>
-                {
-                    Some(nominal.value)
-                }
-                Some(crate::ir::ParamValue::Text(t)) => mass_text(t),
-                _ => None,
-            });
+        let library = part_of(&f.reference).and_then(|p| p.params.get("mass").and_then(param_mass));
         let (mass, src) = match (f.properties.get("mass").and_then(|t| mass_text(t)), library) {
             (Some(m), _) => (m, MassSource::Component),
             (None, Some(m)) => (m, MassSource::Library),
@@ -298,5 +301,17 @@ mod tests {
         assert_eq!(mass_text("2mg"), Some(2e-6));
         assert_eq!(mass_text("1 kg"), Some(1.0));
         assert_eq!(mass_text("3 oz"), None);
+        assert_eq!(mass_text("5 mm"), None);
+        assert_eq!(mass_text("4 ug"), Some(4e-9));
+    }
+
+    #[test]
+    fn a_mass_param_in_grams_is_a_mass() {
+        let source = "runmat 0.7\nstd 1\n\ncircuit probe {\n    root = main\n    sheet main {\n        component X1 = { part = \"P\", mass = 0.35 g }\n        component X2 = { part = \"P\", mass = 2 kg }\n    }\n}\n";
+        let parsed = crate::syntax::parse_circuit("/probe.circuit", source);
+        let design = parsed.design.expect("the probe reads");
+        let mass = |i: usize| param_mass(&design.sheets["main"].components[i].params["mass"]);
+        assert_eq!(mass(0), Some(0.35e-3));
+        assert_eq!(mass(1), Some(2.0));
     }
 }

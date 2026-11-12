@@ -36,6 +36,46 @@ impl fmt::Display for UnitExpressionError {
 }
 
 pub fn parse_unit_expression(source: &str) -> Result<UnitDefinition, UnitExpressionError> {
+    parse_with(source, unit)
+}
+
+/// [`parse_unit_expression`] where the value must measure `expected`. A symbol with two
+/// readings takes the one that fits: `g` is standard gravity, but where a mass is expected it
+/// is the gram, and so are its prefixed forms (`0.35 g`, `2 mg`, `g/cm^3` for a density).
+/// When neither reading fits, the result is the ordinary reading, so the caller reports the
+/// mismatch against the unit as usually read.
+pub fn parse_unit_expecting(
+    source: &str,
+    expected: PhysicalDimension,
+) -> Result<UnitDefinition, UnitExpressionError> {
+    let ordinary = parse_with(source, unit);
+    if matches!(&ordinary, Ok(u) if u.dimension == expected) || expected.mass == 0 {
+        return ordinary;
+    }
+    match parse_with(source, |symbol| gram(symbol).or_else(|| unit(symbol))) {
+        Ok(grams) if grams.dimension == expected => Ok(grams),
+        _ => ordinary,
+    }
+}
+
+/// The gram reading of `g` and its SI-prefixed forms (`mg`, `ug`, `kg`).
+fn gram(symbol: &str) -> Option<UnitDefinition> {
+    let factor = match symbol.strip_suffix('g')? {
+        "" => 1.0,
+        prefix => SI_PREFIXES.iter().find(|(p, _)| *p == prefix)?.1,
+    };
+    Some(UnitDefinition {
+        dimension: PhysicalDimension::MASS,
+        angle_power: 0,
+        scale_bits: (factor * 1e-3_f64).to_bits(),
+        offset_bits: 0.0_f64.to_bits(),
+    })
+}
+
+fn parse_with(
+    source: &str,
+    unit: impl Fn(&str) -> Option<UnitDefinition>,
+) -> Result<UnitDefinition, UnitExpressionError> {
     let normalized = source.replace(['µ', 'μ'], "u");
     let compact = normalized
         .chars()
@@ -311,6 +351,25 @@ mod tests {
         let pressure = parse_unit_expression("GPa").unwrap();
         assert_eq!(pressure.dimension, PhysicalDimension::PRESSURE);
         assert_eq!(pressure.scale(), 1e9);
+    }
+
+    #[test]
+    fn g_is_the_gram_where_a_mass_is_expected() {
+        let mass = PhysicalDimension::MASS;
+        let gram = parse_unit_expecting("g", mass).unwrap();
+        assert_eq!((gram.dimension, gram.scale()), (mass, 1e-3));
+        assert_eq!(parse_unit_expecting("mg", mass).unwrap().scale(), 1e-6);
+        assert_eq!(parse_unit_expecting("kg", mass).unwrap().scale(), 1.0);
+        assert_eq!(parse_unit_expecting("gram", mass).unwrap().scale(), 1e-3);
+        let density = parse_unit_expecting("g/cm^3", PhysicalDimension::DENSITY).unwrap();
+        assert_eq!(density.dimension, PhysicalDimension::DENSITY);
+        assert!((density.scale() - 1e3).abs() < 1e-9);
+        // Elsewhere `g` stays standard gravity, and `mg` stays unknown.
+        let acceleration = PhysicalDimension::ACCELERATION;
+        assert_eq!(parse_unit_expecting("g", acceleration).unwrap().dimension, acceleration);
+        assert!(parse_unit_expecting("mg", PhysicalDimension::LENGTH).is_err());
+        // A unit that fits neither reading is the ordinary one, for the mismatch message.
+        assert_eq!(parse_unit_expecting("mm", mass).unwrap().dimension, PhysicalDimension::LENGTH);
     }
 
     #[test]

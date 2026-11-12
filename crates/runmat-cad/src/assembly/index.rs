@@ -98,14 +98,19 @@ pub struct OccurrenceRow {
 }
 
 /// One configured input of an occurrence: its SI value, its quantity kind when known, and the
-/// value as the label reads it (`88 mm`).
+/// value as editors show it: in the unit the author wrote (`0.25 in`), or for a computed value
+/// in its kind's display unit (`88 mm`). Views that compare occurrences format `si` themselves
+/// when the value was computed (`written` is false).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputValueRow {
     pub name: String,
     pub si: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    pub text: String,
+    pub display: String,
+    /// `display` is the author's own literal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub written: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -336,11 +341,15 @@ pub fn build_assembly_index(
                 .iter()
                 .map(|(k, v)| {
                     let kind = n.configuration.kinds.get(k);
+                    let written = n.configuration.display.get(k);
                     InputValueRow {
                         name: k.to_string(),
                         si: *v,
                         kind: kind.map(|q| q.0.clone()),
-                        text: crate::assembly::source::display_quantity(kind, *v),
+                        display: written.cloned().unwrap_or_else(|| {
+                            crate::assembly::source::display_quantity(kind, *v)
+                        }),
+                        written: written.is_some(),
                     }
                 })
                 .collect(),

@@ -4,6 +4,8 @@
 //! unit with `runmat_types::physical::unit_mismatch_message`, underlining the value. For each
 //! such diagnostic in the requested range this offers the value's own number in each unit of the
 //! expected kind (`10 kg` → `10 mm`, `10 cm`, `10 m`, `10 in`). It never changes the number.
+//! Titles are plain text ("Write 10 mm"): editors show action titles without Markdown, so
+//! code marks would appear as literal backticks.
 
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Diagnostic, Range, TextEdit, Url,
@@ -40,7 +42,7 @@ pub fn unit_code_actions(
                 new_text: replacement.clone(),
             };
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Write `{replacement}`"),
+                title: format!("Write {replacement}"),
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: Some(vec![diagnostic.clone()]),
                 edit: Some(WorkspaceEdit {

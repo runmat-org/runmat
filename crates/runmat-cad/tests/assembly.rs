@@ -361,10 +361,36 @@ fn a03_typed_configurations_are_checked() {
         .unwrap();
     assert_eq!(row.inputs.len(), 1);
     assert_eq!(
-        (row.inputs[0].name.as_str(), row.inputs[0].text.as_str()),
+        (row.inputs[0].name.as_str(), row.inputs[0].display.as_str()),
         ("thickness", "3 mm")
     );
     assert!((row.inputs[0].si - 0.003).abs() < 1e-12);
+    // A value written in another unit shows as written: 0.125 in stays 0.125 in.
+    let mut inches = top.clone();
+    inches
+        .occurrences
+        .iter_mut()
+        .find(|o| o.name == "bracket")
+        .unwrap()
+        .configuration = ConfigurationSelection::Inputs {
+        base: None,
+        values: [(
+            InputName::new("thickness"),
+            ValueExpr::Quantity {
+                value: 0.125,
+                unit: "in".into(),
+            },
+        )]
+        .into_iter()
+        .collect(),
+    };
+    src.add_assembly(inches);
+    let r = run(&src, "rig.assembly", &ResolveRequest::default());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let index = build_assembly_index(&r, Some(&src));
+    let row = index.occurrences.iter().find(|o| o.name == "bracket").unwrap();
+    assert_eq!(row.inputs[0].display, "0.125 in");
+    assert!((row.inputs[0].si - 0.003175).abs() < 1e-12);
     // Wrong dimension.
     let br = top
         .occurrences

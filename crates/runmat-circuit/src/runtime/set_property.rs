@@ -13,8 +13,10 @@
 //!   the layout ([`board_edit::edit_board`]).
 //!
 //! The Desktop sends the field's id and its new value (`values = { <field>: <value> }`) with the
-//! item's Outline id as the selection. Lengths are millimetres as numbers, or text with a unit
-//! (`0.25 mm`, `10 mil`); angles are degrees as numbers or text (`90 deg`).
+//! item's Outline id as the selection. Lengths are millimetres as numbers, or a value with a
+//! unit (`0.25 mm`, `10 mil`, as text or as the value field's `{ kind = "value", … }`); angles
+//! are degrees as numbers or values (`90 deg`). A value typed with a unit is written as typed
+//! (`width = 12 mil`), the way MCAD fields keep a literal; a bare number is written in mm.
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
@@ -22,6 +24,7 @@ use crate::geom::{Coord, NM_PER_MM};
 use crate::ir::{ComponentDecl, Endpoint, Fitting, PartRef};
 use crate::layer_set::CopperIndex;
 use crate::layout::{copper_name, PadConnect};
+use crate::syntax::board::authored::{edit_board_written, Step, Written};
 
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
     let [id] = request.selection.as_slice() else {
@@ -100,6 +103,34 @@ fn number_and_unit(value: &Value) -> Option<(f64, Option<String>)> {
                 .ok()
                 .map(|v| (v, (!unit.is_empty()).then(|| unit.to_owned())))
         }
+        // The Desktop's value field: `{ kind = "value", value = { form, value, unit }, text }`.
+        Value::Object(edit) if edit.get("kind").and_then(Value::as_str) == Some("value") => {
+            let expr = edit.get("value")?;
+            let v = expr.get("value")?.as_f64()?;
+            match expr.get("form")?.as_str()? {
+                "quantity" => Some((v, Some(expr.get("unit")?.as_str()?.to_owned()))),
+                "number" => Some((v, None)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The text to write for a value typed with a unit (`0.3 in`, `12 mil`, `90 deg`), as typed;
+/// `None` for a bare number, which the printer writes in the field's unit.
+fn typed(value: &Value) -> Option<String> {
+    let (v, unit) = number_and_unit(value)?;
+    let unit = unit?;
+    match value {
+        Value::String(s) => Some(s.trim().to_owned()),
+        Value::Object(edit) => Some(
+            edit.get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|t| !t.is_empty() && !t.starts_with('='))
+                .map_or_else(|| format!("{v} {unit}"), str::to_owned),
+        ),
         _ => None,
     }
 }
@@ -521,7 +552,23 @@ fn footprint_field(
         }
         _ => unreachable!("dispatched above"),
     };
-    let change = board_edit::board_command(&layout.path, &layout.text, &edit).map_err(failure)?;
+    let at: &[Step] = match field {
+        "x" => &[Step::Key("at"), Step::Index(0)],
+        "y" => &[Step::Key("at"), Step::Index(1)],
+        "rotation" => &[Step::Key("rotation")],
+        _ => &[],
+    };
+    let literal = typed(value).filter(|_| !at.is_empty());
+    let written = literal.as_deref().map(|text| Written {
+        item: footprint.id,
+        at,
+        text,
+    });
+    let parsed = parse_board(&layout.path, &layout.text);
+    let (change, ()) = edit_board_written(&layout.path, &layout.text, &parsed, written, |b| {
+        board_edit::apply_board_edit(b, &parsed.sites, &edit)
+    })
+    .map_err(failure)?;
     Ok(EditOutput {
         summary: format!("{} on {designator}", edit.command()),
         files: vec![file_change(&layout.path, &layout.text, change)],
@@ -550,7 +597,20 @@ fn board_item_field(
         .parse()
         .map_err(|_| EditError::new(format!("`{kind}:{id}` is not a board item")))?;
     let item = ItemId(n);
-    let (change, summary) = board_edit::edit_board(&layout.path, &layout.text, |b| {
+    // The printed key: a via's diameter is its `size`.
+    let key = match (kind, field) {
+        ("via", "diameter") => "size",
+        _ => field,
+    };
+    let at = [Step::Key(key)];
+    let literal = typed(value);
+    let written = literal.as_deref().map(|text| Written {
+        item,
+        at: &at,
+        text,
+    });
+    let parsed = parse_board(&layout.path, &layout.text);
+    let (change, summary) = edit_board_written(&layout.path, &layout.text, &parsed, written, |b| {
         set_board_item(b, kind, item, field, value).map_err(|e| e.message)
     })
     .map_err(failure)?;

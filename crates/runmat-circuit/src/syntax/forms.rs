@@ -271,6 +271,24 @@ fn value_call(expr: &Expr) -> Option<(ast::Call, Option<String>)> {
     }
 }
 
+/// The param `name = value`. A param whose name says what it measures reads its unit expecting
+/// that: `mass = 0.35 g` is grams, not standard gravity.
+pub(super) fn field_param(name: &str, value: &Expr, source: SourceKey) -> Read<Param> {
+    let mut param = param_of(value, source)?;
+    if let (Some(expected), Some(written), ParamValue::Quantity { nominal, tol }) = (
+        crate::units::param_dimension(name),
+        param.written.as_deref(),
+        &param.value,
+    ) {
+        if nominal.dim != crate::units::dim_of(expected) {
+            if let Ok(q) = crate::units::param_quantity(name, written) {
+                param.value = ParamValue::Quantity { nominal: q, tol: *tol };
+            }
+        }
+    }
+    Ok(param)
+}
+
 pub(super) fn read_params(
     expr: Option<Expr>,
     span: Span,
@@ -278,7 +296,8 @@ pub(super) fn read_params(
 ) -> Read<BTreeMap<String, Param>> {
     let mut params = BTreeMap::new();
     for (name, value) in record_of(expr, span)? {
-        params.insert(name, param_of(&value, source.clone())?);
+        let param = field_param(&name, &value, source.clone())?;
+        params.insert(name, param);
     }
     Ok(params)
 }
@@ -354,7 +373,7 @@ pub(super) fn fitting_of(expr: &Expr, span: Span, source: &SourceKey) -> Read<Fi
             let mut params = BTreeMap::new();
             for (field, value) in record_of(Some(expr.clone()), span)? {
                 if !part_field(&mut part, &field, &value, span)? {
-                    params.insert(field, param_of(&value, source.clone())?);
+                    params.insert(field.clone(), field_param(&field, &value, source.clone())?);
                 }
             }
             Ok(Fitting::Alternate { part, params })
@@ -473,7 +492,7 @@ pub(super) fn read_component(
             _ => {
                 component
                     .params
-                    .insert(field, param_of(&value, source.clone())?);
+                    .insert(field.clone(), field_param(&field, &value, source.clone())?);
             }
         }
     }
@@ -503,7 +522,7 @@ pub(super) fn read_net(
             "global" => net.global = bool_of(value)?,
             "renamed_from" => net.renamed_from = Some(word_of(Some(value), span)?),
             _ => {
-                net.params.insert(field, param_of(&value, source.clone())?);
+                net.params.insert(field.clone(), field_param(&field, &value, source.clone())?);
             }
         }
     }
@@ -537,7 +556,7 @@ pub(super) fn read_blanket(
             _ => {
                 blanket
                     .params
-                    .insert(field, param_of(&value, source.clone())?);
+                    .insert(field.clone(), field_param(&field, &value, source.clone())?);
             }
         }
     }

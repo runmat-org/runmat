@@ -9,9 +9,13 @@
 //! - `oz`, copper weight as a thickness (1 oz = 34.79 µm of copper);
 //! - the symbol spellings `Ω`, `Ohm`, `°` and `°C`, read as `ohm`, `deg` and `degC`;
 //! - `W/mK` and `mm2`, read as `W/m/K` and `mm^2`.
+//!
+//! A param whose name says what it measures reads its units expecting that ([`param_quantity`]):
+//! `mass = 0.35 g` is 0.35 grams, where elsewhere `g` is standard gravity.
 
 use runmat_rules::{Dim, UnitDef, UnitResolver};
-use runmat_types::physical::parse_unit_expression;
+use runmat_types::physical::{parse_unit_expecting, parse_unit_expression};
+use runmat_types::PhysicalDimension;
 
 /// The unit registry as the circuit's rule engine reads units.
 #[derive(Clone, Copy, Debug, Default)]
@@ -19,6 +23,50 @@ pub struct RegistryUnits;
 
 impl UnitResolver for RegistryUnits {
     fn resolve(&self, symbol: &str) -> Option<UnitDef> {
+        resolve(symbol, None)
+    }
+}
+
+/// The registry where the value must measure one dimension: a symbol with two readings takes
+/// the one that fits (`g` is the gram where a mass is expected;
+/// [`runmat_types::physical::parse_unit_expecting`]).
+#[derive(Clone, Copy, Debug)]
+pub struct ExpectingUnits(pub PhysicalDimension);
+
+impl UnitResolver for ExpectingUnits {
+    fn resolve(&self, symbol: &str) -> Option<UnitDef> {
+        resolve(symbol, Some(self.0))
+    }
+}
+
+/// What a param measures when its name says so: `mass` is a mass.
+pub fn param_dimension(name: &str) -> Option<PhysicalDimension> {
+    (name == "mass").then_some(PhysicalDimension::MASS)
+}
+
+/// A param's value text as a quantity, read with the units its name expects.
+pub fn param_quantity(name: &str, text: &str) -> Result<runmat_rules::Quantity, String> {
+    match param_dimension(name) {
+        Some(expected) => runmat_rules::parse_quantity(text, &ExpectingUnits(expected)),
+        None => runmat_rules::parse_quantity(text, &RegistryUnits),
+    }
+}
+
+/// The rule engine's dimension for a registry dimension.
+pub fn dim_of(d: PhysicalDimension) -> Dim {
+    Dim([
+        d.length,
+        d.mass,
+        d.time,
+        d.current,
+        d.temperature,
+        d.amount,
+        d.luminous_intensity,
+    ])
+}
+
+fn resolve(symbol: &str, expected: Option<PhysicalDimension>) -> Option<UnitDef> {
+    {
         let ratio = |scale: f64| {
             Some(UnitDef {
                 scale,
@@ -47,7 +95,10 @@ impl UnitResolver for RegistryUnits {
             "mm2" => "mm^2".to_owned(),
             other => other.replace('Ω', "ohm").replace("Ohm", "ohm"),
         };
-        let unit = parse_unit_expression(&spelled).ok()?;
+        let unit = match expected {
+            Some(expected) => parse_unit_expecting(&spelled, expected).ok()?,
+            None => parse_unit_expression(&spelled).ok()?,
+        };
         let d = unit.dimension();
         if d.information != 0 {
             return None;
@@ -55,15 +106,7 @@ impl UnitResolver for RegistryUnits {
         Some(UnitDef {
             scale: unit.scale(),
             offset: unit.offset(),
-            dim: Dim([
-                d.length,
-                d.mass,
-                d.time,
-                d.current,
-                d.temperature,
-                d.amount,
-                d.luminous_intensity,
-            ]),
+            dim: dim_of(d),
         })
     }
 }

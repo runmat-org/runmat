@@ -119,16 +119,20 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
                 let mut inputs = BTreeMap::new();
                 let mut kinds = BTreeMap::new();
+                let mut display = BTreeMap::new();
                 for (name, expr) in values {
                     // A wrong unit underlines the input's value (`input.thickness = 3 deg`).
-                    let si = self.typed_input(name, expr, env, summary).map_err(|(code, message)| {
+                    let q = self.typed_input(name, expr, env, summary).map_err(|(code, message)| {
                         SelectionError {
                             param: (code == DiagCode::ValueUnit).then(|| name.0.clone()),
                             code,
                             message,
                         }
                     })?;
-                    inputs.insert(name.clone(), si);
+                    inputs.insert(name.clone(), q.si);
+                    if let Some(written) = crate::value::written_literal(expr, &q) {
+                        display.insert(name.clone(), written);
+                    }
                     if let Some((_, kind)) = summary.inputs.iter().find(|(n, _)| n == name) {
                         kinds.insert(name.clone(), kind.clone());
                     }
@@ -137,6 +141,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     name: base.clone(),
                     inputs,
                     kinds,
+                    display,
                 })
             }
             ConfigurationSelection::Switch { cases, otherwise } => {
@@ -180,7 +185,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         expr: &ValueExpr,
         env: &ValueEnv,
         s: &DefinitionSummary,
-    ) -> Result<f64, (DiagCode, String)> {
+    ) -> Result<crate::value::Quantity, (DiagCode, String)> {
         let Some((_, kind)) = s.inputs.iter().find(|(n, _)| n == name) else {
             return Err((
                 DiagCode::AsmInputType,
@@ -210,7 +215,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 .message,
             ));
         }
-        Ok(q.si)
+        Ok(q)
     }
 
     /// The overrides of a sub-assembly's inputs from its configuration key.

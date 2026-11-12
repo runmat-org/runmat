@@ -105,6 +105,16 @@ fn check_part(case: &Case) {
     assert_eq!(underlined, case.value, ".part span");
     assert_eq!(code, "cad.value.unit");
     assert_eq!(fixes, unit_fixes(case.value, case.expected), ".part fixes");
+    let titles: Vec<String> = analysis
+        .code_actions(analysis.diagnostics().iter().find(|d| d.message == message).unwrap().range)
+        .into_iter()
+        .filter_map(|a| match a {
+            CodeActionOrCommand::CodeAction(a) => Some(a.title),
+            _ => None,
+        })
+        .collect();
+    let plain: Vec<String> = fixes.iter().map(|fix| format!("Write {fix}")).collect();
+    assert_eq!(titles, plain, ".part quick-fix titles are plain text");
 }
 
 fn check_layout(case: &Case) {
