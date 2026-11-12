@@ -381,12 +381,29 @@ fn text_value<'a>(values: &'a Map<String, Value>, id: &str) -> &'a str {
 }
 
 /// Runs a catalog command on the part or assembly `path`.
+/// `study.new` on a part or assembly: FEA's Simulation setup guide (`simulation_setup`) writes
+/// the study, asking for the goal, supports, loads, material and acceptance limit, so the CAD
+/// dispatcher writes no `.fea` of its own. The Desktop canvas starts that guide on the file; the
+/// agent and the CLI get this reply, which names the guide to start.
+fn study_handoff(path: &str) -> EditOutput {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    EditOutput {
+        files: Vec::new(),
+        summary: format!(
+            "New study on {name} is set up by the Simulation setup guide (simulation_setup): start it on {path}"
+        ),
+    }
+}
+
 pub fn edit(
     path: &str,
     text: &str,
     files: &Files,
     request: &EditRequest,
 ) -> Result<EditOutput, EditFailure> {
+    if request.command == "study.new" && (path.ends_with(".part") || path.ends_with(".assembly")) {
+        return Ok(study_handoff(path));
+    }
     let (change, summary) = if path.ends_with(".drawing") {
         match request.command.as_str() {
             "drawing.auto" => crate::drawing::auto::auto(path, text, files, &request.values)?,
@@ -515,6 +532,18 @@ mod tests {
 
     fn run(path: &str, text: &str, request: Value) -> Value {
         serde_json::from_str(&edit_json(path, text, &Files::new(), &request.to_string())).unwrap()
+    }
+
+    #[test]
+    fn new_study_on_a_part_or_assembly_hands_off_to_simulation_setup() {
+        for path in ["/p/plate.part", "/p/frame.assembly"] {
+            let out = run(path, PLATE, json!({ "command": "study.new", "values": { "physics": "structural" } }));
+            assert_eq!(out["ok"], true, "{out}");
+            assert_eq!(out["files"], json!([]), "the CAD dispatcher writes no study");
+            let summary = out["summary"].as_str().unwrap();
+            assert!(summary.contains("Simulation setup guide (simulation_setup)"), "{summary}");
+            assert!(summary.ends_with(&format!("start it on {path}")), "{summary}");
+        }
     }
 
     #[test]
