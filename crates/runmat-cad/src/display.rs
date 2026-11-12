@@ -244,18 +244,22 @@ pub struct FrameDisplay {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SketchEntityDisplay {
     pub id: String,
-    /// `point`, `line`, `arc`, `circle` or `spline`.
+    /// `point`, `line`, `arc`, `circle`, `spline` or `ellipse`.
     pub kind: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub construction: bool,
     /// Solved points by role (`at`, `start`, `end`, `center`, and `p<i>` for a spline's
     /// interior through-points).
     pub points: BTreeMap<String, [f32; 2]>,
-    /// A spline's curve sampled as a polyline from start to end (empty for other kinds).
+    /// A spline's or ellipse's curve sampled as a polyline from start to end (empty for other
+    /// kinds).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub samples: Vec<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radius: Option<f32>,
+    /// An ellipse's semi-major and semi-minor axes and its major axis's angle (radians).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ellipse: Option<[f32; 3]>,
     /// Remaining degrees of freedom, where the solver reports them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dof: Option<u32>,
@@ -830,6 +834,7 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                         SketchGeometry::Arc { .. } => "arc",
                         SketchGeometry::Circle { .. } => "circle",
                         SketchGeometry::Spline { .. } => "spline",
+                        SketchGeometry::Ellipse { .. } => "ellipse",
                     };
                     let points = entity
                         .geometry
@@ -845,6 +850,15 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                         SketchGeometry::Spline { points, closed } => {
                             spline_samples(&entity.id, points.len(), *closed, solved)
                         }
+                        SketchGeometry::Ellipse { start, .. } => solved
+                            .ellipse_segment(&entity.id, start.is_some())
+                            .map(|s| {
+                                s.polyline(96)
+                                    .into_iter()
+                                    .map(|p| p.map(|x| x as f32))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                         _ => Vec::new(),
                     };
                     SketchEntityDisplay {
@@ -854,6 +868,10 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                         points,
                         samples,
                         radius: solved.radii.get(&entity.id).map(|r| *r as f32),
+                        ellipse: solved
+                            .ellipses
+                            .get(&entity.id)
+                            .map(|e| [e.major as f32, e.minor as f32, e.angle as f32]),
                         dof: solved.entity_dof.get(&entity.id).copied(),
                     }
                 })

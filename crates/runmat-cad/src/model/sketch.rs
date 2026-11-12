@@ -53,6 +53,22 @@ pub enum SketchGeometry {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         closed: bool,
     },
+    /// An ellipse about `center` with semi-axes `major` and `minor`, its major axis turned
+    /// `angle` counter-clockwise from the sketch's x axis (0 when not written). With `start` and
+    /// `end` it is the elliptical arc counter-clockwise from `start` to `end`, both on the
+    /// ellipse. The written semi-axes and angle are starting values, as a circle's radius is;
+    /// the `major_radius` and `minor_radius` dimensions hold them.
+    Ellipse {
+        center: PointExpr,
+        major: ValueExpr,
+        minor: ValueExpr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<PointExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<PointExpr>,
+    },
 }
 
 impl SketchGeometry {
@@ -84,6 +100,16 @@ impl SketchGeometry {
                 .into_iter()
                 .zip(points)
                 .collect(),
+            SketchGeometry::Ellipse {
+                center, start, end, ..
+            } => {
+                let mut points = vec![(PointRole::Center, center)];
+                if let (Some(start), Some(end)) = (start, end) {
+                    points.push((PointRole::Start, start));
+                    points.push((PointRole::End, end));
+                }
+                points
+            }
         }
     }
 
@@ -293,6 +319,16 @@ pub enum SketchConstraintKind {
         curve: SketchTarget,
         value: ValueExpr,
     },
+    /// An ellipse's semi-major axis.
+    MajorRadius {
+        curve: SketchTarget,
+        value: ValueExpr,
+    },
+    /// An ellipse's semi-minor axis.
+    MinorRadius {
+        curve: SketchTarget,
+        value: ValueExpr,
+    },
     Angle {
         a: SketchTarget,
         b: SketchTarget,
@@ -327,6 +363,12 @@ pub enum SolvedKey {
     Radius {
         entity: SketchEntityId,
     },
+    /// An ellipse's semi-axis or angle (`e1.major`, `e1.minor`, `e1.angle`; the angle in
+    /// radians).
+    Ellipse {
+        entity: SketchEntityId,
+        measure: EllipseMeasure,
+    },
     /// A solver-owned variable with no authored name (e.g. a curve parameter of point-on-spline),
     /// keyed by the constraint that owns it.
     Hidden {
@@ -335,12 +377,64 @@ pub enum SolvedKey {
     },
 }
 
+/// The scalars of an ellipse that the solver owns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EllipseMeasure {
+    Major,
+    Minor,
+    Angle,
+}
+
+impl EllipseMeasure {
+    pub const ALL: [EllipseMeasure; 3] = [Self::Major, Self::Minor, Self::Angle];
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Major => "major",
+            Self::Minor => "minor",
+            Self::Angle => "angle",
+        }
+    }
+
+    pub fn from_word(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.word() == word)
+    }
+}
+
+/// A solved ellipse: semi-axes in metres and the major axis's angle in radians.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SolvedEllipse {
+    pub major: f64,
+    pub minor: f64,
+    pub angle: f64,
+}
+
+impl SolvedEllipse {
+    pub fn get(&self, measure: EllipseMeasure) -> f64 {
+        match measure {
+            EllipseMeasure::Major => self.major,
+            EllipseMeasure::Minor => self.minor,
+            EllipseMeasure::Angle => self.angle,
+        }
+    }
+
+    /// The point at eccentric angle `t`.
+    pub fn at(&self, center: [f64; 2], t: f64) -> [f64; 2] {
+        let (s, c) = self.angle.sin_cos();
+        let (x, y) = (self.major * t.cos(), self.minor * t.sin());
+        [center[0] + c * x - s * y, center[1] + s * x + c * y]
+    }
+}
+
 /// Solved sketch geometry in sketch coordinates (SI).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SolvedSketch {
     #[serde(with = "crate::serde_rows")]
     pub points: BTreeMap<(SketchEntityId, PointRole), [f64; 2]>,
     pub radii: BTreeMap<SketchEntityId, f64>,
+    #[serde(default)]
+    pub ellipses: BTreeMap<SketchEntityId, SolvedEllipse>,
     pub status: SketchSolveStatus,
     /// Remaining DOF per entity, where the solver reports it.
     #[serde(default)]
@@ -362,6 +456,49 @@ pub struct SolvedSketch {
 impl SolvedSketch {
     pub fn point(&self, entity: &SketchEntityId, role: PointRole) -> Option<[f64; 2]> {
         self.points.get(&(entity.clone(), role)).copied()
+    }
+
+    /// A solved ellipse as a kernel segment: the whole ellipse from the end of its major axis,
+    /// or, when `arc`, the elliptical arc counter-clockwise from its start to its end. The
+    /// segment's major axis is the longer semi-axis, whichever the sketch names `major`.
+    pub fn ellipse_segment(
+        &self,
+        entity: &SketchEntityId,
+        arc: bool,
+    ) -> Option<runmat_geometry_kernel::op::ProfileSegment> {
+        use runmat_geometry_kernel::op::{ProfileSegment, SegmentKind};
+        let center = self.point(entity, PointRole::Center)?;
+        let e = self.ellipses.get(entity)?;
+        let (a, b) = (e.major.abs(), e.minor.abs());
+        if !(a > 0.0 && b > 0.0) {
+            return None;
+        }
+        let (length, turn, ratio) = if a >= b {
+            (a, e.angle, b / a)
+        } else {
+            (b, e.angle + std::f64::consts::FRAC_PI_2, a / b)
+        };
+        let major = [length * turn.cos(), length * turn.sin()];
+        let (start, end) = if arc {
+            (
+                self.point(entity, PointRole::Start)?,
+                self.point(entity, PointRole::End)?,
+            )
+        } else {
+            let tip = [center[0] + major[0], center[1] + major[1]];
+            (tip, tip)
+        };
+        Some(ProfileSegment {
+            curve: entity.clone(),
+            kind: SegmentKind::Ellipse {
+                center,
+                major,
+                ratio,
+                clockwise: false,
+            },
+            start,
+            end,
+        })
     }
 }
 

@@ -5,12 +5,15 @@
 //!     l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
 //!     l2 = line(start = l1.end, end = [80 mm, 50 mm])
 //!     c1 = circle(center = [40 mm, 25 mm], radius = 5 mm, construction)
+//!     e1 = ellipse(center = [40 mm, 25 mm], major = 20 mm, minor = 8 mm, angle = 30 deg)
 //!     constrain horizontal(l1)
 //!     constrain distance(l1.start, l2.end, id = d1) = 60 mm
 //!     constrain limit(length(l1, value = 80 mm), min = 60 mm, max = 90 mm)
+//!     constrain major_radius(e1) = 20 mm
 //!     solved {
 //!         l1.start = [0, 0]
 //!         c1.radius = 0.005
+//!         e1.major = 0.02
 //!     }
 //! }
 //! ```
@@ -19,9 +22,14 @@
 //!   makes the two the same point.
 //! - A constraint names entities (`l1`) and their points (`l1.start`); a dimension takes its
 //!   value after `=`. `id = <name>` names the constraint.
+//! - An ellipse takes its centre, semi-axes `major` and `minor`, and the major axis's `angle`
+//!   from the x axis (0 when left out). With `start` and `end` it is the elliptical arc
+//!   counter-clockwise between them. `major_radius(e1)` and `minor_radius(e1)` dimension its
+//!   semi-axes; `horizontal(e1)` and `vertical(e1)` set its major axis's direction.
 //! - `solved { }` holds the solver's last output in SI units, so the file reloads without
-//!   re-solving: `<entity>.<point> = [x, y]`, `<entity>.radius = r`, and
-//!   `<constraint>.hidden_<n> = v` for variables the solver adds.
+//!   re-solving: `<entity>.<point> = [x, y]`, `<entity>.radius = r`, an ellipse's
+//!   `<entity>.major`, `.minor` and `.angle` (radians), and `<constraint>.hidden_<n> = v` for
+//!   variables the solver adds.
 //! - `suppressed = true` and `frozen = "<key>"` are the feature's own settings.
 
 use super::refs::{self, print_plane_or_face, role_of};
@@ -29,8 +37,8 @@ use super::value::{lower_value, print_value};
 use crate::ids::{ConstraintId, SketchEntityId};
 use crate::model::datum::PlaneRef;
 use crate::model::sketch::{
-    PointExpr, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K, SketchEntity,
-    SketchGeometry, SketchTarget, SolvedCache, SolvedKey,
+    EllipseMeasure, PointExpr, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K,
+    SketchEntity, SketchGeometry, SketchTarget, SolvedCache, SolvedKey,
 };
 use crate::value::ValueExpr;
 use runmat_design_syntax::ast::{self, Argument, Expr, Headed, Statement};
@@ -98,6 +106,30 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
             }
             arguments
         }
+        SketchGeometry::Ellipse {
+            center,
+            major,
+            minor,
+            angle,
+            start,
+            end,
+        } => {
+            let mut arguments = vec![
+                format!("center = {}", print_point(center)?),
+                format!("major = {}", print_value(major)?),
+                format!("minor = {}", print_value(minor)?),
+            ];
+            if let Some(angle) = angle {
+                arguments.push(format!("angle = {}", print_value(angle)?));
+            }
+            if let Some(start) = start {
+                arguments.push(format!("start = {}", print_point(start)?));
+            }
+            if let Some(end) = end {
+                arguments.push(format!("end = {}", print_point(end)?));
+            }
+            arguments
+        }
     };
     if entity.construction {
         arguments.push("construction".into());
@@ -108,6 +140,7 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
         SketchGeometry::Arc { .. } => "arc",
         SketchGeometry::Circle { .. } => "circle",
         SketchGeometry::Spline { .. } => "spline",
+        SketchGeometry::Ellipse { .. } => "ellipse",
     };
     Some(format!(
         "{} = {kind}({})",
@@ -142,6 +175,8 @@ fn print_kind(kind: &K, extra: Option<String>) -> Option<(String, Option<String>
         K::Length { line, value } => ("length", vec![target(line)?], Some(value)),
         K::Radius { curve, value } => ("radius", vec![target(curve)?], Some(value)),
         K::Diameter { curve, value } => ("diameter", vec![target(curve)?], Some(value)),
+        K::MajorRadius { curve, value } => ("major_radius", vec![target(curve)?], Some(value)),
+        K::MinorRadius { curve, value } => ("minor_radius", vec![target(curve)?], Some(value)),
         K::Limit {
             dimension,
             min,
@@ -191,6 +226,9 @@ fn solved_target(key: &SolvedKey) -> Option<String> {
             format!("{}.{}", name(&entity.0)?, role_word(*role))
         }
         SolvedKey::Radius { entity } => format!("{}.radius", name(&entity.0)?),
+        SolvedKey::Ellipse { entity, measure } => {
+            format!("{}.{}", name(&entity.0)?, measure.word())
+        }
         SolvedKey::Hidden { constraint, index } => {
             format!("{}.hidden_{index}", name(&constraint.0)?)
         }
@@ -473,10 +511,34 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
             }
             SketchGeometry::Spline { points, closed }
         }
+        "ellipse" => {
+            let center = lower_point(&call.need("center", span)?)?;
+            let major = lower_value(&call.need("major", span)?)?;
+            let minor = lower_value(&call.need("minor", span)?)?;
+            let angle = call.take("angle").map(|a| lower_value(&a)).transpose()?;
+            let start = call.take("start").map(|p| lower_point(&p)).transpose()?;
+            let end = call.take("end").map(|p| lower_point(&p)).transpose()?;
+            if start.is_some() != end.is_some() {
+                return Err(error(
+                    span,
+                    "an elliptical arc takes both `start` and `end`; a whole ellipse takes neither",
+                ));
+            }
+            SketchGeometry::Ellipse {
+                center,
+                major,
+                minor,
+                angle,
+                start,
+                end,
+            }
+        }
         other => {
             return Err(error(
                 span,
-                format!("`{other}` is not a sketch entity (point, line, arc, circle, spline)"),
+                format!(
+                    "`{other}` is not a sketch entity (point, line, arc, circle, spline, ellipse)"
+                ),
             ))
         }
     };
@@ -605,6 +667,14 @@ fn lower_kind(expr: &Expr, value: Option<&Expr>) -> Result<(K, Option<Constraint
             curve: targets(1)?.remove(0),
             value: need_value(value)?,
         },
+        "major_radius" => K::MajorRadius {
+            curve: targets(1)?.remove(0),
+            value: need_value(value)?,
+        },
+        "minor_radius" => K::MinorRadius {
+            curve: targets(1)?.remove(0),
+            value: need_value(value)?,
+        },
         "limit" => {
             no_value(&value)?;
             let [dimension] = positional.as_slice() else {
@@ -629,6 +699,10 @@ fn solved_key(target: &[String], span: Span) -> Result<SolvedKey, LowerError> {
     match target {
         [entity, field] if field == "radius" => Ok(SolvedKey::Radius {
             entity: SketchEntityId::new(entity),
+        }),
+        [entity, field] if EllipseMeasure::from_word(field).is_some() => Ok(SolvedKey::Ellipse {
+            entity: SketchEntityId::new(entity),
+            measure: EllipseMeasure::from_word(field).expect("checked"),
         }),
         [owner, field] if field.starts_with("hidden_") => {
             let index = field["hidden_".len()..]

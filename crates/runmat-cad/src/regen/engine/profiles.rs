@@ -92,6 +92,7 @@ pub(super) fn build_loops(
             SketchGeometry::Spline { points, closed } => {
                 spline_segment(id, points.len(), *closed, solved)
             }
+            SketchGeometry::Ellipse { start, .. } => solved.ellipse_segment(id, start.is_some()),
             SketchGeometry::Point { .. } => None,
         }
     };

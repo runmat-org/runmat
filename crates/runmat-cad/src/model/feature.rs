@@ -1045,6 +1045,23 @@ impl FeatureKind {
                             ptrs.push(radius);
                         }
                         G::Spline { points, .. } => points.iter().for_each(|p| pe(&mut ptrs, p)),
+                        G::Ellipse {
+                            center,
+                            major,
+                            minor,
+                            angle,
+                            start,
+                            end,
+                        } => {
+                            pe(&mut ptrs, center);
+                            ptrs.push(major);
+                            ptrs.push(minor);
+                            ptrs.extend(angle.iter());
+                            start
+                                .iter()
+                                .chain(end.iter())
+                                .for_each(|p| pe(&mut ptrs, p));
+                        }
                     }
                 }
                 for c in &s.constraints {
@@ -1053,6 +1070,8 @@ impl FeatureKind {
                         | K::Length { value, .. }
                         | K::Radius { value, .. }
                         | K::Diameter { value, .. }
+                        | K::MajorRadius { value, .. }
+                        | K::MinorRadius { value, .. }
                         | K::Angle { value, .. } => ptrs.push(value),
                         K::Limit { min, max, .. } => {
                             ptrs.push(min);

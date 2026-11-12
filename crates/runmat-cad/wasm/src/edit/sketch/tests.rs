@@ -1,9 +1,9 @@
 use crate::runtime::compile_part;
 use serde_json::{json, Value};
 
-const PLATE: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n        l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 5 mm)\n}\n";
+pub(super) const PLATE: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n        l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 5 mm)\n}\n";
 
-fn run(text: &str, command: &str, values: Value) -> Value {
+pub(super) fn run(text: &str, command: &str, values: Value) -> Value {
     let request = json!({ "command": command, "values": values }).to_string();
     serde_json::from_str(&crate::edit::edit_json(
         "/p/plate.part",
@@ -14,7 +14,7 @@ fn run(text: &str, command: &str, values: Value) -> Value {
     .unwrap()
 }
 
-fn applied(text: &str, command: &str, values: Value) -> String {
+pub(super) fn applied(text: &str, command: &str, values: Value) -> String {
     let out = run(text, command, values);
     assert_eq!(out["ok"], true, "{out}");
     let text = out["files"][0]["text"].as_str().unwrap().to_owned();
@@ -23,7 +23,7 @@ fn applied(text: &str, command: &str, values: Value) -> String {
 }
 
 /// The lines of `after` that `before` doesn't have.
-fn added(before: &str, after: &str) -> Vec<String> {
+pub(super) fn added(before: &str, after: &str) -> Vec<String> {
     after
         .lines()
         .filter(|l| !before.lines().any(|b| b == *l))
@@ -187,14 +187,14 @@ fn drawing_tools_write_entities_into_the_open_sketch() {
     // A tool the sketch dispatcher has no code for says so and marks the call, so the command
     // registry's build check finds it.
     crate::edit::take_unhandled();
-    let ellipse = run(PLATE, "sketch.ellipse", json!({ "sketch": "s1" }));
-    assert_eq!(ellipse["ok"], false);
+    let unknown = run(PLATE, "sketch.no-such-tool", json!({ "sketch": "s1" }));
+    assert_eq!(unknown["ok"], false);
     assert!(
-        ellipse["message"]
+        unknown["message"]
             .as_str()
             .unwrap()
             .contains("has no handler"),
-        "{ellipse}"
+        "{unknown}"
     );
     assert!(crate::edit::take_unhandled());
 }
@@ -594,7 +594,10 @@ fn a_spline_runs_through_the_picked_points_and_closes_on_request() {
     let new = added(PLATE, &open);
     assert_eq!(new.len(), 1, "{new:?}");
     assert!(new[0].contains("sp1 = spline("), "{new:?}");
-    assert!(new[0].contains("l3.end") && new[0].contains("30 mm"), "{new:?}");
+    assert!(
+        new[0].contains("l3.end") && new[0].contains("30 mm"),
+        "{new:?}"
+    );
     // Canvas picks of sketch points, closed.
     let closed = applied(
         PLATE,
@@ -602,13 +605,28 @@ fn a_spline_runs_through_the_picked_points_and_closes_on_request() {
         json!({ "sketch": "s1", "points": ["sketch.s1.l1.start", "sketch.s1.l2.start", "sketch.s1.l3.start"], "closed": true }),
     );
     let new = added(PLATE, &closed);
-    assert!(new.iter().any(|l| l.contains("spline(") && l.contains("closed")), "{new:?}");
-    // One point, or a type the sketch model lacks, says why.
-    let short = run(PLATE, "sketch.spline", json!({ "sketch": "s1", "points": [{ "x": 1, "y": 1 }] }));
-    assert_eq!(short["ok"], false, "{short}");
-    let control = run(PLATE, "sketch.spline", json!({ "sketch": "s1", "type": "control_points" }));
     assert!(
-        control["message"].as_str().unwrap().contains("control-point splines"),
+        new.iter()
+            .any(|l| l.contains("spline(") && l.contains("closed")),
+        "{new:?}"
+    );
+    // One point, or a type the sketch model lacks, says why.
+    let short = run(
+        PLATE,
+        "sketch.spline",
+        json!({ "sketch": "s1", "points": [{ "x": 1, "y": 1 }] }),
+    );
+    assert_eq!(short["ok"], false, "{short}");
+    let control = run(
+        PLATE,
+        "sketch.spline",
+        json!({ "sketch": "s1", "type": "control_points" }),
+    );
+    assert!(
+        control["message"]
+            .as_str()
+            .unwrap()
+            .contains("control-point splines"),
         "{control}"
     );
 }

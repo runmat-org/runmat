@@ -10,8 +10,9 @@
 
 use crate::ids::SketchEntityId;
 use crate::model::sketch::{
-    PointExpr, PointRole, Sketch, SketchConstraintKind as K, SketchGeometry as G,
-    SketchSolveFailure, SketchSolveStatus, SketchTarget, SolvedCache, SolvedKey, SolvedSketch,
+    EllipseMeasure, PointExpr, PointRole, Sketch, SketchConstraintKind as K, SketchGeometry as G,
+    SketchSolveFailure, SketchSolveStatus, SketchTarget, SolvedCache, SolvedEllipse, SolvedKey,
+    SolvedSketch,
 };
 use crate::units::Dimension;
 use crate::value::{Evaluator, ValueEnv};
@@ -69,10 +70,9 @@ fn shared_end(
     None
 }
 
-type StartingGeometry = (
-    BTreeMap<(SketchEntityId, PointRole), [f64; 2]>,
-    BTreeMap<SketchEntityId, f64>,
-);
+type Points = BTreeMap<(SketchEntityId, PointRole), [f64; 2]>;
+type Ellipses = BTreeMap<SketchEntityId, SolvedEllipse>;
+type StartingGeometry = (Points, BTreeMap<SketchEntityId, f64>, Ellipses);
 
 /// Starting geometry: every entity point evaluated from its expression, shared points
 /// (`l1.end`) resolved, and the `solved { }` cache preferred where it has a value.
@@ -120,7 +120,39 @@ fn starting_points(
     }
     let mut points = BTreeMap::new();
     let mut radii = BTreeMap::new();
+    let mut ellipses = BTreeMap::new();
     for e in &sketch.entities {
+        if let G::Ellipse {
+            major,
+            minor,
+            angle,
+            ..
+        } = &e.geometry
+        {
+            let scalar = |measure: EllipseMeasure,
+                          written: Option<&crate::value::ValueExpr>,
+                          dim: Dimension|
+             -> Result<f64, SketchSolveFailure> {
+                match sketch.solved.scalars.get(&SolvedKey::Ellipse {
+                    entity: e.id.clone(),
+                    measure,
+                }) {
+                    Some(v) => Ok(*v),
+                    None => match written {
+                        Some(v) => eval.eval_as(v, env, dim).map_err(|e| fail(e.to_string())),
+                        None => Ok(0.0),
+                    },
+                }
+            };
+            ellipses.insert(
+                e.id.clone(),
+                SolvedEllipse {
+                    major: scalar(EllipseMeasure::Major, Some(major), Dimension::LENGTH)?,
+                    minor: scalar(EllipseMeasure::Minor, Some(minor), Dimension::LENGTH)?,
+                    angle: scalar(EllipseMeasure::Angle, angle.as_ref(), Dimension::ANGLE)?,
+                },
+            );
+        }
         let roles: Vec<PointRole> = match &e.geometry {
             G::Circle { radius, .. } => {
                 let r = sketch
@@ -151,12 +183,13 @@ fn starting_points(
             points.insert((e.id.clone(), role), p);
         }
     }
-    Ok((points, radii))
+    Ok((points, radii, ellipses))
 }
 
 fn cache_of(
-    points: &BTreeMap<(SketchEntityId, PointRole), [f64; 2]>,
+    points: &Points,
     radii: &BTreeMap<SketchEntityId, f64>,
+    ellipses: &Ellipses,
 ) -> SolvedCache {
     SolvedCache {
         points: points
@@ -174,6 +207,17 @@ fn cache_of(
         scalars: radii
             .iter()
             .map(|(e, r)| (SolvedKey::Radius { entity: e.clone() }, *r))
+            .chain(ellipses.iter().flat_map(|(e, s)| {
+                EllipseMeasure::ALL.map(|measure| {
+                    (
+                        SolvedKey::Ellipse {
+                            entity: e.clone(),
+                            measure,
+                        },
+                        s.get(measure),
+                    )
+                })
+            }))
             .collect(),
     }
 }
@@ -250,11 +294,12 @@ pub fn last_solved(
     eval: &Evaluator<'_>,
     env: &ValueEnv,
 ) -> Result<SolvedSketch, SketchSolveFailure> {
-    let (points, radii) = starting_points(sketch, eval, env)?;
-    let cache = cache_of(&points, &radii);
+    let (points, radii, ellipses) = starting_points(sketch, eval, env)?;
+    let cache = cache_of(&points, &radii, &ellipses);
     Ok(SolvedSketch {
         points,
         radii,
+        ellipses,
         status: SketchSolveStatus::Explicit,
         entity_dof: BTreeMap::new(),
         dof: None,
@@ -282,11 +327,12 @@ impl SketchSolver for ExplicitSketchSolver {
         // Written coordinates win over the cache: this solver solves nothing.
         let mut plain = sketch.clone();
         plain.solved = SolvedCache::default();
-        let (points, radii) = starting_points(&plain, eval, env)?;
-        let cache = cache_of(&points, &radii);
+        let (points, radii, ellipses) = starting_points(&plain, eval, env)?;
+        let cache = cache_of(&points, &radii, &ellipses);
         Ok(SolvedSketch {
             points,
             radii,
+            ellipses,
             status: SketchSolveStatus::Explicit,
             entity_dof: BTreeMap::new(),
             dof: None,
@@ -349,7 +395,7 @@ impl ConstraintSketchSolver {
         use runmat_constraint::{
             solve, Constraint as C, ConstraintId, EntityId, SolveOptions, Status, System,
         };
-        let (start, radii0) = starting_points(sketch, eval, env)?;
+        let (start, radii0, ellipses0) = starting_points(sketch, eval, env)?;
         let mut sys = System::new();
         let build = |e: runmat_constraint::BuildError| fail(format!("sketch build: {:?}", e));
 
@@ -390,6 +436,7 @@ impl ConstraintSketchSolver {
         };
         let mut curves: BTreeMap<SketchEntityId, EntityId> = BTreeMap::new();
         let mut is_round: BTreeMap<SketchEntityId, bool> = BTreeMap::new();
+        let mut is_elliptic: BTreeMap<SketchEntityId, bool> = BTreeMap::new();
         for e in &sketch.entities {
             let id = match &e.geometry {
                 G::Point { .. } => get_point(&mut sys, &e.id, PointRole::At),
@@ -420,6 +467,19 @@ impl ConstraintSketchSolver {
                     }
                     first.expect("a spline has points")
                 }
+                G::Ellipse { start: ends, .. } => {
+                    let c = get_point(&mut sys, &e.id, PointRole::Center);
+                    let s = ellipses0.get(&e.id).copied().unwrap_or_default();
+                    is_elliptic.insert(e.id.clone(), true);
+                    if ends.is_some() {
+                        let a = get_point(&mut sys, &e.id, PointRole::Start);
+                        let b = get_point(&mut sys, &e.id, PointRole::End);
+                        sys.elliptical_arc(c, s.major, s.minor, s.angle, a, b)
+                            .map_err(build)?
+                    } else {
+                        sys.ellipse(c, s.major, s.minor, s.angle).map_err(build)?
+                    }
+                }
             };
             if e.construction && !matches!(e.geometry, G::Spline { .. }) {
                 sys.set_construction(id, true);
@@ -448,6 +508,23 @@ impl ConstraintSketchSolver {
         for (i, c) in sketch.constraints.iter().enumerate() {
             let t = |x: &SketchTarget| target(x, &point_ids);
             let round = |x: &SketchTarget| matches!(x, SketchTarget::Entity { entity } if is_round.get(entity).copied().unwrap_or(false));
+            let elliptic = |x: &SketchTarget| matches!(x, SketchTarget::Entity { entity } if is_elliptic.get(entity).copied().unwrap_or(false));
+            // An ellipse's centre point, for relations that act on centres.
+            let center = |x: &SketchTarget| -> Result<EntityId, SketchSolveFailure> {
+                match x {
+                    SketchTarget::Entity { entity } => point_ids
+                        .get(&(entity.clone(), PointRole::Center))
+                        .copied()
+                        .ok_or_else(|| fail(format!("`{}` has no centre", entity))),
+                    other => t(other),
+                }
+            };
+            // The major axis's angle variable of an ellipse.
+            let rotation =
+                |x: &SketchTarget| -> Result<runmat_constraint::VarId, SketchSolveFailure> {
+                    let id = t(x)?;
+                    Ok(sys.entity_vars(id)[4])
+                };
             let cc = match &c.kind {
                 // A point coincident with a curve lies on it; two points coincide.
                 K::Coincident { a, b } => match (a, b) {
@@ -460,6 +537,15 @@ impl ConstraintSketchSolver {
                         curve: t(a)?,
                     },
                     _ => C::Coincident(t(a)?, t(b)?),
+                },
+                // An ellipse is horizontal or vertical along its major axis.
+                K::Horizontal { line } if elliptic(line) => C::VarValue {
+                    var: rotation(line)?,
+                    value: 0.0,
+                },
+                K::Vertical { line } if elliptic(line) => C::VarValue {
+                    var: rotation(line)?,
+                    value: std::f64::consts::FRAC_PI_2,
                 },
                 K::Horizontal { line } => C::Horizontal(t(line)?),
                 K::Vertical { line } => C::Vertical(t(line)?),
@@ -479,7 +565,7 @@ impl ConstraintSketchSolver {
                     None => C::Tangent(t(a)?, t(b)?),
                 },
                 K::Equal { a, b } => {
-                    if round(a) {
+                    if round(a) || elliptic(a) {
                         C::EqualRadius(t(a)?, t(b)?)
                     } else {
                         C::EqualLength(t(a)?, t(b)?)
@@ -490,6 +576,10 @@ impl ConstraintSketchSolver {
                     point: t(point)?,
                     line: t(line)?,
                 },
+                // Centres coincide when either curve is an ellipse.
+                K::Concentric { a, b } if elliptic(a) || elliptic(b) => {
+                    C::Coincident(center(a)?, center(b)?)
+                }
                 K::Concentric { a, b } => C::Concentric(t(a)?, t(b)?),
                 K::Coradial { a, b } => C::Coradial(t(a)?, t(b)?),
                 K::Collinear { a, b } => C::Collinear(t(a)?, t(b)?),
@@ -514,6 +604,16 @@ impl ConstraintSketchSolver {
                 K::Diameter { curve, value } => C::Radius {
                     curve: t(curve)?,
                     value: len(value)? / 2.0,
+                },
+                K::MajorRadius { curve, value } => C::EllipseDimension {
+                    curve: t(curve)?,
+                    measure: runmat_constraint::EllipseMeasure::SemiMajor,
+                    value: len(value)?,
+                },
+                K::MinorRadius { curve, value } => C::EllipseDimension {
+                    curve: t(curve)?,
+                    measure: runmat_constraint::EllipseMeasure::SemiMinor,
+                    value: len(value)?,
                 },
                 K::Angle { a, b, value } => C::Angle {
                     a: t(a)?,
@@ -548,6 +648,16 @@ impl ConstraintSketchSolver {
                         },
                         K::Radius { curve, .. } => C::Radius {
                             curve: t(curve)?,
+                            value: lo,
+                        },
+                        K::MajorRadius { curve, .. } => C::EllipseDimension {
+                            curve: t(curve)?,
+                            measure: runmat_constraint::EllipseMeasure::SemiMajor,
+                            value: lo,
+                        },
+                        K::MinorRadius { curve, .. } => C::EllipseDimension {
+                            curve: t(curve)?,
+                            measure: runmat_constraint::EllipseMeasure::SemiMinor,
                             value: lo,
                         },
                         K::Angle { a, b, .. } => C::Angle {
@@ -603,6 +713,20 @@ impl ConstraintSketchSolver {
                 );
             }
         }
+        let mut ellipses = BTreeMap::new();
+        for e in &sketch.entities {
+            if let G::Ellipse { .. } = e.geometry {
+                let vars = sys.entity_vars(curves[&e.id]);
+                ellipses.insert(
+                    e.id.clone(),
+                    SolvedEllipse {
+                        major: report.value(vars[2]),
+                        minor: report.value(vars[3]),
+                        angle: report.value(vars[4]),
+                    },
+                );
+            }
+        }
         if let Some(failure) = collapsed(sketch, &start, &radii0, &points, &radii) {
             return Err(failure);
         }
@@ -615,10 +739,11 @@ impl ConstraintSketchSolver {
             Status::UnderDefined => SketchSolveStatus::UnderDefined,
             _ => SketchSolveStatus::OverDefined,
         };
-        let cache = cache_of(&points, &radii);
+        let cache = cache_of(&points, &radii, &ellipses);
         Ok(SolvedSketch {
             points,
             radii,
+            ellipses,
             status,
             entity_dof,
             dof: Some(report.dof as u32),

@@ -14,8 +14,9 @@
 //! centre-point arcs, straight slots (two lines and two arcs, tangent), points, offsets of lines
 //! and circles, trim and extend (`modify`), mirror, pattern, transform, split and the
 //! construction toggle (`repeat`), fillet and chamfer (`corners`), auto-constrain (`infer`), and
-//! the relations and dimensions the sketch model has, and splines through points. A tool the
-//! sketch model lacks (ellipses, text, control-point splines) says so.
+//! the relations and dimensions the sketch model has, splines through points, and ellipses and
+//! elliptical arcs. A tool the sketch model lacks (parabolas, conics, control-point splines)
+//! says so.
 
 use super::{model, EditFailure, SourceChange};
 use runmat_cad::ids::SketchEntityId;
@@ -383,6 +384,7 @@ fn draw(
             Ok((entities, relations))
         }
         "sketch.polygon" => polygon(values, &mut name),
+        "sketch.ellipse" => ellipse::draw(values, kind, &mut name),
         "sketch.spline" => {
             if !kind.is_empty() && kind != "through_points" {
                 let what = match kind {
@@ -395,7 +397,10 @@ fn draw(
                 )));
             }
             let points = spline_points(values)?;
-            let closed = values.get("closed").and_then(Value::as_bool).unwrap_or(false);
+            let closed = values
+                .get("closed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             if points.len() < if closed { 3 } else { 2 } {
                 return Err(model(if closed {
                     "a closed spline runs through at least three points"
@@ -534,7 +539,11 @@ fn polygon(
         Some("circumscribed") => r / (step / 2.0).cos(),
         _ => r,
     };
-    let turn = values.get("rotation").and_then(num).unwrap_or(0.0).to_radians();
+    let turn = values
+        .get("rotation")
+        .and_then(num)
+        .unwrap_or(0.0)
+        .to_radians();
     let ids: Vec<String> = (0..n).map(|_| name("l")).collect();
     let corner = |k: usize| {
         let a = turn + step * k as f64;
@@ -670,6 +679,7 @@ fn dimension(
         SketchTarget::Point { .. } => false,
     };
     let line = |g: &G| matches!(g, G::Line { .. });
+    let elliptic = |g: &G| matches!(g, G::Ellipse { .. });
     let circle = |g: &G| matches!(g, G::Circle { .. });
     let arc = |g: &G| matches!(g, G::Arc { .. });
     Ok(constraint(match targets.as_slice() {
@@ -686,6 +696,15 @@ fn dimension(
             curve: t.clone(),
             value: mm(value),
         },
+        // An ellipse's semi-axis: the major unless the form names the minor.
+        [t] if is(t, elliptic) => {
+            let curve = t.clone();
+            let value = mm(value);
+            match values.get("axis").and_then(Value::as_str) {
+                Some("minor") => K::MinorRadius { curve, value },
+                _ => K::MajorRadius { curve, value },
+            }
+        }
         [a, b]
             if is(a, line)
                 && is(b, line)
@@ -809,9 +828,13 @@ fn new_sketch(
 }
 
 mod corners;
+mod ellipse;
 mod infer;
 mod modify;
 mod repeat;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod ellipse_tests;
