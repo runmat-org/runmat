@@ -183,3 +183,43 @@ fn guides_that_write_fea_are_checked_by_the_runtime() {
     .unwrap_err();
     assert_eq!(e.code, "unsupported");
 }
+
+/// Every decision's card title is short, distinct from the question its field label asks, and
+/// names no other decision of its guide. Manufacturing review is the guide where a card once
+/// showed the process decision's title over a draft pick.
+#[test]
+fn every_decision_has_a_title_distinct_from_its_field_labels() {
+    let c = catalog();
+    for g in &c.guides {
+        for d in &g.decisions {
+            assert!(!d.title.trim().is_empty(), "{}.{}", g.id, d.id);
+            assert_ne!(d.title.trim().to_lowercase(), d.question.trim().trim_end_matches('?').to_lowercase(), "{}.{}", g.id, d.id);
+        }
+    }
+    let problems: Vec<String> = c.lint(&[]).into_iter().filter(|p| p.contains("title")).collect();
+    assert!(problems.is_empty(), "{problems:#?}");
+    let m = c.guide("manufacturable").unwrap();
+    let titles: Vec<(&str, &str)> = m.decisions.iter().map(|d| (d.id.as_str(), d.title.as_str())).collect();
+    assert_eq!(
+        titles,
+        [
+            ("process", "Manufacturing process"),
+            ("min_wall", "Minimum wall"),
+            ("draft", "Draft angles"),
+            ("radii", "Bend radius"),
+            ("tolerances", "Tight tolerances"),
+        ]
+    );
+}
+
+/// The lint catches a title that repeats its question or names another decision.
+#[test]
+fn a_title_that_repeats_the_question_or_names_another_decision_is_a_lint_problem() {
+    let mut c = catalog();
+    let m = c.guides.iter_mut().find(|g| g.id == "manufacturable").unwrap();
+    m.decisions[1].title = "Minimum wall thickness".into();
+    m.decisions[2].title = "Manufacturing process draft".into();
+    let problems = c.lint(&[]);
+    assert!(problems.iter().any(|p| p.contains("manufacturable.min_wall") && p.contains("repeats the question")), "{problems:#?}");
+    assert!(problems.iter().any(|p| p.contains("manufacturable.draft") && p.contains("names process")), "{problems:#?}");
+}
