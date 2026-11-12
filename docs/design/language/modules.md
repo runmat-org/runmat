@@ -86,6 +86,9 @@ assembly fixture {
     use fx.part.clamp as clamp_b {
         placement = { placement = offset, offset = { translation = [60 mm, 0 mm, 6 mm] } }
     }
+    use part clamp from "./fixtures/clamp.part" as clamp_c {
+        placement = { placement = offset, offset = { translation = [120 mm, 0 mm, 6 mm] } }
+    }
 }
 ```
 
@@ -95,6 +98,7 @@ assembly fixture {
 |---|---|
 | `use part plate as plate` | the `part plate` of this folder, in any file of it |
 | `use part clamp from "./fixtures" as clamp_a` | a design in another folder; `..`, `../wing` and `./a/b` work |
+| `use part clamp from "./fixtures/clamp.part" as clamp_c` | the same design, through the file that declares it |
 | `use part skeleton from "//wing/skeleton" as sk` | a folder by its path from the project root |
 | `use part skeleton from "//wing/skeleton" @ "R3" as sk` | the same, pinned to the released revision `R3` |
 | `use part standoff from hardware as post` | the `+hardware/` package (`a.b` is `+a/+b/`) |
@@ -103,12 +107,13 @@ assembly fixture {
 
 - **In an assembly**, `use part <name> as <occurrence> { … }` is also the occurrence: it places the design and its block holds the placement, configuration and other occurrence fields. See [Occurrences and mates](/docs/mcad/assembly/mates).
 - **Kinds:** `part`, `assembly` and `material`. The kind keyword is part of the name: `use part x` never finds an assembly called `x`.
-- **Drawings and interface frames** name designs the same way: `model = { part = hinge_mount }`, `model = { assembly = drone, from = ".." }`, `to = { frame = interface, part = skeleton, name = wing_ref, from = "./interfaces" }`.
+- **Drawings and interface frames** name designs the same way: `model = { part = hinge_mount }`, `model = { assembly = drone, from = ".." }`, `model = { part = l_bracket, from = "../l_bracket.part" }`, `to = { frame = interface, part = skeleton, name = wing_ref, from = "./interfaces" }`.
+- **A file as `from`:** a `from` that ends in a design extension (`.part`, `.assembly`, `.drawing`) names that file, relative to the referring file like a folder path. The named design must be one the file declares. A drawing's `model` may leave the name out (`model = { from = "../l_bracket.part" }`) to show the file's own design.
 
 ## How a name resolves
 
 1. **The same folder.** Every design file in the folder, and every `.m` function in it (including `private/`).
-2. **A `from` path or an alias.** The folder it names, relative to the referring file, or from the project root with `//`.
+2. **A `from` path or an alias.** The folder or design file it names, relative to the referring file, or from the project root with `//`.
 3. **A package.** `from hardware` looks for `+hardware/` in the referring file's folder, then in each folder above it up to the project root, and takes the first it finds. A `+hardware` in `cabin/` therefore shadows the project's `+hardware` for designs in `cabin/`, while other folders still reach the project's.
 
 Subfolders are not in scope until a `use` names them. A `.m` function outside the folder comes from the MATLAB path, as in MATLAB: the project's source roots, its dependencies, then `+pkg` folders as `pkg.fn`.
@@ -120,9 +125,12 @@ Subfolders are not in scope until a `use` names them. A `.m` function outside th
 | The design is not in the folder | *no `part platter` in this folder (did you mean part.plate?)*, at the `use` line |
 | Two designs of one kind and name in one folder | an error naming both files |
 | Folders that `use` each other in a cycle | an error at the `use` that closes the cycle. Shared and skeleton folders must flow one way. |
-| A design named by its file path (`from "plate.part"`, `file = "arm.part"`, `model = { file = … }`) | an error at the reference that gives the symbol to write, such as `use part plate as …`, with `from "./folder"` for another folder. STEP sources keep their file paths. |
+| A `from` that names neither a design file nor a folder of designs | *`./l_bracket.part` is neither a design file nor a folder in the workspace; did you mean `../l_bracket.part`?*, with the nearest real file or folder when one is close |
+| A `from` file that doesn't declare the design | *no `part flange` in `../l_bracket.part`; it holds part l_bracket* |
+| A `from` file of another kind | *`../rig.assembly` holds assembly rig, not a part* |
+| A design named by a `file` key (`file = "arm.part"`, `model = { file = … }`) | an error at the reference that gives the symbol to write, such as `model = { part = arm }`. STEP sources keep their file paths. |
 
-This assembly names its part by file, so the check stops at the `use` line:
+This assembly names a file in a `parts/` folder that doesn't exist, so the check stops at the `use` line and suggests `./plate.part`:
 
 ```part file=plate.part
 runmat 0.7
@@ -142,7 +150,7 @@ runmat 0.7
 std 1
 
 assembly by_file {
-    use part plate from "plate.part" as base
+    use part plate from "./parts/plate.part" as base
 }
 ```
 
