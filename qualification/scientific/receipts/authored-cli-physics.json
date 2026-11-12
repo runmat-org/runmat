@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "cohort": "authored-cli-physics",
-  "policy_sha256": "71379c3bce11f6f26e0e017aa44b64cf12688b11dfac22f26fa55ae2969271f8",
+  "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "d8e06ca2ca8e68847e01c19268715c53a07a5cd5",
+    "source_revision": "ceae94b5da5d3c95f00cb6ba01a151a536f5fbcb",
     "passed": 12,
     "failed": 0,
     "ignored": 0,
@@ -22,18 +22,18 @@
       "generated_and_derived_geometry_complete_the_typed_study_pipeline",
       "harmonic::authored_harmonic_generated_and_explicit_sources_preserve_rod_response_and_phase"
     ],
-    "log_sha256": "fcf53bd545d2e16ab7d2a1593c8cbf86523d57c372d93761cc7de6c1caa15e08",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/final-d8e06ca2ca.authored-cli-physics.log",
+    "log_sha256": "458b119514332cd25b996529050c1601de1a2c22ef42af1a5f5dc313d77c523d",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific.authored-cli-physics.log",
     "artifacts": [
       {
-        "sha256": "72d565e1752d9ee54a37eac7bddc43bac96067a9aa289da3cd4d3254d440f82d",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/final-d8e06ca2ca.artifacts/authored-cli-physics-harness",
-        "bytes": 356045320
+        "sha256": "830d9243e079e3b1398a5cd44d5343da302eaf27a95fb5f57f94a10ab7675557",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific-artifacts/typed_fea_geometry_cli",
+        "bytes": 356405896
       },
       {
-        "sha256": "15203f17e66981b6daa4f0ea8fa357ee07b8ed1d6904487f13f3260ad5f3fa2d",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/final-d8e06ca2ca.artifacts/runmat",
-        "bytes": 682128952
+        "sha256": "3c30253c880d8ae8ceed8de8947e38c5cf268c126c5530824a4c30c07c9c44cb",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific-artifacts/runmat",
+        "bytes": 682734392
       }
     ],
     "exit_code": 0,
@@ -63,34 +63,34 @@
     },
     "selected_filter": null,
     "inputs": {
-      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
-      "files": 26096,
+      "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "source_verification": {
-      "at": "2026-11-11T13:18:39.787Z",
+      "at": "2026-11-12T00:02:14.039Z",
       "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
-      "stage": "/home/nallana/rm1293/incoming/final-d8e06ca2ca",
+      "stage": "/home/nallana/rm1293/incoming/intake-ceae94b5da-source",
       "status": "verified",
-      "files": 27232
+      "files": 27246
     },
-    "source_scope": "Content-verified public snapshot; transfer protects .env namespaces and excludes them from its inventory."
+    "source_scope": "All 27,246 canonical source files verified against the frozen ceae94b5da snapshot after the authored cohort. Credentials and .env namespaces are excluded from transfers."
   },
   "conservation": {
     "measured_inputs": {
-      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
-      "files": 26096,
+      "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "22322d2db88a4ad8623cb1ffcc2741cb82ffb92a9826e10ba431c35f7094f238",
-      "files": 26096,
+      "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts.",
+    "reason": "The complete seven-file source delta contains four formatting-only changes, one isolated CAD integration fixture repair and the selected-plane sketch handler with its separate regression. The authored FEA CLI cohort does not dispatch part.sketch. Its scientific arithmetic, admission, publication, test cases and required command remain unchanged.",
     "review": {
-      "path": "qualification/scientific/reviews/d8e06-final-integration.json",
-      "sha256": "7013249d738dfb4cb3a8788fdb7d6c52514e268d482c4b5f0b2568d8ebb098f4"
+      "path": "qualification/scientific/reviews/authored-ceae-to-793f9ae2b3.json",
+      "sha256": "b3e4d75f5d50696cfe9affad4f18315171c200cd46698e5b8ab3df09dd045106"
     }
   }
 }
