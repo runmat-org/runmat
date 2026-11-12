@@ -251,7 +251,11 @@ pub fn derive_curve_geometry_metric(
             points_m: witness_points,
             face_material_sides: face_normals
                 .keys()
-                .filter_map(|face| face_sides.get(face).map(|sides| (face.clone(), sides.clone())))
+                .filter_map(|face| {
+                    face_sides
+                        .get(face)
+                        .map(|sides| (face.clone(), sides.clone()))
+                })
                 .collect(),
             face_normals,
         });

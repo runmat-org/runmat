@@ -141,7 +141,11 @@ fn the_battery_cold_plate_sizes_its_thin_material_and_not_its_steps() {
     let representation = geometry.kernel_representation().unwrap().unwrap().to_vec();
     let evaluator = runmat_geometry_io::OcctExactEvaluator::from_closure_controlled(
         &representation,
-        geometry.document.source.representation_units.meters_per_unit(),
+        geometry
+            .document
+            .source
+            .representation_units
+            .meters_per_unit(),
         &geometry.topology,
         &geometry.evaluators,
         &Unlimited,
@@ -188,10 +192,16 @@ impl runmat_geometry_core::GeometryEvaluationControl for Unlimited {
     fn checkpoint(&self) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
         Ok(())
     }
-    fn consume_iterations(&self, _: u64) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
+    fn consume_iterations(
+        &self,
+        _: u64,
+    ) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
         Ok(())
     }
-    fn consume_search_work(&self, _: u64) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
+    fn consume_search_work(
+        &self,
+        _: u64,
+    ) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
         Ok(())
     }
     fn consume_allocation_bytes(

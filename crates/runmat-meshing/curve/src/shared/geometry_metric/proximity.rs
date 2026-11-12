@@ -876,7 +876,8 @@ mod tests {
             edge.points_m = (0..9).map(|i| [0.0, i as f64 * 0.5 / 8.0, z]).collect();
             edge.face_ids = BTreeSet::from([strip.clone(), other.clone()]);
             edge.solid_ids = BTreeSet::from([plate.clone()]);
-            edge.face_normals.insert(strip.clone(), vec![[1.0, 0.0, 0.0]; 9]);
+            edge.face_normals
+                .insert(strip.clone(), vec![[1.0, 0.0, 0.0]; 9]);
             edge.face_normals.insert(other.clone(), vec![raw; 9]);
             edge.face_material_sides
                 .insert(strip.clone(), BTreeMap::from([(plate.clone(), 1.0)]));
