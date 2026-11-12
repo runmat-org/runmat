@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -55,10 +56,25 @@ struct PlacedBody {
   TopoDS_Shape shape;
   ExactNameTable names;
   std::string display_name;
+  // The occurrence path by instance names below the top-level shape (`left` or `wing/aileron`),
+  // empty for a top-level part or when an instance on the path is unnamed.
+  std::string occurrence_path;
 };
+
+// The path of `component` below `parent`: nullptr when `parent` has none or the instance is
+// unnamed (or its name holds the path separator).
+std::unique_ptr<std::string> component_path(const std::string* parent,
+                                            const TDF_Label& component) {
+  const std::string name = exact_label_name(component);
+  if (parent == nullptr || name.empty() || name.find('/') != std::string::npos) {
+    return nullptr;
+  }
+  return std::make_unique<std::string>(parent->empty() ? name : *parent + "/" + name);
+}
 
 void collect_bodies(const TDF_Label& occurrence,
                     const TopLoc_Location& parent_location,
+                    const std::string* path,
                     std::uint32_t depth,
                     std::vector<PlacedBody>& bodies,
                     const OcctImportOptions& options) {
@@ -77,7 +93,9 @@ void collect_bodies(const TDF_Label& occurrence,
     TDF_LabelSequence components;
     XCAFDoc_ShapeTool::GetComponents(definition, components, Standard_False);
     for (Standard_Integer index = 1; index <= components.Length(); ++index) {
-      collect_bodies(components.Value(index), location, depth + 1, bodies, options);
+      const std::unique_ptr<std::string> child = component_path(path, components.Value(index));
+      collect_bodies(
+          components.Value(index), location, child.get(), depth + 1, bodies, options);
     }
     return;
   }
@@ -91,6 +109,7 @@ void collect_bodies(const TDF_Label& occurrence,
   const ExactNameTable names = ExactNameTable::from_definition(definition, occurrence);
   PlacedBody body;
   body.display_name = names.body_name();
+  body.occurrence_path = path == nullptr ? std::string() : *path;
   // The joined shape is written without placements: each part's placement is applied to its
   // geometry, so every shape in the result is in one frame and no kernel location survives.
   if (placement.IsIdentity()) {
@@ -151,7 +170,8 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
     TDF_LabelSequence free_shapes;
     shape_tool->GetFreeShapes(free_shapes);
     for (Standard_Integer index = 1; index <= free_shapes.Length(); ++index) {
-      collect_bodies(free_shapes.Value(index), TopLoc_Location(), 0, bodies, options);
+      const std::string top;
+      collect_bodies(free_shapes.Value(index), TopLoc_Location(), &top, 0, bodies, options);
     }
   } else {
     PlacedBody body;
@@ -214,8 +234,10 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
   TopoDS_Compound compound;
   compound_builder.MakeCompound(compound);
   std::unordered_map<const TopoDS_TShape*, std::size_t> owners;
-  // (volume, name) per shared face, edge or vertex, then sorted into the documented precedence.
-  std::unordered_map<const TopoDS_TShape*, std::pair<TopoDS_Shape, std::vector<std::tuple<double, std::string>>>>
+  // (rank, volume, name) per shared face, edge or vertex, then sorted into the documented
+  // precedence: authored names (rank 0) before their occurrence-qualified forms (rank 1).
+  std::unordered_map<const TopoDS_TShape*,
+                     std::pair<TopoDS_Shape, std::vector<std::tuple<int, double, std::string>>>>
       subshape_names;
   for (std::size_t index = 0; index < inputs.size(); ++index) {
     check_cancelled(options);
@@ -237,8 +259,14 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
                                "touch without overlapping");
     }
     compound_builder.Add(compound, image);
-    for (const std::string& name : body.names.solid_names(input.solid)) {
+    const std::vector<std::string> solid_names = body.names.solid_names(input.solid);
+    for (const std::string& name : solid_names) {
       result.names.add_solid_name(image, name);
+    }
+    if (!body.occurrence_path.empty()) {
+      for (const std::string& name : solid_names) {
+        result.names.add_solid_name(image, body.occurrence_path + "/" + name);
+      }
     }
     for (const std::string& tag : body.names.solid_tags(input.solid)) {
       result.names.add_solid_tag(image, tag);
@@ -263,7 +291,10 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
           auto& entry = subshape_names[subshape_image.TShape().get()];
           entry.first = subshape_image;
           for (const std::string& name : names) {
-            entry.second.emplace_back(input.volume, name);
+            entry.second.emplace_back(0, input.volume, name);
+            if (!body.occurrence_path.empty()) {
+              entry.second.emplace_back(1, input.volume, body.occurrence_path + "/" + name);
+            }
           }
         }
       }
@@ -272,7 +303,8 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
   for (auto& [key, entry] : subshape_names) {
     (void)key;
     std::sort(entry.second.begin(), entry.second.end());
-    for (const auto& [volume, name] : entry.second) {
+    for (const auto& [rank, volume, name] : entry.second) {
+      (void)rank;
       (void)volume;
       result.names.add_subshape_name(entry.first, name);
     }

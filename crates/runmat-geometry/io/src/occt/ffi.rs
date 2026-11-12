@@ -290,6 +290,9 @@ pub(crate) mod bridge {
         occurrence_index: u64,
         parent_occurrence_index: u64,
         path_segments: Vec<String>,
+        /// The occurrence's authored name (the instance label's name); empty for the root or an
+        /// unnamed instance.
+        occurrence_name: String,
         definition_index: u64,
         transform: Vec<f64>,
     }
