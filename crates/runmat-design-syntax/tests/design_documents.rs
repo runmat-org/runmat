@@ -290,6 +290,9 @@ fn model_errors_point_at_the_text_that_wrote_them() {
         &text[diagnostic.span.start..diagnostic.span.end],
         "\"wide\""
     );
+    // People read the message; the internal path only places the span.
+    assert_eq!(diagnostic.message, message);
+    assert!(!diagnostic.message.contains("inputs[0]"), "{}", diagnostic.message);
 }
 
 #[test]
