@@ -495,12 +495,15 @@ fn drawing() -> DrawingDocument {
         display: Display::HiddenLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),
         header: Default::default(),
         formats: vec![SheetFormat {
             standard: Default::default(),
+            units: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![
@@ -556,6 +559,9 @@ fn drawing() -> DrawingDocument {
                     },
                     label: "A".into(),
                     aligned: false,
+                    offset: None,
+                    keep_other_side: false,
+                    vertical: false,
                 },
             ),
             View {

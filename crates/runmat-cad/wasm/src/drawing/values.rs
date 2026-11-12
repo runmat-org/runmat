@@ -7,7 +7,8 @@
 //! Y14.5 and ISO 1101 write them).
 //!
 //! Values print as drawings print them: in the part's millimetres with no unit, trailing zeros
-//! dropped (`80`, `12.5`).
+//! dropped (`80`, `12.5`); dimensions print in the drawing's units when its format sets them
+//! (`9'-1 1/8"`, [`runmat_cad::drawing::units`]).
 
 use runmat_cad::drawing::index::AnnotationValues;
 use runmat_cad::drawing::{ArcCondition, DimensionStyle, ModelRef};
@@ -26,6 +27,8 @@ type P3 = [f64; 3];
 pub struct Values<'a> {
     pub displays: &'a serde_json::Map<String, Value>,
     pub documents: &'a BTreeMap<String, PartDocument>,
+    /// The units dimension values print in (the drawing's sheet formats').
+    pub units: runmat_cad::drawing::units::DrawingUnits,
 }
 
 /// A number as a drawing prints it: two decimals at most, trailing zeros dropped.
@@ -216,18 +219,7 @@ fn modifier(m: MaterialCondition) -> &'static str {
 
 /// A length written in the part: millimetres, or the unit converted.
 fn length_mm(v: &ValueExpr) -> Option<f64> {
-    match v {
-        ValueExpr::Quantity { value, unit } => Some(match unit.as_str() {
-            "mm" => *value,
-            "m" => value * 1000.0,
-            "cm" => value * 10.0,
-            "um" | "µm" => value / 1000.0,
-            "in" => value * 25.4,
-            _ => return None,
-        }),
-        ValueExpr::Number { value } => Some(*value),
-        _ => None,
-    }
+    runmat_cad::units::length_mm(v)
 }
 
 impl AnnotationValues for Values<'_> {
@@ -246,27 +238,29 @@ impl AnnotationValues for Values<'_> {
             .collect();
         match (style, faces.as_slice()) {
             (DimensionStyle::Radius, [(_, surface)]) => {
-                cylinder(surface).map(|(_, _, r)| format!("R{}", number(r)))
+                cylinder(surface).map(|(_, _, r)| format!("R{}", self.units.length(r)))
             }
             (_, [(_, surface)]) => {
-                cylinder(surface).map(|(_, _, r)| format!("⌀{}", number(2.0 * r)))
+                cylinder(surface).map(|(_, _, r)| format!("⌀{}", self.units.length(2.0 * r)))
             }
             (DimensionStyle::Angular, [a, b]) => angle(a, b).map(|deg| format!("{}°", number(deg))),
             // Baseline: each feature from the first; chain: each from the one before. One value
             // per pair, in order, joined by ` · ` (the sheet draws one dimension line each).
             (DimensionStyle::Baseline, [first, rest @ ..]) if !rest.is_empty() => {
-                let v: Option<Vec<String>> =
-                    rest.iter().map(|f| linear(first, f).map(number)).collect();
+                let v: Option<Vec<String>> = rest
+                    .iter()
+                    .map(|f| linear(first, f).map(|v| self.units.length(v)))
+                    .collect();
                 v.map(|v| v.join(" · "))
             }
             (DimensionStyle::Chain, all) if all.len() >= 2 => {
                 let v: Option<Vec<String>> = all
                     .windows(2)
-                    .map(|w| linear(&w[0], &w[1]).map(number))
+                    .map(|w| linear(&w[0], &w[1]).map(|v| self.units.length(v)))
                     .collect();
                 v.map(|v| v.join(" · "))
             }
-            (_, [a, b]) => linear(a, b).map(number),
+            (_, [a, b]) => linear(a, b).map(|v| self.units.length(v)),
             _ => None,
         }
     }
@@ -298,7 +292,7 @@ impl AnnotationValues for Values<'_> {
             .filter_map(|(_, s)| cylinder(s))
             .map(|(_, _, r)| r)
             .sum();
-        Some(number(linear(a, b)? + sign * radii))
+        Some(self.units.length(linear(a, b)? + sign * radii))
     }
 
     fn tolerance_frame(&self, model: &ModelRef, tolerance: &str) -> Option<String> {

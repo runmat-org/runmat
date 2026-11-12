@@ -48,7 +48,8 @@
 //! product under its name. `--copper` adds the outer copper as thin solids; `--no-mask` leaves the
 //! mask out.
 //!
-//! The workspace is the file's folder and everything under it (`--root <dir>` names another).
+//! The workspace is the file's project (the nearest folder up holding a `runmat.toml`, else the
+//! file's folder) and everything under it (`--root <dir>` names another).
 //! `--all-configurations` exports a product family: a part's STEP, or every sheet of a
 //! drawing as DXF, once per configuration. Files are written to `--out` (default: the current
 //! folder) and listed on stdout.
@@ -97,7 +98,7 @@ fn check(args: &[String]) -> ExitCode {
         let base = root
             .clone()
             .and_then(|r| std::fs::canonicalize(r).ok())
-            .unwrap_or_else(|| file.parent().unwrap_or(Path::new("/")).to_path_buf());
+            .unwrap_or_else(|| runmat_design_tools::workspace::project_root(&file));
         let files = runmat_design_tools::workspace::read_workspace(&base);
         let path = source_path(&file);
         if matches!(runmat_design_tools::DesignKind::of(&path), Some(k) if !k.is_circuit()) {
@@ -261,7 +262,7 @@ fn run(args: &[String]) -> ExitCode {
     };
     let base = root
         .and_then(|r| std::fs::canonicalize(r).ok())
-        .unwrap_or_else(|| file.parent().unwrap_or(Path::new("/")).to_path_buf());
+        .unwrap_or_else(|| runmat_design_tools::workspace::project_root(&file));
     let files = runmat_design_tools::workspace::read_workspace(&base);
     let path = source_path(&file);
     let Some(text) = files
@@ -482,7 +483,7 @@ fn main() -> ExitCode {
     };
     let root = root
         .and_then(|r| std::fs::canonicalize(r).ok())
-        .unwrap_or_else(|| file.parent().unwrap_or(Path::new("/")).to_path_buf());
+        .unwrap_or_else(|| runmat_design_tools::workspace::project_root(&file));
     let files = runmat_design_tools::workspace::read_workspace(&root);
     let mut input = json!({
         "path": source_path(&file),

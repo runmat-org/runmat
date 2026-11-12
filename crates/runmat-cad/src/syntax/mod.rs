@@ -210,7 +210,8 @@ pub const DRAWING: DocumentGrammar = DocumentGrammar {
                 field: "kind",
                 tag: "view",
                 extras: &[
-                    "sheet", "model", "at", "scale", "display", "exclude", "exploded",
+                    "sheet", "model", "at", "scale", "display", "exclude", "exploded", "title",
+                    "centerlines",
                 ],
             }),
             ..named("view", "views", "view")

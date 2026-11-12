@@ -158,6 +158,7 @@ fn a_facet_edge_on_at_the_silhouette_still_draws_it() {
         edges: Vec::new(),
         axes: Vec::new(),
         bodies: 1,
+        materials: Vec::new(),
     };
     let front = axes("front");
     let xs: Vec<f64> = silhouettes(&model, front.depth)
@@ -209,6 +210,7 @@ fn a_silhouette_along_a_smooth_split_between_two_faces_still_draws() {
         edges: Vec::new(),
         axes: Vec::new(),
         bodies: 1,
+        materials: Vec::new(),
     };
     let mut vs: Vec<f64> = silhouettes(&model, front.depth)
         .iter()
@@ -237,6 +239,7 @@ fn a_silhouette_along_a_smooth_split_between_two_faces_still_draws() {
         edges: Vec::new(),
         axes: Vec::new(),
         bodies: 2,
+        materials: Vec::new(),
     };
     assert!(silhouettes(&apart, front.depth).is_empty());
 }
@@ -309,6 +312,7 @@ fn a_thin_skin_hides_what_touches_it_in_a_large_model() {
         }],
         axes: Vec::new(),
         bodies: 2,
+        materials: Vec::new(),
     };
     let lines = lines_of(&model, &axes("front"), true);
     assert!(lines.visible.is_empty(), "visible: {:?}", lines.visible);
@@ -353,6 +357,7 @@ fn a_hidden_cylinder_draws_no_center_mark() {
         edges: Vec::new(),
         axes: vec![shank],
         bodies: 2,
+        materials: Vec::new(),
     };
     let front = axes("front");
     assert!(lines_of(&model(true), &front, false).centers.is_empty());
@@ -381,6 +386,7 @@ fn centerlines_in_line_join_only_where_they_meet() {
         edges: Vec::new(),
         axes,
         bodies: 1,
+        materials: Vec::new(),
     };
     let front = axes("front");
     let apart = centers(

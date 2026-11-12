@@ -53,6 +53,7 @@ pub fn edit(
                             size,
                             title_block: first.map(|f| f.title_block.clone()).unwrap_or_default(),
                             standard: first.map(|f| f.standard).unwrap_or_default(),
+                            units: first.map(|f| f.units).unwrap_or_default(),
                         };
                         d.document.formats.push(format);
                         name

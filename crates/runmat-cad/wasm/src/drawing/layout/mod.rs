@@ -25,6 +25,7 @@ mod border;
 mod angular;
 mod callouts;
 mod dims;
+mod lining;
 pub(crate) mod marks;
 pub(crate) mod solver;
 mod tables;
@@ -237,6 +238,8 @@ pub(crate) struct Ctx<'a> {
     /// The sheet's scale (numerator / denominator).
     pub scale: f64,
     pub size: Xy,
+    /// The units the format's dimensions and scales print in.
+    pub units: runmat_cad::drawing::units::DrawingUnits,
     /// The drawing frame's inside: everything drawn stays in it.
     pub frame: solver::BoxR,
     pub occ: solver::Occupancy,
@@ -269,6 +272,7 @@ impl<'a> Ctx<'a> {
         };
         let std = Std::of(&data["styles"][sheet]);
         let frame = border::frame_box(size, std.iso);
+        let units = serde_json::from_value(format["units"].clone()).unwrap_or_default();
         Ctx {
             data,
             displays,
@@ -276,6 +280,7 @@ impl<'a> Ctx<'a> {
             std,
             scale,
             size,
+            units,
             frame,
             occ: solver::Occupancy::new(frame),
             out: SheetLayout {
@@ -299,6 +304,27 @@ impl<'a> Ctx<'a> {
             item: item.to_owned(),
             message,
         });
+    }
+
+    /// A view's scale as its label prints it, in the format's units (`1:2`, `3" = 1'-0"`,
+    /// `FULL SIZE` for 1:1 in inches or feet and inches).
+    pub fn scale_label(&self, scale: f64) -> String {
+        use runmat_cad::drawing::units::DrawingUnits;
+        if self.units != DrawingUnits::Mm && (scale - 1.0).abs() < 1e-9 {
+            return self.units.scale((1, 1));
+        }
+        if self.units == DrawingUnits::FtIn && scale > 0.0 && scale < 1.0 {
+            return self.units.scale((1, (1.0 / scale).round() as u32));
+        }
+        scale_text(scale)
+    }
+
+    /// A view's scale line under its title: `SCALE 1:2`, or `FULL SIZE` alone.
+    pub fn scale_line(&self, scale: f64) -> String {
+        match self.scale_label(scale) {
+            full if full == "FULL SIZE" => full,
+            label => format!("SCALE {label}"),
+        }
     }
 
     /// The text the compile gives an annotation (its value, frame cells, callout).

@@ -207,12 +207,15 @@ fn drawing() -> DrawingDocument {
         display: Display::HiddenLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),
         header: Default::default(),
         formats: vec![SheetFormat {
             standard: Default::default(),
+            units: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![
@@ -268,6 +271,9 @@ fn drawing() -> DrawingDocument {
                     },
                     label: "A".into(),
                     aligned: false,
+                    offset: None,
+                    keep_other_side: false,
+                    vertical: false,
                 },
             ),
             View {
@@ -820,3 +826,35 @@ fn adding_a_publish_and_removing_it_restores_the_source() {
 
 #[allow(dead_code)]
 fn unused(_: BTreeMap<(), ()>, _: RelPath) {}
+
+#[test]
+fn a_section_view_keeps_its_title_offset_and_sides_through_text() {
+    let document: DrawingDocument = serde_json::from_value(serde_json::json!({
+        "path": "plans.drawing",
+        "formats": [{ "name": "d", "size": { "size": "ansi", "name": "D" }, "title_block": [], "units": "ft_in" }],
+        "sheets": [{ "name": "1", "format": "d", "scale": [1, 48], "projection": "third_angle" }],
+        "views": [
+            { "name": "key", "sheet": "1", "model": { "file": "house.part" }, "at": [80.0, 400.0], "display": "visible_lines",
+              "kind": { "view": "standard", "orientation": "front" }, "title": "KEY" },
+            { "name": "first", "sheet": "1", "model": { "file": "house.part" }, "at": [300.0, 300.0], "display": "visible_lines",
+              "kind": { "view": "section", "from": "key", "plane": { "on": "datum", "datum": { "datum": "origin_plane", "plane": "xy" } }, "label": "A",
+                        "offset": { "form": "quantity", "value": 4.0, "unit": "ft" }, "keep_other_side": true },
+              "title": "FIRST FLOOR PLAN" }
+        ],
+        "annotations": [],
+        "tables": []
+    }))
+    .expect("the document reads");
+    let text = runmat_cad::syntax::print_drawing(&document, &[]).expect("prints");
+    assert!(
+        text.contains("title = \"FIRST FLOOR PLAN\"") && text.contains("units = ft_in"),
+        "{text}"
+    );
+    let parsed = reparse_drawing("plans.drawing", &text, &document);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "{text}\n{:#?}",
+        parsed.diagnostics
+    );
+    assert_eq!(parsed.document.expect("parses"), document);
+}

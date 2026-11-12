@@ -29,6 +29,7 @@ pub mod merge;
 pub mod revision_table;
 pub mod standard;
 pub mod title_layout;
+pub mod units;
 
 use crate::assembly::bom::{Bom, BomItem, BomKind, IndentedRow};
 use crate::assembly::model::RelPath;
@@ -96,6 +97,10 @@ pub struct SheetFormat {
     /// ([`standard::DrawingStandard::style`]).
     #[serde(default, skip_serializing_if = "standard::DrawingStandard::is_iso")]
     pub standard: standard::DrawingStandard,
+    /// The units its sheets' dimensions and scale print in (`units = ft_in`; millimetres when
+    /// absent) ([`units::DrawingUnits`]).
+    #[serde(default, skip_serializing_if = "units::DrawingUnits::is_mm")]
+    pub units: units::DrawingUnits,
 }
 
 impl SheetFormat {
@@ -209,12 +214,29 @@ pub enum ViewKind {
     /// A cut through the model seen from `from`: the cutting line crosses the parent view
     /// through a point of `plane`, a face (`feature.body.face.end`) or an origin plane
     /// (`origin.xy`, `origin.yz`, `origin.zx`, through the model's origin).
+    ///
+    /// `offset` moves the cut from that point across the parent's cutting line, toward the
+    /// parent's top (or right, for a `vertical` cutting line): `offset = 4 ft` on a front
+    /// elevation cuts 4 ft above the plane's point. The section looks from the cutting line
+    /// toward the parent's top and keeps the model beyond it; `keep_other_side` looks the other
+    /// way and keeps the other side, so a horizontal cut through a front elevation is a floor
+    /// plan (the model below the cut, seen from above).
     Section {
         from: String,
         plane: crate::model::PlaneRef,
         label: String,
         #[serde(default)]
         aligned: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offset: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_other_side: bool,
+        /// The cutting line runs up the parent instead of across it: the cut's normal is the
+        /// parent's right, the section looks toward the parent's right (the other side: its
+        /// left), and `offset` moves the cut to the right. A vertical cut through a roof plan is
+        /// a cross section through the building.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        vertical: bool,
     },
     /// An enlarged circle of `from` around a model point.
     Detail {
@@ -329,6 +351,23 @@ pub struct View {
     /// lines), for assembly instructions and service views.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exploded: Option<String>,
+    /// The title under the view in place of the one its kind gives (`SECTION A-A`, `FRONT
+    /// VIEW`): `title = "FIRST FLOOR PLAN"`. A section keeps its letter on the cutting line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Whether the view draws center marks and centerlines on holes, bosses and shafts (on by
+    /// default). A floor plan sets `centerlines = false`: its posts, rods and fixtures read
+    /// without crosses.
+    #[serde(default = "drawn", skip_serializing_if = "is_drawn")]
+    pub centerlines: bool,
+}
+
+fn drawn() -> bool {
+    true
+}
+
+fn is_drawn(on: &bool) -> bool {
+    *on
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1159,7 +1198,7 @@ pub fn check_drawing_with(
                 FieldSource::Literal { text } => text.clone(),
                 FieldSource::SheetNumber => (i + 1).to_string(),
                 FieldSource::SheetCount => count.to_string(),
-                FieldSource::Scale => format!("{}:{}", sh.scale.0, sh.scale.1),
+                FieldSource::Scale => f.units.scale(sh.scale),
                 FieldSource::Image { .. } => String::new(),
                 FieldSource::Revision => model_of
                     .and_then(|m| model.property(m, &PropertyName::new("revision")))
