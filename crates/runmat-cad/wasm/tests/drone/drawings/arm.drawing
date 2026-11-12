@@ -76,9 +76,9 @@ drawing arm {
             "DIMENSIONS IN MM. UNTOLERANCED: ISO 2768-m.",
             "PART MARK {part_number} NEAR THE KNUCKLE."
         ],
-        width = 140 mm,
+        width = 185 mm,
         sheet = "1",
-        at = [25, 55]
+        at = [25, 51]
     )
 
     table revisions = revision(

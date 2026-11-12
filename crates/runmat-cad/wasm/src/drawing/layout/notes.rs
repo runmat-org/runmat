@@ -27,6 +27,8 @@ pub const DEFAULT_WIDTH: f64 = 100.0;
 pub const LEADER_WIDTH: f64 = 90.0;
 /// The space kept between a note and what is beside it.
 const CLEAR: f64 = 1.0;
+/// The space kept between a note and the border.
+const BORDER_CLEAR: f64 = 3.0;
 
 impl Std {
     /// The baseline-to-baseline pitch of text `size` high: ISO 3098-1 lettering type B sets
@@ -161,12 +163,11 @@ impl NotesList {
         }
     }
 
-    /// The column's width and the list's height: the heading, a pitch, then each note's lines
-    /// with half a pitch between notes.
+    /// The column's width and the list's height: the heading, then each note's lines, a pitch
+    /// apart (the numbers and the hanging indent set the notes apart).
     pub fn size_wh(&self) -> Xy {
         let lines: usize = self.items.iter().map(|(_, b)| b.lines.len()).sum();
-        let gaps = self.items.len().saturating_sub(1) as f64 * self.pitch * 0.5;
-        let h = self.size * 1.25 + (1 + lines) as f64 * self.pitch + gaps;
+        let h = self.size * 1.25 + lines as f64 * self.pitch;
         [self.width, h]
     }
 
@@ -193,7 +194,7 @@ impl NotesList {
                 q.kind = "table";
                 out.push(q);
             }
-            top -= block.lines.len() as f64 * self.pitch + self.pitch * 0.5;
+            top -= block.lines.len() as f64 * self.pitch;
         }
         out
     }
@@ -220,17 +221,24 @@ fn what_is_under(ctx: &Ctx<'_>, b: &BoxR, owner: &str) -> String {
         .unwrap_or_else(|| "the centring marks".into())
 }
 
-/// Whether `b` is free for a note owned by `owner` and clear of the centring marks.
+/// Whether `b` is free for a note owned by `owner`, off the border and clear of the centring
+/// marks.
 fn free(ctx: &Ctx<'_>, b: &BoxR, owner: &str) -> bool {
+    ctx.occ.free(b, owner, CLEAR, &[]) && clear_of_border(ctx, b)
+}
+
+/// Whether `b` keeps its distance from the border and the centring marks.
+fn clear_of_border(ctx: &Ctx<'_>, b: &BoxR) -> bool {
     let marks = super::border::centring_marks(ctx.size, &ctx.frame);
-    ctx.occ.free(b, owner, CLEAR, &[]) && marks.iter().all(|(p, q)| !b.grow(0.5).crossed_by(*p, *q))
+    b.inside(&ctx.occ.frame.grow(-BORDER_CLEAR))
+        && marks.iter().all(|(p, q)| !b.grow(0.5).crossed_by(*p, *q))
 }
 
 /// A note placed by hand with no `width`: wrapped at the room to the right of `at`, narrowing to
 /// the nearest item in its way. None when it has no room at `at`.
 fn wrap_in_room(ctx: &Ctx<'_>, owner: &str, at: Xy, t: &str) -> Option<TextBlock> {
     let st = &ctx.std;
-    let mut w = ctx.occ.frame.x1 - at[0] - CLEAR;
+    let mut w = ctx.occ.frame.x1 - at[0] - BORDER_CLEAR;
     for _ in 0..12 {
         if w < MIN_WIDTH.min(Std::text_width(t, st.text)) {
             return None;
@@ -283,17 +291,14 @@ pub fn fit(
         Some(w) => vec![w],
         None => [DEFAULT_WIDTH, 75.0, 50.0]
             .into_iter()
-            .map(|w| w.min(ctx.occ.frame.w() - 2.0 * CLEAR))
+            .map(|w| w.min(ctx.occ.frame.w() - 2.0 * BORDER_CLEAR))
             .collect(),
     };
     for w in &widths {
         let block = TextBlock::new(&st, t, Some(*w));
         let [bw, bh] = block.size_wh();
         let c = [near[0] + bw / 2.0, near[1] - bh / 2.0];
-        let ok = |b: &BoxR| {
-            let marks = super::border::centring_marks(ctx.size, &ctx.frame);
-            marks.iter().all(|(p, q)| !b.grow(0.5).crossed_by(*p, *q))
-        };
+        let ok = |b: &BoxR| clear_of_border(ctx, b);
         if let Some(b) = nearest_free(&ctx.occ, owner, [bw, bh], c, 2.0, CLEAR, &ok) {
             let spot = [b.x0, b.y1];
             if let Some(at) = at {
