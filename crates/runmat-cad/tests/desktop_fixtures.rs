@@ -414,6 +414,7 @@ impl AnnotationValues for Model {
         &self,
         _: &ModelRef,
         _: DimensionStyle,
+        _: &[runmat_cad::assembly::model::RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
         (!entities.is_empty()).then(|| "10 mm".into())
@@ -588,6 +589,7 @@ fn drawing() -> DrawingDocument {
                     group: None,
                     reference: false,
                     condition: Default::default(),
+                    occurrences: Vec::new(),
                 },
                 at: [0.0, 0.0],
             },

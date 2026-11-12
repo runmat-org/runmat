@@ -136,6 +136,10 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
         {
             continue;
         }
+        // Grids, level marks and door swings are drawn as building marks (plan_marks.rs).
+        if matches!(what, "grids" | "level" | "door_swing") {
+            continue;
+        }
         let id = format!("annotation:{aid}");
         let t = ctx.text_of(&aid);
         let anchors: Vec<Xy> = ctx.data["anchors"][&aid]

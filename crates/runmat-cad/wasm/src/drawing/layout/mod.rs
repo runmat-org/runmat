@@ -13,7 +13,8 @@
 //!    parent. Each view reserves room for its label and its dimension rows ([`views`]).
 //! 5. **Dimensions** stack outward from the view at the standard's offsets, shortest nearest;
 //!    a dimension that repeats one already drawn is a finding and is drawn once ([`dims`]).
-//! 6. **Callouts** (hole callouts, frames, finishes, notes, weld symbols, datum targets,
+//! 6. **Building marks**: grid lines and bubbles, level marks and door swings ([`plan_marks`]).
+//! 7. **Callouts** (hole callouts, frames, finishes, notes, weld symbols, datum targets,
 //!    balloons) take the free spot nearest what they point at, where their label overlaps
 //!    nothing and their leader crosses no text ([`callouts`], [`solver`]).
 //!
@@ -26,6 +27,7 @@ mod angular;
 mod callouts;
 mod dims;
 mod lining;
+mod plan_marks;
 pub(crate) mod marks;
 pub(crate) mod solver;
 mod tables;
@@ -220,6 +222,7 @@ pub fn sheet_layout(data: &Value, displays: &Map<String, Value>, name: &str) -> 
     views::place(&mut ctx, &mut planned, &plans.rooms);
     views::draw(&mut ctx, &planned);
     dims::draw(&mut ctx, &planned, plans);
+    plan_marks::draw(&mut ctx, &planned);
     callouts::draw(&mut ctx, &planned);
     for p in &mut ctx.out.primitives {
         if p.width.is_none() {

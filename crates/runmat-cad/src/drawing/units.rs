@@ -31,6 +31,20 @@ impl DrawingUnits {
         }
     }
 
+    /// A height (mm) as a level mark prints it: as [`Self::length`], except that feet and
+    /// inches always carry the feet (`0'-0"`, `-0'-8"`, `10'-1 3/4"`), as elevations are written.
+    pub fn elevation(self, mm: f64) -> String {
+        match self {
+            DrawingUnits::FtIn => {
+                let inches = mm / 25.4;
+                let sixteenths = (inches.abs() * 16.0).round() as u64;
+                let sign = if inches < 0.0 && sixteenths > 0 { "-" } else { "" };
+                format!("{sign}{}'-{}\"", sixteenths / 192, fraction(sixteenths % 192))
+            }
+            other => other.length(mm),
+        }
+    }
+
     /// A sheet scale `numerator : denominator` as the title block prints it.
     pub fn scale(self, (n, d): (u32, u32)) -> String {
         if self != DrawingUnits::Mm && n > 0 && n == d {
@@ -95,6 +109,15 @@ mod tests {
         assert_eq!(FtIn.length(143.99 * 25.4), "12'-0\"");
         assert_eq!(Inch.length(7.75 * 25.4), "7.75\"");
         assert_eq!(Mm.length(12.5), "12.5");
+    }
+
+    #[test]
+    fn an_elevation_always_carries_its_feet() {
+        assert_eq!(FtIn.elevation(0.0), "0'-0\"");
+        assert_eq!(FtIn.elevation(-8.0 * 25.4), "-0'-8\"");
+        assert_eq!(FtIn.elevation(-22.0 * 25.4), "-1'-10\"");
+        assert_eq!(FtIn.elevation(121.75 * 25.4), "10'-1 3/4\"");
+        assert_eq!(super::DrawingUnits::Mm.elevation(3200.0), "3200");
     }
 
     #[test]

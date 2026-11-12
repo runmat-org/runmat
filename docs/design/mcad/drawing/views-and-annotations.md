@@ -1,5 +1,5 @@
 ---
-description: Reference for RunMat drawing files. Sheet formats and title blocks, standard, projected, section, detail, auxiliary and broken-out views, dimensions, hole callouts, GD&T frames from the part's PMI, surface finish and weld symbols, notes, balloons, and BOM, hole, revision, bend, weld and cut-list tables.
+description: Reference for RunMat drawing files. Sheet formats and title blocks, standard, projected, section, detail, auxiliary and broken-out views, dimensions, hole callouts, GD&T frames from the part's PMI, surface finish and weld symbols, notes, balloons, level marks, plan grids and door swings, and BOM, hole, revision, bend, weld and cut-list tables.
 keywords: [engineering drawing, 2D drawing, title block, section view, detail view, dimensions, GD&T, feature control frame, surface finish symbol, BOM table, hole table, revision table, cut list, third angle projection]
 ---
 # Drawing views and annotations
@@ -125,8 +125,32 @@ view b = detail(from = a_a, center = feature.body.face.end, radius = 20 mm, labe
 | `note` | `text`, `leader` | text; `{part_number}`, `{revision}` and other `{property}` fields fill in |
 | `balloon` | `occurrence`, `table` | a balloon numbered by a BOM table |
 | `center_mark`, `centerline` | `on`, `between` | center marks and centerlines |
+| `level` | `label`, `on` or `datum`, `occurrence` | a level mark: a line from a face's or a datum plane's height to a target symbol, the label above the line and the elevation below it |
+| `grids` | `occurrence`, `datums`, `labels` | grid lines across a plan, each label in a bubble, and a row of dimensions between neighboring grids |
+| `door_swing` | `door`, `hinge`, `swing` | a door's leaf open 90° from its hinge and the quarter arc it sweeps |
 
 Annotations read PMI from the part instead of restating it: change the flatness tolerance in the `.part` and the frame on every drawing changes with it.
+
+### Annotations on assembly views
+
+On an assembly view, a reference names a face of one occurrence's part. A dimension lists the occurrence of each reference in `occurrences`, one path per reference and in the same order. A level mark names its face's occurrence in `occurrence`, or names a datum plane that occurrence publishes in `datum` (a skeleton's `second_floor`). The drawing measures each face where the assembly places that occurrence, so moving a wall in the assembly moves its dimension and changes the value.
+
+```drawing fragment
+annotation overall_ns = dimension(style = linear, references = [feature.top1.face.start, feature.top1.face.start], occurrences = [[{ name = framing }, { name = wall_a_l1 }], [{ name = framing }, { name = wall_d_l1 }]], view = first)
+annotation slab = level(label = "T.O. SLAB", on = feature.slab.face.end, occurrence = [{ name = foundation }, { name = slab }], view = south, at = [60, 253])
+annotation floor_2 = level(label = "2ND FLOOR", datum = second_floor, occurrence = [{ name = skeleton }], view = south)
+```
+
+A level mark prints the level's height above the model's origin in the sheet's units. In feet and inches the elevation always carries its feet: `EL. 0'-0"`, `EL. -0'-8"`, `EL. 10'-1 3/4"`.
+
+`grids` reads the datum planes an occurrence's part publishes (`publish grid_1 = datum(…)` in a skeleton) and pairs each with a label. Each grid line runs across the view as a chain line and ends in a bubble beyond the view's dimension rows. Grids measured left to right put their bubbles on the side the view's horizontal dimensions use; grids measured bottom to top use the vertical dimensions' side. The dimensions between neighboring grids join the view's dimension rows as a chain.
+
+`door_swing` draws from the door occurrence's own geometry. The leaf is the door's thinnest body across the wall (the slab, not the frame), and the leaf is as wide as that body. `hinge = start` hangs the leaf at the door's x = 0, `hinge = end` at the far end of the opening. `swing = positive` opens it toward the door's +y, `swing = negative` toward -y.
+
+```drawing fragment
+annotation grids_ew = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3, grid_4, grid_5], labels = ["1", "2", "3", "4", "5"], view = first)
+annotation swing_d1 = door_swing(door = [{ name = envelope }, { name = d1_a_l1_2 }], hinge = start, swing = positive, view = first)
+```
 
 ## Tables
 
