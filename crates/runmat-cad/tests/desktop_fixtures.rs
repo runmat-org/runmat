@@ -50,12 +50,107 @@ fn emit(name: &str, json: &str) {
         return;
     }
     let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
+    let matches = checked_in == json
+        || (name == "rig.assembly.json" && assembly_fixture_matches(&checked_in, json));
     assert!(
-        checked_in == json,
+        matches,
         "{} is stale; regenerate with RUNMAT_DESKTOP_FIXTURES={} cargo test -p runmat-cad --test desktop_fixtures",
         path.display(),
         dir.display()
     );
+}
+
+// Native sin/cos implementations can differ in their last bit. The fixture's
+// dimensionless world rotations allow one machine epsilon of absolute error;
+// all other values, fields, array sizes and occurrence identities stay exact.
+fn assembly_fixture_matches(expected: &str, actual: &str) -> bool {
+    let Ok(expected) = serde_json::from_str::<serde_json::Value>(expected) else {
+        return false;
+    };
+    let Ok(mut actual) = serde_json::from_str::<serde_json::Value>(actual) else {
+        return false;
+    };
+    let Some(expected_occurrences) = expected["occurrences"].as_array() else {
+        return false;
+    };
+    let Some(actual_occurrences) = actual["occurrences"].as_array_mut() else {
+        return false;
+    };
+    if expected_occurrences.len() != actual_occurrences.len() {
+        return false;
+    }
+    for (expected, actual) in expected_occurrences.iter().zip(actual_occurrences) {
+        let expected_rotation = &expected["world"]["rotation"];
+        let actual_rotation = &mut actual["world"]["rotation"];
+        let Some(expected_rows) = expected_rotation.as_array().filter(|rows| rows.len() == 3)
+        else {
+            return false;
+        };
+        let Some(actual_rows) = actual_rotation.as_array().filter(|rows| rows.len() == 3) else {
+            return false;
+        };
+        for (expected_row, actual_row) in expected_rows.iter().zip(actual_rows) {
+            let Some(expected_cells) = expected_row.as_array().filter(|cells| cells.len() == 3)
+            else {
+                return false;
+            };
+            let Some(actual_cells) = actual_row.as_array().filter(|cells| cells.len() == 3) else {
+                return false;
+            };
+            for (expected_cell, actual_cell) in expected_cells.iter().zip(actual_cells) {
+                let (Some(expected), Some(actual)) = (expected_cell.as_f64(), actual_cell.as_f64())
+                else {
+                    return false;
+                };
+                if (expected - actual).abs() > f64::EPSILON {
+                    return false;
+                }
+            }
+        }
+        *actual_rotation = expected_rotation.clone();
+    }
+    expected == actual
+}
+
+#[test]
+fn assembly_fixture_comparison_bounds_only_rotation_roundoff() {
+    let root_half = std::f64::consts::FRAC_1_SQRT_2;
+    let adjacent_root_half = f64::from_bits(root_half.to_bits() - 1);
+    let expected = serde_json::json!({"occurrences": [{
+        "id": "frame", "world": {
+            "rotation": [[1.0, 0.0, 0.0], [0.0, adjacent_root_half, -adjacent_root_half], [0.0, adjacent_root_half, adjacent_root_half]],
+            "translation": [0.0, 1.0, 2.0]
+        }
+    }]});
+    let mut actual = expected.clone();
+    actual["occurrences"][0]["world"]["rotation"][1][1] = serde_json::json!(root_half);
+    assert!(assembly_fixture_matches(
+        &expected.to_string(),
+        &actual.to_string()
+    ));
+    actual["occurrences"][0]["world"]["rotation"][1][1] = serde_json::json!(root_half + 1.0e-12);
+    assert!(!assembly_fixture_matches(
+        &expected.to_string(),
+        &actual.to_string()
+    ));
+    actual = expected.clone();
+    actual["occurrences"][0]["world"]["translation"][1] = serde_json::json!(1.0000000000000002);
+    assert!(!assembly_fixture_matches(
+        &expected.to_string(),
+        &actual.to_string()
+    ));
+    actual = expected.clone();
+    actual["occurrences"][0]["id"] = serde_json::json!("other");
+    assert!(!assembly_fixture_matches(
+        &expected.to_string(),
+        &actual.to_string()
+    ));
+    actual = expected.clone();
+    actual["occurrences"].as_array_mut().unwrap().pop();
+    assert!(!assembly_fixture_matches(
+        &expected.to_string(),
+        &actual.to_string()
+    ));
 }
 
 /// The showcase bracket: block, cut, hole, fillet, regions, a publish and a second

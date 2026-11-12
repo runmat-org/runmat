@@ -2,8 +2,8 @@
 //! minimal text change per file.
 
 use super::*;
-use crate::layer_set::CopperIndex;
 use crate::item_ref::ItemRef;
+use crate::layer_set::CopperIndex;
 
 /* ------------------------------------------------------------------------------------------------
  * Edits

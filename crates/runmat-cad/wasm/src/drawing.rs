@@ -25,7 +25,10 @@ pub mod title;
 pub(crate) mod values;
 mod view_picks;
 
-use crate::runtime::{compile_assembly_indented, resolve_path, Diagnostic, Files, RegeneratedPart};
+use crate::runtime::{
+    compile_assembly_indented, resolve_path, CompiledAssemblyWithIndentedBom, Diagnostic, Files,
+    RegeneratedPart,
+};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
@@ -317,7 +320,12 @@ pub fn compile_json_in(
                 progress::model_key(&at, source, None, Some(files)),
             );
             match compile_assembly_indented(&at, source, files) {
-                Ok((index, display, _, indented)) => {
+                Ok(CompiledAssemblyWithIndentedBom {
+                    index,
+                    display,
+                    diagnostics: _,
+                    indented_bom: indented,
+                }) => {
                     models.indented.insert(file.clone(), indented);
                     let occ = index["occurrences"]
                         .as_array()

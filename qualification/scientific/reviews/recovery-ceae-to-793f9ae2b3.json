@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
+    "files": 26104,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "9eb1fb59fa44dd2efb55fa6a409b30adeedc4f3eafc74e3c8a55040acadfc3f0",
+    "files": 26104,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "driver-recovery-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-analysis/core/src/lib.rs",
+      "before": [
+        "100644",
+        "blob",
+        "6ab90d460f70fc3805a1a7165d58477ce84a2d94"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b3d71997850fef393cac03adcd0b80dd809abbfa"
+      ],
+      "reason": "Rustfmt reorders and wraps existing modal-accuracy exports without changing symbols or implementations."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "25ffb37cf15124f3c0fddd3910c9862d2775babc"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6477df53653ad5faac683d2ea561a4659e584b34"
+      ],
+      "reason": "Rustfmt wraps an existing modal-result assertion without changing its expression. This unit-test module is outside the driver recovery binary."
+    },
+    {
+      "path": "crates/runmat-analysis/language/src/semantic/procedure/lower.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e72e487b2b6525aa534c0a71121695c66686161b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8759afc9e0ac3830ed9b8aaaefe2afa9466a7b4c"
+      ],
+      "reason": "Rustfmt joins existing modal-extraction calls. Arguments, evaluation order and control flow are unchanged."
+    },
+    {
+      "path": "crates/runmat-cad/tests/desktop_fixtures.rs",
+      "before": [
+        "100644",
+        "blob",
+        "00dbf231723adc96ba133d216335dd7893b1081d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "27e8873d14a5e21ce506b0d0907cf97a20ebd10b"
+      ],
+      "reason": "Only the CAD integration fixture comparator changes: dimensionless world rotation cells allow one f64 epsilon; every other JSON field remains exact. New tests reject larger rotation differences, changed translations, identities and lengths. This separate integration-test target does not execute in the authored CLI cohort; production CAD and scientific code are unchanged. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries."
+    },
+    {
+      "path": "crates/runmat-design-tools/src/commands.rs",
+      "before": [
+        "100644",
+        "blob",
+        "39234dab3694bc4f09d38480396902f24bc8b135"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0fb62787ed634e777e2433729d5a375005897ab9"
+      ],
+      "reason": "The part.sketch EnterMode command routes to the existing Edit handler. The authored CLI physics cases execute FEA source files and do not dispatch this Desktop design command. Numerical execution, admission, recovery and publication paths are unchanged."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/command_registry.rs",
+      "before": [
+        "100644",
+        "blob",
+        "0e747e3c3fd1915570069741ed62903695c05349"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8c0b234316501abbcf433c485d863f7ba8439ee8"
+      ],
+      "reason": "Adds the selected-plane sketch edit-handler regression. This separate integration-test target is not executed by the driver recovery cohort."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9ba071a33f0f18350a143590c2fdaa1a28c8d21b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0cf4c19e9dea5268b18b918faa06af53a1156e49"
+      ],
+      "reason": "Rustfmt joins an existing accuracy assertion without changing its expression. Runtime unit tests are outside the driver recovery binary."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/solve/modal/diagnostics.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8c4f7a4c5584b10925af6a1d3b0f2cc85b69946e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3402ffffa9b1d64df07f640be9f9ed6c7927b38b"
+      ],
+      "reason": "The unchanged cfg(test) module moves after the production items in modal/diagnostics.rs. Byte comparison proves that both the complete test module and production source are unchanged apart from module position and final whitespace. No arithmetic, diagnostic contents, accuracy policy, allocation, serialization contract or scientific assertion changes."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/rotation-constant-20261111.json",
+      "sha256": "6f8b79f0a30aa363bb9a33bcd31dba5c0431b18a1295984e99e01e269811345b"
+    },
+    {
+      "path": "qualification/scientific/evidence/modal-test-position-20261111.json",
+      "sha256": "b8138fe8803a18d23731ca0edecbc3cd20ea27632dd75056111b5a1c27fae66d"
+    },
+    {
+      "path": "qualification/scientific/evidence/recovery-ceae-20261111.json",
+      "sha256": "e1d92a452775039789f824bf46da8f7ed3a808f7eaf22b389edad750b079af20"
+    }
+  ]
+}

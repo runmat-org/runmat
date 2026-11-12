@@ -1224,10 +1224,7 @@ fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
         balanced.truncation.requested_mode_count()
             < high_accuracy.truncation.requested_mode_count()
     );
-    assert!(
-        coarse.convergence.algebraic_tolerance()
-            > balanced.convergence.algebraic_tolerance()
-    );
+    assert!(coarse.convergence.algebraic_tolerance() > balanced.convergence.algebraic_tolerance());
     assert!(
         balanced.convergence.algebraic_tolerance()
             > high_accuracy.convergence.algebraic_tolerance()

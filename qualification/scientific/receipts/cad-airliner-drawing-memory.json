@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "cohort": "cad-airliner-drawing-memory",
+  "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
+  "measured": {
+    "source_revision": "b85c8a433d53d286a98c0b0dfa6bd5b88cc7b181",
+    "target": "linux-x86_64",
+    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat-geometry-wasm-host",
+      "--test",
+      "cad_airliner_drawing",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "profile": {
+      "release": true,
+      "debug": 0,
+      "cargo_build_jobs": 8,
+      "incremental": false
+    },
+    "log_sha256": "044a44a39aedc62eda1edb6a0f9d6dc6c10261ca2bb20776d4125695b4c7886a",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-b85c8a433d-guides-r2.airliner.log",
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 0,
+    "exit_code": 0,
+    "case_names": [
+      "the_airliner_general_arrangement_compiles_within_the_host_memory"
+    ],
+    "selected_filter": null,
+    "inputs": {
+      "sha256": "c70d8a53b7f60f3c5ec95c78b068a209acf72c047fda4840ddeabe9a8f5aebc3",
+      "files": 26101,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "artifacts": [
+      {
+        "sha256": "7d7d36ab09000b0f779043d3c3477b7ce03c4a7c1fea27687162a3cfdf6ac20a",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/cad-airliner-b85c8a433d-qualified"
+      }
+    ],
+    "source_verification": {
+      "status": "verified",
+      "files": 27242,
+      "before_and_after": true
+    },
+    "test_seconds": 217.23,
+    "rust_heap_peak_mib": {
+      "sheet": 2,
+      "front": 331,
+      "top": 374,
+      "right": 349
+    }
+  },
+  "scope": "The complete staged drawing passes the test's unchanged Rust-heap ceiling through the optimized native browser-host adapter. These measurements exclude the C++ allocator and operating-system RSS; distributed browser artifact acceptance is separate. The measured source and binary are retained without relabelling them as the later G32 source.",
+  "comparison_runs": [
+    {
+      "source_revision": "80226433e07bba08d7f002da89db5cc3a4a3ef25",
+      "profile": "unoptimized test with the broader package feature union",
+      "exit_code": 101,
+      "termination": "Owner-controlled SIGTERM of the exact test process after 19m28s while the last view was computing; incomplete, not a passing measurement or an observed assertion failure.",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-80226433e0-airliner-r2.tests.log"
+    }
+  ],
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "c70d8a53b7f60f3c5ec95c78b068a209acf72c047fda4840ddeabe9a8f5aebc3",
+      "files": 26101,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "9eb1fb59fa44dd2efb55fa6a409b30adeedc4f3eafc74e3c8a55040acadfc3f0",
+      "files": 26104,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "The complete inventory delta changes FEA modal/eigen qualification, a highlighting grammar, the separate sketch edit-handler route and independent fixture tests. The staged airliner CAD compile, its models, geometric kernel, allocations and heap ceiling are unchanged. The review enumerates every changed input and distinguishes renewed G32 physics evidence from this conserved CAD measurement. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries. The unchanged cfg(test) module moves after the production items in modal/diagnostics.rs. Byte comparison proves that both the complete test module and production source are unchanged apart from module position and final whitespace. No arithmetic, diagnostic contents, accuracy policy, allocation, serialization contract or scientific assertion changes.",
+    "review": {
+      "path": "qualification/scientific/reviews/airliner-b85-to-2822ea6807.json",
+      "sha256": "000a9c84725d7a10d73ec076101cc668965e76b2db3d05e6edd73ba5a5fd83a5"
+    }
+  }
+}

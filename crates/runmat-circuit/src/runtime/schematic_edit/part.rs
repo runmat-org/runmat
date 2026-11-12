@@ -16,8 +16,8 @@
 use super::super::edit::{lock_change, EditError, EditOutput, EditRequest};
 use super::super::{file_change, load_with, Files, Project};
 use crate::ids::SchPlace;
-use crate::item_ref::ItemRef;
 use crate::ir::Endpoint;
+use crate::item_ref::ItemRef;
 use crate::library::catalog::{prefix_for, CatalogPart};
 use crate::syntax::board_edit::SourceChange;
 use crate::syntax::{parse_circuit, part_decl, words};

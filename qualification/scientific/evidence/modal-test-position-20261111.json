@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "source_revision": "32c1fa4d09b5fcc00737e57ffff95118cafc97c8",
+  "previous_source_revision": "a53f47dbbdf82807d801d0ca7cf7dc7fc79cbada",
+  "changed_input": "crates/runmat-analysis/fea/src/solve/modal/diagnostics.rs",
+  "production_source_sha256": "e6b36e8291bd10b95f8bfaba5d3f012332432d97d35be366932291cbf5b2764d",
+  "test_module_sha256": "e257dd26c567569354beb7d3e719b8771ad1f91f7e3d66303974f13bceb251c9",
+  "before_lines": 256,
+  "after_lines": 256,
+  "production_bytes_equal": true,
+  "test_module_bytes_equal": true,
+  "scope": "The unchanged cfg(test) module moves after the production items in modal/diagnostics.rs. Byte comparison proves that both the complete test module and production source are unchanged apart from module position and final whitespace. No arithmetic, diagnostic contents, accuracy policy, allocation, serialization contract or scientific assertion changes.",
+  "unrepaired_census": {
+    "source_revision": "df1e2068ed02cd490c1a9ca307c98ab080f09c3a",
+    "log_sha256": "bbc7e80ee73297c2657b386476c56f1a925f1d4c0d5371043a53eed25161384d",
+    "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/intake-df1e2068ed-quality.fea.jsonl",
+    "cargo_exit": 101,
+    "verifier_exit": 1,
+    "actual_emissions": 266,
+    "reviewed_emissions": 265,
+    "additional_code": "clippy::items_after_test_module"
+  },
+  "limitations": "The retained Windows census precedes the module move. It is a failed qualification result, not a green post-repair census. This static conservation proof concerns scientific behavior; the post-repair quality check remains required. No debt entry is added."
+}

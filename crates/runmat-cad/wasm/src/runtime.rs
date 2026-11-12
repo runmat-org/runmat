@@ -708,27 +708,32 @@ pub fn compile_assembly_known(
     compile_assembly_with(path, text, files, known, |_, _| ())
 }
 
+/// An assembly's projection, display, diagnostics and hierarchical parts list.
+pub struct CompiledAssemblyWithIndentedBom {
+    pub index: Value,
+    pub display: Value,
+    pub diagnostics: Vec<Diagnostic>,
+    pub indented_bom: Vec<runmat_cad::assembly::bom::IndentedRow>,
+}
+
 /// [`compile_assembly`] with the assembly's indented BOM (sub-assemblies as lines with their
 /// contents under them), for a drawing's top-level and indented parts lists.
 pub fn compile_assembly_indented(
     path: &str,
     text: &str,
     files: &Files,
-) -> Result<
-    (
-        Value,
-        Value,
-        Vec<Diagnostic>,
-        Vec<runmat_cad::assembly::bom::IndentedRow>,
-    ),
-    Vec<Diagnostic>,
-> {
+) -> Result<CompiledAssemblyWithIndentedBom, Vec<Diagnostic>> {
     let mut rows = Vec::new();
     let (index, display, problems) =
         compile_assembly_with(path, text, files, &BTreeSet::new(), |resolved, source| {
             rows = runmat_cad::assembly::bom::indented_bom(resolved, Some(source));
         })?;
-    Ok((index, display, problems, rows))
+    Ok(CompiledAssemblyWithIndentedBom {
+        index,
+        display,
+        diagnostics: problems,
+        indented_bom: rows,
+    })
 }
 
 /// [`compile_assembly_known`], handing the resolved tree and its source to `also` first.

@@ -23,8 +23,14 @@ The full induction-gear harmonic witness runs manually. Its current model
 meshes for about 65 minutes before refusing a predicted 628,552,420,949-byte
 numerical allocation. The three-frequency solve remains unqualified. Bounded
 Maxwell regressions run in ordinary CI. This routing addition leaves the
-commands, input identities and measured results of the three required cohorts
+commands, input identities and measured results of the existing measured cohorts
 unchanged; their receipts retain that evidence under the revised policy hash.
+
+The full-airliner drawing memory check also runs offline and requires a passing
+receipt. It compiles the 3,200-occurrence assembly sheet and three staged views
+through the native browser-host adapter, retaining the test's Rust-heap ceiling.
+Ordinary CI runs the bounded drawing and assembly regressions. Actual browser
+acceptance separately qualifies the distributed CAD host.
 
 ## Run a cohort
 
@@ -36,7 +42,9 @@ python3 scripts/qualification/scientific.py command --cohort driver-recovery-phy
 ```
 
 Run the printed command through the machine's resource gate, using its existing
-Cargo cache. These workloads use the release profile; record that profile in the
+Cargo cache. Physics, board-timing and airliner heap cohorts use the release
+profile. The airliner command selects the browser host's own features rather
+than enabling unrelated CLI rendering and `.m` evaluation. Record the actual profile in the
 receipt. Keep `CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0` and
 `CARGO_INCREMENTAL=0` for development/test builds so they reuse the same cache.
 

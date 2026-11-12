@@ -1,0 +1,650 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "c70d8a53b7f60f3c5ec95c78b068a209acf72c047fda4840ddeabe9a8f5aebc3",
+    "files": 26101,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "9eb1fb59fa44dd2efb55fa6a409b30adeedc4f3eafc74e3c8a55040acadfc3f0",
+    "files": 26104,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "cad-airliner-drawing-memory"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-analysis/core/src/lib.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e74f94d7c88ba2709ae78fde510cf5fdd6ed0883"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b3d71997850fef393cac03adcd0b80dd809abbfa"
+      ],
+      "reason": "G32 adds modal-solver selection and algebraic-accuracy types/validation, with subsequent rustfmt corrections. These FEA procedure contracts are not evaluated by the staged CAD drawing compile. No CAD model, projection, tessellation or host allocation implementation changes here."
+    },
+    {
+      "path": "crates/runmat-analysis/core/src/study/accuracy.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3b6cdca02503952cdc40e3452b9de12dfa9bc13d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "21f947e6bf90323ea3c6000bd3ce8bc66ad13cf2"
+      ],
+      "reason": "G32 adds modal-solver selection and algebraic-accuracy types/validation, with subsequent rustfmt corrections. These FEA procedure contracts are not evaluated by the staged CAD drawing compile. No CAD model, projection, tessellation or host allocation implementation changes here."
+    },
+    {
+      "path": "crates/runmat-analysis/core/src/study/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3fc8ad552d91799d48b9b7d8fabfe9ef97b86736"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e4d232456a5bb502d38917ee21372b388ba6c4d1"
+      ],
+      "reason": "G32 adds modal-solver selection and algebraic-accuracy types/validation, with subsequent rustfmt corrections. These FEA procedure contracts are not evaluated by the staged CAD drawing compile. No CAD model, projection, tessellation or host allocation implementation changes here."
+    },
+    {
+      "path": "crates/runmat-analysis/core/src/study/modal_solver.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "17e74f7d5bf421e6cb273712decc032bb5f3000f"
+      ],
+      "reason": "G32 adds modal-solver selection and algebraic-accuracy types/validation, with subsequent rustfmt corrections. These FEA procedure contracts are not evaluated by the staged CAD drawing compile. No CAD model, projection, tessellation or host allocation implementation changes here."
+    },
+    {
+      "path": "crates/runmat-analysis/core/src/study/sequence.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a4277a8839ad5bf860c26f2145f8c9111425cd85"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3d915d42f3b4be165d9e88af56b18c780353a173"
+      ],
+      "reason": "G32 adds modal-solver selection and algebraic-accuracy types/validation, with subsequent rustfmt corrections. These FEA procedure contracts are not evaluated by the staged CAD drawing compile. No CAD model, projection, tessellation or host allocation implementation changes here."
+    },
+    {
+      "path": "crates/runmat-analysis/core/src/validate_accuracy.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1ddf5a6431d9a38091a7ac104193da942bfdca2d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ff20c6871f5d17deafd388302567b9c14a500f42"
+      ],
+      "reason": "G32 adds modal-solver selection and algebraic-accuracy types/validation, with subsequent rustfmt corrections. These FEA procedure contracts are not evaluated by the staged CAD drawing compile. No CAD model, projection, tessellation or host allocation implementation changes here."
+    },
+    {
+      "path": "crates/runmat-analysis/core/src/validate_sequence/step.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e4daae6f945203137bb28558a48fa81d0e9c9e63"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b790b221be27cffb37cbfd4dcd806ecc2f74209e"
+      ],
+      "reason": "G32 adds modal-solver selection and algebraic-accuracy types/validation, with subsequent rustfmt corrections. These FEA procedure contracts are not evaluated by the staged CAD drawing compile. No CAD model, projection, tessellation or host allocation implementation changes here."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/contracts/field_ids.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ae259f83299a4a009cf80af948d0fc12706c725e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8c3a6dce088fdbed114504747fc7b4b02f6311b6"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/contracts/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ba115d9197207d1e7ec6e1d9042402982cade157"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "df3840a4bbe43b64a16b0e6cd2d2f216a69062b7"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/pipeline/modal.rs",
+      "before": [
+        "100644",
+        "blob",
+        "2747ffb4a02c8ff8d55cd5685ccedd02aed8c8ec"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "114b874100fdd85cb4f46f3998c818cfca8e8295"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8f707d1eabb062a39735cb58752528fb6aa6afcf"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1ce288fd3dca369f3e514ae9026859c7c8cf254b"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/pipeline/modal_basis.rs",
+      "before": [
+        "100644",
+        "blob",
+        "bdd2c7ebcba1ed9d1ec3831a7815dc6c06538c5f"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e04b76269cd45cf54678bf9bc0fa64adef0bd93d"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/pipeline/modal_basis/accuracy.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "5f1636729863edff82060df1afc58ac94bee62f1"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/pipeline/modal_governance.rs",
+      "before": [
+        "100644",
+        "blob",
+        "96aad13177a8f0d7a22ef3f283def4413fe314b1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3bfb96f054a902a63d3034c4a86e66f942acd232"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/pipeline/modal_governance/convergence.rs",
+      "before": [
+        "100644",
+        "blob",
+        "610ba019179e1ef1ce330b10daaa31adc0d38835"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "9e3f92a3dc5390056d7cb5afc96ba28d73d7a420"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/planning/resource/modal/selection.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7ee46ed1fb7fea0d8fb1dc050350fef4d27d07fe"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c8053d1e0f9ee4a91429b60d52c0e3d445433976"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/planning/resource/modal_tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b8d4df26ac21a6f56b96362bb58d56ab3ec515f5"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "76b0bf581dd6c1192bb34987ea6b1ae6263bef9b"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/planning/resource/modal_tests/solve_path.rs",
+      "before": [
+        "100644",
+        "blob",
+        "140395c3040fdd498cd6732b0c4aa2f27ca9c6f8"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "115cfbab91b42da6a458635762eee5132613536b"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/planning/resource/solve_policy.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e04362d207b90f272a44300d52a4f30aa4de65bb"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "18fc24799295a58d9a4670e94bba695c9c1c7ac0"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/solve/modal/capacity.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f6a47ab158c19865342f1cef70ca0f7eb0cc2495"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ede28b18c0244d49cb57e2bc621f99631fecb824"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/solve/modal/diagnostics.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ff4055edd0bcefecf0c993fce4d091c5ded6b712"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3402ffffa9b1d64df07f640be9f9ed6c7927b38b"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph. The unchanged cfg(test) module moves after the production items in modal/diagnostics.rs. Byte comparison proves that both the complete test module and production source are unchanged apart from module position and final whitespace. No arithmetic, diagnostic contents, accuracy policy, allocation, serialization contract or scientific assertion changes."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/solve/modal/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "0fe2a1dd9d4d6750ec2ea398a64108c5b0a1a5cc"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "fea3d9d9cb2a82c8192247a677da5850dc999d57"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/solve/modal/options.rs",
+      "before": [
+        "100644",
+        "blob",
+        "08c37ffbcd06a16f17d3d39bfee12c2ce882e58d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "d83eb77143afb53c2a98ebc4caeaa1eb6777991f"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/solve/modal/result.rs",
+      "before": [
+        "100644",
+        "blob",
+        "1333c23a4fb0daf86da04eeea2181a6897ee5882"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ebcd940e5fea21934c0a2791909600a48e637f3f"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/solve/modal/truncation.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8ecb793ee1f1bb5f9011d55d0fdfb07a0529be18"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "aab93ea6ad813b9e818765981539eac7d4dd98b1"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/study/planning.rs",
+      "before": [
+        "100644",
+        "blob",
+        "928233958c151ae3680c6e4a262c4aba2161f678"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5ec6245161e6e74e33d53b9cd04e6bcf58998001"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/study/planning/dynamics.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ff0c9a62b25c654c119d97fbb10eea59dca68531"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e3a3baf42373d6789b7426daa7a0c6f95ef922ff"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8ed1b3849c6bdba75905c738f885d17aea4cee90"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6477df53653ad5faac683d2ea561a4659e584b34"
+      ],
+      "reason": "G32 changes FEA modal planning, eigenpair diagnostics, backward-error qualification and their tests. The airliner case compiles a mechanical drawing and never plans or executes an FEA study; this branch does not enter its CAD call graph."
+    },
+    {
+      "path": "crates/runmat-analysis/language/src/semantic/procedure/accuracy.rs",
+      "before": [
+        "100644",
+        "blob",
+        "4d232a1617266c450b96c105df82f5c87678854a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "a031f2451251847263db4f577882c535c282825a"
+      ],
+      "reason": "G32 parses and lowers FEA modal method/accuracy settings and tests those declarations. The measured case parses .drawing, .assembly and .part documents through CAD syntax, not the FEA procedure front end."
+    },
+    {
+      "path": "crates/runmat-analysis/language/src/semantic/procedure/lower.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7b70c6b79c3ebdf191679f8b6757a2ded3615b4e"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8759afc9e0ac3830ed9b8aaaefe2afa9466a7b4c"
+      ],
+      "reason": "G32 parses and lowers FEA modal method/accuracy settings and tests those declarations. The measured case parses .drawing, .assembly and .part documents through CAD syntax, not the FEA procedure front end."
+    },
+    {
+      "path": "crates/runmat-analysis/language/src/semantic/procedure/modal_reduction.rs",
+      "before": [
+        "100644",
+        "blob",
+        "28e525120d9fafa8748aba2ef5fc478db79a6ff1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ca5043eb2fde82adc9d3fd5015d06d8591f69be8"
+      ],
+      "reason": "G32 parses and lowers FEA modal method/accuracy settings and tests those declarations. The measured case parses .drawing, .assembly and .part documents through CAD syntax, not the FEA procedure front end."
+    },
+    {
+      "path": "crates/runmat-analysis/language/tests/procedure_accuracy.rs",
+      "before": [
+        "100644",
+        "blob",
+        "06f31c7f010fffd459a7fb0282e27bcedde1b731"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0ba310d923128a8e14ef4f0f072f2d228027cb4a"
+      ],
+      "reason": "G32 parses and lowers FEA modal method/accuracy settings and tests those declarations. The measured case parses .drawing, .assembly and .part documents through CAD syntax, not the FEA procedure front end."
+    },
+    {
+      "path": "crates/runmat-cad/tests/desktop_fixtures.rs",
+      "before": [
+        "100644",
+        "blob",
+        "00dbf231723adc96ba133d216335dd7893b1081d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "27e8873d14a5e21ce506b0d0907cf97a20ebd10b"
+      ],
+      "reason": "Separate Desktop fixture test comparison bounds last-bit world-rotation differences and tests rejection of other changes. This integration-test source is not linked into cad_airliner_drawing; the CAD implementation and measured airliner assertion remain unchanged. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries."
+    },
+    {
+      "path": "crates/runmat-design-syntax/grammar/fea.tmLanguage.json",
+      "before": [
+        "100644",
+        "blob",
+        "e6be3c01980e1b078c633b23b072d37717d946f9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "bb2dfa8f53fb4ea2af74d6bd45a56afdcf41de7c"
+      ],
+      "reason": "Generated editor grammar for FEA procedure keywords. The runtime CAD compiler does not load this editor highlighting artifact."
+    },
+    {
+      "path": "crates/runmat-design-tools/src/commands.rs",
+      "before": [
+        "100644",
+        "blob",
+        "39234dab3694bc4f09d38480396902f24bc8b135"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0fb62787ed634e777e2433729d5a375005897ab9"
+      ],
+      "reason": "Routes part.sketch EnterMode to its existing edit handler. The airliner test sends compile requests through call_framed and does not call the edit/analyze/run command-dispatch branches."
+    },
+    {
+      "path": "crates/runmat-design-tools/tests/command_registry.rs",
+      "before": [
+        "100644",
+        "blob",
+        "0e747e3c3fd1915570069741ed62903695c05349"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8c0b234316501abbcf433c485d863f7ba8439ee8"
+      ],
+      "reason": "Adds and formats a separate sketch-handler integration regression. It is not linked into the airliner test executable."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "before": [
+        "100644",
+        "blob",
+        "88a4f9cac51f0dc4d1bf5ffec4c4887f71b05ae1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "dbe1c5a3e43ea53dd642345d64d939627d9fc218"
+      ],
+      "reason": "G32 publishes modal accuracy fields and updates modal admission/contract tests. The geometry host CAD compile does not invoke the RunMat runtime FEA adapter."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/contracts/frequency_results.rs",
+      "before": [
+        "100644",
+        "blob",
+        "61f70f133a1eb0a724ffda3436742f3dd2a58fa1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "7627af85e41569c98b6f763d57dc88c87bc4b89a"
+      ],
+      "reason": "G32 publishes modal accuracy fields and updates modal admission/contract tests. The geometry host CAD compile does not invoke the RunMat runtime FEA adapter."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/modal_run_admission.rs",
+      "before": [
+        "100644",
+        "blob",
+        "4428bcaa1bce4e2bab4f187bc7b25c317896a13b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3c9d392edab7942c7d1883b4555f64dffc37af54"
+      ],
+      "reason": "G32 publishes modal accuracy fields and updates modal admission/contract tests. The geometry host CAD compile does not invoke the RunMat runtime FEA adapter."
+    },
+    {
+      "path": "crates/runmat-runtime/src/analysis/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "af1deb670046b5ee702360a82add6c0057cec7b0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "0cf4c19e9dea5268b18b918faa06af53a1156e49"
+      ],
+      "reason": "G32 publishes modal accuracy fields and updates modal admission/contract tests. The geometry host CAD compile does not invoke the RunMat runtime FEA adapter."
+    },
+    {
+      "path": "crates/runmat-sparse-solvers/src/backward_error.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "3d4eb39a11bfc167ffb70f20a3148c326670989d"
+      ],
+      "reason": "G32 adds sparse eigen backward-error calculations and changes LOBPCG qualification. CAD drawing projection and hidden-line geometry do not invoke sparse eigensolvers."
+    },
+    {
+      "path": "crates/runmat-sparse-solvers/src/eigen/lobpcg.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7b57f6ee1a14cc6375dec578bf4778428a04beb9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "30280d2b485529e55a47e1f7ac44757470b95339"
+      ],
+      "reason": "G32 adds sparse eigen backward-error calculations and changes LOBPCG qualification. CAD drawing projection and hidden-line geometry do not invoke sparse eigensolvers."
+    },
+    {
+      "path": "crates/runmat-sparse-solvers/src/eigen/mod.rs",
+      "before": [
+        "100644",
+        "blob",
+        "03a41e69f7ed11854d5a0d882672494bdaf868f8"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "f1cefa0b1185a66c7dc955d3bd652c134dabc049"
+      ],
+      "reason": "G32 adds sparse eigen backward-error calculations and changes LOBPCG qualification. CAD drawing projection and hidden-line geometry do not invoke sparse eigensolvers."
+    },
+    {
+      "path": "crates/runmat-sparse-solvers/src/eigen/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a78241a6246cd529fde1b5b79296b2921d5a28a0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1299398185846b1ee1ffd07aa66088d0aa242be5"
+      ],
+      "reason": "G32 adds sparse eigen backward-error calculations and changes LOBPCG qualification. CAD drawing projection and hidden-line geometry do not invoke sparse eigensolvers."
+    },
+    {
+      "path": "crates/runmat-sparse-solvers/src/lib.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b47017c221b3711e22bd82dfbffac3eb8f161d4b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "ce8fe7e624cda644c1aa27ab6805ab0a02e5c060"
+      ],
+      "reason": "G32 adds sparse eigen backward-error calculations and changes LOBPCG qualification. CAD drawing projection and hidden-line geometry do not invoke sparse eigensolvers."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/airliner-b85-callgraph-20261111.json",
+      "sha256": "1a0f858e91ea2fa782c8a2f52d9b1cd1ad9a981a110d8d1ba80ec2f05b344db0"
+    },
+    {
+      "path": "qualification/scientific/evidence/rotation-constant-20261111.json",
+      "sha256": "6f8b79f0a30aa363bb9a33bcd31dba5c0431b18a1295984e99e01e269811345b"
+    },
+    {
+      "path": "qualification/scientific/evidence/modal-test-position-20261111.json",
+      "sha256": "b8138fe8803a18d23731ca0edecbc3cd20ea27632dd75056111b5a1c27fae66d"
+    }
+  ]
+}

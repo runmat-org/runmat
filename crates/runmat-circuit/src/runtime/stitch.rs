@@ -10,13 +10,13 @@
 //! out, until a check finds none of them. So the vias written are the ones that pass DRC.
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
+use super::picks;
 use super::*;
 use crate::board_rules::BItem;
 use crate::geom::poly::circle_ring;
 use crate::geom::{mm, Coord, Point};
-use crate::layout::NetId;
-use super::picks;
 use crate::item_ref::ItemRef;
+use crate::layout::NetId;
 
 /// Runs `board.stitch`.
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
