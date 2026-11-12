@@ -181,6 +181,8 @@ This file is generated from the command catalog.
 - `board.drc`: Run the design rule check (also runs live while editing).
   - Required: `scope` (one of `all`, `selection`, default `all`)
   - Optional: `live` (true or false, default true)
+- `board.export`: Export the board and its components as a STEP model for mechanical design.
+  - Optional: `copper` (true or false, default false); `mask` (true or false, default true)
 - `board.fab-outputs`: Make the fabrication and assembly files for the board.
   - Required: `preset` (one of `fab_house`, `assembly`, `full`, `custom`, default `fab_house`)
 - `board.fanout`: Fan out a component's pads to vias: BGA balls to the diagonals, other pads past their outer end.

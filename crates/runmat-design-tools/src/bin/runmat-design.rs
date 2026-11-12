@@ -43,6 +43,11 @@
 //! revision. `--remember`
 //! saves the result into the layout.
 //!
+//! `--format step` on a `.circuit` or `.circuit.layout` writes the board as STEP AP242: the board,
+//! its solder mask and each component (its package's STEP model, else its body box), each a
+//! product under its name. `--copper` adds the outer copper as thin solids; `--no-mask` leaves the
+//! mask out.
+//!
 //! The workspace is the file's folder and everything under it (`--root <dir>` names another).
 //! `--all-configurations` exports a product family: a part's STEP, or every sheet of a
 //! drawing as DXF, once per configuration. Files are written to `--out` (default: the current
@@ -58,7 +63,7 @@ use std::process::ExitCode;
 fn usage() -> ExitCode {
     eprintln!("usage: runmat-design check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]");
     eprintln!("usage: runmat-design run <file> <command> [--values <json>] [--select <outline id>]... [--root <dir>] [--out <dir>] [--dry-run] [--json]");
-    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember]");
+    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember] [--copper] [--no-mask]");
     ExitCode::from(2)
 }
 
@@ -430,6 +435,8 @@ fn main() -> ExitCode {
     ) = (None, None, None, false);
     // Output formats (fabrication): passed through as design.export's fabrication fields.
     let mut formats = serde_json::Map::new();
+    // A board's STEP: `--copper` adds the outer copper, `--no-mask` leaves the mask out.
+    let mut board = serde_json::Map::new();
     let mut it = args[2..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -460,6 +467,8 @@ fn main() -> ExitCode {
             "--zip" => zip = Some(true),
             "--no-zip" => zip = Some(false),
             "--remember" => remember = true,
+            "--copper" => drop(board.insert("copper".into(), Value::Bool(true))),
+            "--no-mask" => drop(board.insert("mask".into(), Value::Bool(false))),
             _ => return usage(),
         }
     }
@@ -482,6 +491,9 @@ fn main() -> ExitCode {
         "configuration": configuration,
         "sheet": sheet,
     });
+    if !board.is_empty() {
+        input["board"] = Value::Object(board);
+    }
     if format == "fabrication" {
         // The board's saved settings apply; each flag given overrides them.
         const ALL: [(&str, &str); 10] = [
