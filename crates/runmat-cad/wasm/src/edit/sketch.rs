@@ -14,7 +14,8 @@
 //! centre-point arcs, straight slots (two lines and two arcs, tangent), points, offsets of lines
 //! and circles, trim and extend (`modify`), mirror, pattern, transform, split and the
 //! construction toggle (`repeat`), fillet and chamfer (`corners`), auto-constrain (`infer`), and
-//! the relations and dimensions the sketch model has. A tool the sketch model lacks (splines, ellipses, text) says so.
+//! the relations and dimensions the sketch model has, and splines through points. A tool the
+//! sketch model lacks (ellipses, text, control-point splines) says so.
 
 use super::{model, EditFailure, SourceChange};
 use runmat_cad::ids::SketchEntityId;
@@ -382,6 +383,31 @@ fn draw(
             Ok((entities, relations))
         }
         "sketch.polygon" => polygon(values, &mut name),
+        "sketch.spline" => {
+            if !kind.is_empty() && kind != "through_points" {
+                let what = match kind {
+                    "control_points" => "control-point splines",
+                    "equation" => "equation curves",
+                    _ => "style splines",
+                };
+                return Err(model(format!(
+                    "{what} aren't in the sketch model yet; draw a spline through points"
+                )));
+            }
+            let points = spline_points(values)?;
+            let closed = values.get("closed").and_then(Value::as_bool).unwrap_or(false);
+            if points.len() < if closed { 3 } else { 2 } {
+                return Err(model(if closed {
+                    "a closed spline runs through at least three points"
+                } else {
+                    "a spline runs through at least two points"
+                }));
+            }
+            Ok((
+                vec![entity(&name("sp"), G::Spline { points, closed }, false)],
+                Vec::new(),
+            ))
+        }
         "sketch.offset" => {
             let d = values
                 .get("distance")
@@ -446,6 +472,40 @@ fn draw(
         }
         other => Err(super::unhandled(other)),
     }
+}
+
+/// A spline's points in order: each a point value (`{ x, y }`, or `{ x, y, of }` when it snapped
+/// to a sketch point) or a canvas pick of a sketch point (`sketch.<sketch>.l1.end`).
+fn spline_points(values: &Map<String, Value>) -> Result<Vec<PointExpr>, EditFailure> {
+    let items = match values.get("points") {
+        Some(Value::Array(items)) => items.clone(),
+        Some(v @ (Value::String(_) | Value::Object(_))) => vec![v.clone()],
+        _ => Vec::new(),
+    };
+    items
+        .iter()
+        .map(|item| match item {
+            Value::String(pick) => {
+                // `sketch.<sketch>.l1.end` from the canvas, or `l1.end`.
+                let rest = match pick.strip_prefix("sketch.") {
+                    Some(r) => r.split_once('.').map_or(r, |(_, r)| r),
+                    None => pick.as_str(),
+                };
+                match rest.rsplit_once('.') {
+                    Some((entity, word)) if role(word).is_some() => Ok(of(entity, role(word).expect("checked"))),
+                    _ => Err(model(format!(
+                        "`{pick}` isn't a sketch point; a spline runs through points of the open sketch"
+                    ))),
+                }
+            }
+            Value::Object(_) => {
+                let mut one = Map::new();
+                one.insert("point".into(), item.clone());
+                point(&one, "point")
+            }
+            _ => Err(model("a spline point is a picked sketch point or { x, y }")),
+        })
+        .collect()
 }
 
 /// A regular polygon: `sides` lines in a closed chain, each corner shared, all of equal length.

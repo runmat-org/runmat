@@ -187,14 +187,14 @@ fn drawing_tools_write_entities_into_the_open_sketch() {
     // A tool the sketch dispatcher has no code for says so and marks the call, so the command
     // registry's build check finds it.
     crate::edit::take_unhandled();
-    let spline = run(PLATE, "sketch.spline", json!({ "sketch": "s1" }));
-    assert_eq!(spline["ok"], false);
+    let ellipse = run(PLATE, "sketch.ellipse", json!({ "sketch": "s1" }));
+    assert_eq!(ellipse["ok"], false);
     assert!(
-        spline["message"]
+        ellipse["message"]
             .as_str()
             .unwrap()
             .contains("has no handler"),
-        "{spline}"
+        "{ellipse}"
     );
     assert!(crate::edit::take_unhandled());
 }
@@ -579,4 +579,36 @@ fn an_angle_that_clashes_is_a_conflict_and_leaves_the_rectangle_where_it_was() {
             .collect()
     };
     assert_eq!(points(&after), points(&before));
+}
+
+#[test]
+fn a_spline_runs_through_the_picked_points_and_closes_on_request() {
+    // Through a snapped corner and two clicked points.
+    let open = applied(
+        PLATE,
+        "sketch.spline",
+        json!({ "sketch": "s1", "type": "through_points", "points": [
+            { "x": 0, "y": 20, "of": "l3.end" }, { "x": 10, "y": 30 }, { "x": 30, "y": 25 }
+        ] }),
+    );
+    let new = added(PLATE, &open);
+    assert_eq!(new.len(), 1, "{new:?}");
+    assert!(new[0].contains("sp1 = spline("), "{new:?}");
+    assert!(new[0].contains("l3.end") && new[0].contains("30 mm"), "{new:?}");
+    // Canvas picks of sketch points, closed.
+    let closed = applied(
+        PLATE,
+        "sketch.spline",
+        json!({ "sketch": "s1", "points": ["sketch.s1.l1.start", "sketch.s1.l2.start", "sketch.s1.l3.start"], "closed": true }),
+    );
+    let new = added(PLATE, &closed);
+    assert!(new.iter().any(|l| l.contains("spline(") && l.contains("closed")), "{new:?}");
+    // One point, or a type the sketch model lacks, says why.
+    let short = run(PLATE, "sketch.spline", json!({ "sketch": "s1", "points": [{ "x": 1, "y": 1 }] }));
+    assert_eq!(short["ok"], false, "{short}");
+    let control = run(PLATE, "sketch.spline", json!({ "sketch": "s1", "type": "control_points" }));
+    assert!(
+        control["message"].as_str().unwrap().contains("control-point splines"),
+        "{control}"
+    );
 }

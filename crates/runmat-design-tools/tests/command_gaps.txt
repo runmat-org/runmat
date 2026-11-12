@@ -131,11 +131,6 @@ sketch.spline assembly type=control_points
 sketch.spline assembly type=equation
 sketch.spline assembly type=style
 sketch.spline assembly type=through_points
-sketch.spline part
-sketch.spline part type=control_points
-sketch.spline part type=equation
-sketch.spline part type=style
-sketch.spline part type=through_points
 sketch.split assembly
 sketch.text assembly
 sketch.text part
