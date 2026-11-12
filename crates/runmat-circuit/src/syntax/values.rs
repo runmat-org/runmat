@@ -11,6 +11,9 @@ use runmat_design_syntax::ast::{Expr, RecordEntry};
 use runmat_design_syntax::json::{format_f64, is_bare_key, is_bare_word, quote};
 use runmat_design_syntax::lexical::FeaKeyword;
 use runmat_design_syntax::{FeaSyntaxDiagnostic, FeaSyntaxDiagnosticKind};
+use runmat_types::physical::{
+    parse_unit_expression, unit_mismatch_message, DynamicDimension, FoundUnit,
+};
 use runmat_types::Span;
 
 pub(crate) fn diagnostic(span: Span, message: impl Into<String>) -> FeaSyntaxDiagnostic {
@@ -135,18 +138,59 @@ fn entry(e: &RecordEntry) -> Read<(String, Val)> {
     Ok((key, val(&value)?))
 }
 
-/// nm per unit for the length units a board takes.
-fn length_scale(unit: &str) -> Option<i128> {
-    Some(match unit {
-        "nm" => 1,
-        "um" | "µm" => 1_000,
-        "mm" => 1_000_000,
-        "cm" => 10_000_000,
-        "m" => 1_000_000_000,
-        "mil" | "thou" => 25_400,
-        "in" => 25_400_000,
-        _ => return None,
-    })
+/// The subject a value reader names before [`Fields`] knows the field.
+const UNNAMED: &str = "the value";
+
+/// The shared wrong-unit diagnostic ([`runmat_types::physical::unit_mismatch_message`]) at the
+/// value, for a unit that measures something other than `expected`.
+fn unit_mismatch(v: &Val, expected: DynamicDimension, unit: &str) -> FeaSyntaxDiagnostic {
+    let found = match parse_unit_expression(unit) {
+        Ok(definition) => FoundUnit::Authored(unit, DynamicDimension::from_unit(definition)),
+        Err(_) => {
+            let kind = runmat_types::physical::unit_kind(expected.dimension(), expected.angle_power())
+                .map(|row| (row.kind, row.suggestions.join(", ")))
+                .unwrap_or(("value", String::new()));
+            return diagnostic(
+                v.span,
+                format!("unknown unit `{unit}`; a {} takes {}", kind.0, kind.1),
+            );
+        }
+    };
+    FeaSyntaxDiagnostic {
+        kind: FeaSyntaxDiagnosticKind::UnitMismatch,
+        span: v.span,
+        message: unit_mismatch_message(UNNAMED, expected, found).message,
+    }
+}
+
+/// `d` with its unit-mismatch subject named after the field `key` reads.
+pub(crate) fn named(mut d: FeaSyntaxDiagnostic, key: &str) -> FeaSyntaxDiagnostic {
+    if d.kind == FeaSyntaxDiagnosticKind::UnitMismatch {
+        if let Some(rest) = d.message.strip_prefix(UNNAMED) {
+            d.message = format!("{}{rest}", key.replace('_', " "));
+        }
+    }
+    d
+}
+
+/// nm per unit for a length unit of the one registry (`mm`, `mil`, `in`, `um`), or the shared
+/// wrong-unit diagnostic. A board's lengths are whole nanometres, so the unit's size must be one.
+fn length_scale(v: &Val, unit: &str) -> Read<i128> {
+    match parse_unit_expression(unit) {
+        Ok(definition) if DynamicDimension::from_unit(definition) == DynamicDimension::LENGTH => {
+            let nm = definition.scale() * 1e9;
+            let whole = nm.round();
+            if whole >= 1.0 && (nm - whole).abs() <= 1e-6 * whole {
+                Ok(whole as i128)
+            } else {
+                Err(diagnostic(
+                    v.span,
+                    format!("`{unit}` is finer than a board's 1 nm grid; use nm, um, mm or mil"),
+                ))
+            }
+        }
+        _ => Err(unit_mismatch(v, DynamicDimension::LENGTH, unit)),
+    }
 }
 
 /// Decimal text (`-12.5`, `3`, `1e-3`) times `scale`, rounded to the nearest integer; exact
@@ -194,15 +238,7 @@ pub(crate) fn len(v: &Val) -> Read<Coord> {
     };
     match &v.v {
         V::Num(t) => scaled(t, 1_000_000).ok_or_else(bad),
-        V::Qty(t, unit) => {
-            let scale = length_scale(unit).ok_or_else(|| {
-                diagnostic(
-                    v.span,
-                    format!("`{unit}` is not a length unit; use mm, um, mil or in"),
-                )
-            })?;
-            scaled(t, scale).ok_or_else(bad)
-        }
+        V::Qty(t, unit) => scaled(t, length_scale(v, unit)?).ok_or_else(bad),
         _ => Err(bad()),
     }
 }
@@ -216,12 +252,22 @@ pub(crate) fn num(v: &Val) -> Read<f64> {
     }
 }
 
-/// Degrees: a number, or a quantity in `deg`.
+/// Degrees: a number, or a quantity in an angle unit (`45 deg`, `0.5 rad`).
 pub(crate) fn angle(v: &Val) -> Read<f64> {
     match &v.v {
-        V::Qty(t, unit) if unit == "deg" => t
-            .parse::<f64>()
-            .map_err(|_| diagnostic(v.span, "expected an angle in degrees")),
+        V::Qty(t, unit) => {
+            let value = t
+                .parse::<f64>()
+                .map_err(|_| diagnostic(v.span, "expected an angle in degrees"))?;
+            match parse_unit_expression(unit) {
+                Ok(definition)
+                    if DynamicDimension::from_unit(definition) == DynamicDimension::ANGLE =>
+                {
+                    Ok((value * definition.scale()).to_degrees())
+                }
+                _ => Err(unit_mismatch(v, DynamicDimension::ANGLE, unit)),
+            }
+        }
         _ => num(v),
     }
 }
@@ -326,7 +372,9 @@ impl<'a> Fields<'a> {
     }
 
     pub fn opt<T>(&mut self, key: &str, read: impl Fn(&Val) -> Read<T>) -> Read<Option<T>> {
-        self.get(key).map(read).transpose()
+        self.get(key)
+            .map(|v| read(v).map_err(|d| named(d, key)))
+            .transpose()
     }
 
     pub fn or<T>(&mut self, key: &str, default: T, read: impl Fn(&Val) -> Read<T>) -> Read<T> {

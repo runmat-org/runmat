@@ -19,7 +19,7 @@ use crate::refs::publish::PublishedCatalog;
 use crate::refs::reference::Reference;
 use crate::refs::resolve::{ResolutionPolicy, ResolveOutcome, Resolver};
 use crate::regen::engine::RegenResult;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
 use crate::value::{DynamicValueEvaluator, Evaluator, ValueExpr};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -239,7 +239,7 @@ pub fn resolve_pmi(
     doc: &PartDocument,
     pmi: &PmiSet,
     result: &RegenResult,
-    units: &dyn UnitAuthority,
+    units: &Units,
     dynamic: &dyn DynamicValueEvaluator,
 ) -> ResolvedPmi {
     resolve_pmi_with(
@@ -261,7 +261,7 @@ pub fn resolve_pmi_with(
     doc: &PartDocument,
     pmi: &PmiSet,
     result: &RegenResult,
-    units: &dyn UnitAuthority,
+    units: &Units,
     dynamic: &dyn DynamicValueEvaluator,
     lock: Option<&LockSection>,
     catalog: Option<&dyn PublishedCatalog>,
@@ -436,7 +436,7 @@ pub fn resolve_pmi_with(
                 DiagCode::PmiInvalid,
                 Severity::Error,
                 s("size"),
-                format!("`{}` is a {}, not a size", z.name, q.dimension),
+                format!("`{}` is a {}, not a size", z.name, crate::value::kind_name(q.dimension)),
                 Cause::Root,
                 Vec::new(),
             ),

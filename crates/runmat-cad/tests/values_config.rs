@@ -8,7 +8,7 @@ use runmat_cad::assembly::fasteners::{Column, ColumnData, ColumnarTable, MemoryT
 use runmat_cad::config::*;
 use runmat_cad::ids::{ConfigurationName, InputName};
 use runmat_cad::model::*;
-use runmat_cad::units::{Dimension, StubUnits};
+use runmat_cad::units::{Dimension, Units};
 use runmat_cad::value::*;
 use std::collections::BTreeMap;
 
@@ -87,7 +87,7 @@ fn call(f: &str, volatile: bool) -> ValueExpr {
 
 fn input_env(expr: ValueExpr) -> ValueEnv {
     let ev = Evaluator {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &Fns,
     };
     let mut overrides = BTreeMap::new();
@@ -132,7 +132,7 @@ fn v02_effects_need_volatile_and_volatile_values_are_recorded() {
 #[test]
 fn v03_cache_keys_chain_the_contract_and_seeded_randomness_is_deterministic() {
     let ev = Evaluator {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &Fns,
     };
     let mc = |seed: f64| ValueExpr::Dynamic {
@@ -227,7 +227,7 @@ fn c01_columnar_design_tables_expand_typed() {
         ("light", 5.0, 70.0),
         ("xl", 12.0, 120.0),
     ]));
-    let (m, problems) = materialize(&doc, &[spec(&d)], &tables, &StubUnits);
+    let (m, problems) = materialize(&doc, &[spec(&d)], &tables, &Units);
     assert!(problems.is_empty(), "{:?}", problems);
     let names: Vec<String> = m
         .all_configurations()
@@ -249,7 +249,7 @@ fn c01_columnar_design_tables_expand_typed() {
         *unit = "deg".into();
     }
     let d = tables.put(&bad);
-    let (_, problems) = materialize(&doc, &[spec(&d)], &tables, &StubUnits);
+    let (_, problems) = materialize(&doc, &[spec(&d)], &tables, &Units);
     assert!(
         problems
             .iter()

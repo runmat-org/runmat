@@ -190,12 +190,20 @@ impl<'a, 'b> Resolver<'a, 'b> {
             .ev()
             .eval(expr, env)
             .map_err(|e| (DiagCode::AsmInputType, format!("input `{}`: {}", name, e)))?;
-        if q.dimension != info.dimension {
+        if q.dimension != info {
             return Err((
                 DiagCode::AsmInputType,
                 format!(
-                    "input `{}` of `{}` is a {} ({}), found {}",
-                    name, s.definition, info.id, info.si_symbol, q.dimension
+                    "input `{}` of `{}`: {}",
+                    name,
+                    s.definition,
+                    crate::value::unit_mismatch_text(
+                        Some(name.0.as_str()),
+                        info,
+                        q.dimension,
+                        &crate::value::Written::of(expr)
+                    )
+                    .message
                 ),
             ));
         }
@@ -218,8 +226,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
         for (name, si) in &key.inputs {
             if let Some(decl) = doc.inputs.iter().find(|i| &i.name == name) {
-                if let Some(info) = self.ctx.units.kind(&decl.kind) {
-                    overrides.insert(name.clone(), ValueExpr::qty(*si, &info.si_symbol));
+                if let Some(dimension) = self.ctx.units.kind(&decl.kind) {
+                    let unit = crate::value::si_symbol(dimension);
+                    let value = if unit.is_empty() {
+                        ValueExpr::number(*si)
+                    } else {
+                        ValueExpr::qty(*si, unit)
+                    };
+                    overrides.insert(name.clone(), value);
                 }
             }
         }

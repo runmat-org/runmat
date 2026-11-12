@@ -22,7 +22,7 @@ use runmat_cad::index::{build_index, to_json};
 use runmat_cad::model::*;
 use runmat_cad::refs::*;
 use runmat_cad::regen::kernel::TessellationOptions;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::NoDynamicValues;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -298,7 +298,7 @@ fn part_fixture() {
 fn assembly_fixture() {
     let mut p = generate(&SynthSpec::small());
     add_frame_mates(&mut p.source);
-    let units = StubUnits;
+    let units = Units;
     let dynamic = NoDynamicValues;
     let ctx = ResolveContext {
         source: &p.source,

@@ -4,7 +4,7 @@
 use runmat_cad::ids::{InputName, LetName};
 use runmat_cad::modules::ModuleScope;
 use runmat_cad::syntax::parse_part;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::m_functions::{effect_of, parameters_of, MFunctions, MRunner};
 use runmat_cad::value::{Evaluator, ValueError};
 use std::cell::Cell;
@@ -95,7 +95,7 @@ fn a_part_dimension_comes_from_a_same_folder_function_with_named_arguments() {
         .document
         .unwrap();
     let ev = Evaluator {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &m,
     };
     let env = ev.evaluate_env(&doc.inputs, &doc.lets, &BTreeMap::new());
@@ -127,7 +127,7 @@ fn a_function_that_differs_between_runs_is_refused() {
         .document
         .unwrap();
     let env = Evaluator {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &m,
     }
     .evaluate_env(&doc.inputs, &doc.lets, &BTreeMap::new());
@@ -160,7 +160,7 @@ fn effects_need_volatile_and_wrong_calls_say_what_the_function_takes() {
         .document
         .unwrap();
     let env = Evaluator {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &m,
     }
     .evaluate_env(&doc.inputs, &doc.lets, &BTreeMap::new());

@@ -595,6 +595,35 @@ pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsVal
     }
 }
 
+/// Quick fixes for the diagnostics in a range: units of the expected kind for a wrong unit, in
+/// every design language and `.fea`.
+#[wasm_bindgen(js_name = "codeActions")]
+pub fn code_actions(
+    uri: String,
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
+) -> Result<JsValue, JsValue> {
+    ensure_builtins_registered();
+    let entry = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
+    let Some(doc) = entry else {
+        return to_js(&Vec::<lsp_types::CodeActionOrCommand>::new());
+    };
+    let range = lsp_types::Range::new(
+        Position::new(start_line, start_character),
+        Position::new(end_line, end_character),
+    );
+    let actions = if let Some(analysis) = doc.design_analysis.as_ref() {
+        analysis.code_actions(range)
+    } else if let (Some(analysis), Ok(url)) = (doc.fea_analysis.as_ref(), lsp_types::Url::parse(&uri)) {
+        analysis.code_actions(&url, &doc.text, range)
+    } else {
+        Vec::new()
+    };
+    to_js(&actions)
+}
+
 #[wasm_bindgen(js_name = "quickInformation")]
 pub fn quick_information(uri: String, line: u32, character: u32) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();

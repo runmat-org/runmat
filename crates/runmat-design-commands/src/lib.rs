@@ -40,51 +40,34 @@ impl Dimension {
         base: [0; 8],
         angle: 0,
     };
-    pub const LENGTH: Dimension = Dimension::base_unit(0);
-    pub const MASS: Dimension = Dimension::base_unit(1);
-    pub const TIME: Dimension = Dimension::base_unit(2);
-    pub const CURRENT: Dimension = Dimension::base_unit(3);
-    pub const TEMPERATURE: Dimension = Dimension::base_unit(4);
-    pub const ANGLE: Dimension = Dimension {
-        base: [0; 8],
-        angle: 1,
-    };
-    pub const AREA: Dimension = Dimension {
-        base: [2, 0, 0, 0, 0, 0, 0, 0],
-        angle: 0,
-    };
 
-    const fn base_unit(index: usize) -> Dimension {
-        let mut base = [0i8; 8];
-        base[index] = 1;
-        Dimension { base, angle: 0 }
+    /// The unit authority's dimension, without a semantic kind.
+    pub fn to_physical(self) -> runmat_types::physical::DynamicDimension {
+        runmat_types::physical::DynamicDimension::try_with_angle(
+            runmat_types::PhysicalDimension::new(self.base),
+            self.angle,
+            None,
+        )
+        .expect("a kind-free dimension is always valid")
     }
+}
 
-    pub fn multiply(self, other: Dimension) -> Dimension {
-        self.combine(other, 1)
-    }
-
-    pub fn divide(self, other: Dimension) -> Dimension {
-        self.combine(other, -1)
-    }
-
-    pub fn power(self, exponent: i8) -> Dimension {
-        let mut base = self.base;
-        base.iter_mut().for_each(|b| *b *= exponent);
+/// The wire form of the unit authority's dimension.
+impl From<runmat_types::physical::DynamicDimension> for Dimension {
+    fn from(dimension: runmat_types::physical::DynamicDimension) -> Self {
+        let d = dimension.dimension();
         Dimension {
-            base,
-            angle: self.angle * exponent,
-        }
-    }
-
-    fn combine(self, other: Dimension, sign: i8) -> Dimension {
-        let mut base = self.base;
-        for (b, o) in base.iter_mut().zip(other.base) {
-            *b += sign * o;
-        }
-        Dimension {
-            base,
-            angle: self.angle + sign * other.angle,
+            base: [
+                d.length,
+                d.mass,
+                d.time,
+                d.current,
+                d.temperature,
+                d.amount,
+                d.luminous_intensity,
+                d.information,
+            ],
+            angle: dimension.angle_power(),
         }
     }
 }

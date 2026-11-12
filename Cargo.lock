@@ -8218,6 +8218,7 @@ version = "0.7.1"
 dependencies = [
  "runmat-cad",
  "runmat-circuit",
+ "runmat-types",
  "serde",
  "serde_json",
 ]

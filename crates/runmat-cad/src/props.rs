@@ -21,7 +21,7 @@ use crate::assembly::resolve::ResolvedAssembly;
 use crate::diagnostics::{Cause, DiagCode, DiagnosticReport, Severity, Site, Subject};
 use crate::ids::PropertyName;
 use crate::model::items::{Link, LinkKind, Property, PropertyScope, PropertyValue};
-use crate::units::{Dimension, QuantityKindId, UnitAuthority};
+use crate::units::{Dimension, QuantityKindId, Units};
 use crate::value::{Evaluator, ValueEnv};
 use runmat_rules as rules;
 use serde::{Deserialize, Serialize};
@@ -71,7 +71,7 @@ pub struct PropertySite<'a> {
 pub fn validate_properties(
     schema: &PropertySchema,
     sites: &[PropertySite<'_>],
-    units: &dyn UnitAuthority,
+    units: &Units,
     ev: &Evaluator<'_>,
     release: bool,
 ) -> DiagnosticReport {
@@ -123,16 +123,19 @@ pub fn validate_properties(
                     }
                 }
                 (PropertyType::Quantity { kind }, PropertyValue::Quantity(e)) => {
-                    let want = units.kind(kind).map(|k| k.dimension);
+                    let want = units.kind(kind);
                     match (ev.eval(e, &ValueEnv::default()), want) {
                         (Ok(q), Some(d)) if q.dimension == d => {}
                         (Ok(q), Some(d)) => push(
                             DiagCode::PropertyInvalid,
                             &s.label,
-                            format!(
-                                "`{}` must be a {} ({}), found {}",
-                                p.name, kind, d, q.dimension
-                            ),
+                            crate::value::unit_mismatch_text(
+                                Some(p.name.0.as_str()),
+                                d,
+                                q.dimension,
+                                &crate::value::Written::of(e),
+                            )
+                            .message,
                         ),
                         (Ok(_), None) => push(
                             DiagCode::PropertyInvalid,
@@ -173,20 +176,20 @@ pub fn validate_properties(
 // ------------------------------------------------------------------------------ units
 
 /// Selector units from the one unit authority.
-pub struct AuthorityUnits<'a>(pub &'a dyn UnitAuthority);
+pub struct AuthorityUnits<'a>(pub &'a Units);
 
 pub fn to_rules_dim(d: Dimension) -> rules::Dim {
     let mut b = [0i8; 7];
-    b.copy_from_slice(&d.base[..7]);
+    b.copy_from_slice(&crate::units::wire::to_wire(d).base[..7]);
     rules::Dim(b)
 }
 
 impl rules::UnitResolver for AuthorityUnits<'_> {
     fn resolve(&self, symbol: &str) -> Option<rules::UnitDef> {
         self.0.unit(symbol).map(|u| rules::UnitDef {
-            scale: u.scale,
-            offset: 0.0,
-            dim: to_rules_dim(u.dimension),
+            scale: u.scale(),
+            offset: u.offset(),
+            dim: to_rules_dim(crate::units::dimension_of(&u)),
         })
     }
 }
@@ -216,7 +219,7 @@ pub struct AssemblyGraph<'a> {
     pub tree: &'a ResolvedAssembly,
     pub definition_properties: BTreeMap<String, Vec<Property>>,
     pub measurements: &'a dyn Measurements,
-    pub units: &'a dyn UnitAuthority,
+    pub units: &'a Units,
     pub ev: Evaluator<'a>,
     kinds: Vec<&'static str>,
 }
@@ -501,7 +504,7 @@ pub fn run_checks(
 pub fn run_checks_on<G: CheckGraph>(
     packs: &[CheckPack],
     graph: &G,
-    authority: &dyn UnitAuthority,
+    authority: &Units,
 ) -> (Vec<CheckResult>, DiagnosticReport) {
     let units = AuthorityUnits(authority);
     let mut results = Vec::new();

@@ -56,12 +56,12 @@ impl SheetSize {
 }
 
 fn side_mm(side: &crate::value::ValueExpr) -> Option<f64> {
-    use crate::units::{StubUnits, UnitAuthority};
+    use crate::units::Units;
     let mm = match side {
         crate::value::ValueExpr::Quantity { value, unit } => {
-            let info = StubUnits.unit(unit)?;
-            (info.dimension == crate::units::Dimension::LENGTH)
-                .then_some(value * info.scale * 1000.0)?
+            let info = Units.unit(unit)?;
+            (crate::units::dimension_of(&info) == crate::units::Dimension::LENGTH)
+                .then_some(value * info.scale() * 1000.0)?
         }
         crate::value::ValueExpr::Number { value } => *value,
         _ => return None,

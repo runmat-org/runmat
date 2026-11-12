@@ -139,7 +139,7 @@ fn compile_part(
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
         solver: &runmat_cad::sketch_solver::ConstraintSketchSolver,
-        units: &runmat_cad::units::StubUnits,
+        units: &runmat_cad::units::Units,
         dynamic: &values,
         lock: None,
         catalog: None,

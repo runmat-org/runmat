@@ -23,7 +23,7 @@ use crate::props::{
 use crate::refs::history::SurfaceKind;
 use crate::regen::records::FeatureRecord;
 use crate::regen::RegenResult;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
 use crate::value::Evaluator;
 use runmat_rules as rules;
 use serde::{Deserialize, Serialize};
@@ -566,7 +566,7 @@ pub fn pack(process: Process) -> CheckPack {
 pub fn run(
     packs: &[CheckPack],
     graph: &DfmGraph,
-    units: &dyn UnitAuthority,
+    units: &Units,
 ) -> (Vec<CheckResult>, DiagnosticReport) {
     run_checks_on(packs, graph, units)
 }

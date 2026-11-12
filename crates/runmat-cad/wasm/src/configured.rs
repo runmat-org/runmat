@@ -13,7 +13,7 @@ use runmat_cad::display::{configuration_key, part_display, PartDisplay};
 use runmat_cad::model::PartDocument;
 use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest, RegenResult};
 use runmat_cad::sketch_solver::ConstraintSketchSolver;
-use runmat_cad::units::{StubUnits, UnitAuthority};
+use runmat_cad::units::Units;
 use runmat_cad::value::{NoDynamicValues, ValueExpr};
 use std::collections::BTreeMap;
 
@@ -24,9 +24,14 @@ fn configured_document(document: &PartDocument, key: &ConfigKey) -> PartDocument
         let Some(si) = key.inputs.get(&input.name) else {
             continue;
         };
-        input.default = match StubUnits.kind(&input.kind) {
-            Some(kind) if kind.si_symbol != "1" => ValueExpr::qty(*si, &kind.si_symbol),
-            _ => ValueExpr::number(*si),
+        let si_unit = Units
+            .kind(&input.kind)
+            .map(runmat_cad::value::si_symbol)
+            .unwrap_or("");
+        input.default = if si_unit.is_empty() {
+            ValueExpr::number(*si)
+        } else {
+            ValueExpr::qty(*si, si_unit)
         };
     }
     doc
@@ -53,7 +58,7 @@ fn regenerate_configured_watched(
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
         solver: &ConstraintSketchSolver,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &watched,
         lock: None,
         catalog: None,

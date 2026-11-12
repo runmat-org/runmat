@@ -8,7 +8,7 @@ use runmat_cad::evaluate::*;
 use runmat_cad::model::*;
 use runmat_cad::props::ItemOutcome;
 use runmat_cad::refs::*;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{Evaluator, NoDynamicValues, ValueExpr};
 
 fn close(a: f64, b: f64, tol: f64) -> bool {
@@ -187,8 +187,8 @@ fn undercuts_block_release() {
     assert!(faces.is_empty());
 }
 
-fn evaluator() -> (StubUnits, NoDynamicValues) {
-    (StubUnits, NoDynamicValues)
+fn evaluator() -> (Units, NoDynamicValues) {
+    (Units, NoDynamicValues)
 }
 
 fn outcome<'a>(

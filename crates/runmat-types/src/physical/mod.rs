@@ -38,5 +38,8 @@ pub use expression::*;
 mod derivative;
 pub use derivative::*;
 
+mod unit_message;
+pub use unit_message::*;
+
 mod parameter_coordinate;
 pub use parameter_coordinate::*;

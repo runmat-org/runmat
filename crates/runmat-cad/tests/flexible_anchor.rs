@@ -8,7 +8,7 @@ use runmat_cad::assembly::*;
 use runmat_cad::diagnostics::DiagCode;
 use runmat_cad::ids::{FilePath, PublishName};
 use runmat_cad::model::datum::Frame;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{NoDynamicValues, ValueExpr};
 
 fn frame_at(x: f64, y: f64, z: f64) -> PublishedGeometry {
@@ -137,7 +137,7 @@ fn rig(anchor_floats: bool, fasten_to_base: bool) -> MemorySource {
 fn run(src: &MemorySource) -> ResolvedAssembly {
     let ctx = ResolveContext {
         source: src,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock: None,
         catalog: None,

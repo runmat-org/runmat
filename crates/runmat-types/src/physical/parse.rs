@@ -151,6 +151,7 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
         "km" => (PhysicalDimension::LENGTH, 1e3, 0.0),
         "in" | "inch" => (PhysicalDimension::LENGTH, 0.0254, 0.0),
         "ft" => (PhysicalDimension::LENGTH, 0.3048, 0.0),
+        "mil" | "thou" => (PhysicalDimension::LENGTH, 2.54e-5, 0.0),
         "s" => (PhysicalDimension::TIME, 1.0, 0.0),
         "ms" => (PhysicalDimension::TIME, 1e-3, 0.0),
         "us" => (PhysicalDimension::TIME, 1e-6, 0.0),
@@ -184,12 +185,21 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
         "mV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e-3, 0.0),
         "kV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e3, 0.0),
         "MV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e6, 0.0),
+        "ohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1.0, 0.0),
+        "kohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1e3, 0.0),
+        "Mohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1e6, 0.0),
         "T" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1.0, 0.0),
         "mT" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1e-3, 0.0),
         "rad" => (PhysicalDimension::DIMENSIONLESS, 1.0, 0.0),
         "deg" => (
             PhysicalDimension::DIMENSIONLESS,
             std::f64::consts::PI / 180.0,
+            0.0,
+        ),
+        // Revolutions per minute: an angle per time.
+        "rpm" => (
+            PhysicalDimension::FREQUENCY,
+            std::f64::consts::PI / 30.0,
             0.0,
         ),
         "B" => (PhysicalDimension::INFORMATION, 1.0, 0.0),
@@ -204,7 +214,7 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
     };
     Some(UnitDefinition {
         dimension,
-        angle_power: if matches!(symbol, "rad" | "deg") {
+        angle_power: if matches!(symbol, "rad" | "deg" | "rpm") {
             1
         } else {
             0

@@ -10,7 +10,7 @@
 use runmat_cad::metering::{MeterClock, UsageEvent, UsageMeter};
 use runmat_cad::regen::{regenerate_metered, RegenCache, RegenContext, RegenRequest};
 use runmat_cad::sketch_solver::ConstraintSketchSolver;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::NoDynamicValues;
 use runmat_cad_wasm::runtime::{compile_json, part_cache, Files, ASSEMBLY_TESSELLATION};
 use serde_json::{json, Value};
@@ -86,7 +86,7 @@ fn part_pass(path: &str, text: &str) -> Value {
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
         solver: &ConstraintSketchSolver,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock: None,
         catalog: None,

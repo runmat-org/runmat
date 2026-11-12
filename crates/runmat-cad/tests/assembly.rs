@@ -19,7 +19,7 @@ use runmat_cad::model::datum::Frame;
 use runmat_cad::refs::lock::{LockSection, SeededMinter};
 use runmat_cad::refs::{InstanceKey, XrefContext};
 use runmat_cad::regen::kernel::Transform;
-use runmat_cad::units::{Dimension, QuantityKindId, StubUnits};
+use runmat_cad::units::{Dimension, QuantityKindId, Units};
 use runmat_cad::value::{NoDynamicValues, Quantity, ValueExpr};
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -70,14 +70,14 @@ fn frame_at(x: f64, y: f64, z: f64) -> PublishedGeometry {
 }
 
 struct Env {
-    units: StubUnits,
+    units: Units,
     dynamic: NoDynamicValues,
 }
 
 impl Env {
     fn new() -> Self {
         Env {
-            units: StubUnits,
+            units: Units,
             dynamic: NoDynamicValues,
         }
     }

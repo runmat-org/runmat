@@ -56,6 +56,7 @@ The check reports *`body` ran but no longer makes `body.side(l9)`* as a root cau
 | `cad.xref.*` | Reads from other files: an unknown file, a name it does not publish, a missing pinned revision |
 | `cad.sketch.*` | Sketches: over- or under-constrained, redundant constraints, open profiles |
 | `cad.regen.*`, `cad.kernel.*` | Regeneration: cascades, operations the geometry kernel could not build |
+| `cad.value.unit`, `circuit.value.unit` | A value whose unit measures something other than what its field needs. The message, underline and quick fixes are the same in every language; see [Wrong units](/docs/design-language/values-and-units#wrong-units) |
 | `cad.region.expectation` | A region that found more or fewer entities than its `expect` |
 | `cad.asm.*` | Assemblies: unknown designs and occurrences, cycles, mates that conflict, are redundant or leave parts under-defined, configuration problems, interference and clearance |
 | `cad.fastener.*` | Fastener sets: paths, exceptions, fits and tables |

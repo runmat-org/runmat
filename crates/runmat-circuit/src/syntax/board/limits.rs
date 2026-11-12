@@ -76,7 +76,7 @@ pub(super) fn read_limits(v: &Val, path: &str) -> Read<FabLimits> {
     }
     for (key, field) in LIMIT_KEYS.iter().zip(limit_fields(&mut l)) {
         if let Some(val) = f.get(key) {
-            *field = len(val)?;
+            *field = len(val).map_err(|d| crate::syntax::values::named(d, key))?;
             let s = val.span;
             sources.insert(
                 (*key).to_owned(),

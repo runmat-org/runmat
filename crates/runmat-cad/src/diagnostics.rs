@@ -106,6 +106,9 @@ pub enum DiagCode {
     DrawingView,
     #[serde(rename = "cad.value.failed")]
     ValueFailed,
+    /// A value's unit measures something other than what its place needs.
+    #[serde(rename = "cad.value.unit")]
+    ValueUnit,
     #[serde(rename = "cad.sketch.solve_failed")]
     SketchSolveFailed,
     #[serde(rename = "cad.sketch.redundant")]
@@ -605,9 +608,30 @@ impl DiagnosticReport {
     /// Fill spans from the syntax layer's map.
     pub fn attach_spans(&mut self, spans: &SpanMap) {
         for d in &mut self.diagnostics {
+            let key = d.site.key();
+            // A parameter nested in the model (`distance` written into `extent.distance`), and
+            // the value a declaration holds (`input.width#default`), before the whole entry: a
+            // wrong-unit diagnostic underlines the value.
+            let nested = d.site.param.as_ref().and_then(|param| {
+                let base = key.split('#').next().unwrap_or(&key);
+                let suffix = format!(".{param}");
+                spans
+                    .spans
+                    .iter()
+                    .find(|(k, _)| {
+                        k.split_once('#')
+                            .is_some_and(|(b, p)| b == base && p.ends_with(&suffix))
+                    })
+                    .map(|(_, s)| s)
+            });
+            let value = (d.code == DiagCode::ValueUnit && d.site.param.is_none())
+                .then(|| spans.spans.get(&format!("{key}#default")))
+                .flatten();
             d.span = spans
                 .spans
-                .get(&d.site.key())
+                .get(&key)
+                .or(nested)
+                .or(value)
                 .or_else(|| {
                     let mut s = d.site.clone();
                     s.param = None;
