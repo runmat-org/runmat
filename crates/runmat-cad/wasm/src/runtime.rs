@@ -604,6 +604,18 @@ pub fn resolve_assembly_in(
                                     summary.part_number = output.part_number.clone();
                                 }
                             }
+                            if part.document.parts.len() > 1 {
+                                summary.outputs = part
+                                    .document
+                                    .parts
+                                    .iter()
+                                    .map(|o| runmat_cad::assembly::source::OutputSummary {
+                                        name: o.name.as_str().to_owned(),
+                                        part_number: o.part_number.clone(),
+                                        material: o.material.clone(),
+                                    })
+                                    .collect();
+                            }
                             summary.digest = format!("text:{}", text.len());
                             let configured = ConfiguredSummary {
                                 bbox: bbox(&part.display),

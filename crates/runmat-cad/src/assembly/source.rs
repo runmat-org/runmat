@@ -334,6 +334,20 @@ pub struct DefinitionSummary {
     /// Content digest of the definition source (joins artifact keys).
     #[serde(default)]
     pub digest: String,
+    /// A part file's outputs when it makes more than one (a display unit's screen and case):
+    /// each is its own parts-list item.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<OutputSummary>,
+}
+
+/// One output of a part file that makes several.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutputSummary {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<MaterialRef>,
 }
 
 impl DefinitionSummary {
@@ -349,6 +363,7 @@ impl DefinitionSummary {
             material: None,
             properties: Vec::new(),
             digest: String::new(),
+            outputs: Vec::new(),
         }
     }
 

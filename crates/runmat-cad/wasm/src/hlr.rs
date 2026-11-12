@@ -109,8 +109,8 @@ pub enum Center {
     },
 }
 
-/// A cylindrical face's axis in model millimetres: a point, the unit direction, the radius and
-/// the face's extent along the axis from the point.
+/// A cylindrical face's axis in model millimetres: a point, the unit direction, the radius,
+/// the face's extent along the axis from the point, and the face (its index in the model).
 #[derive(Clone, Copy)]
 struct Axis {
     point: P3,
@@ -118,6 +118,7 @@ struct Axis {
     radius: f64,
     lo: f64,
     hi: f64,
+    face: usize,
 }
 
 type P3 = [f64; 3];
@@ -222,7 +223,10 @@ fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64]) {
                 .map(|c| [at(c[0]), at(c[1]), at(c[2])])
                 .collect();
             if let Some(axis) = cylinder_axis(&f["surface"], t, (0..pos.len() / 3).map(at)) {
-                model.axes.push(axis);
+                model.axes.push(Axis {
+                    face: model.faces.len(),
+                    ..axis
+                });
             }
             model.faces.push(Face {
                 tris,
@@ -315,16 +319,46 @@ fn cylinder_axis(surface: &Value, t: &[f64], points: impl Iterator<Item = P3>) -
         radius,
         lo,
         hi,
+        face: 0,
+    })
+}
+
+/// Whether any of a cylindrical face shows in the view: points round it near both ends and
+/// at its middle, tested as an edge's samples are. A rivet's shank inside the skin, or a frame
+/// under it, shows nowhere and draws no centerline.
+fn axis_shows(model: &Model, grid: &Grid, axes: &Axes, a: &Axis) -> bool {
+    let helper = if a.dir[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let e1 = norm(cross(a.dir, helper));
+    let e2 = cross(a.dir, e1);
+    [0.1, 0.5, 0.9].iter().any(|f| {
+        let h = a.lo + (a.hi - a.lo) * f;
+        (0..8).any(|k| {
+            let t = k as f64 * std::f64::consts::FRAC_PI_4;
+            let p = [0, 1, 2].map(|i| {
+                a.point[i] + a.dir[i] * h + a.radius * (t.cos() * e1[i] + t.sin() * e2[i])
+            });
+            !hidden(model, grid, axes, p, [a.face, a.face])
+        })
     })
 }
 
 /// Center marks for axes that point at the viewer and centerlines for axes in the view's
-/// plane; each drawn once (a counterbore's two cylinders share one mark).
-fn centers(model: &Model, axes: &Axes) -> Vec<Center> {
+/// plane; each drawn once (a counterbore's two cylinders share one mark). `occluders`: for a
+/// view that draws no hidden lines, the model's triangles, so it marks only the cylinders that
+/// show; `None` marks every cylinder.
+fn centers(model: &Model, occluders: Option<&Grid>, axes: &Axes) -> Vec<Center> {
     let project = |p: P3| [dot(p, axes.u), dot(p, axes.v)];
     let r = |x: f64| (x * 100.0).round() as i64;
     let mut seen = BTreeMap::new();
-    for a in &model.axes {
+    for a in model
+        .axes
+        .iter()
+        .filter(|a| occluders.is_none_or(|grid| axis_shows(model, grid, axes, a)))
+    {
         let facing = dot(a.dir, axes.depth).abs();
         let (key, center) = if facing > 0.999 {
             let at = project(a.point);
@@ -363,7 +397,7 @@ fn centers(model: &Model, axes: &Axes) -> Vec<Center> {
             seen.insert(key, center);
         }
     }
-    // Centerlines that lie on one axis line (a counterbore and its hole) join into one.
+    // Centerlines that lie on one axis line and meet (a counterbore and its hole) join into one.
     let mut out: Vec<Center> = Vec::new();
     for c in seen.into_values() {
         if let Center::Line { from, to, radius } = &c {
@@ -376,9 +410,12 @@ fn centers(model: &Model, axes: &Axes) -> Vec<Center> {
                     let (dx, dy) = (t[0] - f[0], t[1] - f[1]);
                     let len = (dx * dx + dy * dy).sqrt().max(1e-9);
                     let off = |p: [f64; 2]| ((p[0] - f[0]) * dy - (p[1] - f[1]) * dx).abs() / len;
-                    if off(*from) < 1e-3 && off(*to) < 1e-3 {
-                        let along = |p: [f64; 2]| ((p[0] - f[0]) * dx + (p[1] - f[1]) * dy) / len;
-                        let (a0, a1) = (along(*from).min(0.0), along(*to).max(len));
+                    let along = |p: [f64; 2]| ((p[0] - f[0]) * dx + (p[1] - f[1]) * dy) / len;
+                    // On one line and touching or overlapping: two wheels' axles in line across
+                    // an aircraft stay two centerlines.
+                    let (s0, s1) = (along(*from).min(along(*to)), along(*from).max(along(*to)));
+                    if off(*from) < 1e-3 && off(*to) < 1e-3 && s1 >= -1e-3 && s0 <= len + 1e-3 {
+                        let (a0, a1) = (s0.min(0.0), s1.max(len));
                         let at = |s: f64| [f[0] + dx / len * s, f[1] + dy / len * s];
                         (*f, *t) = (at(a0), at(a1));
                         *rr = rr.max(*radius);
@@ -588,7 +625,10 @@ impl Grid {
 fn hidden(model: &Model, grid: &Grid, axes: &Axes, p: P3, own: [usize; 2]) -> bool {
     let toward = axes.depth.map(|x| -x);
     let cell = grid.index(dot(p, axes.v), 1) * grid.n + grid.index(dot(p, axes.u), 0);
-    let tol = 1e-4 * grid.cell * grid.n as f64;
+    // Far enough in front to hide, past rounding: a face that touches the sample (a frame's
+    // flange against the skin's inside) doesn't hide it, and a 3 mm skin over it does, however
+    // large the model. Fixed to the model's size it grew to 4 mm on an airliner.
+    let tol = (1e-6 * grid.cell * grid.n as f64).max(1e-4);
     grid.cells[cell].iter().any(|&(fi, ti)| {
         if own.contains(&fi) {
             return false;
@@ -835,7 +875,7 @@ fn lines_of(model: &Model, axes: &Axes, hidden_drawn: bool) -> ViewLines {
         }
     }
     merge_overlaps(&mut out);
-    out.centers = centers(model, axes);
+    out.centers = centers(model, (!hidden_drawn).then_some(&grid), axes);
     out
 }
 

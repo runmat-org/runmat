@@ -153,6 +153,24 @@ fn the_airliner_general_arrangement_compiles_within_the_host_memory() {
             let lines = &entry["visible"];
             let count = lines.as_array().map(Vec::len).unwrap_or(0);
             assert!(count > 0, "{stage} has no visible lines");
+            // The side elevation and plan show the barrel's skin, not the frames under it: no
+            // visible line along a frame's edges (the 15 inner frames of each of the three
+            // barrel sections, each ring 40 mm wide) within the fuselage's sides.
+            if stage != "right" {
+                let through: Vec<(f64, f64)> = [5_200.0, 13_200.0, 21_200.0]
+                    .into_iter()
+                    .flat_map(|x0| (1..16).map(move |j| x0 + 500.0 * j as f64))
+                    .flat_map(|x| [x, x + 40.0])
+                    .map(|u| (u, vertical_at(lines, u, 1_800.0)))
+                    .filter(|(_, len)| *len > 1.0)
+                    .collect();
+                assert!(
+                    through.is_empty(),
+                    "{stage}: frame edges drawn through the skin (station, mm): {through:?}"
+                );
+            }
+            let centers = entry["centers"].as_array().map(Vec::len).unwrap_or(0);
+            eprintln!("  {stage}: {centers} center marks and centerlines");
         }
         if peak > share {
             over.push(format!("{stage} peaked at {} MB", peak >> 20));
@@ -164,4 +182,25 @@ fn the_airliner_general_arrangement_compiles_within_the_host_memory() {
         share >> 20,
         host_ceiling() >> 20
     );
+}
+
+/// Visible length (mm) of the vertical segments of `lines` at `u` within `|v| < reach`.
+fn vertical_at(lines: &serde_json::Value, u: f64, reach: f64) -> f64 {
+    let mut total = 0.0;
+    for line in lines.as_array().into_iter().flatten() {
+        let p: Vec<f64> = line
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_f64)
+            .collect();
+        for w in p.chunks_exact(2).collect::<Vec<_>>().windows(2) {
+            let ([u0, v0], [u1, v1]) = ([w[0][0], w[0][1]], [w[1][0], w[1][1]]);
+            if (u0 - u).abs() < 0.5 && (u1 - u).abs() < 0.5 {
+                let (lo, hi) = (v0.min(v1).max(-reach), v0.max(v1).min(reach));
+                total += (hi - lo).max(0.0);
+            }
+        }
+    }
+    total
 }

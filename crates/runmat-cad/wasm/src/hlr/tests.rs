@@ -268,3 +268,131 @@ fn hidden_runs_under_visible_lines_merge_by_neighbourhood() {
         started.elapsed()
     );
 }
+
+/// In a model 40 m across, an edge 3 mm behind a skin is hidden: how far in front a face must
+/// be to hide a line doesn't grow with the model (an airliner's frames under its 3 mm skin).
+#[test]
+fn a_thin_skin_hides_what_touches_it_in_a_large_model() {
+    // The skin: the plane y = -3 mm over x in [0, 40 m], z in [-100, 100] mm.
+    let skin = vec![
+        [
+            [0.0, -3.0, -100.0],
+            [40_000.0, -3.0, -100.0],
+            [40_000.0, -3.0, 100.0],
+        ],
+        [
+            [0.0, -3.0, -100.0],
+            [40_000.0, -3.0, 100.0],
+            [0.0, -3.0, 100.0],
+        ],
+    ];
+    // A frame's face touching the skin's inside, and its edge on it.
+    let frame = vec![[
+        [20_000.0, 0.0, -50.0],
+        [20_040.0, 0.0, -50.0],
+        [20_000.0, 0.0, 50.0],
+    ]];
+    let model = Model {
+        faces: vec![
+            Face {
+                tris: skin,
+                body: 0,
+            },
+            Face {
+                tris: frame,
+                body: 1,
+            },
+        ],
+        edges: vec![Edge {
+            points: vec![[20_000.0, 0.0, -50.0], [20_000.0, 0.0, 50.0]],
+            faces: [1, 1],
+        }],
+        axes: Vec::new(),
+        bodies: 2,
+    };
+    let lines = lines_of(&model, &axes("front"), true);
+    assert!(lines.visible.is_empty(), "visible: {:?}", lines.visible);
+    assert!(!lines.hidden.is_empty());
+}
+
+/// In a view of visible lines, a cylinder under the skin (a rivet's shank, a frame) draws no
+/// center mark: only the cylinders that show carry one.
+#[test]
+fn a_hidden_cylinder_draws_no_center_mark() {
+    let skin = vec![
+        [
+            [-100.0, -3.0, -100.0],
+            [100.0, -3.0, -100.0],
+            [100.0, -3.0, 100.0],
+        ],
+        [
+            [-100.0, -3.0, -100.0],
+            [100.0, -3.0, 100.0],
+            [-100.0, -3.0, 100.0],
+        ],
+    ];
+    let shank = Axis {
+        point: [0.0, 0.0, 0.0],
+        dir: [0.0, 1.0, 0.0],
+        radius: 2.0,
+        lo: 0.0,
+        hi: 10.0,
+        face: 1,
+    };
+    let model = |covered: bool| Model {
+        faces: vec![
+            Face {
+                tris: if covered { skin.clone() } else { Vec::new() },
+                body: 0,
+            },
+            Face {
+                tris: Vec::new(),
+                body: 1,
+            },
+        ],
+        edges: Vec::new(),
+        axes: vec![shank],
+        bodies: 2,
+    };
+    let front = axes("front");
+    assert!(lines_of(&model(true), &front, false).centers.is_empty());
+    assert_eq!(lines_of(&model(false), &front, false).centers.len(), 1);
+    // A view that draws hidden lines marks it too, as it draws the hidden cylinder.
+    assert_eq!(lines_of(&model(true), &front, true).centers.len(), 1);
+}
+
+/// Two cylinders on one axis line join into one centerline only where they meet: a hole and
+/// its counterbore do, two wheels' axles in line across an aircraft don't.
+#[test]
+fn centerlines_in_line_join_only_where_they_meet() {
+    let axle = |x: f64, lo: f64, hi: f64| Axis {
+        point: [x, 0.0, 0.0],
+        dir: [1.0, 0.0, 0.0],
+        radius: 5.0,
+        lo,
+        hi,
+        face: 0,
+    };
+    let model = |axes: Vec<Axis>| Model {
+        faces: vec![Face {
+            tris: Vec::new(),
+            body: 0,
+        }],
+        edges: Vec::new(),
+        axes,
+        bodies: 1,
+    };
+    let front = axes("front");
+    let apart = centers(
+        &model(vec![axle(0.0, 0.0, 10.0), axle(100.0, 0.0, 10.0)]),
+        None,
+        &front,
+    );
+    assert_eq!(apart.len(), 2, "{apart:?}");
+    let meeting = centers(
+        &model(vec![axle(0.0, 0.0, 10.0), axle(10.0, 0.0, 10.0)]),
+        None,
+        &front,
+    );
+    assert_eq!(meeting.len(), 1, "{meeting:?}");
+}

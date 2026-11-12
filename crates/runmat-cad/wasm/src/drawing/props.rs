@@ -46,8 +46,9 @@ pub fn output_properties(document: &PartDocument) -> BTreeMap<String, String> {
     props
 }
 
-/// The key [`item_properties`] files an item's properties under: its definition's file, and
-/// for a named configuration other than the default `<file>|<configuration>`.
+/// The key [`item_properties`] files an item's properties under: its definition (the file, and
+/// `#<output>` for one output of several), and for a named configuration other than the
+/// default `<definition>|<configuration>`.
 pub fn item_key(file: &str, configuration: &str) -> String {
     if configuration == "default" {
         file.to_owned()
@@ -73,7 +74,8 @@ pub fn item_properties(
     let mut out = BTreeMap::new();
     for row in &bom.rows {
         let file = row.item.definition.file.as_str().to_owned();
-        let key = item_key(&file, &row.item.configuration);
+        // One output of a part file that makes several is filed under `<file>#<output>`.
+        let key = item_key(&row.item.definition.to_string(), &row.item.configuration);
         if out.contains_key(&key) {
             continue;
         }
@@ -97,7 +99,14 @@ pub fn item_properties(
         if let Some(document) = parse_part(&at, source).document {
             let configuration = label_configuration(&row.item.configuration)
                 .filter(|name| document.configuration(name).is_some());
-            let document = document.in_configuration(configuration.as_ref());
+            let mut document = document.in_configuration(configuration.as_ref());
+            // That output's properties: it goes first, where the readers look.
+            if let Some(name) = &row.item.definition.part {
+                if let Some(i) = document.parts.iter().position(|o| &o.name == name) {
+                    let output = document.parts.remove(i);
+                    document.parts.insert(0, output);
+                }
+            }
             let mut props = output_properties(&document);
             if let Some(description) = description_of(&document, &props) {
                 props.insert("description".to_owned(), description);
