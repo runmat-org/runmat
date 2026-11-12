@@ -78,5 +78,22 @@
       "before_and_after": true
     },
     "source_scope": "All 27,272 canonical source files match the frozen consolidated snapshot before and after the required authored, recovery and bounded exact-kernel cohorts. Retained executables have byte-verified copies. Credentials and .env files are excluded from the source transfer."
+  },
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "44db52c4eb7410d88c988dfc061ea4d94b324d0ee1c4b7db0d6665edac0243cf",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Conserves the recorded scientific measurement across circuit lint metadata, an exact transparent return-type alias and a test-only initializer. Prior CAD/circuit conservation across the FEA intake remains individually declared. No arithmetic, allocation, workload, dependency, compiler setting or timing threshold changes.",
+    "review": {
+      "path": "qualification/scientific/reviews/circuit-quality-20261112-authored-cli-physics.json",
+      "sha256": "b13fad5f90f6aaf405d20643cda7dbc485f9051f726cd1a65acc4786b600b5a6"
+    }
   }
 }

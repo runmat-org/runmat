@@ -89,14 +89,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "sha256": "44db52c4eb7410d88c988dfc061ea4d94b324d0ee1c4b7db0d6665edac0243cf",
       "files": 26117,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "All intervening inputs concern FEA resource planning, curve sizing, Delaunay volume recovery and independent test fixtures. The complete CAD/circuit implementation trees, workloads, geometry kernel, dependency lock and compiler configuration remain byte-identical. The review lists every changed input and retains the original measured binary and log identities.",
+    "reason": "Conserves the recorded scientific measurement across circuit lint metadata, an exact transparent return-type alias and a test-only initializer. Prior CAD/circuit conservation across the FEA intake remains individually declared. No arithmetic, allocation, workload, dependency, compiler setting or timing threshold changes.",
     "review": {
-      "path": "qualification/scientific/reviews/circuit-large-board-performance-35f-to-67e-20261112.json",
-      "sha256": "73857cdb2347040ca72cdaa810353cba26d8fb0348b69bc60a8d778e8611ac99"
+      "path": "qualification/scientific/reviews/circuit-quality-20261112-circuit-large-board-performance.json",
+      "sha256": "a0b217476d35d6a9afaed341ac92d24069326a131e2b07a2f288d87b13e52d87"
     }
   }
 }

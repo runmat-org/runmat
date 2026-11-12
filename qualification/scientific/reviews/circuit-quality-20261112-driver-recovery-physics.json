@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+    "files": 26117,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "44db52c4eb7410d88c988dfc061ea4d94b324d0ee1c4b7db0d6665edac0243cf",
+    "files": 26117,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "driver-recovery-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-circuit/src/board3d/solid.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ba9511006688aecbcda578aa66a09dfa214055c5"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cc271e3ee0b1922aa7da56758330424fde8c9ae3"
+      ],
+      "reason": "Adds only a transparent type alias for the existing copper-vector and two mask-height intervals. Layout, ownership and all function bodies are unchanged."
+    },
+    {
+      "path": "crates/runmat-circuit/src/library/footprint.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8e706e55ff4442c5d8c429e8da75136719047322"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8da6b5af0c05c44f2b3775f0ced633331377d437"
+      ],
+      "reason": "Restores the existing too_many_arguments lint annotation to finish. Its body, parameters, material constants and every call are unchanged."
+    },
+    {
+      "path": "crates/runmat-circuit/src/runtime/session.rs",
+      "before": [
+        "100644",
+        "blob",
+        "2e32e361878405170ae37fcfc054cda8c5461215"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "64e0fcfb7aeea559e6daa427a195c0d94365f1ab"
+      ],
+      "reason": "Spells the existing return tuple using its exact transparent alias. The board_surfaces function body and all other methods remain byte-identical."
+    },
+    {
+      "path": "crates/runmat-circuit/tests/schematic_sheet_layout.rs",
+      "before": [
+        "100644",
+        "blob",
+        "fefc6eb39bd968f93480972ce644fef25de4863c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6a54f26463ef4e81349570486181e067b7604ea0"
+      ],
+      "reason": "Initializes the same places clone and remaining Default fields in one test-local initializer. Every assertion is unchanged; this separate integration-test target is not linked into the measured scientific executables."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/circuit-quality-20261112.json",
+      "sha256": "b1fc86c09c80ddfe82b393c59f1f0518c4cb5b4099103bbeb740225f67ad0a61"
+    }
+  ],
+  "reason": "Conserves the recorded scientific measurement across circuit lint metadata, an exact transparent return-type alias and a test-only initializer. Prior CAD/circuit conservation across the FEA intake remains individually declared. No arithmetic, allocation, workload, dependency, compiler setting or timing threshold changes."
+}
