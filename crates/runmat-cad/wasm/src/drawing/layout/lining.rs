@@ -130,11 +130,11 @@ fn loops(lo: Xy, hi: Xy) -> Vec<Xy> {
     if thick <= 0.0 {
         return Vec::new();
     }
-    // A prolate cycloid, x = a t - b sin t, y = c cos t: a coil of round loops, each as wide
-    // as about half the thickness, two fifths of the thickness apart, centred along the piece.
-    let pitch = 0.4 * thick;
+    // A prolate cycloid, x = a t - b sin t, y = c cos t: a coil of round loops, each about a
+    // third of the thickness wide and three tenths of it apart, centred along the piece.
+    let pitch = 0.3 * thick;
     let a = pitch / std::f64::consts::TAU;
-    let b = 0.3 * thick;
+    let b = 0.18 * thick;
     let c = 0.45 * thick;
     let turns = ((long - 2.0 * b) / pitch).floor().max(1.0) as usize;
     let steps = turns * 48;
