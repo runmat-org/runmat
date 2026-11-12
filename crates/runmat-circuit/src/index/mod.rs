@@ -328,9 +328,10 @@ pub fn build_index(
             .and_then(|u| pool.parts.values().find(|p| p.uuid == u))
             .map(|p| (p.mpn.clone(), p.manufacturer.clone(), p.description.clone()))
     };
-    let mut hierarchy: Vec<SheetRow> = netlist
-        .sheets
-        .iter()
+    let mut sheets: Vec<_> = netlist.sheets.iter().collect();
+    sheets.sort_by(|(a, _), (b, _)| a.natural_cmp(b));
+    let hierarchy: Vec<SheetRow> = sheets
+        .into_iter()
         .map(|(path, sheet)| {
             let text = path.to_string();
             let parent = text.rsplit_once('/').map(|(p, _)| p.to_owned());
@@ -341,7 +342,6 @@ pub fn build_index(
             }
         })
         .collect();
-    hierarchy.sort_by(|a, b| a.path.cmp(&b.path));
 
     let mut components: Vec<ComponentRow> = netlist
         .components
