@@ -625,12 +625,17 @@ This file is generated from the command catalog.
   - Required: `layout` (one of `linear`, `circular`, default `linear`); `entities` (picks: sketch entity); `spacing` (number in mm, default 10) when `layout` is linear; `direction` (number in deg, default 0) when `layout` is linear; `center` (pick: sketch point or vertex or point) when `layout` is circular; `angle` (number in deg, default 360) when `layout` is circular; `instances` (whole number, default 4)
 - `sketch.point`: Place a sketch point.
   - Required: `at` (pick: sketch point or vertex or point)
+- `sketch.polygon`: Draw a regular polygon.
+  - Required: `sides` (whole number, default 6); `center` (pick: sketch point or vertex or point); `radius` (number in mm, default 10); `fit` (one of `inscribed`, `circumscribed`, default `inscribed`); `rotation` (number in deg, default 0)
 - `sketch.rectangle`: Draw a rectangle by corners, center, three points or as a parallelogram.
   - Required: `type` (one of `corner`, `center`, `three_point`, `parallelogram`, default `corner`); `first` (pick: sketch point or vertex or point); `second` (pick: sketch point or vertex or point); `third` (pick: sketch point or vertex or point) when `type` is three_point or parallelogram
   - Optional: `construction_diagonals` (true or false, default false)
 - `sketch.slot`: Draw a straight, center-point or arc slot.
   - Required: `type` (one of `straight`, `center`, `arc`, default `straight`); `start` (pick: sketch point or vertex or point); `end` (pick: sketch point or vertex or point); `width` (number in mm, default 6)
   - Optional: `dimension` (true or false, default true)
+- `sketch.spline`: Draw a spline through points, by control points, from an equation or as a style spline.
+  - Required: `type` (one of `through_points`, `control_points`, `equation`, `style`, default `through_points`); `points` (picks: sketch point or vertex) when `type` is through_points or control_points or style; `degree` (whole number, default 3) when `type` is control_points or style; `x` (text) when `type` is equation; `y` (text) when `type` is equation
+  - Optional: `closed` (true or false, default false)
 - `sketch.split`: Split an entity at a point.
   - Required: `entity` (pick: sketch entity); `at` (pick: sketch point or vertex or point)
 - `sketch.transform`: Move, copy, rotate or scale entities.
