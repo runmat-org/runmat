@@ -81,5 +81,22 @@
       "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.circuit-large-board-performance.log",
       "disposition": "Renewed failed N1 comparison; the reference-Mac receipt retains the unchanged 500 ms budget."
     }
-  ]
+  ],
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
+      "files": 26112,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "All intervening inputs concern FEA resource planning, curve sizing, Delaunay volume recovery and independent test fixtures. The complete CAD/circuit implementation trees, workloads, geometry kernel, dependency lock and compiler configuration remain byte-identical. The review lists every changed input and retains the original measured binary and log identities.",
+    "review": {
+      "path": "qualification/scientific/reviews/circuit-large-board-performance-35f-to-67e-20261112.json",
+      "sha256": "73857cdb2347040ca72cdaa810353cba26d8fb0348b69bc60a8d778e8611ac99"
+    }
+  }
 }

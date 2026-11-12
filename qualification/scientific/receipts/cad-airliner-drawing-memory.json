@@ -72,5 +72,22 @@
       "termination": "Owner-controlled SIGTERM of the exact test process after 19m28s while the last view was computing; incomplete, not a passing measurement or an observed assertion failure.",
       "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-80226433e0-airliner-r2.tests.log"
     }
-  ]
+  ],
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
+      "files": 26112,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "All intervening inputs concern FEA resource planning, curve sizing, Delaunay volume recovery and independent test fixtures. The complete CAD/circuit implementation trees, workloads, geometry kernel, dependency lock and compiler configuration remain byte-identical. The review lists every changed input and retains the original measured binary and log identities.",
+    "review": {
+      "path": "qualification/scientific/reviews/cad-airliner-drawing-memory-35f-to-67e-20261112.json",
+      "sha256": "437320adfc32c7cb563ce0d69e7e2dce10c8bc14e58c796d24b36213b11f0101"
+    }
+  }
 }
