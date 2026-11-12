@@ -18,13 +18,15 @@ pub(crate) fn reconcile_resource_request(
             actual: actual.peak_cpu_millicores,
         });
     }
-    let planned_core_millis = u64::from(request.cpu_millicores)
-        .checked_mul(request.max_wall_millis)
-        .map(|millicore_millis| millicore_millis.div_ceil(1000))
-        .ok_or(ResourcePlanningError::Overflow("planned CPU time"))?;
-    if actual.scheduler.cpu_core_millis > planned_core_millis {
+    // Planned CPU time is cores x wall time. A study with no authored wall-time ceiling plans the
+    // wire maximum (2^53 - 1 ms), so the product needs u128; it cannot overflow there.
+    let planned_core_millis =
+        (u128::from(request.cpu_millicores) * u128::from(request.max_wall_millis)).div_ceil(1000);
+    if u128::from(actual.scheduler.cpu_core_millis) > planned_core_millis {
         overruns.push(ResourceOverrun::CpuTime {
-            planned_core_millis,
+            // Below a u64 actual, so it fits.
+            planned_core_millis: u64::try_from(planned_core_millis)
+                .map_err(|_| ResourcePlanningError::Overflow("planned CPU time"))?,
             actual_core_millis: actual.scheduler.cpu_core_millis,
         });
     }
@@ -91,11 +93,10 @@ pub(crate) fn reconcile_resource_request(
             .checked_add(usage.device_millis)
             .ok_or(ResourcePlanningError::Overflow("actual accelerator time"))?;
     }
-    let mut planned_accelerators = BTreeMap::<&str, u64>::new();
+    // u128 for the same reason as planned CPU time: no ceiling plans the wire-maximum wall time.
+    let mut planned_accelerators = BTreeMap::<&str, u128>::new();
     for accelerator in &request.accelerators {
-        let millis = u64::from(accelerator.count)
-            .checked_mul(request.max_wall_millis)
-            .ok_or(ResourcePlanningError::Overflow("planned accelerator time"))?;
+        let millis = u128::from(accelerator.count) * u128::from(request.max_wall_millis);
         let total = planned_accelerators
             .entry(accelerator.class.as_str())
             .or_default();
@@ -104,11 +105,13 @@ pub(crate) fn reconcile_resource_request(
             .ok_or(ResourcePlanningError::Overflow("planned accelerator time"))?;
     }
     for (class, actual_device_millis) in actual_accelerators {
-        let planned_device_millis = planned_accelerators.get(class).copied().unwrap_or(0);
-        if actual_device_millis > planned_device_millis {
+        let planned = planned_accelerators.get(class).copied().unwrap_or(0);
+        if u128::from(actual_device_millis) > planned {
             overruns.push(ResourceOverrun::AcceleratorTime {
                 class: class.to_owned(),
-                planned_device_millis,
+                // Below a u64 actual, so it fits.
+                planned_device_millis: u64::try_from(planned)
+                    .map_err(|_| ResourcePlanningError::Overflow("planned accelerator time"))?,
                 actual_device_millis,
             });
         }

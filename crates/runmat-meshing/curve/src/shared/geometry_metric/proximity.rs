@@ -26,6 +26,9 @@ pub(super) struct EdgeWitness {
     /// Per face the edge bounds, the unit surface normal at each of `points_m` (sign as
     /// evaluated). Empty when no normals were sampled.
     pub face_normals: BTreeMap<PersistentEntityId, Vec<[f64; 3]>>,
+    /// Per face the edge bounds, the sign that turns that face's sampled normal away from each
+    /// solid the face bounds (see `FaceWitness::material_sides`). Empty for sheet geometry.
+    pub face_material_sides: BTreeMap<PersistentEntityId, BTreeMap<PersistentEntityId, f64>>,
 }
 
 /// Whether the space between features bounding the solids `left` and `right` lies outside
@@ -264,8 +267,15 @@ pub(super) fn derive_proximity_contributions(
 }
 
 /// Whether two edges are the two sides of a narrow face on thicker material: they bound a
-/// common face, and none of their other faces face each other at the closest samples (see
-/// `derive_proximity_contributions`). Edges without sampled normals keep the gap law.
+/// common face, and none of their other faces face each other across it at the closest samples
+/// (see `derive_proximity_contributions`). Edges without sampled normals keep the gap law.
+///
+/// Facing is judged on the side away from the material. Across a thickness strip the material
+/// lies between the other two faces, so their outward normals point apart: the top and bottom
+/// of a plate, the inner and outer walls of a tube. Across a step the two faces are parallel
+/// but point the same way: the top of a 1 mm land and the plate top beside it. The strip
+/// between them is a narrow face on the plate's full thickness, not a 1 mm layer. When the
+/// strip's solids are unknown (sheet geometry) the normals are compared up to sign.
 fn is_narrow_face(left: &EdgeWitness, right: &EdgeWitness, closest: (usize, usize)) -> bool {
     let shared = left
         .face_ids
@@ -279,7 +289,7 @@ fn is_narrow_face(left: &EdgeWitness, right: &EdgeWitness, closest: (usize, usiz
             .face_normals
             .iter()
             .filter(|(face, _)| !shared.contains(face))
-            .filter_map(|(_, normals)| normals.get(sample).copied())
+            .filter_map(|(face, normals)| normals.get(sample).map(|normal| (face.clone(), *normal)))
             .collect::<Vec<_>>()
     };
     let left_normals = other_normals(left, closest.0);
@@ -287,10 +297,44 @@ fn is_narrow_face(left: &EdgeWitness, right: &EdgeWitness, closest: (usize, usiz
     if left_normals.is_empty() || right_normals.is_empty() {
         return false;
     }
-    !left_normals.iter().any(|left| {
-        right_normals.iter().any(|right| {
-            let dot = left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
-            dot.abs() >= FACING_COSINE
+    let strip_solids = shared
+        .iter()
+        .flat_map(|face| {
+            left.face_material_sides
+                .get(*face)
+                .into_iter()
+                .chain(right.face_material_sides.get(*face))
+                .flat_map(|sides| sides.keys())
+        })
+        .collect::<BTreeSet<_>>();
+    let dot = |left: [f64; 3], right: [f64; 3]| {
+        left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+    };
+    if strip_solids.is_empty() {
+        return !left_normals.iter().any(|(_, left)| {
+            right_normals
+                .iter()
+                .any(|(_, right)| dot(*left, *right).abs() >= FACING_COSINE)
+        });
+    }
+    let outward = |witness: &EdgeWitness, face: &PersistentEntityId, solid, normal: [f64; 3]| {
+        witness
+            .face_material_sides
+            .get(face)
+            .and_then(|sides| sides.get(solid))
+            .map(|side| normal.map(|component| side * component))
+    };
+    !strip_solids.into_iter().any(|solid| {
+        left_normals.iter().any(|(left_face, left_normal)| {
+            right_normals.iter().any(|(right_face, right_normal)| {
+                match (
+                    outward(left, left_face, solid, *left_normal),
+                    outward(right, right_face, solid, *right_normal),
+                ) {
+                    (Some(left), Some(right)) => dot(left, right) <= -FACING_COSINE,
+                    _ => false,
+                }
+            })
         })
     })
 }
@@ -811,6 +855,65 @@ mod tests {
         let mut wide = right;
         wide.points_m.iter_mut().for_each(|point| point[0] = 1.2e-3);
         assert!(size(left, wide).is_empty());
+    }
+
+    /// A 1 mm land standing on an 8 mm plate, and a 1 mm plate. Both side strips are 1 mm
+    /// wide and both strips' other faces are horizontal. On the land, the land top and the
+    /// plate top beside it point the same way, away from the plate: the strip is a step on the
+    /// plate's full thickness, a narrow face sized rho * w along it. On the thin plate, the top
+    /// and bottom point apart across the material: the strip is a thickness with
+    /// cells_across_gap cells across. The sampled normals are evaluator normals, so a reversed
+    /// face use carries the opposite sign; the material side, not the raw sign, decides.
+    #[test]
+    fn a_step_is_a_narrow_face_and_a_thin_plate_side_is_a_thickness() {
+        let width = 1.0e-3;
+        let plate = id(PersistentEntityKind::Solid, 40);
+        let strip = id(PersistentEntityKind::Face, 41);
+        let upper = id(PersistentEntityKind::Face, 42);
+        let lower = id(PersistentEntityKind::Face, 43);
+        let edge = |seed: u8, z: f64, other: &PersistentEntityId, raw: [f64; 3], side: f64| {
+            let mut edge = witness(seed, 0.0);
+            edge.points_m = (0..9).map(|i| [0.0, i as f64 * 0.5 / 8.0, z]).collect();
+            edge.face_ids = BTreeSet::from([strip.clone(), other.clone()]);
+            edge.solid_ids = BTreeSet::from([plate.clone()]);
+            edge.face_normals.insert(strip.clone(), vec![[1.0, 0.0, 0.0]; 9]);
+            edge.face_normals.insert(other.clone(), vec![raw; 9]);
+            edge.face_material_sides
+                .insert(strip.clone(), BTreeMap::from([(plate.clone(), 1.0)]));
+            edge.face_material_sides
+                .insert(other.clone(), BTreeMap::from([(plate.clone(), side)]));
+            edge
+        };
+        let size = |left: EdgeWitness, right: EdgeWitness| {
+            derive_proximity_contributions(
+                vec![left, right],
+                &ContactProximityPairs::default(),
+                MetricTensor3::isotropic_length_m(12.0e-3).unwrap(),
+                24.0e-3,
+                2,
+                TEN_RADIUS_EDGE,
+                &Control,
+            )
+            .unwrap()
+        };
+        // Land top evaluated with its normal reversed (use reversed): outward is still +z.
+        let step = size(
+            edge(1, -3.0e-3, &upper, [0.0, 0.0, -1.0], -1.0),
+            edge(2, -4.0e-3, &lower, [0.0, 0.0, 1.0], 1.0),
+        );
+        let along = MetricTensor3::isotropic_length_m(width * TEN_RADIUS_EDGE).unwrap();
+        assert_eq!(step.len(), 2);
+        assert!(step.iter().all(|source| source.metric == along));
+
+        // Plate bottom evaluated as +z on a reversed use: outward is -z, opposite the top.
+        let thickness = size(
+            edge(1, -3.0e-3, &upper, [0.0, 0.0, 1.0], 1.0),
+            edge(2, -4.0e-3, &lower, [0.0, 0.0, 1.0], -1.0),
+        );
+        assert_eq!(thickness.len(), 2);
+        // Two cells across the thickness, along the separation (z).
+        let across = thickness[0].metric.zz;
+        assert!((across - 1.0 / (0.5 * width).powi(2)).abs() < 1.0e-9 * across);
     }
 
     fn face(seed: u8, vertices: &[u8], samples: Vec<([f64; 3], [f64; 3])>) -> FaceWitness {
@@ -1527,6 +1630,7 @@ mod tests {
             solid_ids: BTreeSet::new(),
             points_m: vec![[x, 0.0, 0.0]],
             face_normals: BTreeMap::new(),
+            face_material_sides: BTreeMap::new(),
         }
     }
 
