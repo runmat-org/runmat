@@ -115,6 +115,7 @@ pub fn edit(
         "library.place" => super::library_edit::place(&project, request),
         "circuit.set-property" => super::set_property::run(&project, request),
         "study.new" => super::board_study::run(&project, files, request),
+        c if super::context_edit::COMMANDS.contains(&c) => super::context_edit::run(&project, request),
         c if super::schematic_edit::COMMANDS.contains(&c) => {
             super::schematic_edit::run(&project, files, request)
         }
@@ -484,7 +485,7 @@ fn room_formats(project: &Project, request: &EditRequest) -> Result<EditOutput, 
 }
 
 /// An Outline node id or designator → the site or designator `apply_board_edit` resolves.
-fn site_of(board: &Board, sites: &BTreeMap<ItemId, String>, id: &str) -> Result<String, EditError> {
+pub(super) fn site_of(board: &Board, sites: &BTreeMap<ItemId, String>, id: &str) -> Result<String, EditError> {
     let (kind, rest) = id.split_once(':').unwrap_or(("", id));
     match kind {
         "component" | "footprint" | "" => {
