@@ -1,7 +1,7 @@
 //! The agent's command list: `docs/design/commands.md`, rendered from the catalog, so an agent
 //! finds every command's id, what it does and the fields it needs without opening the Desktop.
 
-use crate::{Catalog, CommandDescriptor, Field, FieldKind};
+use crate::{Catalog, CommandDescriptor, EditorKind, Field, FieldKind};
 use std::collections::BTreeMap;
 
 fn snake<T: serde::Serialize>(value: &T) -> String {
@@ -108,8 +108,11 @@ fn command_entry(command: &CommandDescriptor) -> String {
 }
 
 impl Catalog {
-    /// `docs/design/commands.md`: every command, grouped by id prefix, with its required and optional fields.
-    pub fn commands_reference(&self) -> String {
+    /// `docs/design/commands.md`: every command the agent can run, grouped by id prefix, with
+    /// its required and optional fields. `offered(id, editor)` says whether the agent's tools run
+    /// command `id` on a file of `editor` (the command registry's routes); a command offered in
+    /// none of its editors is left out.
+    pub fn commands_reference(&self, offered: impl Fn(&str, EditorKind) -> bool) -> String {
         let mut out = String::from(
             "---\n\
              description: Design commands and their required fields for proposing edits to parts, assemblies, drawings, circuits and boards.\n\
@@ -126,17 +129,27 @@ impl Catalog {
              see `design/mcad/part/features.md` and `design/ecad/circuit` for the syntax.\n\n\
              This file is generated from the command catalog.\n",
         );
-        let mut groups: BTreeMap<&str, Vec<&CommandDescriptor>> = BTreeMap::new();
+        let mut groups: BTreeMap<&str, Vec<(&CommandDescriptor, Vec<EditorKind>)>> =
+            BTreeMap::new();
         for command in &self.commands {
+            let editors: Vec<EditorKind> = command
+                .editors
+                .iter()
+                .copied()
+                .filter(|e| offered(&command.id, *e))
+                .collect();
+            if editors.is_empty() {
+                continue;
+            }
             groups
                 .entry(command.id.split('.').next().unwrap_or(&command.id))
                 .or_default()
-                .push(command);
+                .push((command, editors));
         }
         for (prefix, mut commands) in groups {
-            commands.sort_by(|a, b| a.id.cmp(&b.id));
+            commands.sort_by(|a, b| a.0.id.cmp(&b.0.id));
             let mut editors: Vec<&str> = Vec::new();
-            for editor in commands.iter().flat_map(|c| c.editors.iter()) {
+            for editor in commands.iter().flat_map(|c| c.1.iter()) {
                 if !editors.contains(&editor.as_str()) {
                     editors.push(editor.as_str());
                 }
@@ -146,7 +159,7 @@ impl Catalog {
                 "\n## `{prefix}.` commands ({})\n\n",
                 files.join(", ")
             ));
-            for command in commands {
+            for (command, _) in commands {
                 out.push_str(&command_entry(command));
             }
         }
