@@ -87,14 +87,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "e1104f3daf51ca75bcf96cfa0a78abb3c28098976e89531f328c240bda2420c8",
+      "sha256": "9eb1fb59fa44dd2efb55fa6a409b30adeedc4f3eafc74e3c8a55040acadfc3f0",
       "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The circuit benchmark source, its dependency implementations and threshold are unchanged since the measured snapshot. The complete intervening inventory contains four FEA formatting-only files and the separate design-tool sketch handler/regression. These edits do not execute through the circuit Session benchmark. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries.",
+    "reason": "The circuit benchmark source, its dependency implementations and threshold are unchanged since the measured snapshot. The complete intervening inventory contains four FEA formatting-only files and the separate design-tool sketch handler/regression. These edits do not execute through the circuit Session benchmark. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries. The unchanged cfg(test) module moves after the production items in modal/diagnostics.rs. Byte comparison proves that both the complete test module and production source are unchanged apart from module position and final whitespace. No arithmetic, diagnostic contents, accuracy policy, allocation, serialization contract or scientific assertion changes.",
     "review": {
       "path": "qualification/scientific/reviews/circuit-air-df1e2068ed-to-2822ea6807.json",
-      "sha256": "5a17090fbf3dc12fcda1a2a2c15d627d10d89a980b985aa2892337c09a41f36b"
+      "sha256": "d3a04cad675e39c9b7877af90728245f8905ef2b95c086eea7e5ae710dde2baf"
     }
   }
 }
