@@ -68,7 +68,10 @@ impl ItemRef {
             "sheet" => ItemRef::Sheet(named(key)?),
             "text" => {
                 let (sheet, name) = key.rsplit_once('/')?;
-                ItemRef::Text { sheet: sheet.to_owned(), name: named(name)? }
+                ItemRef::Text {
+                    sheet: sheet.to_owned(),
+                    name: named(name)?,
+                }
             }
             "point" => {
                 let (x, y) = key.split_once(',')?;
@@ -128,7 +131,11 @@ impl ItemRef {
     pub fn carries_net(&self) -> bool {
         matches!(
             self,
-            ItemRef::Net(_) | ItemRef::Pad { .. } | ItemRef::Track(_) | ItemRef::Via(_) | ItemRef::Zone(_)
+            ItemRef::Net(_)
+                | ItemRef::Pad { .. }
+                | ItemRef::Track(_)
+                | ItemRef::Via(_)
+                | ItemRef::Zone(_)
         )
     }
 
@@ -137,9 +144,11 @@ impl ItemRef {
     pub fn net_on(&self, board: &Board) -> Option<NetId> {
         match self {
             ItemRef::Net(name) => board.net(name),
-            ItemRef::Pad { component, pad } => {
-                board.footprint_by_ref(component)?.pad_nets.get(pad).copied()
-            }
+            ItemRef::Pad { component, pad } => board
+                .footprint_by_ref(component)?
+                .pad_nets
+                .get(pad)
+                .copied(),
             ItemRef::Track(id) => board.tracks.get(&ItemId(*id))?.net,
             ItemRef::Via(id) => board.vias.get(&ItemId(*id))?.net,
             ItemRef::Zone(id) => board.zones.get(&ItemId(*id))?.net,
@@ -225,22 +234,39 @@ mod tests {
     fn a_pin_name_keeps_its_dots_and_a_point_trims_to_a_micrometre() {
         assert_eq!(
             ItemRef::parse("pin:U1.P0.1"),
-            Some(ItemRef::Pin { component: "U1".into(), pin: "P0.1".into() })
+            Some(ItemRef::Pin {
+                component: "U1".into(),
+                pin: "P0.1".into()
+            })
         );
         assert_eq!(ItemRef::point(1.0000004, -0.0).to_string(), "point:1,0");
     }
 
     #[test]
     fn malformed_and_unknown_text_reads_as_nothing() {
-        for text in ["track:x", "pad:U1", "net:", "point:1", "point:a,b", "wire:3", "GND"] {
+        for text in [
+            "track:x",
+            "pad:U1",
+            "net:",
+            "point:1",
+            "point:a,b",
+            "wire:3",
+            "GND",
+        ] {
             assert_eq!(ItemRef::parse(text), None, "{text}");
         }
     }
 
     #[test]
     fn a_bare_name_takes_the_fields_kind() {
-        assert_eq!(ItemRef::read("GND", ItemRef::Net), Some(ItemRef::Net("GND".into())));
-        assert_eq!(ItemRef::read("track:7", ItemRef::Net), Some(ItemRef::Track(7)));
+        assert_eq!(
+            ItemRef::read("GND", ItemRef::Net),
+            Some(ItemRef::Net("GND".into()))
+        );
+        assert_eq!(
+            ItemRef::read("track:7", ItemRef::Net),
+            Some(ItemRef::Track(7))
+        );
         assert_eq!(ItemRef::read("wire:7", ItemRef::Net), None);
         assert_eq!(ItemRef::read("", ItemRef::Net), None);
     }

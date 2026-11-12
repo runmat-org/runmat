@@ -24,9 +24,9 @@ mod wire;
 use super::edit::{lock_change, EditError, EditOutput, EditRequest};
 use super::{file_change, load_with, Files, Project};
 use crate::elab::find_pins;
-use crate::item_ref::ItemRef;
 use crate::ids::{NamePath, SchWire, WireKey, WireMode};
 use crate::ir::{Connection, Endpoint, SheetDef};
+use crate::item_ref::ItemRef;
 use crate::syntax::board_edit::SourceChange;
 use crate::syntax::{connection_statement, endpoint, parse_circuit, words};
 use runmat_design_syntax::ast::{Headed, Item, Statement};
@@ -325,7 +325,12 @@ impl<'a> Editor<'a> {
             self.request
                 .selection
                 .iter()
-                .filter(|s| matches!(ItemRef::parse(s), Some(ItemRef::Pin { .. } | ItemRef::Net(_))))
+                .filter(|s| {
+                    matches!(
+                        ItemRef::parse(s),
+                        Some(ItemRef::Pin { .. } | ItemRef::Net(_))
+                    )
+                })
                 .nth(n)
                 .cloned()
         })
@@ -334,7 +339,11 @@ impl<'a> Editor<'a> {
     pub fn resolve(&self, id: &str) -> Result<End, EditError> {
         let nl = &self.project.netlist;
         let picked = ItemRef::parse(id);
-        if let Some(ItemRef::Pin { component: designator, pin }) = &picked {
+        if let Some(ItemRef::Pin {
+            component: designator,
+            pin,
+        }) = &picked
+        {
             let (designator, pin) = (designator.as_str(), pin.as_str());
             let (comp, c) = nl
                 .component(designator)

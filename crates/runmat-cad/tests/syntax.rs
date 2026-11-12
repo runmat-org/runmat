@@ -263,7 +263,9 @@ fn drawing() -> DrawingDocument {
                 "a_a",
                 ViewKind::Section {
                     from: "front".into(),
-                    plane: PlaneRef::Face { face: Reference::start_cap("body") },
+                    plane: PlaneRef::Face {
+                        face: Reference::start_cap("body"),
+                    },
                     label: "A".into(),
                     aligned: false,
                 },

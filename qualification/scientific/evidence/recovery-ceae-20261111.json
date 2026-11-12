@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "source_revision": "ceae94b5da5d3c95f00cb6ba01a151a536f5fbcb",
+  "source_verification": {
+    "at": "2026-11-12T00:56:31.027Z",
+    "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+    "stage": "/home/nallana/rm1293/incoming/intake-ceae94b5da-source",
+    "status": "verified",
+    "files": 27246
+  },
+  "controller_exit": 0,
+  "exit_code": 0,
+  "passed": 18,
+  "failed": 0,
+  "ignored": 0,
+  "filtered_out": 464,
+  "case_names": [
+    "remote::driver_replacement_tests::active_analysis_attempt_retries_after_actual_driver_replacement",
+    "remote::driver_replacement_tests::actual_driver_restarts_from_server_checkpoint_on_a_different_worker",
+    "remote::driver_replacement_tests::authored_thermal_outer_root_matrix_replays_after_preexecution_driver_replacement",
+    "remote::driver_replacement_tests::authored_thermal_prefix_survives_driver_loss_after_its_commit",
+    "remote::driver_replacement_tests::authored_thermal_prefix_survives_lost_checkpoint_acknowledgement",
+    "remote::driver_replacement_tests::committed_structural_and_modal_work_survives_checkpoint_acknowledgement_loss",
+    "remote::driver_replacement_tests::exact_meshing_admission_deadline_expires_before_replacement_dispatch",
+    "remote::driver_replacement_tests::exact_meshing_admission_exhausts_retry_budget_after_two_driver_losses",
+    "remote::driver_replacement_tests::exact_meshing_admission_retries_and_cancels_after_encrypted_driver_replacement",
+    "remote::driver_replacement_tests::exact_meshing_root_preserves_committed_pool_task_after_encrypted_driver_replacement",
+    "remote::driver_replacement_tests::observer::lost_original_parent_cannot_supply_a_replacement_clock_end",
+    "remote::driver_replacement_tests::observer::original_parent_observer_survives_actual_worker_loss_and_driver_replacement",
+    "remote::driver_replacement_tests::random_response_driver_replacement_replays_on_a_different_worker",
+    "remote::driver_replacement_tests::rejected_structural_and_modal_checkpoint_does_not_grant_commit_authority",
+    "remote::driver_replacement_tests::rejected_thermal_checkpoint_cannot_be_restored_as_a_committed_prefix",
+    "remote::driver_replacement_tests::response_spectrum_driver_replacement_replays_on_a_different_worker",
+    "remote::driver_replacement_tests::restored_analysis_retry_observes_cancellation_before_publication",
+    "remote::driver_replacement_tests::thermal::authored_matrix_variants_typecheck_with_explicit_physical_loads"
+  ],
+  "log_sha256": "6354aa6ca74dbf7919b36ec71d97ad86126c563a8852466602c7bb96560e8c7b",
+  "log_location": "/home/nallana/rm1293/logs/intake-ceae94b5da-scientific.driver-recovery-physics.log",
+  "artifact": {
+    "sha256": "0994faff673f6a545b566e7ccb6fd793eac944c9189d3692bc40e2a9d7cda61c",
+    "bytes": 572298832,
+    "location": "/home/nallana/rm1293/logs/intake-ceae94b5da-scientific-artifacts/driver-recovery-physics"
+  },
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--release",
+    "--all-features",
+    "-p",
+    "runmat-execution-runner-native",
+    "--lib",
+    "remote::driver_replacement_tests::",
+    "--",
+    "--test-threads=1"
+  ],
+  "accepted_source_revision": "942a054d4c2583f406a3056ff3a3ef15af856838",
+  "scope": "The complete eight-file delta consists of four formatting-only FEA files, an unchanged modal diagnostic test module moved after production items, the separate CAD fixture comparator and its equivalent rotation constants, and the Desktop part.sketch handler with its integration test. These recovery tests execute FEA requests and driver replacement; they do not dispatch the Desktop part.sketch command. Exact byte comparisons and the rotation-value witness qualify the test-only edits. Solver arithmetic, admission, checkpoint fencing, recovery publication, case inventory and required command remain unchanged.",
+  "limitations": "This evidence covers the selected Linux recovery cohort. It does not qualify the separate Desktop sketch command or final distributed products."
+}

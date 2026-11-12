@@ -251,7 +251,9 @@ fn drawing() -> DrawingDocument {
                 "a_a",
                 ViewKind::Section {
                     from: "front".into(),
-                    plane: runmat_cad::model::PlaneRef::Face { face: Reference::start_cap("body") },
+                    plane: runmat_cad::model::PlaneRef::Face {
+                        face: Reference::start_cap("body"),
+                    },
                     label: "A".into(),
                     aligned: false,
                 },
