@@ -231,7 +231,7 @@ pub fn board_mass(board: &Board, netlist: Option<&Netlist>, pool: Option<&Pool>)
         Some(pool.effective_part(pool.parts.get(&comp.part?)?))
     };
     for f in board.footprints.values().filter(|f| f.fitted) {
-        let body = f.package.body;
+        let body = f.package.body.as_ref();
         let (bw, bl, h) = body
             .map(|b| {
                 (

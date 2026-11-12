@@ -12,6 +12,9 @@
 //! The per-part cache travels too (`runmat_cad_wasm::runtime::part_cache`): `probe` is `compile`
 //! with each part the cache doesn't hold left out (its fifth argument, a JSON list of digests,
 //! names those it may regenerate), and `cacheMisses` lists what the last probe left out.
+//! `cacheEntries` lists every part, configured part and board the last probe met, with its kind,
+//! file and whether the cache held it: the Desktop's load progress counts them
+//! (`runmat_cad_wasm::runtime::assembly_stages`).
 //! [`call_framed`]'s `cacheFresh` returns the entries regenerated since the last take, and
 //! [`runmat_cad_seed`] reads stored entries back in.
 
@@ -37,8 +40,8 @@ struct Request {
 /// the files travel in the request and the kernel reads their text from here.
 static IMPORTS: Mutex<BTreeMap<String, ImportSource>> = Mutex::new(BTreeMap::new());
 
-/// The digests the last `probe` left out.
-static MISSES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// What the last `probe` found.
+static LAST_PROBE: Mutex<Option<runtime::part_cache::ProbeReport>> = Mutex::new(None);
 
 fn set_imports(files: &runtime::Files) {
     let mut map = BTreeMap::new();
@@ -107,7 +110,7 @@ pub fn call(request: &str) -> String {
             match runtime::parse_files(arg(a, 2)) {
                 Ok(files) => {
                     set_imports(&files);
-                    let (out, misses) = runtime::part_cache::probe(allow, || {
+                    let (out, report) = runtime::part_cache::probe(allow, || {
                         runtime::values_host::compile_json_with_values(
                             path,
                             text,
@@ -115,14 +118,22 @@ pub fn call(request: &str) -> String {
                             arg(a, 3),
                         )
                     });
-                    *MISSES.lock().unwrap_or_else(|e| e.into_inner()) = misses;
+                    *LAST_PROBE.lock().unwrap_or_else(|e| e.into_inner()) = Some(report);
                     out
                 }
                 Err(message) => runtime::error_json(path, &message),
             }
         }
-        "cacheMisses" => serde_json::to_string(&*MISSES.lock().unwrap_or_else(|e| e.into_inner()))
-            .unwrap_or_else(|_| "[]".into()),
+        "cacheMisses" => {
+            let last = LAST_PROBE.lock().unwrap_or_else(|e| e.into_inner());
+            serde_json::to_string(last.as_ref().map_or(&[][..], |r| &r.misses[..]))
+                .unwrap_or_else(|_| "[]".into())
+        }
+        "cacheEntries" => {
+            let last = LAST_PROBE.lock().unwrap_or_else(|e| e.into_inner());
+            serde_json::to_string(last.as_ref().map_or(&[][..], |r| &r.entries[..]))
+                .unwrap_or_else(|_| "[]".into())
+        }
         "edit" => {
             let (path, text, request) = (arg(a, 0), arg(a, 1), arg(a, 3));
             match runtime::parse_files(arg(a, 2)) {

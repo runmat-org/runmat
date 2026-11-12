@@ -18,6 +18,11 @@ use std::collections::BTreeMap;
 /// a quarter of a 600 dpi printer dot.
 pub const SHEET_TOLERANCE: f64 = 0.01;
 
+/// The smallest circle radius (sheet mm) that carries a center mark or centerline: the sheet
+/// draws their arms at a fixed size, so a smaller circle (a rivet on a 1:200 arrangement) would
+/// draw a cross many times its own size.
+pub const CENTER_MIN_RADIUS: f64 = 0.25;
+
 /// Thins one view's `hlr` entry drawn at `scale` (sheet mm per model mm). `hidden`: whether
 /// the view draws hidden lines.
 pub fn thin(entry: &mut Value, scale: f64, hidden: bool) {
@@ -34,6 +39,13 @@ pub fn thin(entry: &mut Value, scale: f64, hidden: bool) {
         } else {
             Vec::new()
         };
+    }
+    if let Some(Value::Array(centers)) = o.get_mut("centers") {
+        centers.retain(|c| {
+            c["radius"]
+                .as_f64()
+                .is_none_or(|r| r * scale >= CENTER_MIN_RADIUS)
+        });
     }
     if let Some(Value::Array(picks)) = o.get_mut("picks") {
         *picks = thin_picks(std::mem::take(picks), tol, grid);

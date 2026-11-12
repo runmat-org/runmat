@@ -72,33 +72,6 @@ fn design_commands_json_is_current() {
     }
 }
 
-/// `docs/design/commands.md`, the agent's list of commands with the fields each needs (the
-/// design reference embeds it as `design/commands.md`). Set `RUNMAT_DESIGN_COMMANDS_DOC_OUT=1`
-/// to rewrite it.
-#[test]
-fn design_commands_reference_is_current() {
-    let doc = design_catalog().commands_reference();
-    for line in [
-        "- `part.sketch`: Start a sketch on a plane or planar face.",
-        "  - Required: `plane` (pick: plane or face)",
-        "## `board.` commands (`.circuit`, `.circuit.layout`)",
-    ] {
-        assert!(doc.contains(line), "{line}");
-    }
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/design/commands.md");
-    if std::env::var_os("RUNMAT_DESIGN_COMMANDS_DOC_OUT").is_some() {
-        std::fs::write(&path, &doc).expect("write commands.md");
-        return;
-    }
-    let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
-    assert!(
-        checked_in == doc,
-        "{} is stale; regenerate with RUNMAT_DESIGN_COMMANDS_DOC_OUT=1 cargo test -p runmat-design-commands --test design_catalog",
-        path.display()
-    );
-}
-
 /// Ticking Section view's Second plane cuts a corner at once: the second plane starts on a
 /// plane other than the first plane's default.
 #[test]

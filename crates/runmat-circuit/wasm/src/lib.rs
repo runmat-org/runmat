@@ -147,7 +147,7 @@ pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
 /// holds a footprint-file package's text by the path the record writes.
 #[wasm_bindgen]
 pub fn library_preview(part: &str, files: &str) -> String {
-    let part: runmat_circuit::library::catalog::CatalogPart = match serde_json::from_str(part) {
+    let part: runmat_circuit::library::catalog::PartRecord = match serde_json::from_str(part) {
         Ok(p) => p,
         Err(e) => return error_json(&format!("the part record isn't valid: {e}")),
     };

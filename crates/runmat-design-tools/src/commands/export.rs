@@ -1,5 +1,6 @@
 //! Export commands as files: `manage.export`, `part.export-body` and `assembly.export` (STEP
-//! AP242, IGES, STL, 3MF, glTF, a face's DXF: [`crate::exchange::host`]), `drawing.export`
+//! AP242, IGES, STL, 3MF, glTF, a face's DXF: [`crate::exchange::host`]), `board.export` (a
+//! board's STEP AP242, [`runmat_cad_wasm::exchange::board`]), `drawing.export`
 //! (PDF, DXF, DWG or SVG of the current sheet or of every sheet), `schematic.export-pdf` and
 //! `board.fab-outputs` ([`crate::exchange::export`]); `assembly.pack-and-share` copies the
 //! assembly and every file it references into a folder ([`pack`]).
@@ -70,7 +71,8 @@ pub fn run(
     match (editor, request.command.as_str()) {
         (EditorKind::Drawing, "drawing.export") => drawing(path, text, &files, request),
         (EditorKind::Assembly, "assembly.pack-and-share") => pack(path, text, &files, request),
-        (EditorKind::Part | EditorKind::Assembly, _) => {
+        (EditorKind::Part | EditorKind::Assembly, _)
+        | (EditorKind::Circuit | EditorKind::CircuitLayout, "board.export") => {
             let body = json!({ "command": request.command, "values": request.values });
             let out: Value = serde_json::from_str(&crate::exchange::host::export_json(
                 path,

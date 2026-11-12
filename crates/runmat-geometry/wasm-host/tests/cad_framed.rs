@@ -140,6 +140,13 @@ fn stored_part_entries_seed_the_host_and_its_probe_finds_nothing_missing() {
     part_cache::clear();
     cad::call(&probe);
     assert_eq!(misses(), digests);
+    // `cacheEntries` names what the probe met, for the Desktop's load progress.
+    let entries: Value =
+        serde_json::from_str(&cad::call(r#"{"fn":"cacheEntries","args":[]}"#)).unwrap();
+    assert_eq!(
+        entries,
+        serde_json::json!([{ "digest": digests[0], "kind": "part", "path": "/p/bracket.part", "held": false }])
+    );
     assert_eq!(
         part_cache::stats().misses,
         0,

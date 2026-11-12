@@ -11,9 +11,12 @@
 //!   `{ ok: false, message }`.
 //!
 //! A handler that has no code for a command marks the call ([`take_unhandled`]). The registry's
-//! build check (`tests/command_registry.rs`) runs every catalog command on every surface its
-//! route claims and fails when one is marked, so a toolbar never offers a command that only
-//! answers "not here".
+//! build check (`tests/command_registry.rs`) runs every catalog command in every editor that
+//! offers it and lists each one marked in `tests/command_gaps.txt`, the gap ledger. A command in
+//! the ledger runs on no surface: its route has no surfaces, [`run`] answers "<Label> isn't
+//! available for this file yet" without reaching a dispatcher, the agent's command list leaves it
+//! out, and the Desktop shows it disabled with that reason (`design-command-gaps.json`, which the
+//! check writes from the same ledger).
 
 mod export;
 mod report;
@@ -54,13 +57,41 @@ pub enum Handler {
     Shell,
 }
 
-/// One command in one editor: who runs it and where.
+/// One command in one editor: who runs it and where. A command in the gap ledger has no
+/// surfaces; its handler is the one that would run it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Route {
     pub id: String,
     pub editor: EditorKind,
     pub surfaces: Vec<Surface>,
     pub handler: Handler,
+}
+
+/// The gap ledger: one `<command> <editor>` line per catalog command that its editor offers and
+/// no dispatcher runs yet (lines with a third `<field>=<value>` word name a form choice of such
+/// a command). `tests/command_registry.rs` keeps it exact.
+const GAP_LEDGER: &str = include_str!("../tests/command_gaps.txt");
+
+/// Whether the gap ledger lists command `id` in `editor`: no surface runs it there yet.
+pub fn is_gap(id: &str, editor: EditorKind) -> bool {
+    static GAPS: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    GAPS.get_or_init(|| {
+        GAP_LEDGER
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .filter_map(|l| {
+                let mut words = l.split_whitespace();
+                Some((words.next()?.to_owned(), words.next()?.to_owned()))
+            })
+            .collect()
+    })
+    .iter()
+    .any(|(c, e)| c == id && e == editor.as_str())
+}
+
+/// Why a command in the gap ledger doesn't run: "<Label> isn't available for this file yet".
+pub fn unavailable_reason(label: &str) -> String {
+    format!("{label} isn't available for this file yet")
 }
 
 /// A command to run: the catalog id, the values the form holds and the selection (Outline ids).
@@ -158,6 +189,7 @@ fn route_of(command: &CommandDescriptor, editor: EditorKind) -> Route {
     let handler = handler_of(command, editor);
     let surfaces = match handler {
         Handler::Shell => vec![Surface::Desktop],
+        _ if is_gap(&command.id, editor) => Vec::new(),
         _ => vec![Surface::Desktop, Surface::Agent, Surface::Cli],
     };
     Route {
@@ -217,9 +249,32 @@ pub fn run_or(
     let Some(editor) = editor_of(path) else {
         return failed(format!("{path} isn't a design file"));
     };
-    let handler = route(&request.command, editor)
-        .map(|r| r.handler)
-        .unwrap_or(fallback);
+    let handler = match route(&request.command, editor) {
+        Some(r) if r.surfaces.is_empty() => {
+            let label = catalog()
+                .command(&r.id)
+                .map_or(r.id.as_str(), |c| c.label.as_str());
+            return failed(unavailable_reason(label));
+        }
+        Some(r) => r.handler,
+        None => fallback,
+    };
+    dispatch(path, text, files, request, handler)
+}
+
+/// Runs `request` with `handler`, whether or not the gap ledger lists it: the registry's build
+/// check probes every command this way to keep the ledger exact. Everything else calls [`run`].
+#[doc(hidden)]
+pub fn dispatch(
+    path: &str,
+    text: &str,
+    files: &Files,
+    request: &RunRequest,
+    handler: Handler,
+) -> Value {
+    let Some(editor) = editor_of(path) else {
+        return failed(format!("{path} isn't a design file"));
+    };
     match handler {
         Handler::Edit => tagged(edit(path, text, files, request, editor), "edit"),
         Handler::Analyze => tagged(analyze(path, text, files, request), "table"),

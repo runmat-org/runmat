@@ -346,12 +346,15 @@ pub struct Model3d {
     pub origin: String,
 }
 
-/// Package body for 3D placeholders and height keepouts (mm).
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Package body for 3D placeholders, height keepouts and the board thermal study (mm).
+#[derive(Clone, Debug, PartialEq)]
 pub struct Body {
     pub width: Coord,
     pub length: Coord,
     pub height: Coord,
+    /// What the body is made of, as a material library id (`material.mold_compound_epoxy`), the
+    /// same id a `.part` writes; `None` when the package doesn't say.
+    pub material: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

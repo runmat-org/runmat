@@ -77,11 +77,12 @@ A new board reports the schematic changes it hasn't taken (`board_out_of_sync`).
 net GND : power
 net "+3V3" : power
 footprint C3 = { package = C0402, at = [14.5, 7.5], rotation = 90, pads = { "1" = "+3V3", "2" = GND } }
-package C0402 {
-    smd = true
-    pad "1" = { shape = roundrect, size = [0.5, 0.6], ratio = 0.25, at = [-0.5, 0] }
-    pad "2" = { shape = roundrect, size = [0.5, 0.6], ratio = 0.25, at = [0.5, 0] }
-    courtyard = [[-1, -0.5], [1, -0.5], [1, 0.5], [-1, 0.5]]
+package C0402 = {
+    pads = [
+        { number = "1", shape = roundrect, size = [0.5, 0.6], at = [-0.5, 0], layers = smd },
+        { number = "2", shape = roundrect, size = [0.5, 0.6], at = [0.5, 0], layers = smd }
+    ],
+    courtyard = rect([-1, -0.5], [1, 0.5])
 }
 ```
 

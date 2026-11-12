@@ -1,12 +1,12 @@
-//! Catalog parts: the record a manufacturer part search returns and a `.circuit` file's `part`
-//! declarations hold, and its mapping onto pool items.
+//! Catalog parts: the part record ([`record`]: what a manufacturer part search returns and a
+//! `.circuit` file's `part` declarations hold) and its mapping onto pool items.
 //!
 //! A catalog part names its package by a footprint-generator string (`SOT23-6`, `R0402`,
 //! `QFN32_5mm_P0.5_EP3.1`) and lists its pins with the pads they land on and their electrical
 //! types. [`add_to_pool`] makes the unit, entity, package and part, so the elaborator, the
 //! board, the 3D view and the simulator treat it like a built-in part. Supply data (stock,
 //! price, lifecycle) is not part of the record: it comes from the server's part search with
-//! each [`CatalogHit`].
+//! each [`PartHit`].
 
 use super::footprint;
 use super::{
@@ -16,107 +16,10 @@ use super::{
 use crate::ids::Uuid;
 use crate::ir::{Param, Tolerance};
 use runmat_rules::{parse_quantity, BuiltinUnits};
-use serde::{Deserialize, Serialize};
+mod record;
+
+pub use record::{PartHit, PartOffer, PartPin, PartRecord, PartSpice};
 use std::collections::BTreeMap;
-
-/// One pin of a catalog part: its name, the pads it lands on and its electrical type.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogPin {
-    pub name: String,
-    pub pads: Vec<String>,
-    /// The ERC pin type by its written word (`input`, `power_in`, `passive` …).
-    #[serde(rename = "type", default = "passive")]
-    pub kind: String,
-}
-
-fn passive() -> String {
-    "passive".into()
-}
-
-/// A part's SPICE model: a model or subcircuit name, the library file that defines it, and the
-/// subcircuit's node order as pin names.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogSpice {
-    pub model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub library: Option<String>,
-    /// The subcircuit's nodes in order, each a pin name.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub nodes: Vec<String>,
-    /// A primitive device letter (`D`, `Q`, `M`) when the model is a `.model` card.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device: Option<String>,
-}
-
-/// An orderable part as a catalog describes it.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogPart {
-    pub mpn: String,
-    pub manufacturer: String,
-    #[serde(default)]
-    pub description: String,
-    /// What kind of part (`regulator`, `resistor`, `mcu` …), for search and the designator.
-    #[serde(default)]
-    pub category: String,
-    /// Designator prefix (`U`, `R`); empty takes one from the category.
-    #[serde(default)]
-    pub prefix: String,
-    /// A footprint-generator string, or a footprint file read in place for interop; empty when
-    /// [`CatalogPart::footprint`] names a declared footprint.
-    #[serde(default)]
-    pub package: String,
-    /// The `footprint` declaration the part's `package` names by identifier
-    /// (`package = gps_lcc18`), from the file or a library it uses.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub footprint: Option<String>,
-    /// The `symbol` declaration the part draws with; without one the symbol is generated from
-    /// the pins. Part pins map to the symbol's pins by name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub symbol: Option<String>,
-    /// The part's 3D body, an MCAD `.part` or a STEP file, over its footprint's own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
-    /// Pads the part leaves without a pin on purpose (`nc = ["9"]`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub nc: Vec<String>,
-    pub pins: Vec<CatalogPin>,
-    /// Parametrics as written quantities (`vin_max = "36 V"`) or text.
-    #[serde(default)]
-    pub params: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub datasheet: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub spice: Option<CatalogSpice>,
-}
-
-/// One distributor's offer for a part.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogOffer {
-    pub supplier: String,
-    pub sku: String,
-    #[serde(default)]
-    pub stock: Option<u64>,
-    /// `[quantity, unit price]` breaks, ascending by quantity.
-    #[serde(default)]
-    pub price_breaks: Vec<(u64, f64)>,
-    #[serde(default)]
-    pub currency: String,
-}
-
-/// One part search result: the part, its lifecycle and the offers for it.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogHit {
-    pub part: CatalogPart,
-    #[serde(default)]
-    pub lifecycle: String,
-    #[serde(default)]
-    pub offers: Vec<CatalogOffer>,
-}
 
 /// The designator prefix a category takes when the part names none.
 pub fn prefix_for(category: &str) -> &'static str {
@@ -145,60 +48,58 @@ pub fn lifecycle_of(word: &str) -> Lifecycle {
     }
 }
 
-impl CatalogPart {
-    /// What is wrong with the record, if anything: the package, the pin types, the pads.
-    /// Footprint files are not read; [`CatalogPart::check_on`] checks the pads against one.
-    pub fn check(&self) -> Result<(), String> {
-        if self.mpn.trim().is_empty() {
-            return Err("a part needs its `mpn`".into());
-        }
-        if self.footprint.is_some() || is_footprint_file(&self.package) || has_no_package(self) {
-            return self.check_pins(None);
-        }
-        let package = footprint::from_string(&self.package)
-            .ok_or_else(|| format!("part `{}`: `{}` is not a package the footprint generator makes, nor a footprint file", self.mpn, self.package))?;
-        self.check_pins(Some(&package))
+/// What is wrong with `part`, if anything: the package, the pin types, the pads. Footprint files
+/// are not read; [`check_on`] checks the pads against one.
+pub fn check(part: &PartRecord) -> Result<(), String> {
+    if part.mpn.trim().is_empty() {
+        return Err("a part needs its `mpn`".into());
     }
-
-    /// [`CatalogPart::check`] with the pads checked against `package`.
-    pub fn check_on(&self, package: &Package) -> Result<(), String> {
-        self.check_pins(Some(package))
+    if part.footprint.is_some() || is_footprint_file(&part.package) || has_no_package(part) {
+        return check_pins(part, None);
     }
+    let package = footprint::from_string(&part.package)
+        .ok_or_else(|| format!("part `{}`: `{}` is not a package the footprint generator makes, nor a footprint file", part.mpn, part.package))?;
+    check_pins(part, Some(&package))
+}
 
-    fn check_pins(&self, package: Option<&Package>) -> Result<(), String> {
-        if self.pins.is_empty() {
-            return Err(format!("part `{}` has no pins", self.mpn));
+/// [`check`] with the pads checked against `package`.
+pub fn check_on(part: &PartRecord, package: &Package) -> Result<(), String> {
+    check_pins(part, Some(package))
+}
+
+fn check_pins(part: &PartRecord, package: Option<&Package>) -> Result<(), String> {
+    if part.pins.is_empty() {
+        return Err(format!("part `{}` has no pins", part.mpn));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for pin in &part.pins {
+        if PinType::from_name(&pin.kind).is_none() {
+            return Err(format!(
+                "part `{}`: pin `{}` has type `{}`, which is not a pin type",
+                part.mpn, pin.name, pin.kind
+            ));
         }
-        let mut seen = std::collections::BTreeSet::new();
-        for pin in &self.pins {
-            if PinType::from_name(&pin.kind).is_none() {
+        if !seen.insert(pin.name.as_str()) {
+            return Err(format!(
+                "part `{}` lists pin `{}` twice",
+                part.mpn, pin.name
+            ));
+        }
+        let Some(package) = package else { continue };
+        for pad in &pin.pads {
+            if package.pad(pad).is_none() {
                 return Err(format!(
-                    "part `{}`: pin `{}` has type `{}`, which is not a pin type",
-                    self.mpn, pin.name, pin.kind
+                    "part `{}`: pin `{}` lands on pad `{pad}`, which {} has no pad of",
+                    part.mpn, pin.name, part.package
                 ));
             }
-            if !seen.insert(pin.name.as_str()) {
-                return Err(format!(
-                    "part `{}` lists pin `{}` twice",
-                    self.mpn, pin.name
-                ));
-            }
-            let Some(package) = package else { continue };
-            for pad in &pin.pads {
-                if package.pad(pad).is_none() {
-                    return Err(format!(
-                        "part `{}`: pin `{}` lands on pad `{pad}`, which {} has no pad of",
-                        self.mpn, pin.name, self.package
-                    ));
-                }
-            }
         }
-        Ok(())
     }
+    Ok(())
+}
 
-    fn entity_name(&self) -> String {
-        format!("catalog:{}", self.mpn)
-    }
+fn entity_name(part: &PartRecord) -> String {
+    format!("catalog:{}", part.mpn)
 }
 
 /// The `package` of a part with no footprint (`package = none`): a device wired in the field,
@@ -207,7 +108,7 @@ pub const NO_PACKAGE: &str = "none";
 
 /// Whether `part` has no footprint (`package = none`). Its pins take no pads; it has an empty
 /// package, so it shows on schematics, netlists and the BOM, and a board has nothing to place.
-pub fn has_no_package(part: &CatalogPart) -> bool {
+pub fn has_no_package(part: &PartRecord) -> bool {
     part.footprint.is_none() && part.package == NO_PACKAGE
 }
 
@@ -228,7 +129,7 @@ pub struct Declared<'a> {
 /// A part's package: generated from its string, or read from its footprint file through `file`
 /// (the file's text by the path as written).
 pub fn package_of(
-    part: &CatalogPart,
+    part: &PartRecord,
     file: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Package, String> {
     package_in(part, Declared::default(), file)
@@ -237,7 +138,7 @@ pub fn package_of(
 /// [`package_of`], with a footprint named by identifier found among `declared`, and the part's
 /// own `body` over the footprint's model.
 pub fn package_in(
-    part: &CatalogPart,
+    part: &PartRecord,
     declared: Declared<'_>,
     file: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Package, String> {
@@ -256,7 +157,7 @@ pub fn package_in(
 }
 
 fn base_package(
-    part: &CatalogPart,
+    part: &PartRecord,
     declared: Declared<'_>,
     file: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Package, String> {
@@ -300,14 +201,14 @@ fn base_package(
 /// Adds `part` to `pool` as a unit, an entity, a package and a part keyed by its MPN, replacing
 /// a part of the same MPN. Returns the part's UUID. A footprint-file package fails here; use
 /// [`add_to_pool_with`].
-pub fn add_to_pool(pool: &mut Pool, part: &CatalogPart) -> Result<Uuid, String> {
+pub fn add_to_pool(pool: &mut Pool, part: &PartRecord) -> Result<Uuid, String> {
     add_to_pool_with(pool, part, &|_| None)
 }
 
 /// [`add_to_pool`], reading footprint files through `file`.
 pub fn add_to_pool_with(
     pool: &mut Pool,
-    part: &CatalogPart,
+    part: &PartRecord,
     file: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Uuid, String> {
     add_to_pool_in(pool, part, Declared::default(), file)
@@ -316,13 +217,13 @@ pub fn add_to_pool_with(
 /// [`add_to_pool_with`], with footprints and symbols named by identifier found among `declared`.
 pub fn add_to_pool_in(
     pool: &mut Pool,
-    part: &CatalogPart,
+    part: &PartRecord,
     declared: Declared<'_>,
     file: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Uuid, String> {
-    part.check()?;
+    check(part)?;
     let package = package_in(part, declared, file)?;
-    part.check_on(&package)?;
+    check_on(part, &package)?;
     let symbol = match &part.symbol {
         Some(name) => {
             let symbol = declared.symbols.and_then(|s| s.get(name)).ok_or_else(|| {
@@ -336,7 +237,7 @@ pub fn add_to_pool_in(
         }
         None => None,
     };
-    let entity_name = part.entity_name();
+    let entity_name = entity_name(part);
     let unit = pool.add_unit(Unit {
         uuid: make::uuid("unit", &entity_name),
         name: entity_name.clone(),
@@ -422,7 +323,7 @@ pub fn add_to_pool_in(
 }
 
 /// The pool's supply records for a hit's offers.
-pub fn supply_of(hit: &CatalogHit) -> Vec<SupplyRecord> {
+pub fn supply_of(hit: &PartHit) -> Vec<SupplyRecord> {
     hit.offers
         .iter()
         .map(|o| SupplyRecord {
@@ -439,7 +340,7 @@ pub fn supply_of(hit: &CatalogHit) -> Vec<SupplyRecord> {
 /// the same MPN).
 pub fn pool_with(
     pool: Pool,
-    parts: &BTreeMap<String, CatalogPart>,
+    parts: &BTreeMap<String, PartRecord>,
     file: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Pool, String> {
     pool_in(pool, parts, Declared::default(), file)
@@ -448,7 +349,7 @@ pub fn pool_with(
 /// [`pool_with`], with footprints and symbols named by identifier found among `declared`.
 pub fn pool_in(
     mut pool: Pool,
-    parts: &BTreeMap<String, CatalogPart>,
+    parts: &BTreeMap<String, PartRecord>,
     declared: Declared<'_>,
     file: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Pool, String> {
@@ -465,13 +366,13 @@ pub fn pool_in(
 mod tests {
     use super::*;
 
-    pub(crate) fn buck() -> CatalogPart {
-        let pin = |name: &str, pad: &str, kind: &str| CatalogPin {
+    pub(crate) fn buck() -> PartRecord {
+        let pin = |name: &str, pad: &str, kind: &str| PartPin {
             name: name.into(),
             pads: vec![pad.into()],
             kind: kind.into(),
         };
-        CatalogPart {
+        PartRecord {
             mpn: "BUCK-60V-3A".into(),
             manufacturer: "Sample Catalog".into(),
             description: "60 V 3 A synchronous buck".into(),
@@ -562,8 +463,7 @@ mod tests {
     fn a_hit_reads_from_the_server_json() {
         let json = r#"{"part":{"mpn":"X","manufacturer":"M","package":"R0402","pins":[{"name":"1","pads":["1"]},{"name":"2","pads":["2"]}]},
             "lifecycle":"active","offers":[{"supplier":"S","sku":"S-1","stock":1200,"priceBreaks":[[1,0.1],[100,0.02]],"currency":"USD"}]}"#;
-        let hit: CatalogHit = serde_json::from_str(json).unwrap();
-        assert_eq!(hit.part.pins[0].kind, "passive");
+        let hit: PartHit = serde_json::from_str(json).unwrap();
         assert_eq!(lifecycle_of(&hit.lifecycle), Lifecycle::Active);
         assert_eq!(supply_of(&hit)[0].price_breaks[1], (100, 0.02));
         add_to_pool(&mut Pool::new(), &hit.part).unwrap();

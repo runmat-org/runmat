@@ -70,7 +70,7 @@ pub fn view_lines(
         }
     }
     super::merge_overlaps(&mut out);
-    out.centers = super::centers(&super::model_of(display), axes);
+    out.centers = super::centers(&super::model_of(display), None, axes);
     Some(out)
 }
 

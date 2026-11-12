@@ -11,7 +11,7 @@ use super::{attributes, Document, Fields};
 use crate::import::xml_project::library::{find_attr, param_key};
 use crate::import::{file_safe, Report};
 use crate::ir::{ComponentDecl, Connection, Design, Endpoint, NetDecl, PartRef};
-use crate::library::catalog::{CatalogPart, CatalogPin};
+use crate::library::catalog::{PartRecord, PartPin};
 use crate::library::Package;
 use std::collections::BTreeMap;
 
@@ -109,7 +109,7 @@ pub fn read(
                 });
                 let value = text("N").unwrap_or_default();
                 let package = attrs.get("package").cloned().unwrap_or_default();
-                let mut part_pins: Vec<CatalogPin> = Vec::new();
+                let mut part_pins: Vec<PartPin> = Vec::new();
                 for sub in &subs {
                     let g: Vec<&str> = sub.split("^^").collect();
                     let p = Fields::of(g[0]);
@@ -138,7 +138,7 @@ pub fn read(
                     if part_pins.iter().any(|q| q.name == pin) {
                         pin = format!("{pin}_{number}");
                     }
-                    part_pins.push(CatalogPin {
+                    part_pins.push(PartPin {
                         name: pin.clone(),
                         pads: vec![number],
                         kind: pin_kind(p.str(2)).into(),
@@ -187,7 +187,7 @@ pub fn read(
                     }
                     params.insert(param_key(k), v.clone());
                 }
-                let part = CatalogPart {
+                let part = PartRecord {
                     mpn: mpn.clone(),
                     manufacturer: find_attr(&attrs, MAKER_KEYS).unwrap_or_default(),
                     description: String::new(),
