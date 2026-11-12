@@ -267,7 +267,7 @@ mod tests {
         );
         put(
             "/p/mech/arm/arm.part",
-            "runmat 0.7\nstd 1\n\npart arm {\n    feature s = import(source = \"./arm.step\")\n}\n",
+            "runmat 0.7\nstd 1\n\npart arm {\n    feature s = import(source = \"./arm.step\", digest = arm_step)\n}\n",
         );
         put("/p/mech/arm/arm.step", "ISO-10303-21;");
         put("/p/elsewhere/unrelated.part", "runmat 0.7\n");

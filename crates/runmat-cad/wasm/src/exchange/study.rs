@@ -215,7 +215,7 @@ mod tests {
         );
         files.insert(
             "/p/mech/arm/arm.part".into(),
-            "runmat 0.7\nstd 1\n\npart arm {\n    feature s = import(source = \"./arm.step\")\n}\n".into(),
+            "runmat 0.7\nstd 1\n\npart arm {\n    feature s = import(source = \"./arm.step\", digest = arm_step)\n}\n".into(),
         );
         files.insert("/p/mech/arm/arm.step".into(), "ISO-10303-21;".into());
         files.insert("/p/mech/other/other.part".into(), "runmat 0.7\n".into());
