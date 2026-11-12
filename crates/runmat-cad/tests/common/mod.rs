@@ -7,7 +7,7 @@ use runmat_cad::model::*;
 use runmat_cad::refs::*;
 use runmat_cad::regen::*;
 use runmat_cad::sketch_solver::ExplicitSketchSolver;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{InputDecl, NoDynamicValues, ValueExpr};
 
 pub fn mm(v: f64) -> ValueExpr {
@@ -194,7 +194,7 @@ pub type TestKernel = crate::kernel_under_test::KernelUnderTest;
 pub struct Env {
     pub kernel: TestKernel,
     pub solver: ExplicitSketchSolver,
-    pub units: StubUnits,
+    pub units: Units,
     pub dynamic: NoDynamicValues,
     pub lock: Option<LockSection>,
     pub catalog: Option<MemoryCatalog>,
@@ -206,7 +206,7 @@ impl Env {
         Env {
             kernel: TestKernel::new(),
             solver: ExplicitSketchSolver,
-            units: StubUnits,
+            units: Units,
             dynamic: NoDynamicValues,
             lock: None,
             catalog: None,

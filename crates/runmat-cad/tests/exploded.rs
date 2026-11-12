@@ -11,7 +11,7 @@ use runmat_cad::ids::{FilePath, PublishName};
 use runmat_cad::model::datum::Frame;
 use runmat_cad::refs::lock::{LockSection, SeededMinter};
 use runmat_cad::refs::InstanceKey;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{NoDynamicValues, ValueExpr};
 
 fn mm(v: f64) -> ValueExpr {
@@ -238,7 +238,7 @@ fn gearbox() -> (MemorySource, AssemblyDocument) {
 fn resolve_with(src: &MemorySource, lock: Option<&LockSection>) -> ResolvedAssembly {
     let ctx = ResolveContext {
         source: src,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock,
         catalog: None,
@@ -264,7 +264,7 @@ fn explode(
         tree,
         view,
         &ExplodeContext {
-            units: &StubUnits,
+            units: &Units,
             dynamic: &NoDynamicValues,
             lock,
             source: Some(src),
@@ -558,9 +558,9 @@ fn e04_occurrence_problems_in_the_resolved_configuration() {
             "`housing` sits on the centre of radial step `s2`; it has no direction to move in and stays",
         ),
         (
-            DiagCode::ValueFailed,
+            DiagCode::ValueUnit,
             Severity::Error,
-            "`steps.s3.distance`: unit mismatch: expected L, found angle^1",
+            "distance needs a unit of length such as m; deg measures angle",
         ),
         (
             DiagCode::ExplodeBadJog,

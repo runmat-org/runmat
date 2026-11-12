@@ -9,7 +9,7 @@ use runmat_cad::model::*;
 use runmat_cad::refs::*;
 use runmat_cad::regen::*;
 use runmat_cad::sketch_solver::{ConstraintSketchSolver, SketchSolver};
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{Evaluator, InputDecl, LetDecl, NoDynamicValues, ValueEnv, ValueExpr};
 
 fn revolve_doc() -> PartDocument {
@@ -338,8 +338,11 @@ fn g07_unknown_configuration_and_unit_errors() {
     let mut d2 = block();
     set_input(&mut d2, "width", ValueExpr::deg(3.0));
     let r2 = env.regen(&d2);
-    let v = diag(&r2, DiagCode::ValueFailed);
-    assert!(v.message.contains("unit mismatch"));
+    let v = diag(&r2, DiagCode::ValueUnit);
+    assert_eq!(
+        v.message,
+        "width needs a unit of length such as m; deg measures angle"
+    );
     assert!(matches!(
         r2.status("s1"),
         Some(FeatureStatus::Blocked { .. })
@@ -481,7 +484,7 @@ fn g10_constraint_solver_adapter_solves_and_maps_back() {
             },
         },
     ];
-    let units = StubUnits;
+    let units = Units;
     let ev = Evaluator {
         units: &units,
         dynamic: &NoDynamicValues,
@@ -553,7 +556,7 @@ fn g10c_an_angle_between_a_horizontal_and_a_vertical_line_is_a_conflict() {
             value: mm(8.0),
         }),
     ];
-    let units = StubUnits;
+    let units = Units;
     let ev = Evaluator {
         units: &units,
         dynamic: &NoDynamicValues,
@@ -617,7 +620,7 @@ fn g10b_sketch_range_limits_clamp_and_release() {
         ];
         s
     };
-    let units = StubUnits;
+    let units = Units;
     let ev = Evaluator {
         units: &units,
         dynamic: &NoDynamicValues,

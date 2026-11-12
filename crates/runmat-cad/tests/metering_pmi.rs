@@ -14,7 +14,7 @@ use runmat_cad::model::*;
 use runmat_cad::pmi::*;
 use runmat_cad::refs::*;
 use runmat_cad::regen::*;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{NoDynamicValues, ValueExpr};
 use std::cell::{Cell, RefCell};
 
@@ -254,7 +254,7 @@ fn u03_mate_solves_are_metered_per_scope_and_pass() {
     src.add_assembly(top);
     let ctx = ResolveContext {
         source: &src,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock: None,
         catalog: None,

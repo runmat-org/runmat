@@ -19,7 +19,7 @@ use runmat_cad::model::datum::Frame;
 use runmat_cad::refs::lock::{LockSection, SeededMinter};
 use runmat_cad::refs::{InstanceKey, XrefContext};
 use runmat_cad::regen::kernel::Transform;
-use runmat_cad::units::{Dimension, QuantityKindId, StubUnits};
+use runmat_cad::units::{Dimension, QuantityKindId, Units};
 use runmat_cad::value::{NoDynamicValues, Quantity, ValueExpr};
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -70,14 +70,14 @@ fn frame_at(x: f64, y: f64, z: f64) -> PublishedGeometry {
 }
 
 struct Env {
-    units: StubUnits,
+    units: Units,
     dynamic: NoDynamicValues,
 }
 
 impl Env {
     fn new() -> Self {
         Env {
-            units: StubUnits,
+            units: Units,
             dynamic: NoDynamicValues,
         }
     }
@@ -379,7 +379,18 @@ fn a03_typed_configurations_are_checked() {
     };
     src.add_assembly(top.clone());
     let r = run(&src, "rig.assembly", &ResolveRequest::default());
-    assert!(codes(&r).contains(&DiagCode::AsmInputType));
+    // The one wrong-unit diagnostic, at the input's value.
+    let wrong = r
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagCode::ValueUnit)
+        .unwrap_or_else(|| panic!("{:?}", errors(&r)));
+    assert_eq!(
+        wrong.message,
+        "thickness needs a unit of length such as m; deg measures angle"
+    );
+    assert_eq!(wrong.site.param.as_deref(), Some("thickness"));
     // Unknown configuration name.
     let br = top
         .occurrences

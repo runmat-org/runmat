@@ -30,7 +30,8 @@ use crate::diagnostics::{Cause, DiagCode, DiagnosticReport, Repair, Severity, Si
 use crate::ids::{FilePath, ItemUuid};
 use crate::refs::lock::LockSection;
 use crate::regen::kernel::Transform;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
+use crate::value::ValueError;
 use crate::value::{DynamicValueEvaluator, Evaluator, ValueEnv, ValueExpr};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -225,7 +226,7 @@ impl ExplodedState {
 }
 
 pub struct ExplodeContext<'a> {
-    pub units: &'a dyn UnitAuthority,
+    pub units: &'a Units,
     pub dynamic: &'a dyn DynamicValueEvaluator,
     /// Renamed occurrences resolve through their lock aliases.
     pub lock: Option<&'a LockSection>,
@@ -464,13 +465,14 @@ impl Eval<'_, '_> {
         match self.ev().eval_as(e, &self.env, dim) {
             Ok(v) => Some(v),
             Err(err) => {
-                push(
-                    &mut self.rep,
-                    DiagCode::ValueFailed,
-                    Severity::Error,
-                    site(&self.view, param),
-                    format!("`{}`: {}", param, err),
-                );
+                let (code, message) = match err {
+                    ValueError::UnitMismatch { .. } => {
+                        let field = param.rsplit('.').next().unwrap_or(param);
+                        (DiagCode::ValueUnit, err.with_subject(field).to_string())
+                    }
+                    err => (DiagCode::ValueFailed, format!("`{}`: {}", param, err)),
+                };
+                push(&mut self.rep, code, Severity::Error, site(&self.view, param), message);
                 None
             }
         }

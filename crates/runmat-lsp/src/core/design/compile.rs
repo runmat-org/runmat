@@ -53,7 +53,7 @@ pub(super) fn compile(
                             Span::default()
                         },
                         severity: severity(&d.severity),
-                        code: None,
+                        code: d.code.clone(),
                         message: if in_file {
                             d.message.clone()
                         } else {
@@ -139,7 +139,7 @@ fn compile_part(
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
         solver: &runmat_cad::sketch_solver::ConstraintSketchSolver,
-        units: &runmat_cad::units::StubUnits,
+        units: &runmat_cad::units::Units,
         dynamic: &values,
         lock: None,
         catalog: None,

@@ -299,6 +299,23 @@ pub fn value_error_diagnostic(site: &Site, e: &ValueError) -> (DiagCode, String,
             )
         }
         ValueError::NotAValue { .. } => (DiagCode::XrefNotAValue, e.to_string(), Vec::new()),
+        ValueError::UnitMismatch { .. } => {
+            // The field the value fills names the message: the site's parameter (`distance`),
+            // else the value's own name (`input.width` → `width`).
+            let key = site.key();
+            let base = key.split('#').next().unwrap_or(&key);
+            let subject = site
+                .param
+                .as_deref()
+                .map(|p| p.rsplit(['.', '#']).next().unwrap_or(p))
+                .unwrap_or_else(|| base.rsplit('.').next().unwrap_or(base))
+                .to_owned();
+            (
+                DiagCode::ValueUnit,
+                e.clone().with_subject(&subject).to_string(),
+                Vec::new(),
+            )
+        }
         _ => (DiagCode::ValueFailed, e.to_string(), Vec::new()),
     }
 }

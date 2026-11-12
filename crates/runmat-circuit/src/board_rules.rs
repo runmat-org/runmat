@@ -25,10 +25,8 @@ use crate::geom::{Coord, Point};
 use crate::layer_set::CopperIndex;
 use crate::layout::{Board, FabLimits, ItemId, Layer, NetId, ViaKind};
 use crate::library::PadKind;
-use runmat_rules::{
-    AttrValue, BuiltinUnits, Cascade, Dim, ItemGraph, PairCascade, PairRule, PseudoArg, Quantity,
-    Rule, Schema, Selector, SelectorError, SourceKey, SourceOrder,
-};
+use runmat_rules::{AttrValue, Cascade, Dim, ItemGraph, PairCascade, PairRule, PseudoArg, Quantity, Rule, Schema, Selector, SelectorError, SourceKey, SourceOrder};
+use crate::units::RegistryUnits;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Item key in the board graph.
@@ -693,7 +691,7 @@ impl BoardRules {
         limits: &FabLimits,
         specs: &[RuleSpec],
     ) -> (BoardRules, Vec<(String, SelectorError)>) {
-        let u = BuiltinUnits;
+        let u = RegistryUnits;
         let schema = schema();
         let mut single: Cascade<RuleValue, BItem> = Cascade::new();
         let mut pair: PairCascade<RuleValue, BItem> = PairCascade::new();

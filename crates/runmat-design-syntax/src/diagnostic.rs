@@ -12,6 +12,9 @@ pub enum FeaSyntaxDiagnosticKind {
     ImportAfterDeclaration,
     UnclosedBlock,
     InvalidExpression,
+    /// A value's unit measures something other than what its field needs (the shared
+    /// `runmat_types::physical::unit_mismatch_message`).
+    UnitMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

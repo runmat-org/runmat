@@ -370,8 +370,12 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 let s = s.clone();
                 let key = match self.eval_selection(&selection, env, &s, &file, &site) {
                     Ok(k) => k,
-                    Err((code, msg)) => {
-                        self.diag(code, Severity::Error, site.clone(), msg, Vec::new());
+                    Err(error) => {
+                        let mut at = site.clone();
+                        if error.param.is_some() {
+                            at.param = error.param;
+                        }
+                        self.diag(error.code, Severity::Error, at, error.message, Vec::new());
                         ConfigKey::default()
                     }
                 };

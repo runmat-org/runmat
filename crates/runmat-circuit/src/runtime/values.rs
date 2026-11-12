@@ -17,7 +17,8 @@
 use super::{modules, Files};
 use crate::ir::{Design, Param, ParamValue, ValueCall};
 use runmat_design_syntax::m_calls::{call_key, effect_of, parameters_of, PendingCall, TableResult};
-use runmat_rules::{parse_quantity, BuiltinUnits, Quantity, SourceKey};
+use runmat_rules::{parse_quantity, Quantity, SourceKey};
+use crate::units::RegistryUnits;
 use std::collections::BTreeMap;
 
 /// Results the host evaluated, by [`call_key`].
@@ -155,7 +156,7 @@ fn evaluate(
     let arguments = ordered(&name, &parameters, &call.arguments)?;
     let key = call_key(&sources, &name, &arguments);
     let scale = match &call.unit {
-        Some(u) => parse_quantity(&format!("1 {u}"), &BuiltinUnits)?.value,
+        Some(u) => parse_quantity(&format!("1 {u}"), &RegistryUnits)?.value,
         None => 1.0,
     };
     match values.get(&key) {

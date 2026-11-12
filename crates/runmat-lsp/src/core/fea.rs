@@ -118,6 +118,16 @@ impl FeaDocumentAnalysis {
             .collect()
     }
 
+    /// Quick fixes for the diagnostics in `range`: units of the expected kind for a wrong unit.
+    pub fn code_actions(
+        &self,
+        uri: &lsp_types::Url,
+        source: &str,
+        range: Range,
+    ) -> Vec<lsp_types::CodeActionOrCommand> {
+        super::unit_fixes::unit_code_actions(uri, source, &self.diagnostics(source), range)
+    }
+
     pub fn syntax(&self) -> Option<&FeaSyntaxModule> {
         self.program
             .bound

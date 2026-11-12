@@ -21,7 +21,7 @@ use runmat_cad::assembly::explode::{
 use runmat_cad::assembly::resolve::ResolvedAssembly;
 use runmat_cad::assembly::source::{DesignSource, MemorySource};
 use runmat_cad::regen::kernel::Transform;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::NoDynamicValues;
 use serde_json::{json, Value};
 
@@ -42,7 +42,7 @@ pub fn exploded_views(resolved: &ResolvedAssembly, source: &MemorySource) -> Val
         return json!([]);
     };
     let ctx = ExplodeContext {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock: None,
         source: Some(source),

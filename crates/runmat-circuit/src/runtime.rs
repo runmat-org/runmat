@@ -83,6 +83,10 @@ pub struct Diagnostic {
     /// `error`, `warning` or `info`.
     pub severity: String,
     pub message: String,
+    /// What raised it, when a rule has a code (`circuit.value.unit`: a value's unit measures
+    /// something other than what its field needs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 impl Diagnostic {
@@ -97,17 +101,22 @@ impl Diagnostic {
             end,
             severity: "error".into(),
             message,
+            code: None,
         }
     }
 
     fn syntax(path: &str, text: &str, d: &FeaSyntaxDiagnostic) -> Self {
-        Self::error(
+        let mut out = Self::error(
             path,
             Some(text),
             d.span.start,
             d.span.end,
             d.message.clone(),
-        )
+        );
+        if d.kind == runmat_design_syntax::FeaSyntaxDiagnosticKind::UnitMismatch {
+            out.code = Some("circuit.value.unit".into());
+        }
+        out
     }
 }
 
@@ -900,6 +909,7 @@ pub fn check(path: &str, text: &str, files: &Files, options: &CompileOptions) ->
             end: utf16_offset(text, finding.source.end as usize),
             severity: severity.into(),
             message: format!("{} ({})", finding.message, finding.code),
+            code: None,
         });
     }
     if let Some(layout) = project.layout.as_ref().filter(|l| l.path == path) {

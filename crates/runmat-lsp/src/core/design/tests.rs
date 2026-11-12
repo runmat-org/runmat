@@ -127,7 +127,7 @@ fn hover_shows_resolved_values_with_units() {
     let analysis = analyze("/p/bracket.part", BRACKET, &DesignFiles::new());
     let text = hover_text(&analysis, at(BRACKET, "input.width", 0, 7));
     assert!(text.contains("input width : length = 80 mm"), "{text}");
-    assert!(text.contains("80 mm (0.08 m)"), "{text}");
+    assert!(text.contains("**Value:** 80 mm (length)"), "{text}");
     let feature = hover_text(&analysis, at(BRACKET, "feature.body", 0, 9));
     assert!(feature.contains("extrude"), "{feature}");
 }

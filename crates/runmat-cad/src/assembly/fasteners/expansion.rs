@@ -156,7 +156,7 @@ impl FastenerExpansion {
 pub struct ExpansionInputs<'a> {
     pub ev: &'a Evaluator<'a>,
     pub env: &'a ValueEnv,
-    pub units: &'a dyn UnitAuthority,
+    pub units: &'a Units,
     /// The published path, already in assembly coordinates (along rules).
     pub path: Option<&'a [PathChain]>,
     /// The table, already loaded (table rules), and its frame → assembly transform.
@@ -449,8 +449,8 @@ pub fn expand(
                 |name: &str, problems: &mut Vec<FastenerProblem>| -> Option<Vec<f64>> {
                     match table.column(name) {
                         Some(ColumnData::F64 { unit, values }) => match x.units.unit(unit) {
-                            Some(u) if u.dimension == Dimension::LENGTH => {
-                                Some(values.iter().map(|v| v * u.scale).collect())
+                            Some(u) if crate::units::dimension_of(&u) == Dimension::LENGTH => {
+                                Some(values.iter().map(|v| v * u.scale()).collect())
                             }
                             _ => {
                                 problems.push(FastenerProblem::TableSchema {

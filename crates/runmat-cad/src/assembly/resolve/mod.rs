@@ -39,7 +39,7 @@ use crate::model::items::Property;
 use crate::refs::lock::{ItemPath, LockSection};
 use crate::refs::{InstanceKey, XrefContext};
 use crate::regen::kernel::Transform;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
 use crate::value::{DynamicValueEvaluator, Evaluator, ValueEnv, ValueExpr};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -235,7 +235,7 @@ impl Default for ResolveRequest {
 
 pub struct ResolveContext<'a> {
     pub source: &'a dyn DesignSource,
-    pub units: &'a dyn UnitAuthority,
+    pub units: &'a Units,
     pub dynamic: &'a dyn DynamicValueEvaluator,
     pub lock: Option<&'a LockSection>,
     pub catalog: Option<&'a dyn FastenerCatalog>,

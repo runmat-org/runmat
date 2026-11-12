@@ -12,7 +12,7 @@ use runmat_cad::refs::reference::Reference;
 use runmat_cad::regen::RegenResult;
 use runmat_cad::step::pmi::{Limits, StepDatum, StepLocation, StepPmi, StepSize, StepTolerance};
 use runmat_cad::syntax::refs::print_reference;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{Evaluator, NoDynamicValues, ValueEnv, ValueExpr};
 use std::fmt::Write;
 
@@ -42,7 +42,7 @@ struct Values<'a> {
 impl Values<'_> {
     fn eval(&self, v: &ValueExpr) -> Option<f64> {
         let ev = Evaluator {
-            units: &StubUnits,
+            units: &Units,
             dynamic: &NoDynamicValues,
         };
         ev.eval(v, self.env).ok().map(|q| q.si * 1e3)

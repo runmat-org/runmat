@@ -21,7 +21,7 @@ use runmat_cad::regen::kernel::TessellationOptions;
 use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest, RegenResult};
 use runmat_cad::sketch_solver::ConstraintSketchSolver;
 use runmat_cad::syntax::{parse_assembly_in, parse_part};
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::NoDynamicValues;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -289,7 +289,7 @@ pub fn regenerate_part_in(
         let ctx = RegenContext {
             kernel: kernel.as_ref(),
             solver: &ConstraintSketchSolver,
-            units: &StubUnits,
+            units: &Units,
             dynamic: &watched,
             lock: None,
             catalog: None,
@@ -657,7 +657,7 @@ pub fn resolve_assembly_in(
     source.add_assembly(top_doc);
     let ctx = ResolveContext {
         source: &source,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock: None,
         catalog: None,

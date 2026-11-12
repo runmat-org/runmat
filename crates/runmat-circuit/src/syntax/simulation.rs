@@ -15,7 +15,8 @@ use crate::simulation::{
 };
 use runmat_design_syntax::ast::{self, Expr, Headed, Statement};
 use runmat_design_syntax::json::format_f64;
-use runmat_rules::{parse_quantity, BuiltinUnits};
+use runmat_rules::{parse_quantity};
+use crate::units::RegistryUnits;
 use runmat_types::Span;
 use std::collections::BTreeMap;
 
@@ -51,7 +52,7 @@ fn si(v: &Val) -> Read<f64> {
         V::Qty(t, unit) if unit == "dB" => t
             .parse()
             .map_err(|_| diagnostic(v.span, "expected a number of dB")),
-        V::Qty(t, unit) => parse_quantity(&format!("{t} {unit}"), &BuiltinUnits)
+        V::Qty(t, unit) => parse_quantity(&format!("{t} {unit}"), &RegistryUnits)
             .map(|q| q.value)
             .map_err(|e| diagnostic(v.span, e)),
         _ => Err(diagnostic(v.span, "expected a number or quantity")),
@@ -563,9 +564,9 @@ fn spec_value(v: &Val, unit: &str) -> Read<f64> {
         (V::Qty(t, u), "dB") if u == "dB" => num(t),
         (V::Num(t), "dB") => num(t),
         (V::Qty(t, u), _) if !matches!(unit, "" | "%" | "°" | "dB") => {
-            let q = parse_quantity(&format!("{t} {u}"), &BuiltinUnits)
+            let q = parse_quantity(&format!("{t} {u}"), &RegistryUnits)
                 .map_err(|e| diagnostic(v.span, e))?;
-            let want = parse_quantity(&format!("1 {unit}"), &BuiltinUnits)
+            let want = parse_quantity(&format!("1 {unit}"), &RegistryUnits)
                 .map_err(|e| diagnostic(v.span, e))?;
             if q.dim != want.dim {
                 return Err(diagnostic(

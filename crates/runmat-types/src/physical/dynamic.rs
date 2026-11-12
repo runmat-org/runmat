@@ -111,6 +111,20 @@ impl DynamicDimension {
         })
     }
 }
+/// Kind-free descriptors for the dimensions design values check most often.
+impl DynamicDimension {
+    pub const DIMENSIONLESS: Self = Self::quantity_type(QuantityKind::Dimensionless);
+    pub const LENGTH: Self = Self::quantity_type(QuantityKind::Length);
+    pub const AREA: Self = Self::quantity_type(QuantityKind::Area);
+    pub const VOLUME: Self = Self::quantity_type(QuantityKind::Volume);
+    pub const MASS: Self = Self::quantity_type(QuantityKind::Mass);
+    pub const TIME: Self = Self::quantity_type(QuantityKind::Time);
+    pub const ANGLE: Self = Self::quantity_type(QuantityKind::Angle);
+    /// No SI dimension and no angle: a plain number.
+    pub fn is_dimensionless(self) -> bool {
+        self.dimension == PhysicalDimension::DIMENSIONLESS && self.angle_power == 0
+    }
+}
 impl From<PhysicalDimension> for DynamicDimension {
     fn from(dimension: PhysicalDimension) -> Self {
         Self {

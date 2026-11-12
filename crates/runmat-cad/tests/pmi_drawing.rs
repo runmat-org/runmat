@@ -9,7 +9,7 @@ use runmat_cad::drawing::*;
 use runmat_cad::ids::{FilePath, PropertyName};
 use runmat_cad::pmi::*;
 use runmat_cad::refs::*;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{NoDynamicValues, ValueExpr};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -73,7 +73,7 @@ fn m01_pmi_resolves_by_reference_and_checks_semantics() {
         }],
         ..Default::default()
     };
-    let out = resolve_pmi(&doc, &pmi, &r, &StubUnits, &NoDynamicValues);
+    let out = resolve_pmi(&doc, &pmi, &r, &Units, &NoDynamicValues);
     assert!(
         out.diagnostics.errors().next().is_none(),
         "{:?}",
@@ -100,7 +100,7 @@ fn m01_pmi_resolves_by_reference_and_checks_semantics() {
         label: "A".into(),
         on: Reference::end_cap("missing"),
     });
-    let out = resolve_pmi(&doc, &bad, &r, &StubUnits, &NoDynamicValues);
+    let out = resolve_pmi(&doc, &bad, &r, &Units, &NoDynamicValues);
     assert_eq!(
         out.diagnostics.with_code(DiagCode::PmiInvalid).len(),
         3,

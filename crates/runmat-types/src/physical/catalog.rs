@@ -30,6 +30,7 @@ macro_rules! catalog {
             pub const fn dimension(self) -> PhysicalDimension { match self { $( Self::$name => PhysicalDimension::new($dimension), )* } }
             pub const fn angle_power(self) -> i8 { match self {
                 Self::Angle | Self::Rotation | Self::ComplexPhase | Self::AngularVelocity | Self::AngularAcceleration | Self::AngularFrequency => 1,
+                Self::RotationalStiffness | Self::TorsionalDamping => -1,
                 _ => 0,
             } }
             pub const fn canonical_field(self) -> &'static str { match self { $( Self::$name => $field, )* } }
@@ -104,6 +105,8 @@ catalog! {
     ElectricChargeDensity, "coulombs_per_cubic_meter", [-3, 0, 1, 1, 0, 0, 0, 0], false;
     Stiffness, "newtons_per_meter", [0, 1, -2, 0, 0, 0, 0, 0], false;
     Damping, "newton_seconds_per_meter", [0, 1, -1, 0, 0, 0, 0, 0], false;
+    RotationalStiffness, "newton_meters_per_radian", [2, 1, -2, 0, 0, 0, 0, 0], false;
+    TorsionalDamping, "newton_meter_seconds_per_radian", [2, 1, -1, 0, 0, 0, 0, 0], false;
     FoundationModulus, "newtons_per_cubic_meter", [-2, 1, -2, 0, 0, 0, 0, 0], false;
     RayleighMassCoefficient, "per_second", [0, 0, -1, 0, 0, 0, 0, 0], false;
     RayleighStiffnessCoefficient, "seconds", [0, 0, 1, 0, 0, 0, 0, 0], false;
@@ -194,6 +197,8 @@ pub type ElectricCurrentDensity = Quantity<kind::ElectricCurrentDensity>;
 pub type ElectricChargeDensity = Quantity<kind::ElectricChargeDensity>;
 pub type Stiffness = Quantity<kind::Stiffness>;
 pub type Damping = Quantity<kind::Damping>;
+pub type RotationalStiffness = Quantity<kind::RotationalStiffness>;
+pub type TorsionalDamping = Quantity<kind::TorsionalDamping>;
 pub type FoundationModulus = Quantity<kind::FoundationModulus>;
 pub type RayleighMassCoefficient = Quantity<kind::RayleighMassCoefficient>;
 pub type RayleighStiffnessCoefficient = Quantity<kind::RayleighStiffnessCoefficient>;

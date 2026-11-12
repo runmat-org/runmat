@@ -46,7 +46,7 @@ use crate::regen::deps::DependencyGraph;
 use crate::regen::hash::{chain, CacheKey, KeyInputs};
 use crate::regen::kernel::*;
 use crate::sketch_solver::SketchSolver;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
 use crate::value::{DynamicValueEvaluator, Evaluator, ValueEnv, ValueExpr};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -60,7 +60,7 @@ mod sheet;
 pub struct RegenContext<'a> {
     pub kernel: &'a dyn CadKernel,
     pub solver: &'a dyn SketchSolver,
-    pub units: &'a dyn UnitAuthority,
+    pub units: &'a Units,
     pub dynamic: &'a dyn DynamicValueEvaluator,
     pub lock: Option<&'a LockSection>,
     pub catalog: Option<&'a dyn PublishedCatalog>,

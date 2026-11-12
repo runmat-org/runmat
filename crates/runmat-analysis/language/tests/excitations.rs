@@ -282,6 +282,28 @@ fn a_unit_mismatch_is_located_at_the_value_and_names_expected_and_found_units() 
 }
 
 #[test]
+fn a_list_of_plain_numbers_is_reported_as_missing_its_unit() {
+    let source = figure_source("[0, 0, -10]");
+    let program = check_figure(&source);
+    assert!(!program.is_valid());
+    assert_eq!(
+        program.diagnostics.len(),
+        1,
+        "one diagnostic, at the value: {:#?}",
+        program.diagnostics
+    );
+    let diagnostic = &program.diagnostics[0];
+    assert_eq!(diagnostic.code, "fea.semantic.model");
+    assert_eq!(
+        diagnostic.message,
+        "traction needs a unit of force per area such as Pa; a plain number has no unit"
+    );
+    assert_eq!(diagnostic.label.as_deref(), Some("expected Pa"));
+    let span = diagnostic.location.as_ref().unwrap().span;
+    assert_eq!(&source[span.start..span.end], "[0, 0, -10]");
+}
+
+#[test]
 fn explicit_excitations_bind_declared_signals_without_copying_signal_authority() {
     let source = r#"
 geometry bracket {

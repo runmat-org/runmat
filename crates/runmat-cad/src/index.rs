@@ -70,8 +70,16 @@ pub struct InputRow {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub si: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::units::wire::option"
+    )]
     pub dimension: Option<Dimension>,
+    /// The value as editors show it: in the unit the author wrote (`0.25 in`), or for a
+    /// computed value in its kind's display unit (`6.35 mm`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -83,8 +91,16 @@ pub struct LetRow {
     pub name: LetName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub si: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::units::wire::option"
+    )]
     pub dimension: Option<Dimension>,
+    /// The value as editors show it: in the unit the author wrote (`0.25 in`), or for a
+    /// computed value in its kind's display unit (`6.35 mm`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// The `.m` function the value calls (`camRadius`, `cams.lift`), the outermost when it calls several.
@@ -273,6 +289,7 @@ pub fn build_index(
                 kind: i.kind.0.clone(),
                 si: q.map(|q| q.si),
                 dimension: q.map(|q| q.dimension),
+                display: q.map(|q| crate::value::display_value(&i.default, q)),
                 error: result
                     .values
                     .failed
@@ -291,6 +308,7 @@ pub fn build_index(
                 name: l.name.clone(),
                 si: q.map(|q| q.si),
                 dimension: q.map(|q| q.dimension),
+                display: q.map(|q| crate::value::display_value(&l.value, q)),
                 error: result
                     .values
                     .failed

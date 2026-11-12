@@ -565,6 +565,9 @@ impl LanguageServer for RunMatLanguageServer {
                 }),
             ),
             document_formatting_provider: Some(OneOf::Left(true)),
+            code_action_provider: Some(
+                tower_lsp::lsp_types::CodeActionProviderCapability::Simple(true),
+            ),
             completion_provider: Some(CompletionOptions {
                 resolve_provider: Some(false),
                 trigger_characters: None,
@@ -881,6 +884,25 @@ impl LanguageServer for RunMatLanguageServer {
 
         let tokens = semantic_tokens_full(&text, &analysis);
         Ok(tokens.map(SemanticTokensResult::Tokens))
+    }
+
+    /// Quick fixes: units of the expected kind for a wrong-unit value, in every language.
+    async fn code_action(
+        &self,
+        params: tower_lsp::lsp_types::CodeActionParams,
+    ) -> RpcResult<Option<tower_lsp::lsp_types::CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(Some(design.code_actions(params.range)));
+        }
+        let (text, fea_analysis) = {
+            let state = self.state.read().await;
+            match state.documents.get(&uri) {
+                Some(doc) => (doc.text.clone(), doc.fea_analysis.clone()),
+                None => return Ok(None),
+            }
+        };
+        Ok(fea_analysis.map(|analysis| analysis.code_actions(&uri, &text, params.range)))
     }
 
     async fn formatting(
