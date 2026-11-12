@@ -450,7 +450,14 @@ pub fn si_symbol(dimension: Dimension) -> &'static str {
 /// display unit ([`runmat_types::physical::display_quantity`]). Conversion is for checking and
 /// computing only.
 pub fn display_value(written: &ValueExpr, q: &Quantity) -> String {
-    use runmat_types::physical::{display_quantity, quantity_text};
+    written_literal(written, q)
+        .unwrap_or_else(|| runmat_types::physical::display_quantity(q.si, q.dimension))
+}
+
+/// `written`'s own text when it is a literal that evaluated to `q` (`0.25 in`, a plain `3` for
+/// a count), else `None`: the value was computed.
+pub fn written_literal(written: &ValueExpr, q: &Quantity) -> Option<String> {
+    use runmat_types::physical::quantity_text;
     let literal = match written {
         ValueExpr::Toleranced { nominal, .. } => nominal.as_ref(),
         other => other,
@@ -461,16 +468,13 @@ pub fn display_value(written: &ValueExpr, q: &Quantity) -> String {
                 .unit(unit)
                 .and_then(|u| u.to_canonical(*value).ok())
                 .is_some_and(|si| si.to_bits() == q.si.to_bits());
-            if matches {
-                return quantity_text(*value, unit);
-            }
+            matches.then(|| quantity_text(*value, unit))
         }
         ValueExpr::Number { value } if q.dimension.is_dimensionless() && *value == q.si => {
-            return quantity_text(*value, "");
+            Some(quantity_text(*value, ""))
         }
-        _ => {}
+        _ => None,
     }
-    display_quantity(q.si, q.dimension)
 }
 
 impl ValueError {

@@ -220,8 +220,9 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 /// A resolved configuration of a definition: a named configuration, input values in SI, or
 /// both. Its [`ConfigKey::digest`] is canonical (bit-exact SI values in name order).
 ///
-/// `kinds` carries each input's quantity kind so labels read in display units (`length 88 mm`);
-/// it does not take part in equality or the digest.
+/// `kinds` carries each input's quantity kind so labels read in display units (`length 88 mm`),
+/// and `display` each literal input's value as the author wrote it (`0.25 in`). Neither takes
+/// part in equality or the digest.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ConfigKey {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,6 +231,8 @@ pub struct ConfigKey {
     pub inputs: BTreeMap<InputName, f64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub kinds: BTreeMap<InputName, QuantityKindId>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub display: BTreeMap<InputName, String>,
 }
 
 impl PartialEq for ConfigKey {
@@ -244,6 +247,7 @@ impl ConfigKey {
             name: Some(ConfigurationName::new(name)),
             inputs: BTreeMap::new(),
             kinds: BTreeMap::new(),
+            display: BTreeMap::new(),
         }
     }
 
