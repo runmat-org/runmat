@@ -122,25 +122,27 @@ fn dot(p: Xy) -> Shape {
     }
 }
 
-/// The batt symbol across the piece `lo`–`hi`: loops along its long side, as tall as the piece
-/// is thick, one loop for each half thickness along it.
+/// The batt symbol across the piece `lo`–`hi`: a coil of loops along its long side, as tall as
+/// the piece is thick.
 fn loops(lo: Xy, hi: Xy) -> Vec<Xy> {
     let (w, h) = (hi[0] - lo[0], hi[1] - lo[1]);
     let (long, thick) = (w.max(h), w.min(h));
     if thick <= 0.0 {
         return Vec::new();
     }
-    // A prolate cycloid: x = a t - b sin t, y = c cos t, looping where b > a.
-    let pitch = 0.5 * thick;
+    // A prolate cycloid, x = a t - b sin t, y = c cos t: a coil of round loops, each as wide
+    // as about half the thickness, two fifths of the thickness apart, centred along the piece.
+    let pitch = 0.4 * thick;
     let a = pitch / std::f64::consts::TAU;
-    let b = 0.22 * thick;
+    let b = 0.3 * thick;
     let c = 0.45 * thick;
-    let turns = (long / pitch).ceil() as usize;
-    let steps = turns * 24;
+    let turns = ((long - 2.0 * b) / pitch).floor().max(1.0) as usize;
+    let steps = turns * 48;
+    let start = (long - turns as f64 * pitch) / 2.0;
     (0..=steps)
         .map(|k| {
-            let t = k as f64 * std::f64::consts::TAU / 24.0;
-            let along = a * t - b * t.sin();
+            let t = k as f64 * std::f64::consts::TAU / 48.0;
+            let along = start + a * t - b * t.sin();
             let across = thick / 2.0 + c * t.cos();
             if w >= h {
                 [lo[0] + along, lo[1] + across]
@@ -176,10 +178,14 @@ impl Region {
         Region { rings, edges }
     }
 
-    /// The grid cells, `cell` wide, that the pieces' boxes touch, each once.
+    /// The grid cells, `cell` wide, that the pieces' boxes touch, each once. A piece thinner
+    /// than half a cell (a coat of plaster at a small scale) takes none: its outline reads alone.
     fn cells(&self, cell: f64) -> std::collections::BTreeSet<(i64, i64)> {
         let mut out = std::collections::BTreeSet::new();
         for (lo, hi) in self.pieces() {
+            if (hi[0] - lo[0]).min(hi[1] - lo[1]) < cell / 2.0 {
+                continue;
+            }
             let (i0, i1) = ((lo[0] / cell).floor() as i64, (hi[0] / cell).ceil() as i64);
             let (j0, j1) = ((lo[1] / cell).floor() as i64, (hi[1] / cell).ceil() as i64);
             for i in i0..i1 {
