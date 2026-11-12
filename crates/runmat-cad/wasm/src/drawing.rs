@@ -17,6 +17,7 @@
 //!   as a warning and the sheet draws its frame without geometry.
 
 pub mod auto;
+mod cuts;
 mod holes;
 pub mod layout;
 pub mod progress;
@@ -791,6 +792,14 @@ pub fn compile_json_in(
                 normals.insert(a.id.clone(), Value::Array(ns));
             }
         }
+    }
+    if !stage.partial() {
+        problems.extend(cuts::sections_that_cut_nothing(
+            path,
+            &document,
+            &hlr,
+            &parsed.spans,
+        ));
     }
     let titles = title::title_layouts(path, &document, &index.title_blocks, files, &mut problems);
     // Each sheet's drafting style from its format's standard: text height, arrows, extension

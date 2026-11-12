@@ -496,6 +496,7 @@ fn drawing() -> DrawingDocument {
         exclude: vec![],
         exploded: None,
         title: None,
+        centerlines: true,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),

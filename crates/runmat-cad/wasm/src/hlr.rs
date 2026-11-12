@@ -91,6 +91,9 @@ pub struct ViewLines {
     /// A section view's cut regions, closed loops to hatch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hatch: Vec<Vec<f64>>,
+    /// The section lining of each loop in `hatch`, from its body's material.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hatch_symbols: Vec<runmat_cad::model::materials::SectionSymbol>,
 }
 
 /// A center mark (`at`, the circle's `radius`) or a centerline (`from`–`to` along the axis,
@@ -158,6 +161,8 @@ struct Model {
     axes: Vec<Axis>,
     /// How many bodies the faces belong to.
     bodies: usize,
+    /// Each body's material, by body index, where the display names one.
+    materials: Vec<Option<String>>,
 }
 
 /// A number array of a display, inline or a mesh reference read in place
@@ -199,11 +204,19 @@ fn boundary(face: &Face) -> BTreeMap<EdgeKey, (P3, P3)> {
         .collect()
 }
 
-fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64]) {
+/// `bodies` of a part display placed by `t`; a body that names no material is `material` (its
+/// occurrence's).
+fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64], material: Option<&str>) {
     for body in bodies.as_array().into_iter().flatten() {
         let base = model.faces.len();
         let body_index = model.bodies;
         model.bodies += 1;
+        model.materials.push(
+            body["material"]
+                .as_str()
+                .or(material)
+                .map(str::to_owned),
+        );
         let faces: &[Value] = body["faces"]
             .as_array()
             .map(Vec::as_slice)
@@ -441,6 +454,7 @@ fn model_of(display: &Value) -> Model {
         edges: Vec::new(),
         axes: Vec::new(),
         bodies: 0,
+        materials: Vec::new(),
     };
     let data = &display["data"];
     if display["kind"] == "assembly" {
@@ -457,7 +471,12 @@ fn model_of(display: &Value) -> Model {
                 continue;
             };
             match proto["shape"].as_str() {
-                Some("mesh") => add_bodies(&mut model, &proto["part"]["bodies"], &t),
+                Some("mesh") => add_bodies(
+                    &mut model,
+                    &proto["part"]["bodies"],
+                    &t,
+                    proto["material"].as_str(),
+                ),
                 Some("box") => {
                     let (lo, hi) = (
                         floats(&proto["bounds"]["min"]),
@@ -475,6 +494,7 @@ fn model_of(display: &Value) -> Model {
                             body: model.bodies,
                         });
                         model.bodies += 1;
+                        model.materials.push(proto["material"].as_str().map(str::to_owned));
                         for (i, j) in [
                             (0, 1),
                             (2, 3),
@@ -500,7 +520,7 @@ fn model_of(display: &Value) -> Model {
             }
         }
     } else {
-        add_bodies(&mut model, &data["bodies"], &[]);
+        add_bodies(&mut model, &data["bodies"], &[], None);
     }
     model
 }
@@ -672,7 +692,8 @@ pub fn section_lines(display: &Value, axes: &Axes, point: P3) -> ViewLines {
     let model = model_of(display);
     let side = |p: P3| dot(sub(p, point), axes.depth);
     let eps = 1e-6;
-    let mut cut: Vec<(P3, P3)> = Vec::new();
+    // Each cut segment and the body it cuts.
+    let mut cut: Vec<(P3, P3, usize)> = Vec::new();
     let faces = model
         .faces
         .iter()
@@ -707,7 +728,7 @@ pub fn section_lines(display: &Value, axes: &Axes, point: P3) -> ViewLines {
                     tris.push([poly[0], poly[k], poly[k + 1]]);
                 }
                 if let [a, b] = crossing.as_slice() {
-                    cut.push((*a, *b));
+                    cut.push((*a, *b, f.body));
                 }
             }
             Face { tris, body: f.body }
@@ -758,14 +779,29 @@ pub fn section_lines(display: &Value, axes: &Axes, point: P3) -> ViewLines {
         edges,
         axes: model.axes.iter().map(|a| Axis { ..*a }).collect(),
         bodies: model.bodies,
+        materials: model.materials.clone(),
     };
     let mut out = lines_of(&clipped, axes, false);
     let project = |p: P3| [dot(p, axes.u), dot(p, axes.v)];
-    for (a, b) in &cut {
+    for (a, b, _) in &cut {
         let (pa, pb) = (project(*a), project(*b));
         out.visible.push(vec![pa[0], pa[1], pb[0], pb[1]]);
     }
-    out.hatch = loops(&cut, &project);
+    // Each body's cut chained on its own, so two layers that touch stay apart, and lined by
+    // its material.
+    let mut by_body: BTreeMap<usize, Vec<(P3, P3)>> = BTreeMap::new();
+    for (a, b, body) in &cut {
+        by_body.entry(*body).or_default().push((*a, *b));
+    }
+    for (body, segments) in by_body {
+        let symbol = runmat_cad::model::materials::section_symbol(
+            model.materials.get(body).and_then(|m| m.as_deref()),
+        );
+        for ring in loops(&segments, &project) {
+            out.hatch.push(ring);
+            out.hatch_symbols.push(symbol);
+        }
+    }
     out
 }
 

@@ -359,14 +359,35 @@ fn a_section_cuts_through_an_origin_plane() {
         }
         all
     };
+    // origin.zx is the bracket's back face (y = 0): the cut lies on a face and cuts nothing.
     let out = with("origin.zx");
-    assert_eq!(findings(&out), Vec::<Value>::new());
     let cut = &out["projection"]["data"]["hlr"]["a_a"]["cut"];
     assert_eq!(cut["view"], "top", "{cut}");
     assert!(
         cut["at"].as_f64().is_some_and(|at| at.abs() < 1e-6),
         "{cut}"
     );
+    let messages = Value::Array(findings(&out)).to_string();
+    assert!(messages.contains("section a_a cuts no material"), "{messages}");
+    // Moved 25 mm into the part, through the pocket: hatched, either side of it.
+    for plane in ["origin.zx, offset = 25 mm", "origin.zx, offset = 25 mm, keep_other_side = true"] {
+        let out = with(plane);
+        assert_eq!(findings(&out), Vec::<Value>::new(), "{plane}");
+        let section = &out["projection"]["data"]["hlr"]["a_a"];
+        assert!(
+            section["cut"]["at"].as_f64().is_some_and(|at| (at - 25.0).abs() < 1e-6),
+            "{plane}: {}",
+            section["cut"]
+        );
+        let loops = section["hatch"].as_array().map_or(0, Vec::len);
+        assert!(loops >= 2, "{plane}: {loops} hatch loops");
+        // The sheet draws the hatch on the view.
+        let hatched = out["projection"]["data"]["layouts"]
+            .to_string()
+            .matches("\"hatch\"")
+            .count();
+        assert!(hatched > 0, "{plane}: no hatch on the sheet");
+    }
     let out = with("plane.nowhere");
     let messages = Value::Array(findings(&out)).to_string();
     assert!(
@@ -484,4 +505,29 @@ fn a_part_with_two_outputs_is_two_parts_list_items() {
     for text in ["U-1", "U-2", "Glass", "Aluminum 6061", "Screen", "Case"] {
         assert!(table.contains(&format!("\"{text}\"")), "{text}: {table}");
     }
+}
+
+/// `centerlines = false` leaves a view's center marks and centerlines out (a floor plan's posts
+/// and fixtures); the hole's center mark draws by default.
+#[test]
+fn a_view_can_leave_its_centerlines_out() {
+    let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
+    let centers = |text: &str| {
+        let out: Value =
+            serde_json::from_str(&compile_json("/p/bracket.drawing", text, &files)).unwrap();
+        out["projection"]["data"]["layouts"]["1"]["primitives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["id"] == "view:top" && p["style"] == "center")
+            .count()
+    };
+    assert!(centers(DRAWING) > 0, "the hole's center mark draws by default");
+    let off = DRAWING.replacen(
+        "at = [100, 200],\n        display = hidden_lines\n",
+        "at = [100, 200],\n        display = hidden_lines,\n        centerlines = false\n",
+        1,
+    );
+    assert_ne!(off, DRAWING);
+    assert_eq!(centers(&off), 0);
 }

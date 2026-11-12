@@ -106,6 +106,10 @@ pub struct BodyDisplay {
     /// absent: the part's appearance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 4]>,
+    /// The body's material (`material.douglas_fir_lumber`): its output's, a `material = { body,
+    /// material }` statement's, else the part's. A section view hatches the cut by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
     /// The sheet metal's flat pattern (`sheet_metal.flat_pattern`), kept apart from the model: the
     /// folded model hides it, its bounds leave it out and an assembly never draws it; the flat
     /// pattern drawing and an on-demand show draw it.
@@ -448,6 +452,7 @@ fn body_display(
         vertices,
         triangle_count: mesh.triangle_count() as u32,
         color: None,
+        material: None,
         flat_pattern: false,
         bend_lines: Vec::new(),
     }

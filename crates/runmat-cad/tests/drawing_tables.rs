@@ -364,6 +364,7 @@ fn top_view() -> View {
         exclude: vec![],
         exploded: None,
         title: None,
+        centerlines: true,
     }
 }
 

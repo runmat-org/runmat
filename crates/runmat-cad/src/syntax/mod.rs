@@ -210,6 +210,7 @@ pub const DRAWING: DocumentGrammar = DocumentGrammar {
                 tag: "view",
                 extras: &[
                     "sheet", "model", "at", "scale", "display", "exclude", "exploded", "title",
+                    "centerlines",
                 ],
             }),
             ..named("view", "views", "view")

@@ -144,6 +144,12 @@ pub fn library_label(material: &str) -> Option<&'static str> {
 
 /// The density (kg/m³) of a material by its name, when this table knows it.
 pub fn material_density(material: &str) -> Option<f64> {
+    first_match(material, DENSITIES)
+}
+
+/// The value of the first table entry with a key in `material`'s name: a key with an underscore
+/// anywhere in the name, any other key as a whole word (`eps` is not in `steps`).
+fn first_match<T: Copy>(material: &str, table: &[(&[&str], T)]) -> Option<T> {
     let name = material
         .strip_prefix("material.")
         .unwrap_or(material)
@@ -152,7 +158,7 @@ pub fn material_density(material: &str) -> Option<f64> {
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
         .collect();
-    DENSITIES.iter().find_map(|(keys, density)| {
+    table.iter().find_map(|(keys, value)| {
         keys.iter()
             .any(|k| {
                 if k.contains('_') {
@@ -161,8 +167,80 @@ pub fn material_density(material: &str) -> Option<f64> {
                     words.contains(k)
                 }
             })
-            .then_some(*density)
+            .then_some(*value)
     })
+}
+
+/// The section lining a cut through a material draws (ASME Y14.2 section-lining symbols, and
+/// the architectural material symbols for building materials).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionSymbol {
+    /// 45° lines, evenly spaced: cast iron, and any material without its own symbol.
+    #[default]
+    General,
+    /// 45° lines in pairs.
+    Steel,
+    /// Stippling with small triangles of aggregate.
+    Concrete,
+    /// Wood across the grain: diagonals corner to corner.
+    Wood,
+    /// Batt and loose-fill insulation: a row of loops across the cavity.
+    Insulation,
+    /// Rigid board insulation: 45° lines both ways.
+    RigidInsulation,
+    /// Gypsum board and plaster: fine stippling.
+    Gypsum,
+    /// Earth and compacted fill: short strokes in groups of three, alternating direction.
+    Earth,
+}
+
+/// (keys, symbol): the first entry with a key in the material name wins; insulation before the
+/// fibre and foam words it shares, plaster before the cement words.
+const SECTION_SYMBOLS: &[(&[&str], SectionSymbol)] = &[
+    (
+        &[
+            "batt",
+            "loose_fill",
+            "glass_wool",
+            "mineral_wool",
+            "rock_wool",
+            "cellulose",
+        ],
+        SectionSymbol::Insulation,
+    ),
+    (
+        &["xps", "eps", "polystyrene", "polyiso", "foam_board"],
+        SectionSymbol::RigidInsulation,
+    ),
+    (
+        &["gypsum", "drywall", "stucco", "plaster", "cement_plaster"],
+        SectionSymbol::Gypsum,
+    ),
+    (&["concrete", "grout", "mortar"], SectionSymbol::Concrete),
+    (
+        &["earth", "soil", "gravel", "crushed_stone", "aggregate", "backfill"],
+        SectionSymbol::Earth,
+    ),
+    (
+        &[
+            "lumber", "wood", "douglas_fir", "hem_fir", "spf", "pine", "oak", "birch", "plywood",
+            "osb", "oriented_strand", "lvl", "lsl", "glulam", "i_joist", "timber",
+        ],
+        SectionSymbol::Wood,
+    ),
+    (
+        &["steel", "stainless", "iron", "rebar", "s235", "s275", "s355", "a36"],
+        SectionSymbol::Steel,
+    ),
+];
+
+/// The section lining for a cut through `material` (a library id such as
+/// `material.douglas_fir_lumber`); [`SectionSymbol::General`] for a material without its own.
+pub fn section_symbol(material: Option<&str>) -> SectionSymbol {
+    material
+        .and_then(|m| first_match(m, SECTION_SYMBOLS))
+        .unwrap_or(SectionSymbol::General)
 }
 
 /// Where a part's density came from.
@@ -242,5 +320,30 @@ mod tests {
         }
         assert_eq!(material_density("material.stainless_304"), Some(7950.0));
         assert_eq!(library_label("unobtainium"), None);
+    }
+
+    #[test]
+    fn a_cut_draws_its_materials_section_symbol() {
+        use super::{section_symbol, SectionSymbol::*};
+        for (material, symbol) in [
+            ("material.concrete", Concrete),
+            ("material.douglas_fir_lumber", Wood),
+            ("material.osb", Wood),
+            ("material.engineered_lumber_i_joist", Wood),
+            ("material.fiberglass_batt", Insulation),
+            ("material.glass_wool_loose_fill", Insulation),
+            ("material.xps_foam", RigidInsulation),
+            ("material.gypsum_board", Gypsum),
+            ("material.stucco_brown_coat", Gypsum),
+            ("material.steel_1018", Steel),
+            ("material.galvanized_steel", Steel),
+            ("material.crushed_stone_gravel", Earth),
+            ("material.asphalt_saturated_kraft_wrb", General),
+            ("material.copper_insulated", General),
+            ("material.aluminum_6061_t6", General),
+        ] {
+            assert_eq!(section_symbol(Some(material)), symbol, "{material}");
+        }
+        assert_eq!(section_symbol(None), General);
     }
 }

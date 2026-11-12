@@ -13,7 +13,8 @@
 
 use super::marks::{clip_to_circle, line, prim, text};
 use super::solver::{nearest_free, BoxR, Class};
-use super::{floats, xy, Ctx, Prim, Shape, Xy};
+use super::{floats, lining, xy, Ctx, Prim, Shape, Xy};
+use runmat_cad::model::materials::SectionSymbol;
 use crate::hlr::Axes;
 use serde_json::Value;
 
@@ -41,6 +42,8 @@ pub struct ViewPlan {
     pub edges: Vec<Vec<f64>>,
     pub hidden: Vec<Vec<f64>>,
     pub show_hidden: bool,
+    /// Whether it draws center marks and centerlines (`centerlines = false` turns them off).
+    pub centerlines: bool,
     pub cx: f64,
     pub cy: f64,
     pub w: f64,
@@ -243,7 +246,7 @@ pub fn measure(ctx: &mut Ctx<'_>) -> Vec<ViewPlan> {
         let big = ctx.std.text * 1.4;
         let small = ctx.std.text;
         let differs = (scale - ctx.scale).abs() > 1e-9;
-        let scale_line = (format!("SCALE {}", ctx.scale_label(scale)), small);
+        let scale_line = (ctx.scale_line(scale), small);
         let mut labels = Vec::new();
         let titled = |t: String, labels: &mut Vec<(String, f64)>| {
             labels.push((t, big));
@@ -319,6 +322,7 @@ pub fn measure(ctx: &mut Ctx<'_>) -> Vec<ViewPlan> {
             edges,
             hidden,
             show_hidden: display != Some("visible_lines") && display != Some("shaded"),
+            centerlines: view["centerlines"] != false,
             cx,
             cy,
             w,
@@ -627,7 +631,27 @@ pub fn draw(ctx: &mut Ctx<'_>, plans: &[ViewPlan]) {
             .map(|r| place(&floats(r)))
             .collect();
         if !rings.is_empty() {
-            let hatch = ctx.std.hatch(&v.id, &rings, 2.0);
+            // Each material's cuts lined by its symbol; a loop with none, by the general hatch.
+            let symbols: Vec<SectionSymbol> = v.seam["hatch_symbols"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|s| serde_json::from_value(s.clone()).unwrap_or_default())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut by_symbol: Vec<(SectionSymbol, Vec<Vec<f64>>)> = Vec::new();
+            for (i, ring) in rings.into_iter().enumerate() {
+                let symbol = symbols.get(i).copied().unwrap_or_default();
+                match by_symbol.iter_mut().find(|(s, _)| *s == symbol) {
+                    Some((_, group)) => group.push(ring),
+                    None => by_symbol.push((symbol, vec![ring])),
+                }
+            }
+            let hatch: Vec<Prim> = by_symbol
+                .iter()
+                .flat_map(|(symbol, group)| lining::lining(&ctx.std, &v.id, group, *symbol, 2.0))
+                .collect();
             match detail {
                 // A detail of a section hatches only inside its circle.
                 Some((c, r)) => {
@@ -650,7 +674,8 @@ pub fn draw(ctx: &mut Ctx<'_>, plans: &[ViewPlan]) {
         if v.seam["flat"].is_object() {
             out.extend(bend_lines(&v.id, &v.seam["flat"], &|p| v.to_sheet(p)));
         }
-        for c in v.seam["centers"].as_array().into_iter().flatten() {
+        let centers = v.seam["centers"].as_array().filter(|_| v.centerlines);
+        for c in centers.into_iter().flatten() {
             let r = c["radius"].as_f64().unwrap_or(0.0) * v.scale + CENTER_OVERRUN;
             if c["kind"] == "mark" {
                 let Some(at) = xy(&c["at"]) else { continue };

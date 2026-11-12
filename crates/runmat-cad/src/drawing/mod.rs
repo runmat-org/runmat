@@ -355,6 +355,19 @@ pub struct View {
     /// VIEW`): `title = "FIRST FLOOR PLAN"`. A section keeps its letter on the cutting line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Whether the view draws center marks and centerlines on holes, bosses and shafts (on by
+    /// default). A floor plan sets `centerlines = false`: its posts, rods and fixtures read
+    /// without crosses.
+    #[serde(default = "drawn", skip_serializing_if = "is_drawn")]
+    pub centerlines: bool,
+}
+
+fn drawn() -> bool {
+    true
+}
+
+fn is_drawn(on: &bool) -> bool {
+    *on
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
