@@ -26,10 +26,10 @@ mod facts;
 pub mod layout;
 mod links;
 
-use std::collections::BTreeMap;
 use crate::{kind_of, text_of, DesignKind, Files, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub use links::{
     check_linked_models, related_candidates, study_geometry_files, MAX_RELATED, NOT_CHECKED_HERE,

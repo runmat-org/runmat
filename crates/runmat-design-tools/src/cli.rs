@@ -89,7 +89,10 @@ macro_rules! tell {
 }
 
 fn usage(io: &mut Io) -> ExitCode {
-    tell!(io, "usage: runmat check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]");
+    tell!(
+        io,
+        "usage: runmat check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]"
+    );
     tell!(io, "usage: runmat design run <file> <command> [--values <json>] [--select <outline id>]... [--root <dir>] [--out <dir>] [--dry-run] [--json]");
     tell!(io, "usage: runmat design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember] [--copper] [--no-mask]");
     ExitCode::from(2)
@@ -165,7 +168,8 @@ pub fn check(args: &[String], io: &mut Io) -> ExitCode {
         }
     }
     if json_out {
-        say!(io, 
+        say!(
+            io,
             "{}",
             serde_json::to_string_pretty(&reports).unwrap_or_default()
         );
@@ -208,17 +212,15 @@ fn check_mechanical(
                 .as_str()
                 .map(|s| format!(" {s}:"))
                 .unwrap_or_default();
-            say!(io, 
+            say!(
+                io,
                 "  {}{at}{subject} {}",
                 d["severity"].as_str().unwrap_or("info"),
                 d["message"].as_str().unwrap_or("")
             );
         }
     }
-    if interference
-        && crate::DesignKind::of(path)
-            == Some(crate::DesignKind::Assembly)
-    {
+    if interference && crate::DesignKind::of(path) == Some(crate::DesignKind::Assembly) {
         let inspected: Value = call(
             "design.inspect",
             json!({ "path": path, "sections": ["interference"] }),
@@ -237,7 +239,8 @@ fn check_mechanical(
                 if !json_out {
                     say!(io, "  interference: {} overlap(s)", rows.len());
                     for r in rows {
-                        say!(io, 
+                        say!(
+                            io,
                             "    {} x {}: {} mm3",
                             r["a"].as_str().unwrap_or("?"),
                             r["b"].as_str().unwrap_or("?"),
@@ -313,13 +316,15 @@ fn run(args: &[String], io: &mut Io) -> ExitCode {
         crate::commands::run(&path, &text, &files, &request)
     });
     if json_out {
-        say!(io, 
+        say!(
+            io,
             "{}",
             serde_json::to_string_pretty(&answer).unwrap_or_default()
         );
     }
     if answer["ok"] != true {
-        tell!(io, 
+        tell!(
+            io,
             "{command}: {}",
             answer["message"].as_str().unwrap_or("failed")
         );
@@ -369,7 +374,8 @@ fn run(args: &[String], io: &mut Io) -> ExitCode {
                     })
                     .collect()
             };
-            say!(io, 
+            say!(
+                io,
                 "{}: {}",
                 answer["title"].as_str().unwrap_or(""),
                 answer["summary"].as_str().unwrap_or("")
@@ -502,7 +508,9 @@ fn export(args: &[String], io: &mut Io) -> ExitCode {
             _ => return usage(io),
         }
     }
-    let Some(format) = format else { return usage(io) };
+    let Some(format) = format else {
+        return usage(io);
+    };
     let file = match std::fs::canonicalize(&args[0]) {
         Ok(f) => f,
         Err(e) => {
@@ -574,16 +582,15 @@ fn export(args: &[String], io: &mut Io) -> ExitCode {
         fab.insert("remember".into(), Value::Bool(remember));
         input["fabrication"] = Value::Object(fab);
     }
-    let result: Value =
-        match crate::circuit_values::with_native_values(&files, || {
-            call("design.export", input, &files)
-        }) {
-            Ok(v) => v,
-            Err(e) => {
-                tell!(io, "{e}");
-                return ExitCode::FAILURE;
-            }
-        };
+    let result: Value = match crate::circuit_values::with_native_values(&files, || {
+        call("design.export", input, &files)
+    }) {
+        Ok(v) => v,
+        Err(e) => {
+            tell!(io, "{e}");
+            return ExitCode::FAILURE;
+        }
+    };
     // A fabrication set goes to its settings' folder beside the board unless --out names one.
     let out = out.unwrap_or_else(|| match result["fabrication"]["folder"].as_str() {
         Some(folder) => file.parent().unwrap_or(Path::new(".")).join(folder),
