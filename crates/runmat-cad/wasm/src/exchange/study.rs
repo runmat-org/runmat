@@ -214,21 +214,21 @@ mod tests {
             "runmat 0.7\nstd 1\n\nassembly study {\n    use part arm from \"../mech/arm\" as arm\n}\n".into(),
         );
         files.insert(
-            "/p/mech/arm.part".into(),
+            "/p/mech/arm/arm.part".into(),
             "runmat 0.7\nstd 1\n\npart arm {\n    feature s = import(source = \"./arm.step\")\n}\n".into(),
         );
-        files.insert("/p/mech/arm.step".into(), "ISO-10303-21;".into());
-        files.insert("/p/mech/other.part".into(), "runmat 0.7\n".into());
+        files.insert("/p/mech/arm/arm.step".into(), "ISO-10303-21;".into());
+        files.insert("/p/mech/other/other.part".into(), "runmat 0.7\n".into());
         let closure = source_closure("/p/sim/study.assembly", &files);
         assert_eq!(closure[0], "/p/sim/study.assembly");
-        assert!(closure.contains(&"/p/mech/arm.part".to_owned()), "{closure:?}");
-        assert!(closure.contains(&"/p/mech/arm.step".to_owned()), "{closure:?}");
-        assert!(!closure.contains(&"/p/mech/other.part".to_owned()));
+        assert!(closure.contains(&"/p/mech/arm/arm.part".to_owned()), "{closure:?}");
+        assert!(closure.contains(&"/p/mech/arm/arm.step".to_owned()), "{closure:?}");
+        assert!(!closure.contains(&"/p/mech/other/other.part".to_owned()));
         let before = source_closure_digest("/p/sim/study.assembly", &files);
         // Unrelated files leave the identity alone; a dependency's edit changes it.
-        files.insert("/p/mech/other.part".into(), "runmat 0.7\n// edited\n".into());
+        files.insert("/p/mech/other/other.part".into(), "runmat 0.7\n// edited\n".into());
         assert_eq!(before, source_closure_digest("/p/sim/study.assembly", &files));
-        files.insert("/p/mech/arm.step".into(), "ISO-10303-21; edited".into());
+        files.insert("/p/mech/arm/arm.step".into(), "ISO-10303-21; edited".into());
         assert_ne!(before, source_closure_digest("/p/sim/study.assembly", &files));
         // Moving the project keeps the identity.
         let moved: Files = files

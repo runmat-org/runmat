@@ -266,11 +266,12 @@ mod tests {
             "runmat 0.7\nstd 1\n\nassembly study {\n    use part arm from \"../mech/arm\" as arm\n}\n",
         );
         put(
-            "/p/mech/arm.part",
+            "/p/mech/arm/arm.part",
             "runmat 0.7\nstd 1\n\npart arm {\n    feature s = import(source = \"./arm.step\")\n}\n",
         );
-        put("/p/mech/arm.step", "ISO-10303-21;");
+        put("/p/mech/arm/arm.step", "ISO-10303-21;");
         put("/p/elsewhere/unrelated.part", "runmat 0.7\n");
+        put("/p/mech/arm/notes.md", "not a design file");
         let memory = Memory(view);
         let files = gather(
             "/p/sim/study.assembly",
@@ -279,9 +280,10 @@ mod tests {
                 .unwrap(),
             &CapturedDesignFiles(&memory.0),
         );
-        assert!(files.contains_key("/p/mech/arm.part"), "{:?}", files.keys());
-        assert!(files.contains_key("/p/mech/arm.step"), "{:?}", files.keys());
+        assert!(files.contains_key("/p/mech/arm/arm.part"), "{:?}", files.keys());
+        assert!(files.contains_key("/p/mech/arm/arm.step"), "{:?}", files.keys());
         assert!(!files.contains_key("/p/elsewhere/unrelated.part"));
+        assert!(!files.contains_key("/p/mech/arm/notes.md"));
     }
 
     #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
