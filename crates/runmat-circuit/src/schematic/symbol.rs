@@ -9,9 +9,14 @@
 //!   names and numbers hidden, as schematics conventionally draw them. They turn a quarter for shunts
 //!   and decoupling.
 //! - **Mounting holes and other one-pin parts:** a circle with its pin below.
+//! - **Parts with a declared library `symbol`** (a meter, a breaker, a utility source) draw
+//!   that symbol's art and pins, exactly where the declaration puts them, pin names hidden
+//!   ([`UnitLayout::declared`]).
 
 use super::units::Unit;
-use super::{ceil_div, number_text, text_width, up_to_grid, GRID, NAME_OFFSET, NO_CONNECT_HALF};
+use super::{
+    ceil_div, number_text, text_box, text_width, up_to_grid, GRID, NAME_OFFSET, NO_CONNECT_HALF,
+};
 use super::{PIN_LEN, PIN_PITCH, PIN_TEXT};
 use crate::geom::{Coord, Point};
 use crate::library::PinType;
@@ -65,6 +70,8 @@ pub enum Art {
     Inductor,
     Diode,
     Hole,
+    /// The part's declared library symbol.
+    Symbol,
 }
 
 impl Art {
@@ -76,6 +83,7 @@ impl Art {
             Art::Inductor => "inductor",
             Art::Diode => "diode",
             Art::Hole => "hole",
+            Art::Symbol => "symbol",
         }
     }
     /// Small parts hide pin names and numbers.
@@ -104,6 +112,27 @@ pub(crate) struct UnitLayout {
     /// Every pin's length: long enough for the widest number beside its line.
     pub(crate) pin_len: Coord,
     pub(crate) art: Art,
+    /// A declared symbol's art and pin ends ([`Art::Symbol`] only).
+    pub(crate) declared: Option<Box<DeclaredArt>>,
+}
+
+/// A declared library symbol as drawn, in library coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DeclaredArt {
+    /// Lines, outlines, circles and arcs as open polylines.
+    pub(crate) strokes: Vec<Vec<Point>>,
+    /// Texts in the art (`kWh`), centred on their point.
+    pub(crate) texts: Vec<ArtText>,
+    /// Each layout pin's tip and root, in the layout's pin order.
+    pub(crate) ends: Vec<(Point, Point)>,
+}
+
+/// A text drawn as part of a symbol's art, centred on `at`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ArtText {
+    pub(crate) at: Point,
+    pub(crate) text: String,
+    pub(crate) size: Coord,
 }
 
 /// The least gap between the left and right names across the body.
@@ -124,8 +153,19 @@ pub(crate) type PinList = [(String, Vec<String>, PinType)];
 
 impl UnitLayout {
     /// The layout a component's unit is drawn with.
-    pub(crate) fn of(c: &crate::elab::CompInst, unit: &Unit, units: usize) -> UnitLayout {
+    pub(crate) fn of(
+        c: &crate::elab::CompInst,
+        unit: &Unit,
+        units: usize,
+        symbol: Option<&crate::library::Symbol>,
+    ) -> UnitLayout {
         let pins = super::units::unit_pins(c, unit);
+        if let Some(lay) = symbol
+            .filter(|_| units == 1)
+            .and_then(|s| UnitLayout::declared(&pins, s))
+        {
+            return lay;
+        }
         let prefix: String = c
             .designator
             .chars()
@@ -167,6 +207,7 @@ impl UnitLayout {
                 half_h: GRID,
                 pin_len: PIN_LEN,
                 art,
+                declared: None,
             },
             _ => {
                 // Two pins, 7.62 mm tip to tip; a diode's anode on the left.
@@ -198,6 +239,7 @@ impl UnitLayout {
                     half_h,
                     pin_len: PIN_LEN,
                     art,
+                    declared: None,
                 }
             }
         }
@@ -316,11 +358,98 @@ impl UnitLayout {
             half_h,
             pin_len,
             art: Art::Box,
+            declared: None,
+        }
+    }
+
+    /// The layout of a part drawn by its declared symbol: each pin at the declaration's tip,
+    /// leaving the body on the side it runs from, the body half-size the art's extent. `None`
+    /// when a pin of the unit has no symbol pin of its name (the generated symbol is drawn).
+    pub(crate) fn declared(pins: &PinList, sym: &crate::library::Symbol) -> Option<UnitLayout> {
+        let mut out = Vec::new();
+        let mut ends = Vec::new();
+        let mut pin_len = 0;
+        for (name, pads, kind) in pins {
+            let sp = sym.pins.iter().find(|p| &p.pin == name)?;
+            // `angle` is the way the pin runs from its tip toward the body.
+            let (dx, dy, side) = match (sp.angle.rem_euclid(360.0) / 90.0).round() as i64 % 4 {
+                0 => (1, 0, PinSide::Left),
+                1 => (0, 1, PinSide::Bottom),
+                2 => (-1, 0, PinSide::Right),
+                _ => (0, -1, PinSide::Top),
+            };
+            let tip = sp.at;
+            let root = Point::new(tip.x + dx * sp.length, tip.y + dy * sp.length);
+            out.push(LayoutPin {
+                name: name.clone(),
+                pads: pads.clone(),
+                kind: *kind,
+                side,
+                at: if side.horizontal() { tip.y } else { tip.x },
+            });
+            ends.push((tip, root));
+            pin_len = pin_len.max(sp.length);
+        }
+        let (strokes, texts) = declared_art(&sym.graphics);
+        let mut hw = 0;
+        let mut hh = 0;
+        let points = strokes
+            .iter()
+            .flatten()
+            .copied()
+            .chain(ends.iter().map(|e| e.1));
+        for p in points {
+            hw = hw.max(p.x.abs());
+            hh = hh.max(p.y.abs());
+        }
+        for t in &texts {
+            let b = text_box(
+                &t.text,
+                t.size,
+                t.at.x,
+                centred_baseline_of(t.at.y, t.size),
+                "middle",
+            );
+            hw = hw.max(b[0].abs()).max(b[2].abs());
+            hh = hh.max(b[1].abs()).max(b[3].abs());
+        }
+        Some(UnitLayout {
+            pins: out,
+            half_w: up_to_grid(hw).max(GRID),
+            half_h: up_to_grid(hh).max(GRID),
+            pin_len: pin_len.max(GRID),
+            art: Art::Symbol,
+            declared: Some(Box::new(DeclaredArt {
+                strokes,
+                texts,
+                ends,
+            })),
+        })
+    }
+
+    /// A declared symbol's end of the pin at `side`/`at`: (tip, root).
+    fn declared_end(&self, side: PinSide, at: Coord) -> Option<(Point, Point)> {
+        let d = self.declared.as_ref()?;
+        let k = self
+            .pins
+            .iter()
+            .position(|p| p.side == side && p.at == at)?;
+        d.ends.get(k).copied()
+    }
+
+    /// The length of the pin at `side`/`at`, tip to body.
+    pub(crate) fn pin_length(&self, side: PinSide, at: Coord) -> Coord {
+        match self.declared_end(side, at) {
+            Some((t, r)) => (t.x - r.x).abs() + (t.y - r.y).abs(),
+            None => self.pin_len,
         }
     }
 
     /// Pin tip in library coordinates.
     pub(crate) fn tip(&self, side: PinSide, at: Coord) -> Point {
+        if let Some((tip, _)) = self.declared_end(side, at) {
+            return tip;
+        }
         let (dx, dy) = side.out();
         if side.horizontal() {
             Point::new(dx * (self.half_w + self.pin_len), at)
@@ -330,6 +459,9 @@ impl UnitLayout {
     }
     /// Where the pin meets the body.
     pub(crate) fn root(&self, side: PinSide, at: Coord) -> Point {
+        if let Some((_, root)) = self.declared_end(side, at) {
+            return root;
+        }
         let (dx, dy) = side.out();
         if side.horizontal() {
             Point::new(dx * self.half_w, at)
@@ -382,6 +514,11 @@ impl UnitLayout {
         let w = self.half_w;
         match self.art {
             Art::Box | Art::Resistor => Vec::new(),
+            Art::Symbol => self
+                .declared
+                .as_ref()
+                .map(|d| d.strokes.clone())
+                .unwrap_or_default(),
             Art::Capacitor => {
                 let (g, h) = (381_000, self.half_h);
                 vec![
@@ -446,7 +583,99 @@ const NUMBER_LIFT: Coord = 254_000;
 
 /// The baseline that centres capitals of height [`PIN_TEXT`] on `y`.
 pub(crate) fn centred_baseline(y: Coord) -> Coord {
-    y - PIN_TEXT * 3 / 10
+    centred_baseline_of(y, PIN_TEXT)
+}
+
+/// The baseline that centres capitals of height `size` on `y`.
+pub(crate) fn centred_baseline_of(y: Coord, size: Coord) -> Coord {
+    y - size * 3 / 10
+}
+
+/// A declared symbol's graphics as polylines and texts: lines and polygons as drawn,
+/// rectangles closed, circles and arcs in segments of at most 15 degrees.
+fn declared_art(graphics: &[crate::library::Graphic]) -> (Vec<Vec<Point>>, Vec<ArtText>) {
+    use crate::library::Graphic;
+    let ring = |c: Point, r: Coord, a0: f64, sweep: f64| -> Vec<Point> {
+        let n = ((sweep.abs() / (std::f64::consts::PI / 12.0)).ceil() as usize).max(2);
+        (0..=n)
+            .map(|k| {
+                let a = a0 + sweep * k as f64 / n as f64;
+                Point::new(
+                    c.x + (r as f64 * a.cos()).round() as Coord,
+                    c.y + (r as f64 * a.sin()).round() as Coord,
+                )
+            })
+            .collect()
+    };
+    let mut strokes = Vec::new();
+    let mut texts = Vec::new();
+    for g in graphics {
+        match g {
+            Graphic::Line { points, .. } => strokes.push(points.clone()),
+            Graphic::Polygon { points, .. } => {
+                let mut pts = points.clone();
+                if let Some(&first) = pts.first() {
+                    pts.push(first);
+                }
+                strokes.push(pts);
+            }
+            Graphic::Rect { a, b, .. } => {
+                strokes.push(vec![*a, Point::new(b.x, a.y), *b, Point::new(a.x, b.y), *a])
+            }
+            Graphic::Circle { center, radius, .. } => {
+                strokes.push(ring(*center, *radius, 0.0, std::f64::consts::TAU))
+            }
+            Graphic::Arc {
+                start, mid, end, ..
+            } => strokes.push(arc_points(*start, *mid, *end, &ring)),
+            Graphic::Text { at, text, size, .. } => texts.push(ArtText {
+                at: *at,
+                text: text.clone(),
+                size: if *size > 0 { *size } else { PIN_TEXT },
+            }),
+        }
+    }
+    (strokes, texts)
+}
+
+/// The arc from `a` through `m` to `b`, as segments; a straight line when the points are in line.
+fn arc_points(
+    a: Point,
+    m: Point,
+    b: Point,
+    ring: &dyn Fn(Point, Coord, f64, f64) -> Vec<Point>,
+) -> Vec<Point> {
+    let (ax, ay, mx, my, bx, by) = (
+        a.x as f64, a.y as f64, m.x as f64, m.y as f64, b.x as f64, b.y as f64,
+    );
+    let d = 2.0 * (ax * (my - by) + mx * (by - ay) + bx * (ay - my));
+    if d.abs() < 1.0 {
+        return vec![a, b];
+    }
+    let sq = |x: f64, y: f64| x * x + y * y;
+    let cx = (sq(ax, ay) * (my - by) + sq(mx, my) * (by - ay) + sq(bx, by) * (ay - my)) / d;
+    let cy = (sq(ax, ay) * (bx - mx) + sq(mx, my) * (ax - bx) + sq(bx, by) * (mx - ax)) / d;
+    let r = ((ax - cx).powi(2) + (ay - cy).powi(2)).sqrt();
+    let ang = |x: f64, y: f64| (y - cy).atan2(x - cx);
+    let (a0, am, a1) = (ang(ax, ay), ang(mx, my), ang(bx, by));
+    let tau = std::f64::consts::TAU;
+    // Counter-clockwise sweep from a to b; if m is not on it, go clockwise.
+    let ccw = (a1 - a0).rem_euclid(tau);
+    let to_m = (am - a0).rem_euclid(tau);
+    let sweep = if to_m <= ccw { ccw } else { ccw - tau };
+    let mut pts = ring(
+        Point::new(cx.round() as Coord, cy.round() as Coord),
+        r.round() as Coord,
+        a0,
+        sweep,
+    );
+    if let Some(f) = pts.first_mut() {
+        *f = a;
+    }
+    if let Some(l) = pts.last_mut() {
+        *l = b;
+    }
+    pts
 }
 
 fn up_to_pitch(v: Coord) -> Coord {

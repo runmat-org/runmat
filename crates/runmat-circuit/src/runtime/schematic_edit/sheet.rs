@@ -5,11 +5,11 @@ use super::super::edit::EditError;
 use super::wire::{declare_port, endpoint_of, place, written_name};
 use super::{Editor, End};
 use crate::ids::NamePath;
-use crate::item_ref::ItemRef;
 use crate::ir::{
     Binding, BlanketDecl, BusDecl, DiffPairDecl, HarnessDecl, NetDecl, PortDir, SheetDef,
     SheetInstance,
 };
+use crate::item_ref::ItemRef;
 use crate::syntax::{
     blanket_statement, bus_statement, diff_pair_statement, harness_statement, instance_statement,
     net_statement, no_erc_statement,

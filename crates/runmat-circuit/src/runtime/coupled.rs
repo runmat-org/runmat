@@ -3,8 +3,8 @@
 //! written are the ones that pass DRC.
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
-use super::*;
 use super::picks;
+use super::*;
 use crate::geom::mm;
 use crate::item_ref::ItemRef;
 use crate::layer_set::CopperIndex;

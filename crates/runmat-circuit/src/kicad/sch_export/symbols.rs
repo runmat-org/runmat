@@ -155,24 +155,50 @@ pub(super) fn lib_symbol(lib: &str, units: &[(UnitLayout, Option<String>)]) -> S
         if let Some(label) = label {
             body.push(SExpr::list("unit_name", vec![SExpr::str(label)]));
         }
-        body.extend([SExpr::list(
-            "rectangle",
-            vec![
-                SExpr::list("start", vec![mm(-lay.half_w), mm(lay.half_h)]),
-                SExpr::list("end", vec![mm(lay.half_w), mm(-lay.half_h)]),
-                SExpr::list(
-                    "stroke",
-                    vec![
-                        SExpr::list("width", vec![SExpr::num(0.254)]),
-                        SExpr::list("type", vec![SExpr::sym("default")]),
-                    ],
-                ),
-                SExpr::list(
-                    "fill",
-                    vec![SExpr::list("type", vec![SExpr::sym("background")])],
-                ),
-            ],
-        )]);
+        let stroke = || {
+            SExpr::list(
+                "stroke",
+                vec![
+                    SExpr::list("width", vec![SExpr::num(0.254)]),
+                    SExpr::list("type", vec![SExpr::sym("default")]),
+                ],
+            )
+        };
+        // A declared symbol exports its art; a generated one its body box.
+        for line in lay.declared.iter().flat_map(|d| &d.strokes) {
+            body.push(SExpr::list(
+                "polyline",
+                vec![
+                    SExpr::list(
+                        "pts",
+                        line.iter()
+                            .map(|p| SExpr::list("xy", vec![mm(p.x), mm(p.y)]))
+                            .collect(),
+                    ),
+                    stroke(),
+                ],
+            ));
+        }
+        body.extend(lay.declared.is_none().then(|| {
+            SExpr::list(
+                "rectangle",
+                vec![
+                    SExpr::list("start", vec![mm(-lay.half_w), mm(lay.half_h)]),
+                    SExpr::list("end", vec![mm(lay.half_w), mm(-lay.half_h)]),
+                    SExpr::list(
+                        "stroke",
+                        vec![
+                            SExpr::list("width", vec![SExpr::num(0.254)]),
+                            SExpr::list("type", vec![SExpr::sym("default")]),
+                        ],
+                    ),
+                    SExpr::list(
+                        "fill",
+                        vec![SExpr::list("type", vec![SExpr::sym("background")])],
+                    ),
+                ],
+            )
+        }));
         for lp in &lay.pins {
             let (name, kind) = (&lp.name, lp.kind);
             let tip = lay.tip(lp.side, lp.at);
@@ -190,7 +216,7 @@ pub(super) fn lib_symbol(lib: &str, units: &[(UnitLayout, Option<String>)]) -> S
                         SExpr::sym(crate::schematic::pin_kind(kind)),
                         SExpr::sym("line"),
                         SExpr::list("at", vec![mm(tip.x), mm(tip.y), SExpr::num(angle)]),
-                        SExpr::list("length", vec![mm(lay.pin_len)]),
+                        SExpr::list("length", vec![mm(lay.pin_length(lp.side, lp.at))]),
                         SExpr::list("name", vec![SExpr::str(name), effects(None)]),
                         SExpr::list("number", vec![SExpr::str(pad), effects(None)]),
                     ],

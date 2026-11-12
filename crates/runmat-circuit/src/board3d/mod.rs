@@ -14,8 +14,8 @@
 
 use crate::geom::shape::Prim;
 use crate::geom::{to_mm, Point};
-use crate::layer_set::CopperIndex;
 use crate::item_ref::ItemRef;
+use crate::layer_set::CopperIndex;
 use crate::layout::{Board, Footprint, Side};
 use crate::library::PadKind;
 use serde::Serialize;

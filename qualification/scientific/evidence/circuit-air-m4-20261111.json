@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "source_revision": "df1e2068ed02cd490c1a9ca307c98ab080f09c3a",
+  "target": "macos-aarch64",
+  "hardware": "Apple M4, 24 GiB RAM",
+  "passed": 1,
+  "failed": 0,
+  "ignored": 0,
+  "exit_code": 0,
+  "log_sha256": "e8396a7e425c84cd14ffe41caa907c063d0551495efe8e470a489e14990a5ac9",
+  "artifact_sha256": "f652728ad5ac036166cb00464a32b60806d2ce8f1e3ebe912db04593bf2f165a",
+  "source_verification": {
+    "files": 27246,
+    "sha256": "4b64cf4deef5c33bf8a8c14332b108e3681d24d029533cc9dfd832bdd72dee5a"
+  },
+  "diagnostic_run": {
+    "log_sha256": "102a9f46b10c95b6ac4962f92c252b68e43a8a5cce96eb637e36f184c11c1d36",
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "test_seconds": 72.06,
+    "primitives": 71727,
+    "move_edit_ms": 23.001792,
+    "move_recompile_ms": 270.865375,
+    "delete_edit_ms": 21.76325,
+    "delete_recompile_ms": 415.767041,
+    "package_recompile_ms": 243.960167
+  },
+  "scope": "The policy argument vector passes separately from the diagnostic --nocapture run. Both use the same retained optimized binary and unchanged 500-ms assertions. This is Apple M4 evidence, not the previous M5 Max measurement."
+}

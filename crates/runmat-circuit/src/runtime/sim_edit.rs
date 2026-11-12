@@ -83,7 +83,10 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                 .ok_or_else(|| EditError::new("name the net or pin to probe"))?;
             let picked = ItemRef::parse(&at);
             // `net.X` is the simulation language's own spelling of a net.
-            let net = picked.as_ref().and_then(ItemRef::net).or_else(|| at.strip_prefix("net."));
+            let net = picked
+                .as_ref()
+                .and_then(ItemRef::net)
+                .or_else(|| at.strip_prefix("net."));
             let probe = match net {
                 Some(net) => SimProbe::Net(net.to_string()),
                 None => {

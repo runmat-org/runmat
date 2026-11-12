@@ -494,6 +494,26 @@ pub fn build_index(
             span: None,
         })
         .collect();
+    let schematic = crate::schematic::layout(netlist);
+    // The drawn pages' layout check: items off the sheet, texts over each other.
+    review_rows.extend(
+        crate::schematic::check::findings(&schematic)
+            .into_iter()
+            .map(|f| CheckRow {
+                code: format!("schematic.{}", f.code),
+                severity: "warning".into(),
+                message: format!("{} ({})", f.message, f.sheet),
+                items: f.items,
+                fix: None,
+                source: None,
+                at: None,
+                gap: None,
+                layer: None,
+                regions: Vec::new(),
+                rule: None,
+                span: None,
+            }),
+    );
     review_rows.sort_by(|a, b| (&a.code, &a.items).cmp(&(&b.code, &b.items)));
 
     CircuitIndex {
@@ -511,7 +531,7 @@ pub fn build_index(
         last_eco: None,
         erc: erc_rows,
         review: review_rows,
-        schematic: crate::schematic::layout(netlist),
+        schematic,
         board: None,
         simulations: design
             .simulations

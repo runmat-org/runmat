@@ -158,13 +158,13 @@ pub(super) fn move_items(
             }
         }
         for t in &page.texts {
-            if ids
-                .iter()
-                .any(|id| {
-                    *id == ItemRef::Text { sheet: page.sheet.clone(), name: t.name.clone() }
-                        .to_string()
-                })
-            {
+            if ids.iter().any(|id| {
+                *id == ItemRef::Text {
+                    sheet: page.sheet.clone(),
+                    name: t.name.clone(),
+                }
+                .to_string()
+            }) {
                 // A note moves like a symbol and doesn't turn or mirror.
                 let key = crate::schematic::text_key(&page.sheet, &t.name);
                 sheet_symbols.insert(key.clone());
@@ -172,7 +172,10 @@ pub(super) fn move_items(
             }
         }
         for s in &page.sheet_symbols {
-            if ids.iter().any(|id| *id == ItemRef::Sheet(s.path.clone()).to_string()) {
+            if ids
+                .iter()
+                .any(|id| *id == ItemRef::Sheet(s.path.clone()).to_string())
+            {
                 sheet_symbols.insert(s.key.clone());
                 keys.insert(s.key.clone(), false);
             }

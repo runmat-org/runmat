@@ -12,7 +12,11 @@ use serde_json::{Map, Value};
 pub(super) fn listed(values: &Map<String, Value>, field: &str) -> Vec<String> {
     match values.get(field) {
         Some(Value::String(s)) => vec![s.clone()],
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
         _ => Vec::new(),
     }
 }

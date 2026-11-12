@@ -205,8 +205,8 @@ fn a_package_model_in_the_project_replaces_its_body_box() {
     let before = shown(&files);
     // The 0402 capacitors take the model, lifted 5 mm so the box it reads back in shows it.
     let layout = files[FC].replace(
-        r#"model = { path = "${RUNMAT_3DMODELS}/C_0402_1005Metric_IPCN.step" }"#,
-        r#"model = { path = "models/c0402.step", offset = [0, 0, 5] }"#,
+        r#"model = "${RUNMAT_3DMODELS}/C_0402_1005Metric_IPCN.step""#,
+        r#"model = "models/c0402.step", model_offset = [0, 0, 5]"#,
     );
     assert_ne!(layout, files[FC], "the 0402 package names a model");
     files.insert(FC.into(), layout);

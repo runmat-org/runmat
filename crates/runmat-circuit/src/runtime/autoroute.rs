@@ -4,13 +4,13 @@
 //! connections only.
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
+use super::picks;
 use super::*;
 use crate::autoroute::{self, FanoutOptions, RouteOptions};
 use crate::geom::{mm, Coord};
+use crate::item_ref::ItemRef;
 use crate::layer_set::CopperIndex;
 use crate::layout::NetId;
-use super::picks;
-use crate::item_ref::ItemRef;
 
 /// Runs `board.fanout`, `board.autoroute` or `board.route-net`.
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {

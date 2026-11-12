@@ -165,23 +165,6 @@ fn relative_frequency_separation(a: f64, b: f64) -> f64 {
     (b - a).abs() / a.max(b)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn modal_cluster_metrics_classify_repeated_and_near_repeated_pairs() {
-        let metrics = modal_cluster_metrics(&[10.0, 10.0 + 1.0e-8, 10.005, 12.0]);
-
-        assert_eq!(metrics.adjacent_mode_pair_count, 3);
-        assert_eq!(metrics.repeated_mode_pair_count, 1);
-        assert_eq!(metrics.near_repeated_mode_pair_count, 1);
-        assert_eq!(metrics.well_separated_mode_pair_count, 1);
-        assert_eq!(metrics.cluster_coverage_ratio, 1.0);
-        assert!(metrics.min_relative_frequency_separation <= 1.0e-6);
-    }
-}
-
 /// Each mode's frequency, backward error and relative residual under the gate's measure.
 pub(super) fn modal_accuracy_diagnostic(
     convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
@@ -252,5 +235,22 @@ pub(super) fn modal_convergence_diagnostic(
             figures.maximum_relative_residual,
             figures.converged
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modal_cluster_metrics_classify_repeated_and_near_repeated_pairs() {
+        let metrics = modal_cluster_metrics(&[10.0, 10.0 + 1.0e-8, 10.005, 12.0]);
+
+        assert_eq!(metrics.adjacent_mode_pair_count, 3);
+        assert_eq!(metrics.repeated_mode_pair_count, 1);
+        assert_eq!(metrics.near_repeated_mode_pair_count, 1);
+        assert_eq!(metrics.well_separated_mode_pair_count, 1);
+        assert_eq!(metrics.cluster_coverage_ratio, 1.0);
+        assert!(metrics.min_relative_frequency_separation <= 1.0e-6);
     }
 }

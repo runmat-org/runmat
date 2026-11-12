@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "cohort": "driver-recovery-physics",
-  "policy_sha256": "71379c3bce11f6f26e0e017aa44b64cf12688b11dfac22f26fa55ae2969271f8",
+  "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "d8e06ca2ca8e68847e01c19268715c53a07a5cd5",
+    "source_revision": "ceae94b5da5d3c95f00cb6ba01a151a536f5fbcb",
     "passed": 18,
     "failed": 0,
     "ignored": 0,
@@ -28,13 +28,13 @@
       "remote::driver_replacement_tests::restored_analysis_retry_observes_cancellation_before_publication",
       "remote::driver_replacement_tests::thermal::authored_matrix_variants_typecheck_with_explicit_physical_loads"
     ],
-    "log_sha256": "45fea41aac999d9840f301ceafe7731f1a89825661ee4364dbf2881bc3ceedda",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/final-d8e06ca2ca.driver-recovery-physics.log",
+    "log_sha256": "6354aa6ca74dbf7919b36ec71d97ad86126c563a8852466602c7bb96560e8c7b",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific.driver-recovery-physics.log",
     "artifacts": [
       {
-        "sha256": "81d101bd12c41f5344c794f6786cfc15884f01ac993e5f29b953946b05b3a1dd",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/final-d8e06ca2ca.artifacts/driver-recovery-physics-harness",
-        "bytes": 572078288
+        "sha256": "0994faff673f6a545b566e7ccb6fd793eac944c9189d3692bc40e2a9d7cda61c",
+        "bytes": 572298832,
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific-artifacts/driver-recovery-physics"
       }
     ],
     "exit_code": 0,
@@ -64,34 +64,34 @@
     },
     "selected_filter": "remote::driver_replacement_tests::",
     "inputs": {
-      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
-      "files": 26096,
+      "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "source_verification": {
-      "at": "2026-11-11T13:18:39.787Z",
+      "at": "2026-11-12T00:56:31.027Z",
       "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
-      "stage": "/home/nallana/rm1293/incoming/final-d8e06ca2ca",
+      "stage": "/home/nallana/rm1293/incoming/intake-ceae94b5da-source",
       "status": "verified",
-      "files": 27232
+      "files": 27246
     },
-    "source_scope": "Content-verified public snapshot; transfer protects .env namespaces and excludes them from its inventory."
+    "source_scope": "All 27,246 canonical source files verified against the frozen ceae94b5da snapshot after both cohorts. Credentials and .env namespaces are excluded from transfers."
   },
   "conservation": {
     "measured_inputs": {
-      "sha256": "4efca5c602e9c4ce33e3cc25c1c4428c7e42c9f091fa6f29ebb8e555b4306b6e",
-      "files": 26096,
+      "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "e76f801975ecc2a2304c8f383cbe5a876f5e179af2316f146c77f74f7500b4b4",
-      "files": 26096,
+      "sha256": "9eb1fb59fa44dd2efb55fa6a409b30adeedc4f3eafc74e3c8a55040acadfc3f0",
+      "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts.",
+    "reason": "The complete eight-file delta consists of four formatting-only FEA files, an unchanged modal diagnostic test module moved after production items, the separate CAD fixture comparator and its equivalent rotation constants, and the Desktop part.sketch handler with its integration test. These recovery tests execute FEA requests and driver replacement; they do not dispatch the Desktop part.sketch command. Exact byte comparisons and the rotation-value witness qualify the test-only edits. Solver arithmetic, admission, checkpoint fencing, recovery publication, case inventory and required command remain unchanged.",
     "review": {
-      "path": "qualification/scientific/reviews/d8e06-final-integration.json",
-      "sha256": "ce104205f132542dc28348ab1a8b9fc9b4e1f295f0ee1dc5fd4c560305632899"
+      "path": "qualification/scientific/reviews/recovery-ceae-to-793f9ae2b3.json",
+      "sha256": "c4aa0efdd78f10b17548fb33e29eb5f1617670d4127f318f1b805cea69200c07"
     }
   }
 }

@@ -106,9 +106,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         "change-part",
         "Change part",
         "replace",
-        vec![
-            labeled("circuit.change-part", "From the pool…"),
-        ],
+        vec![labeled("circuit.change-part", "From the pool…")],
     );
     let footprint = menu(
         "footprint",

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source_revision": "e610e4ec222912ed0c10430e737f89685c673de1",
+  "previous_source_revision": "b92c4e8e2a04fb8c8eb2da64dbbfc8e2e993718d",
+  "changed_input": "crates/runmat-cad/tests/desktop_fixtures.rs",
+  "passed": 1,
+  "failed": 0,
+  "ignored": 0,
+  "exit_code": 0,
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "test": "canonical_and_adjacent_rotation_values_preserve_the_fixture_witness",
+  "log_sha256": "82e8ff933e8fb1d56f7fd24f17d7150a5b0a39bb7af350b7f077170833f95adc",
+  "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/rotation_fixture_values.log",
+  "test_source_sha256": "017618f48b0e8b17c8a31ed855dcee8a47a9c8eff5780d004a102bbd97dfa420",
+  "artifact_sha256": "24fadf2f0cb09b949ca28b678d943da48808433795b4f422f5f1d63b73b66ba4",
+  "scope": "The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries.",
+  "limitations": "This is a focused standard-library witness for the fixture constants, not a new CAD product test or completed Clippy census. The earlier actual Windows fixture run and final required ordinary CI remain separate."
+}

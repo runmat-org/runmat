@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "measured_source": "b85c8a433d53d286a98c0b0dfa6bd5b88cc7b181",
+  "accepted_source": "3bbf9f51265d6796966693c08c739f9bfe71d369",
+  "measured_passed": 1,
+  "measured_failed": 0,
+  "measured_ignored": 0,
+  "log_sha256": "044a44a39aedc62eda1edb6a0f9d6dc6c10261ca2bb20776d4125695b4c7886a",
+  "artifact_sha256": "7d7d36ab09000b0f779043d3c3477b7ce03c4a7c1fea27687162a3cfdf6ac20a",
+  "affected_checks": [
+    {
+      "name": "desktop-fixtures",
+      "source_revision": "df1e2068ed02cd490c1a9ca307c98ab080f09c3a",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "e0720117438d0f66c89f89a400605db47a3dd5743c0d0cc93d7c860b1c30cb83"
+    },
+    {
+      "name": "sparse",
+      "source_revision": "df1e2068ed02cd490c1a9ca307c98ab080f09c3a",
+      "passed": 64,
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "6a712498f88d02fdc2e7134bff428c3365749ffd612c4b298d605eeb73407d1b"
+    }
+  ],
+  "call_graph": [
+    "cad_airliner_drawing::compile sends fn=compile",
+    "runmat_geometry_wasm_host::cad::call_framed collects display bytes around call",
+    "cad::call selects compile rather than edit/analyze/run",
+    "CAD runtime compile dispatches .drawing to drawing::compile_json and its staged view projection"
+  ],
+  "scope": "Conserves the complete measured native Rust-heap workload only. The G32 physics cohorts are being rerun separately. This does not qualify the new distributed browser binary, C++ allocator or operating-system RSS."
+}

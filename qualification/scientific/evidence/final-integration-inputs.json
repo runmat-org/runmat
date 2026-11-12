@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "accepted_source_revision": "eb79824ba98605d06539a2d872405be2635da766",
+  "accepted_source_revision": "b0816059935e14cd18b6b13b08b74f551d2e9db8",
   "checks": [
     {
       "name": "Design seating and through-bore placement with OCCT after lint repairs",
@@ -129,6 +129,30 @@
       "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-step-face-names.log"
     },
     {
+      "name": "Windows native STEP face/product names after enumeration-independent fixture repair",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "harnesses": 1,
+      "log_sha256": "1b6c188ef9781f6b8b934dca618183ecf69c556f1f2ec68bb16e698ad30e4ff5",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/windows-step-order-evidence/step-order-20261111.tests.log",
+      "source_revision": "b0816059935e14cd18b6b13b08b74f551d2e9db8",
+      "fixture_sha256": "057dee8eaf27b67fffd4c88794885a4b53d8caab4d26531967265a02244de8a5",
+      "artifact": {
+        "path": "C:\\Users\\nallana\\rm1293\\targets\\debug\\deps\\step_face_names-1d167e0ebffa33a7.exe",
+        "bytes": 26074112,
+        "sha256": "188b947643ee8cfcad3df98fb3a91b84294680258865aaabc0d07038190159d4"
+      },
+      "source_verification": {
+        "at": "2026-11-11T20:05:47.243Z",
+        "root": "C:\\Users\\nallana\\rm1293-r964-source",
+        "stage": "C:\\Users\\nallana\\rm1293\\incoming\\step-order-20261111\\source",
+        "status": "verified",
+        "files": 27237
+      },
+      "source_scope": "Frozen public a630 plus the sole reviewed STEP fixture overlay; all 27,237 canonical source files verified before and after."
+    },
+    {
       "name": "Windows focused Design integration",
       "source_revision": "6c6c9ece36cb587a8691994d4d11445aa30f61f8",
       "passed": 31,
@@ -216,6 +240,6 @@
       "disposition": "The process-wide CountingGeometryFs test provider returns STL bytes to unrelated test threads. The existing CI uses RUST_TEST_THREADS=1; all 65 cases pass with that configuration. The parallel test-isolation defect remains recorded; no production code or CI concurrency policy changed."
     }
   ],
-  "windows_source_scope": "The focused transfer verifier checked 27,226 files and omitted eight Rust source files under directories named target. This evidence retains that partial source-verification scope. Final Windows CI uses the complete Git checkout; the corrected Linux verifier checks every canonical source file.",
+  "windows_source_scope": "The earlier focused Design transfer verifier checked 27,226 files and omitted eight Rust source files under directories named target; that evidence retains its partial scope. The later Windows STEP name check verifies all 27,237 canonical source files before and after, including Rust modules named target. Final Windows CI uses the complete Git checkout; the corrected Linux verifier checks every canonical source file.",
   "scope": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts."
 }

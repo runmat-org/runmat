@@ -144,7 +144,7 @@ pub struct Need {
 /// How a guide knows it is done.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Completion {
-    /// The compiler check: `design.check` for design files, `runmat.check` for `.fea`.
+    /// The compiler check: `design.check` for design files, `runmat.check` for `.fea` and `.m`.
     pub tool: String,
     /// What the checked file must contain beyond compiling cleanly.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -439,7 +439,8 @@ fn command(id: &str) -> EntryPoint {
 /// The model guide turns start on: fast and lower cost for one structured question at a time.
 pub const GUIDE_DEFAULT_MODEL: &str = "gpt-6-luna";
 
-/// Every guide, in the order of doc 18's table, and the composer suggestions.
+/// Every guide and the composer suggestions. On a blank project the Guide tab lists the guides
+/// that start a new file in this order: a part, a schematic, a script, a study.
 pub fn catalog() -> GuideCatalog {
     use ControlKind::*;
     use DefaultPolicy::*;
@@ -472,38 +473,6 @@ pub fn catalog() -> GuideCatalog {
         start_prompt: start_prompt.into(),
     };
     let guides = vec![
-        guide(
-            "simulation_setup",
-            "Simulation setup",
-            "Set up a study: goal, supports, loads, material and the acceptance limit",
-            "fea",
-            ".fea",
-            vec![
-                open_file(&[".step", ".stp", ".stl", ".part", ".assembly", ".fea"]),
-                command("study.new"),
-                EntryPoint::Agent,
-            ],
-            vec![
-                decision("goal", "What would you like to simulate?", &[SingleChoice], &[], true, Ask,
-                    "Strength under load, stiffness, vibration modes or temperature, with what each answers"),
-                decision("supports", "Which faces hold the part?", &[EditorPick, SingleChoice], &[Face], true, Ask,
-                    "Bolted faces, a clamped edge or a symmetry plane, with how each constrains the part"),
-                decision("loads", "Where does the load act, and how large is it?", &[EditorPick, Quantity, Direction], &[Face], true, Ask,
-                    "A force on a face, a pressure, or a remote load through a point, with typical magnitudes"),
-                decision("material", "What material is it?", &[SingleChoice, Quantity], &[], true, Propose,
-                    "Common alloys for the process, with yield strength and density"),
-                decision("acceptance", "What result passes?", &[Quantity, SingleChoice], &[], true, Propose,
-                    "A safety factor on yield, a deflection limit or a minimum frequency"),
-                decision("mesh", "How fine should the mesh be?", &[SingleChoice, Quantity], &[], false, Propose,
-                    "Coarse for a quick check, refined near holes and fillets for stress"),
-                decision("run", "Run the study?", &[ChangeReview], &[], true, Propose,
-                    "Run now on this machine, or keep the setup and run later"),
-            ],
-            "runmat.check",
-            vec![],
-            "fea",
-            "Set up a simulation of this part",
-        ),
         guide(
             "part_from_requirements",
             "New part from requirements",
@@ -673,6 +642,64 @@ pub fn catalog() -> GuideCatalog {
             "Update the board from the schematic",
         ).needing(&[".circuit.layout"], 1),
         guide(
+            "calculation_in_code",
+            "Calculation or model in code",
+            "Write a script that computes what you need: the goal, inputs and units, outputs and a check",
+            "m",
+            ".m",
+            vec![new_file(".m"), open_file(&[".m"]), EntryPoint::Agent],
+            vec![
+                decision("goal", "What do you want to compute?", &[SingleChoice], &[], true, Ask,
+                    "A calculation, a model or simulation in code, data analysis, or matrix and linear algebra work"),
+                decision("inputs", "What are the inputs, and in which units?", &[Quantity, SingleChoice], &[], true, Ask,
+                    "Each known value with its unit, or a data file in the project"),
+                decision("method", "Which method should it use?", &[SingleChoice], &[], false, Propose,
+                    "A closed-form formula, a numerical solver, an ODE integrator or a fit, where the choice matters"),
+                decision("outputs", "What should it show?", &[MultipleChoice], &[], true, Propose,
+                    "Printed values, a table, or plots"),
+                decision("check", "How should the result be checked?", &[SingleChoice, Quantity], &[], false, Propose,
+                    "A known case, a hand calculation or a limit the answer must meet"),
+            ],
+            "runmat.check",
+            vec![],
+            "general",
+            "Write a script that computes this",
+        ),
+        guide(
+            "simulation_setup",
+            "Simulation setup",
+            "Set up a study: goal, supports, loads, material and the acceptance limit",
+            "fea",
+            ".fea",
+            vec![
+                // A blank project starts a new study: the Guide tab asks for the geometry first.
+                new_file(".fea"),
+                open_file(&[".step", ".stp", ".stl", ".part", ".assembly", ".fea"]),
+                command("study.new"),
+                EntryPoint::Agent,
+            ],
+            vec![
+                decision("goal", "What would you like to simulate?", &[SingleChoice], &[], true, Ask,
+                    "Strength under load, stiffness, vibration modes or temperature, with what each answers"),
+                decision("supports", "Which faces hold the part?", &[EditorPick, SingleChoice], &[Face], true, Ask,
+                    "Bolted faces, a clamped edge or a symmetry plane, with how each constrains the part"),
+                decision("loads", "Where does the load act, and how large is it?", &[EditorPick, Quantity, Direction], &[Face], true, Ask,
+                    "A force on a face, a pressure, or a remote load through a point, with typical magnitudes"),
+                decision("material", "What material is it?", &[SingleChoice, Quantity], &[], true, Propose,
+                    "Common alloys for the process, with yield strength and density"),
+                decision("acceptance", "What result passes?", &[Quantity, SingleChoice], &[], true, Propose,
+                    "A safety factor on yield, a deflection limit or a minimum frequency"),
+                decision("mesh", "How fine should the mesh be?", &[SingleChoice, Quantity], &[], false, Propose,
+                    "Coarse for a quick check, refined near holes and fillets for stress"),
+                decision("run", "Run the study?", &[ChangeReview], &[], true, Propose,
+                    "Run now on this machine, or keep the setup and run later"),
+            ],
+            "runmat.check",
+            vec![],
+            "fea",
+            "Set up a simulation of this part",
+        ),
+        guide(
             "coupled_study",
             "Coupled study",
             "A board's thermal or vibration study: heat sources, enclosure and environment",
@@ -714,7 +741,6 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "simulation_setup",
                 "part_from_requirements",
                 "manufacturable",
                 "assembly_from_parts",
@@ -722,6 +748,8 @@ mod tests {
                 "schematic_capture",
                 "board_bring_up",
                 "engineering_change",
+                "calculation_in_code",
+                "simulation_setup",
                 "coupled_study"
             ]
         );
