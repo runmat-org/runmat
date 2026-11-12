@@ -172,7 +172,7 @@ model unknown_member {
         .map(|diagnostic| diagnostic.message.as_str())
         .collect::<Vec<_>>();
     assert!(
-        messages.contains(&"force must be force, found Pa"),
+        messages.contains(&"force needs a unit of force such as N; Pa measures force per area"),
         "{messages:#?}"
     );
     assert!(
@@ -274,7 +274,7 @@ fn a_unit_mismatch_is_located_at_the_value_and_names_expected_and_found_units() 
     assert_eq!(diagnostic.code, "fea.semantic.model");
     assert_eq!(
         diagnostic.message,
-        "traction must be force per area, found N"
+        "traction needs a unit of force per area such as Pa; N measures force"
     );
     assert_eq!(diagnostic.label.as_deref(), Some("expected Pa"));
     let span = diagnostic.location.as_ref().unwrap().span;
