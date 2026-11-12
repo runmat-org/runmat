@@ -9,6 +9,9 @@ use crate::cdt::{
     DelaunayConstraintSegment, DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
+#[path = "tests/cancellation.rs"]
+pub(super) mod cancellation;
+
 #[path = "tests/local_flip.rs"]
 mod local_flip;
 #[path = "tests/same_facet_multi_steiner.rs"]

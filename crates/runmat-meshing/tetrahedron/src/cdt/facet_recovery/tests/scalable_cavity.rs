@@ -181,7 +181,7 @@ fn constructive_facet_steiner_work_is_hard_bounded() {
         node_work.cavity_steiner_node(7).unwrap_err().kind,
         DelaunayFacetRecoveryErrorKind::ResourceLimit
     );
-    node_work.begin_constraint();
+    node_work.begin_constraint(8).unwrap();
     assert_eq!(node_work.cavity_steiner_node(8).unwrap(), 1);
 
     let mut candidate_work = FacetRecoveryWork::new(
@@ -199,7 +199,7 @@ fn constructive_facet_steiner_work_is_hard_bounded() {
             .kind,
         DelaunayFacetRecoveryErrorKind::ResourceLimit
     );
-    candidate_work.begin_constraint();
+    candidate_work.begin_constraint(9).unwrap();
     candidate_work.cavity_steiner_insertion_attempt(9).unwrap();
 }
 

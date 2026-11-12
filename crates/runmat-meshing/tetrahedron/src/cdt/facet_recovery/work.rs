@@ -50,7 +50,13 @@ impl<'a> FacetRecoveryWork<'a> {
         self.last_rejection = None;
     }
 
-    pub(super) fn begin_constraint(&mut self) {
+    pub(super) fn begin_constraint(
+        &mut self,
+        constraint_index: u32,
+    ) -> Result<(), DelaunayFacetRecoveryError> {
+        // Local work limits restart for each facet. Cancellation also has a
+        // boundary checkpoint, so short facets cannot postpone every probe.
+        self.poll_cancellation(constraint_index)?;
         self.search_steps = 0;
         self.flip_attempts = 0;
         self.support_steps = 0;
@@ -59,6 +65,7 @@ impl<'a> FacetRecoveryWork<'a> {
         self.cavity_steiner_nodes = 0;
         self.cavity_steiner_insertion_attempts = 0;
         self.last_rejection = None;
+        Ok(())
     }
 
     pub(super) fn reject(&mut self, reason: impl Into<String>) {
@@ -178,8 +185,15 @@ impl<'a> FacetRecoveryWork<'a> {
                 .segment_recovery
                 .constraints
                 .cancellation_check_interval,
-        ) && self.cancellation.is_cancelled()
-        {
+        ) {
+            self.poll_cancellation(constraint_index)?;
+        }
+        Ok(())
+    }
+
+    #[track_caller]
+    fn poll_cancellation(&self, constraint_index: u32) -> Result<(), DelaunayFacetRecoveryError> {
+        if self.cancellation.is_cancelled() {
             return Err(error(
                 DelaunayFacetRecoveryErrorKind::Cancelled,
                 Some(constraint_index),
@@ -193,6 +207,7 @@ impl<'a> FacetRecoveryWork<'a> {
 #[cfg(test)]
 mod tests {
     use runmat_meshing_core::NeverCancelled;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
 
@@ -212,7 +227,7 @@ mod tests {
         };
         let mut work = FacetRecoveryWork::new(options, &NeverCancelled);
         for constraint in 0..1_000 {
-            work.begin_constraint();
+            work.begin_constraint(constraint).unwrap();
             for _ in 0..4 {
                 work.support_step(constraint).unwrap();
                 work.search_step(constraint).unwrap();
@@ -220,12 +235,52 @@ mod tests {
                 work.cavity_step(constraint).unwrap();
             }
         }
-        work.begin_constraint();
+        work.begin_constraint(1_000).unwrap();
         for _ in 0..4 {
             work.support_step(1_000).unwrap();
         }
         let error = work.support_step(1_000).unwrap_err();
         assert_eq!(error.kind, DelaunayFacetRecoveryErrorKind::ResourceLimit);
         assert_eq!(error.constraint_index, Some(1_000));
+    }
+
+    struct CancellationFlag(AtomicBool);
+
+    impl MeshingCancellationSignal for CancellationFlag {
+        fn is_cancelled(&self) -> bool {
+            self.0.load(Ordering::Relaxed)
+        }
+    }
+
+    #[test]
+    fn short_facets_keep_a_cancellation_checkpoint_when_accounts_restart() {
+        let cancellation = CancellationFlag(AtomicBool::new(false));
+        let mut work = FacetRecoveryWork::new(Default::default(), &cancellation);
+        for constraint in 0..1_000 {
+            work.begin_constraint(constraint).unwrap();
+            work.support_step(constraint).unwrap();
+            work.search_step(constraint).unwrap();
+        }
+        cancellation.0.store(true, Ordering::Relaxed);
+        let error = work.begin_constraint(1_000).unwrap_err();
+        assert_eq!(error.kind, DelaunayFacetRecoveryErrorKind::Cancelled);
+        assert_eq!(error.constraint_index, Some(1_000));
+    }
+
+    #[test]
+    fn cancellation_inside_a_facet_retains_its_work_interval() {
+        let cancellation = CancellationFlag(AtomicBool::new(false));
+        let mut options = DelaunayFacetRecoveryOptions::default();
+        options
+            .segment_recovery
+            .constraints
+            .cancellation_check_interval = 2;
+        let mut work = FacetRecoveryWork::new(options, &cancellation);
+        work.begin_constraint(7).unwrap();
+        cancellation.0.store(true, Ordering::Relaxed);
+        work.support_step(7).unwrap();
+        let error = work.support_step(7).unwrap_err();
+        assert_eq!(error.kind, DelaunayFacetRecoveryErrorKind::Cancelled);
+        assert_eq!(error.constraint_index, Some(7));
     }
 }

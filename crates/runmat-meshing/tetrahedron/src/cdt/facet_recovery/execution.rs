@@ -23,7 +23,7 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
             )
         });
         let _progress_guard = progress_span.as_ref().map(|span| span.enter());
-        work.begin_constraint();
+        work.begin_constraint(constraint_index as u32)?;
         // Recovery mutates the tetrahedral topology. Deriving every support up front would leave
         // later facets holding diagonals that an earlier recovery may legitimately remove.
         let initial_support = facet_support_on(
