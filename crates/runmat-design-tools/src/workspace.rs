@@ -1,4 +1,4 @@
-//! A design workspace read from disk, for command-line callers (`runmat-design`, `runmat check`,
+//! A design workspace read from disk, for command-line callers (`runmat check`, `runmat design`,
 //! `runmat test`): every design file and model library under a folder.
 
 use crate::Files;

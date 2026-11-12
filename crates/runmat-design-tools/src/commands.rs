@@ -1,7 +1,7 @@
 //! The command registry: for every catalog command, the surfaces that run it and the handler
 //! that runs it there. The Desktop (through the CAD host's `run`, `edit`, `analyze` and `export`
 //! calls), the agent's design tools (`design.propose_edit` with a `command`) and the CLI
-//! (`runmat-design run`) all dispatch through [`run`], so a command behaves the same everywhere.
+//! (`runmat design run`) all dispatch through [`run`], so a command behaves the same everywhere.
 //!
 //! - [`route`]`(id, editor)` → the command's [`Route`]: its surfaces and its [`Handler`].
 //! - [`run`]`(path, text, files, request)` → one answer, tagged by `kind`:
@@ -36,7 +36,7 @@ pub enum Surface {
     Desktop,
     /// The agent's design tools (in-app and MCP).
     Agent,
-    /// `runmat-design run`.
+    /// `runmat design run`.
     Cli,
 }
 

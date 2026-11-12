@@ -1,13 +1,14 @@
-//! `runmat-design`: the design tools from the command line, for scripts and batch jobs.
+//! The design commands of the `runmat` command line, for scripts and batch jobs: `runmat check`
+//! on design files and `runmat design run|export`.
 //!
 //! ```text
-//! runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication>
+//! runmat design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication>
 //!     [--all-configurations] [--configuration <name>] [--sheet <name>] [--out <dir>]
 //!     [--preset <fab_house|assembly|full|custom>]
 //!     [--outputs <gerber,drill,drill-map,drawing,ipc356,pick-place,bom,assembly-drawing,ipc2581,odb>]
 //!     [--layers <F.Cu,B.Cu,…>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip]
-//!     [--remember]
-//! runmat-design run <file> <command> [--values <json>] [--select <outline id>]... [--root <dir>]
+//!     [--remember] [--copper] [--no-mask]
+//! runmat design run <file> <command> [--values <json>] [--select <outline id>]... [--root <dir>]
 //!     [--out <dir>] [--dry-run] [--json]
 //! ```
 //!
@@ -18,7 +19,7 @@
 //!
 //!
 //! ```text
-//! runmat-design check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]
+//! runmat check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]
 //! ```
 //!
 //! On a `.part`, `.assembly` or `.drawing`, `check` runs `design.check` (regenerate, resolve
@@ -54,21 +55,49 @@
 //! drawing as DXF, once per configuration. Files are written to `--out` (default: the current
 //! folder) and listed on stdout.
 
+use crate::call;
+use crate::workspace::{output_path, physical_path, source_path};
 use base64::Engine;
-use runmat_design_tools::call;
-use runmat_design_tools::workspace::{output_path, physical_path, source_path};
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-fn usage() -> ExitCode {
-    eprintln!("usage: runmat-design check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]");
-    eprintln!("usage: runmat-design run <file> <command> [--values <json>] [--select <outline id>]... [--root <dir>] [--out <dir>] [--dry-run] [--json]");
-    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember] [--copper] [--no-mask]");
+/// Where a command prints: its report (`out`) and its errors and notes (`err`). The `runmat`
+/// binary passes stdout and stderr; tests pass buffers.
+pub struct Io<'a> {
+    pub out: &'a mut dyn Write,
+    pub err: &'a mut dyn Write,
+}
+
+impl Io<'_> {
+    /// Runs `f` with stdout and stderr.
+    pub fn std<R>(f: impl FnOnce(&mut Io) -> R) -> R {
+        let (mut out, mut err) = (std::io::stdout().lock(), std::io::stderr().lock());
+        f(&mut Io {
+            out: &mut out,
+            err: &mut err,
+        })
+    }
+}
+
+macro_rules! say {
+    ($io:expr, $($arg:tt)*) => {{ let _ = writeln!($io.out, $($arg)*); }};
+}
+macro_rules! tell {
+    ($io:expr, $($arg:tt)*) => {{ let _ = writeln!($io.err, $($arg)*); }};
+}
+
+fn usage(io: &mut Io) -> ExitCode {
+    tell!(io, "usage: runmat check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]");
+    tell!(io, "usage: runmat design run <file> <command> [--values <json>] [--select <outline id>]... [--root <dir>] [--out <dir>] [--dry-run] [--json]");
+    tell!(io, "usage: runmat design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|svg|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember] [--copper] [--no-mask]");
     ExitCode::from(2)
 }
 
-fn check(args: &[String]) -> ExitCode {
+/// `runmat check` on design files: `args` are the files and the flags.
+pub fn check(args: &[String], io: &mut Io) -> ExitCode {
+    crate::kernel::install();
     let (mut json_out, mut simulate, mut root, mut paths) = (false, true, None, Vec::new());
     let mut interference = false;
     let mut it = args.iter();
@@ -79,11 +108,11 @@ fn check(args: &[String]) -> ExitCode {
             "--interference" => interference = true,
             "--root" => root = it.next().map(PathBuf::from),
             p if !p.starts_with("--") => paths.push(PathBuf::from(p)),
-            _ => return usage(),
+            _ => return usage(io),
         }
     }
     if paths.is_empty() {
-        return usage();
+        return usage(io);
     }
     let mut reports = Vec::new();
     let mut failed = false;
@@ -91,52 +120,52 @@ fn check(args: &[String]) -> ExitCode {
         let file = match std::fs::canonicalize(&p) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("{}: {e}", p.display());
+                tell!(io, "{}: {e}", p.display());
                 return ExitCode::FAILURE;
             }
         };
         let base = root
             .clone()
             .and_then(|r| std::fs::canonicalize(r).ok())
-            .unwrap_or_else(|| runmat_design_tools::workspace::project_root(&file));
-        let files = runmat_design_tools::workspace::read_workspace(&base);
+            .unwrap_or_else(|| crate::workspace::project_root(&file));
+        let files = crate::workspace::read_workspace(&base);
         let path = source_path(&file);
-        if matches!(runmat_design_tools::DesignKind::of(&path), Some(k) if !k.is_circuit()) {
-            match runmat_design_tools::circuit_values::with_native_values(&files, || {
-                check_mechanical(&path, &files, interference, &base, json_out)
+        if matches!(crate::DesignKind::of(&path), Some(k) if !k.is_circuit()) {
+            match crate::circuit_values::with_native_values(&files, || {
+                check_mechanical(io, &path, &files, interference, &base, json_out)
             }) {
                 Ok((passed, report)) => {
                     failed |= !passed;
                     reports.push(report);
                 }
                 Err(e) => {
-                    eprintln!("{}: {e}", p.display());
+                    tell!(io, "{}: {e}", p.display());
                     return ExitCode::FAILURE;
                 }
             }
             continue;
         }
-        match runmat_design_tools::circuit_values::with_native_values(&files, || {
-            runmat_design_tools::ci::check_circuit(&source_path(&file), &files, simulate)
+        match crate::circuit_values::with_native_values(&files, || {
+            crate::ci::check_circuit(&source_path(&file), &files, simulate)
         }) {
             Ok(mut r) => {
                 r.path = file.to_string_lossy().into_owned();
                 failed |= !r.passed;
                 if !json_out {
-                    for line in runmat_design_tools::ci::report_lines(&r, &base.to_string_lossy()) {
-                        println!("{line}");
+                    for line in crate::ci::report_lines(&r, &base.to_string_lossy()) {
+                        say!(io, "{line}");
                     }
                 }
                 reports.push(serde_json::to_value(&r).unwrap_or_default());
             }
             Err(e) => {
-                eprintln!("{}: {e}", p.display());
+                tell!(io, "{}: {e}", p.display());
                 return ExitCode::FAILURE;
             }
         }
     }
     if json_out {
-        println!(
+        say!(io, 
             "{}",
             serde_json::to_string_pretty(&reports).unwrap_or_default()
         );
@@ -152,8 +181,9 @@ fn check(args: &[String]) -> ExitCode {
 /// `--interference`, an assembly also runs the Evaluate tab's interference check (exact bodies
 /// that share material; parts that only touch don't count) and fails on any overlap.
 fn check_mechanical(
+    io: &mut Io,
     path: &str,
-    files: &runmat_design_tools::Files,
+    files: &crate::Files,
     interference: bool,
     base: &Path,
     json_out: bool,
@@ -168,7 +198,7 @@ fn check_mechanical(
         call("design.check", json!({ "path": path }), files).map_err(|e| e.to_string())?;
     let mut passed = report["ok"].as_bool().unwrap_or(false);
     if !json_out {
-        println!("{}", shown(report["summary"].as_str().unwrap_or(path)));
+        say!(io, "{}", shown(report["summary"].as_str().unwrap_or(path)));
         for d in report["diagnostics"].as_array().into_iter().flatten() {
             let at = d["range"]["start"]["line"]
                 .as_u64()
@@ -178,7 +208,7 @@ fn check_mechanical(
                 .as_str()
                 .map(|s| format!(" {s}:"))
                 .unwrap_or_default();
-            println!(
+            say!(io, 
                 "  {}{at}{subject} {}",
                 d["severity"].as_str().unwrap_or("info"),
                 d["message"].as_str().unwrap_or("")
@@ -186,8 +216,8 @@ fn check_mechanical(
         }
     }
     if interference
-        && runmat_design_tools::DesignKind::of(path)
-            == Some(runmat_design_tools::DesignKind::Assembly)
+        && crate::DesignKind::of(path)
+            == Some(crate::DesignKind::Assembly)
     {
         let inspected: Value = call(
             "design.inspect",
@@ -205,9 +235,9 @@ fn check_mechanical(
             Some(rows) => {
                 passed &= rows.is_empty();
                 if !json_out {
-                    println!("  interference: {} overlap(s)", rows.len());
+                    say!(io, "  interference: {} overlap(s)", rows.len());
                     for r in rows {
-                        println!(
+                        say!(io, 
                             "    {} x {}: {} mm3",
                             r["a"].as_str().unwrap_or("?"),
                             r["b"].as_str().unwrap_or("?"),
@@ -219,7 +249,7 @@ fn check_mechanical(
             None => {
                 passed = false;
                 if !json_out {
-                    println!("  interference: not run ({})", inspected["notes"]);
+                    say!(io, "  interference: not run ({})", inspected["notes"]);
                 }
             }
         }
@@ -228,10 +258,10 @@ fn check_mechanical(
     Ok((passed, report))
 }
 
-/// `runmat-design run`: one catalog command through `runmat_design_tools::commands::run`.
-fn run(args: &[String]) -> ExitCode {
+/// `runmat design run`: one catalog command through `crate::commands::run`.
+fn run(args: &[String], io: &mut Io) -> ExitCode {
     let (Some(file), Some(command)) = (args.first(), args.get(1)) else {
-        return usage();
+        return usage(io);
     };
     let (mut values, mut selection, mut root, mut out, mut dry, mut json_out) =
         (json!({}), Vec::new(), None, None, false, false);
@@ -241,7 +271,7 @@ fn run(args: &[String]) -> ExitCode {
             "--values" => match it.next().map(|v| serde_json::from_str::<Value>(v)) {
                 Some(Ok(v @ Value::Object(_))) => values = v,
                 _ => {
-                    eprintln!("--values takes a JSON object");
+                    tell!(io, "--values takes a JSON object");
                     return ExitCode::FAILURE;
                 }
             },
@@ -250,46 +280,46 @@ fn run(args: &[String]) -> ExitCode {
             "--out" => out = it.next().map(PathBuf::from),
             "--dry-run" => dry = true,
             "--json" => json_out = true,
-            _ => return usage(),
+            _ => return usage(io),
         }
     }
     let file = match std::fs::canonicalize(file) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("{file}: {e}");
+            tell!(io, "{file}: {e}");
             return ExitCode::FAILURE;
         }
     };
     let base = root
         .and_then(|r| std::fs::canonicalize(r).ok())
-        .unwrap_or_else(|| runmat_design_tools::workspace::project_root(&file));
-    let files = runmat_design_tools::workspace::read_workspace(&base);
+        .unwrap_or_else(|| crate::workspace::project_root(&file));
+    let files = crate::workspace::read_workspace(&base);
     let path = source_path(&file);
     let Some(text) = files
         .get(&path)
         .cloned()
         .or_else(|| std::fs::read_to_string(&file).ok())
     else {
-        eprintln!("{path}: can't read it");
+        tell!(io, "{path}: can't read it");
         return ExitCode::FAILURE;
     };
-    runmat_design_tools::kernel::install();
-    let request = runmat_design_tools::commands::RunRequest {
+    crate::kernel::install();
+    let request = crate::commands::RunRequest {
         command: command.clone(),
         values: values.as_object().cloned().unwrap_or_default(),
         selection,
     };
-    let answer = runmat_design_tools::circuit_values::with_native_values(&files, || {
-        runmat_design_tools::commands::run(&path, &text, &files, &request)
+    let answer = crate::circuit_values::with_native_values(&files, || {
+        crate::commands::run(&path, &text, &files, &request)
     });
     if json_out {
-        println!(
+        say!(io, 
             "{}",
             serde_json::to_string_pretty(&answer).unwrap_or_default()
         );
     }
     if answer["ok"] != true {
-        eprintln!(
+        tell!(io, 
             "{command}: {}",
             answer["message"].as_str().unwrap_or("failed")
         );
@@ -305,26 +335,26 @@ fn run(args: &[String]) -> ExitCode {
                     continue;
                 };
                 if dry {
-                    println!("--- {p}\n{t}");
+                    say!(io, "--- {p}\n{t}");
                 } else {
                     let target = match physical_path(&base, p) {
                         Ok(target) => target,
                         Err(e) => {
-                            eprintln!("{p}: {e}");
+                            tell!(io, "{p}: {e}");
                             return ExitCode::FAILURE;
                         }
                     };
                     if let Err(e) = std::fs::write(&target, t) {
-                        eprintln!("{}: {e}", target.display());
+                        tell!(io, "{}: {e}", target.display());
                         return ExitCode::FAILURE;
                     }
                     if !json_out {
-                        println!("wrote {}", target.display());
+                        say!(io, "wrote {}", target.display());
                     }
                 }
             }
             if !json_out {
-                println!("{}", answer["summary"].as_str().unwrap_or(""));
+                say!(io, "{}", answer["summary"].as_str().unwrap_or(""));
             }
         }
         Some("table") if !json_out => {
@@ -339,14 +369,14 @@ fn run(args: &[String]) -> ExitCode {
                     })
                     .collect()
             };
-            println!(
+            say!(io, 
                 "{}: {}",
                 answer["title"].as_str().unwrap_or(""),
                 answer["summary"].as_str().unwrap_or("")
             );
-            println!("{}", cells(&answer["columns"]).join("\t"));
+            say!(io, "{}", cells(&answer["columns"]).join("\t"));
             for row in answer["rows"].as_array().into_iter().flatten() {
-                println!("{}", cells(&row["cells"]).join("\t"));
+                say!(io, "{}", cells(&row["cells"]).join("\t"));
             }
         }
         Some("file") if !dry => {
@@ -354,7 +384,7 @@ fn run(args: &[String]) -> ExitCode {
             let files = match answer.get("files") {
                 Some(Value::Array(files)) if !files.is_empty() => files.as_slice(),
                 _ => {
-                    eprintln!("{command}: file result has no valid output inventory");
+                    tell!(io, "{command}: file result has no valid output inventory");
                     return ExitCode::FAILURE;
                 }
             };
@@ -363,39 +393,39 @@ fn run(args: &[String]) -> ExitCode {
                     (Some(b), _) => match base64::engine::general_purpose::STANDARD.decode(b) {
                         Ok(bytes) => bytes,
                         Err(e) => {
-                            eprintln!("{command}: invalid output encoding: {e}");
+                            tell!(io, "{command}: invalid output encoding: {e}");
                             return ExitCode::FAILURE;
                         }
                     },
                     (None, Some(t)) => t.as_bytes().to_vec(),
                     _ => {
-                        eprintln!("{command}: output has no file contents");
+                        tell!(io, "{command}: output has no file contents");
                         return ExitCode::FAILURE;
                     }
                 };
                 let Some(name) = f["name"].as_str() else {
-                    eprintln!("{command}: output has no filename");
+                    tell!(io, "{command}: output has no filename");
                     return ExitCode::FAILURE;
                 };
                 let target = match output_path(&dir, Path::new(name)) {
                     Ok(target) => target,
                     Err(e) => {
-                        eprintln!("export: {e}");
+                        tell!(io, "export: {e}");
                         return ExitCode::FAILURE;
                     }
                 };
                 if let Some(parent) = target.parent() {
                     if let Err(e) = std::fs::create_dir_all(parent) {
-                        eprintln!("{}: {e}", parent.display());
+                        tell!(io, "{}: {e}", parent.display());
                         return ExitCode::FAILURE;
                     }
                 }
                 if let Err(e) = std::fs::write(&target, bytes) {
-                    eprintln!("{}: {e}", target.display());
+                    tell!(io, "{}: {e}", target.display());
                     return ExitCode::FAILURE;
                 }
                 if !json_out {
-                    println!("{}", target.display());
+                    say!(io, "{}", target.display());
                 }
             }
         }
@@ -404,20 +434,19 @@ fn run(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn main() -> ExitCode {
+/// `runmat design <run|export> …`: `args` starts with the subcommand.
+pub fn design(args: &[String], io: &mut Io) -> ExitCode {
     // Every command regenerates on the Desktop's kernel (OCCT, with the `occt` feature), including
     // the parts an assembly check or export regenerates through the runtime.
-    runmat_design_tools::kernel::install();
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("check") {
-        return check(&args[1..]);
+    crate::kernel::install();
+    match args.first().map(String::as_str) {
+        Some("run") => run(&args[1..], io),
+        Some("export") if args.len() >= 2 => export(&args[1..], io),
+        _ => usage(io),
     }
-    if args.first().map(String::as_str) == Some("run") {
-        return run(&args[1..]);
-    }
-    if args.first().map(String::as_str) != Some("export") || args.len() < 2 {
-        return usage();
-    }
+}
+
+fn export(args: &[String], io: &mut Io) -> ExitCode {
     let mut format = None;
     let (mut out, mut root, mut configuration, mut sheet): (
         Option<PathBuf>,
@@ -438,7 +467,7 @@ fn main() -> ExitCode {
     let mut formats = serde_json::Map::new();
     // A board's STEP: `--copper` adds the outer copper, `--no-mask` leaves the mask out.
     let mut board = serde_json::Map::new();
-    let mut it = args[2..].iter();
+    let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--gerber-units" => drop(formats.insert("gerberUnits".into(), json!(it.next()))),
@@ -470,21 +499,21 @@ fn main() -> ExitCode {
             "--remember" => remember = true,
             "--copper" => drop(board.insert("copper".into(), Value::Bool(true))),
             "--no-mask" => drop(board.insert("mask".into(), Value::Bool(false))),
-            _ => return usage(),
+            _ => return usage(io),
         }
     }
-    let Some(format) = format else { return usage() };
-    let file = match std::fs::canonicalize(&args[1]) {
+    let Some(format) = format else { return usage(io) };
+    let file = match std::fs::canonicalize(&args[0]) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("{}: {e}", args[1]);
+            tell!(io, "{}: {e}", args[0]);
             return ExitCode::FAILURE;
         }
     };
     let root = root
         .and_then(|r| std::fs::canonicalize(r).ok())
-        .unwrap_or_else(|| runmat_design_tools::workspace::project_root(&file));
-    let files = runmat_design_tools::workspace::read_workspace(&root);
+        .unwrap_or_else(|| crate::workspace::project_root(&file));
+    let files = crate::workspace::read_workspace(&root);
     let mut input = json!({
         "path": source_path(&file),
         "format": format,
@@ -519,8 +548,8 @@ fn main() -> ExitCode {
                 .map(|w| w.trim().replace('_', "-"))
                 .collect();
             if let Some(bad) = want.iter().find(|w| !ALL.iter().any(|(k, _)| k == w)) {
-                eprintln!("--outputs: unknown output {bad}");
-                return usage();
+                tell!(io, "--outputs: unknown output {bad}");
+                return usage(io);
             }
             for (k, field) in ALL {
                 fab.insert(field.into(), Value::Bool(want.iter().any(|w| w == k)));
@@ -546,12 +575,12 @@ fn main() -> ExitCode {
         input["fabrication"] = Value::Object(fab);
     }
     let result: Value =
-        match runmat_design_tools::circuit_values::with_native_values(&files, || {
+        match crate::circuit_values::with_native_values(&files, || {
             call("design.export", input, &files)
         }) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("{e}");
+                tell!(io, "{e}");
                 return ExitCode::FAILURE;
             }
         };
@@ -568,18 +597,18 @@ fn main() -> ExitCode {
         let physical = match physical_path(&root, path) {
             Ok(path) => path,
             Err(e) => {
-                eprintln!("{path}: {e}");
+                tell!(io, "{path}: {e}");
                 return ExitCode::FAILURE;
             }
         };
         if let Err(e) = std::fs::write(physical, text) {
-            eprintln!("{path}: {e}");
+            tell!(io, "{path}: {e}");
             return ExitCode::FAILURE;
         }
-        eprintln!("saved the settings in {path}");
+        tell!(io, "saved the settings in {path}");
     }
     if let Err(e) = std::fs::create_dir_all(&out) {
-        eprintln!("{}: {e}", out.display());
+        tell!(io, "{}: {e}", out.display());
         return ExitCode::FAILURE;
     }
     for f in result["files"].as_array().into_iter().flatten() {
@@ -595,7 +624,7 @@ fn main() -> ExitCode {
         let path = match output_path(&out, Path::new(name)) {
             Ok(path) => path,
             Err(e) => {
-                eprintln!("{name}: {e}");
+                tell!(io, "{name}: {e}");
                 return ExitCode::FAILURE;
             }
         };
@@ -603,13 +632,13 @@ fn main() -> ExitCode {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Err(e) = std::fs::write(&path, bytes) {
-            eprintln!("{}: {e}", path.display());
+            tell!(io, "{}: {e}", path.display());
             return ExitCode::FAILURE;
         }
-        println!("{}", path.display());
+        say!(io, "{}", path.display());
     }
     for n in result["notes"].as_array().into_iter().flatten() {
-        eprintln!("note: {}", n.as_str().unwrap_or(""));
+        tell!(io, "note: {}", n.as_str().unwrap_or(""));
     }
     ExitCode::SUCCESS
 }

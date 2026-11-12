@@ -113,6 +113,7 @@ jit = ["runmat-core/jit"]
 vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
 occt-native = [
     "runmat-core/occt-native",
+    "runmat-design-tools/occt",
     "runmat-execution-runner-native/occt-native",
     "runmat-runtime/occt-native",
 ]

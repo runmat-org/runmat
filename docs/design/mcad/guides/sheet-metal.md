@@ -132,8 +132,8 @@ drawing vent_cover_flat {
 Export the flat pattern as DXF for the cutter:
 
 ```sh
-runmat-design export vent_cover.part --format dxf --out flat
-runmat-design export vent_cover_flat.drawing --format pdf --out drawings
+runmat design export vent_cover.part --format dxf --out flat
+runmat design export vent_cover_flat.drawing --format pdf --out drawings
 ```
 
 ## 5. Check it for manufacture

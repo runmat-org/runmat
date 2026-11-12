@@ -102,8 +102,8 @@ assembly pair {
 ## 5. Export and draw the family
 
 ```sh
-runmat-design export angle_bracket.part --format step --configuration long --out step
-runmat-design export angle_bracket.part --format step --all-configurations --out step
+runmat design export angle_bracket.part --format step --configuration long --out step
+runmat design export angle_bracket.part --format step --all-configurations --out step
 ```
 
 `--all-configurations` writes one STEP file per member. A drawing's title block reads the part number and description of the configuration it shows, so the same `.drawing` exported as DXF with `--all-configurations` writes every sheet once per member, each with its own part number.

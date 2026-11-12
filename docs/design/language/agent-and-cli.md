@@ -1,10 +1,10 @@
 ---
-description: The design tools the RunMat agent, MCP clients and scripts call over parts, assemblies, drawings, circuits and boards, and the runmat-design command line for checks and exports.
+description: The design tools the RunMat agent, MCP clients and scripts call over parts, assemblies, drawings, circuits and boards, and the runmat command line for checks and exports.
 keywords: [agent tools, MCP, design.check, design.inspect, design.export, design.propose_edit, command line, CLI, automation, CI]
 ---
 # Agent tools and the command line
 
-One set of design tools works on every design file kind. The in-app agent calls them, MCP clients see them in the server's tool list, and the `runmat-design` command line runs the checks and exports from scripts. Each tool is a pure function of its input and the files it reads, so the editor, the agent, the server and a CI job get the same answer from the same files.
+One set of design tools works on every design file kind. The in-app agent calls them, MCP clients see them in the server's tool list, and the `runmat` command line runs the checks and exports from scripts. Each tool is a pure function of its input and the files it reads, so the editor, the agent, the server and a CI job get the same answer from the same files.
 
 ## Tools
 
@@ -29,8 +29,9 @@ An agent works in three steps: read with `design.inspect` and `design.check`, ch
 ## The command line
 
 ```sh
-runmat-design check <file>... [--json] [--no-simulate] [--interference] [--root <dir>]
-runmat-design export <file> --format <format> [options]
+runmat check <file> [--json] [--no-simulate] [--interference] [--root <dir>]
+runmat design export <file> --format <format> [options]
+runmat design run <file> <command> [--values <json>] [--select <outline id>]... [--dry-run] [--json]
 ```
 
 `check` is described in [Checks and diagnostics](/docs/design-language/checks-and-diagnostics#checking-from-the-command-line). `export` writes files to `--out` (the current folder by default) and lists them on stdout:

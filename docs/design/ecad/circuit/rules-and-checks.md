@@ -38,8 +38,8 @@ The schematic draws a no-connect cross only on a pin the design marks: a pin in 
 ## Running the checks
 
 ```sh
-runmat-design check board/sensor.circuit.layout
+runmat check board/sensor.circuit.layout
 runmat check board/sensor.circuit
 ```
 
-`runmat-design check` and `runmat check` run every rule, suite and simulation measure on each `.circuit` or `.circuit.layout` named, print each finding and each measure with its verdict, and exit with status 1 on an error, a DRC violation, an unrouted connection, a schematic change the board hasn't taken, or a failed measure. `--no-simulate` skips the simulations. `runmat test` runs them as tests beside `.m` tests. See [Checks and diagnostics](/docs/design-language/checks-and-diagnostics#checking-from-the-command-line).
+`runmat check` runs every rule, suite and simulation measure on the `.circuit` or `.circuit.layout` named, prints each finding and each measure with its verdict, and exits with status 1 on an error, a DRC violation, an unrouted connection, a schematic change the board hasn't taken, or a failed measure. `--no-simulate` skips the simulations. `runmat test` runs them as tests beside `.m` tests. See [Checks and diagnostics](/docs/design-language/checks-and-diagnostics#checking-from-the-command-line).

@@ -152,7 +152,7 @@ The Auto-drawing command (`drawing.auto`) writes a drawing for a part or an asse
 
 ## Exports
 
-`runmat-design export bracket.drawing --format pdf` writes the sheets as PDF, and `--format dxf` or `dwg` as CAD drawings, one file per sheet (`--sheet <name>` for one). See [Import and export](/docs/mcad/import-export).
+`runmat design export bracket.drawing --format pdf` writes the sheets as PDF, and `--format dxf` or `dwg` as CAD drawings, one file per sheet (`--sheet <name>` for one). See [Import and export](/docs/mcad/import-export).
 
 ## Not yet built
 

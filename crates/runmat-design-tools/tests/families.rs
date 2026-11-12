@@ -1,4 +1,4 @@
-//! Product families through `design.export` and the `runmat-design` CLI: every configuration
+//! Product families through `design.export` and `runmat design export`: every configuration
 //! of a part as STEP, every configuration of an assembly as 3MF, STEP, STL and glTF, a drawing's
 //! sheets once per configuration of its part, and an assembly's BOM as CSV.
 
@@ -218,39 +218,55 @@ fn the_cli_writes_a_family_to_a_folder() {
     let work = dir.join("work");
     std::fs::create_dir_all(&work).unwrap();
     std::fs::write(work.join("plate.part"), PLATE).unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_runmat-design"))
-        .args(["export"])
-        .arg(work.join("plate.part"))
-        .args(["--format", "step", "--all-configurations", "--out"])
-        .arg(dir.join("out"))
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let arg = |p: std::path::PathBuf| p.to_string_lossy().into_owned();
+    let (ok, _, err) = runmat_cli(&[
+        "export".into(),
+        arg(work.join("plate.part")),
+        "--format".into(),
+        "step".into(),
+        "--all-configurations".into(),
+        "--out".into(),
+        arg(dir.join("out")),
+    ]);
+    assert!(ok, "{}", String::from_utf8_lossy(&err));
     for f in ["plate.step", "plate-wide.step", "plate-narrow.step"] {
         let text = std::fs::read_to_string(dir.join("out").join(f)).unwrap();
         assert!(text.starts_with("ISO-10303-21;"), "{f}");
     }
     // An assembly family from the CLI: one 3MF per configuration.
     std::fs::write(work.join("stack.assembly"), STACK).unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_runmat-design"))
-        .args(["export"])
-        .arg(work.join("stack.assembly"))
-        .args(["--format", "3mf", "--all-configurations", "--out"])
-        .arg(dir.join("asm"))
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let (ok, _, err) = runmat_cli(&[
+        "export".into(),
+        arg(work.join("stack.assembly")),
+        "--format".into(),
+        "3mf".into(),
+        "--all-configurations".into(),
+        "--out".into(),
+        arg(dir.join("asm")),
+    ]);
+    assert!(ok, "{}", String::from_utf8_lossy(&err));
     for f in ["stack.3mf", "stack-tall.3mf", "stack-single.3mf"] {
         let bytes = std::fs::read(dir.join("asm").join(f)).unwrap();
         assert!(bytes.starts_with(b"PK"), "{f}");
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Runs `runmat check …` or `runmat design …` in-process: whether it succeeded, its stdout and
+/// its stderr.
+fn runmat_cli(args: &[String]) -> (bool, Vec<u8>, Vec<u8>) {
+    use runmat_design_tools::cli::{check, design, Io};
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = {
+        let mut io = Io {
+            out: &mut out,
+            err: &mut err,
+        };
+        if args.first().map(String::as_str) == Some("check") {
+            check(&args[1..], &mut io)
+        } else {
+            design(args, &mut io)
+        }
+    };
+    (code == std::process::ExitCode::SUCCESS, out, err)
 }

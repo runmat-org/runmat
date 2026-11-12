@@ -4,7 +4,7 @@ keywords: [Gerber, Gerber X2, Excellon, drill files, pick and place, BOM, assemb
 ---
 # Fabrication outputs and netlists
 
-A board's fabrication set is written in one step from its `.circuit.layout`: copper, mask, legend and drill data, the fabrication and assembly drawings, and the assembly files of each variant. Every output comes from the same geometry, so the Gerber and ODB++ copies of a board agree. The Desktop's Fabrication outputs panel, `design.export` and `runmat-design export --format fabrication` read the same settings from the board and make the same files. [Make fabrication outputs](/docs/ecad/guides/make-fabrication-outputs) walks through the panel.
+A board's fabrication set is written in one step from its `.circuit.layout`: copper, mask, legend and drill data, the fabrication and assembly drawings, and the assembly files of each variant. Every output comes from the same geometry, so the Gerber and ODB++ copies of a board agree. The Desktop's Fabrication outputs panel, `design.export` and `runmat design export --format fabrication` read the same settings from the board and make the same files. [Make fabrication outputs](/docs/ecad/guides/make-fabrication-outputs) walks through the panel.
 
 ## Outputs
 
@@ -61,14 +61,14 @@ fabrication = { preset = custom, outputs = [gerber, drill, drill_map, drawing, i
 
 ## Pre-flight
 
-Before it writes, an export can run the pre-flight: the counts of DRC findings, ERC findings, unrouted connections and schematic changes the board hasn't taken, from the same checks as `runmat-design check` without the simulations. The Desktop runs it on Generate and asks before exporting a board with issues.
+Before it writes, an export can run the pre-flight: the counts of DRC findings, ERC findings, unrouted connections and schematic changes the board hasn't taken, from the same checks as `runmat check` without the simulations. The Desktop runs it on Generate and asks before exporting a board with issues.
 
 ## The command line
 
 ```sh
-runmat-design export board/sensor.circuit.layout --format fabrication
-runmat-design export board/sensor.circuit.layout --format fabrication --preset assembly --variant "" --variant lite
-runmat-design export board/sensor.circuit.layout --format fabrication --outputs gerber,drill --gerber-units inch --no-zip --out fab
+runmat design export board/sensor.circuit.layout --format fabrication
+runmat design export board/sensor.circuit.layout --format fabrication --preset assembly --variant "" --variant lite
+runmat design export board/sensor.circuit.layout --format fabrication --outputs gerber,drill --gerber-units inch --no-zip --out fab
 ```
 
 The command starts from the board's saved settings, and each flag overrides one. It writes to the settings' folder unless `--out` names another.

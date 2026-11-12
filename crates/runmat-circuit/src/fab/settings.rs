@@ -1,7 +1,7 @@
 //! A board's fabrication settings: the outputs to make, the layers left out, the variant,
 //! the folder and whether to zip. The `.circuit.layout` keeps the last settings used
 //! (`fabrication = { … }`), and the Desktop's Fabrication outputs, `design.export` and
-//! `runmat-design export --format fabrication` all read them from there, so a re-export makes
+//! `runmat design export --format fabrication` all read them from there, so a re-export makes
 //! the same files wherever it runs.
 //!
 //! ```text

@@ -235,7 +235,7 @@
       "id": "language-tools",
       "route": "/docs/design-language/agent-and-cli",
       "title": "Agent tools and the command line",
-      "summary": "The design tools the RunMat agent, MCP clients and scripts call over parts, assemblies, drawings, circuits and boards, and the runmat-design command line for checks and exports.",
+      "summary": "The design tools the RunMat agent, MCP clients and scripts call over parts, assemblies, drawings, circuits and boards, and the runmat command line for checks and exports.",
       "keywords": [
         "agent tools",
         "MCP",

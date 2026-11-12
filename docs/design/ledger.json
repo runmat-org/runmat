@@ -30,11 +30,11 @@
     },
     {
       "id": "design.tools.cli-check-mcad",
-      "title": "runmat-design check on parts, assemblies and drawings",
+      "title": "runmat check on parts, assemblies and drawings",
       "kind": "tooling",
       "area": "tooling",
       "status": "release",
-      "acceptance": "runmat-design check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error.",
+      "acceptance": "runmat check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error.",
       "landed_in": "0.7.1"
     },
     {

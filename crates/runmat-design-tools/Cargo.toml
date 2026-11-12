@@ -38,7 +38,7 @@ futures = { version = "0.3", optional = true }
 [features]
 # No default features: the server links these tools and must not carry the RunMat runtime.
 # `m-values` is enabled where `.m` design values run in-process: `runmat circuit check`
-# (runmat-cli) and the runmat-design binary built with `--features m-values`.
+# (runmat-cli, which runs `runmat check` and `runmat design` through [`cli`]).
 default = []
 # `design.render` through the Desktop's renderer (runmat-plot on wgpu, headless), with its
 # overlay: without `egui-overlay` a 2D figure exports with no axes, ticks, labels, title or legend.
