@@ -627,11 +627,9 @@ impl DiagnosticReport {
             let value = (d.code == DiagCode::ValueUnit && d.site.param.is_none())
                 .then(|| spans.spans.get(&format!("{key}#default")))
                 .flatten();
-            d.span = spans
-                .spans
-                .get(&key)
+            d.span = value
+                .or_else(|| spans.spans.get(&key))
                 .or(nested)
-                .or(value)
                 .or_else(|| {
                     let mut s = d.site.clone();
                     s.param = None;

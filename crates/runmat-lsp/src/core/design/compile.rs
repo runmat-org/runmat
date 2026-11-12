@@ -53,7 +53,7 @@ pub(super) fn compile(
                             Span::default()
                         },
                         severity: severity(&d.severity),
-                        code: None,
+                        code: d.code.clone(),
                         message: if in_file {
                             d.message.clone()
                         } else {
