@@ -141,7 +141,43 @@ fn is_unit_character(value: u8) -> bool {
     value.is_ascii_alphabetic() || value == b'_'
 }
 
+/// SI prefixes a prefixable unit takes (`pF`, `nH`, `mS`, `kJ`). `u` stands for micro; the
+/// expression reader writes `µ` and `μ` as `u` before it looks a symbol up.
+const SI_PREFIXES: &[(&str, f64)] = &[
+    ("T", 1e12),
+    ("G", 1e9),
+    ("M", 1e6),
+    ("k", 1e3),
+    ("m", 1e-3),
+    ("u", 1e-6),
+    ("n", 1e-9),
+    ("p", 1e-12),
+    ("f", 1e-15),
+];
+
+/// Units an SI prefix may precede. The gravity unit `g`, kelvin, the angle units and the
+/// information units take none, so `mg` and `mK` stay unknown rather than mean something odd.
+const PREFIXABLE: &[&str] = &[
+    "m", "s", "Hz", "N", "Pa", "J", "W", "A", "C", "V", "ohm", "F", "H", "S", "T",
+];
+
 fn unit(symbol: &str) -> Option<UnitDefinition> {
+    named_unit(symbol).or_else(|| {
+        SI_PREFIXES.iter().find_map(|(prefix, factor)| {
+            let base = symbol.strip_prefix(prefix)?;
+            if !PREFIXABLE.contains(&base) {
+                return None;
+            }
+            let base = named_unit(base)?;
+            Some(UnitDefinition {
+                scale_bits: (factor * base.scale()).to_bits(),
+                ..base
+            })
+        })
+    })
+}
+
+fn named_unit(symbol: &str) -> Option<UnitDefinition> {
     let (dimension, scale, offset) = match symbol {
         "m" => (PhysicalDimension::LENGTH, 1.0, 0.0),
         "mm" => (PhysicalDimension::LENGTH, 1e-3, 0.0),
@@ -188,6 +224,10 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
         "ohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1.0, 0.0),
         "kohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1e3, 0.0),
         "Mohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1e6, 0.0),
+        // Capacitance, inductance and conductance (circuit component values: `100 nF`).
+        "F" => (PhysicalDimension::new([-2, -1, 4, 2, 0, 0, 0, 0]), 1.0, 0.0),
+        "H" => (PhysicalDimension::new([2, 1, -2, -2, 0, 0, 0, 0]), 1.0, 0.0),
+        "S" => (PhysicalDimension::new([-2, -1, 3, 2, 0, 0, 0, 0]), 1.0, 0.0),
         "T" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1.0, 0.0),
         "mT" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1e-3, 0.0),
         "rad" => (PhysicalDimension::DIMENSIONLESS, 1.0, 0.0),
@@ -242,6 +282,25 @@ mod tests {
         assert_eq!(parse_unit_expression("kA").unwrap().scale(), 1e3);
         assert_eq!(parse_unit_expression("mT").unwrap().scale(), 1e-3);
         assert_eq!(parse_unit_expression("MHz").unwrap().scale(), 1e6);
+    }
+
+    #[test]
+    fn component_units_take_si_prefixes() {
+        let capacitance = PhysicalDimension::new([-2, -1, 4, 2, 0, 0, 0, 0]);
+        let farad = parse_unit_expression("pF").unwrap();
+        assert_eq!(farad.dimension, capacitance);
+        assert_eq!(farad.scale(), 1e-12);
+        assert_eq!(parse_unit_expression("µF").unwrap().scale(), 1e-6);
+        assert_eq!(parse_unit_expression("nH").unwrap().scale(), 1e-9);
+        assert_eq!(parse_unit_expression("mS").unwrap().scale(), 1e-3);
+        assert_eq!(parse_unit_expression("Gohm").unwrap().scale(), 1e9);
+        assert_eq!(parse_unit_expression("kJ").unwrap().scale(), 1e3);
+        // Named units win over a prefix reading: `ms` is a millisecond, `mm` a millimetre.
+        assert_eq!(parse_unit_expression("ms").unwrap().dimension, PhysicalDimension::TIME);
+        assert_eq!(parse_unit_expression("mm").unwrap().scale(), 1e-3);
+        // Units that take no prefix.
+        assert!(parse_unit_expression("mg").is_err());
+        assert!(parse_unit_expression("kdeg").is_err());
     }
 
     #[test]

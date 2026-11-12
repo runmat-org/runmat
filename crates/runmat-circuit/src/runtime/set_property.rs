@@ -18,7 +18,7 @@
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
-use crate::geom::{Coord, NM_PER_MIL, NM_PER_MM};
+use crate::geom::{Coord, NM_PER_MM};
 use crate::ir::{ComponentDecl, Endpoint, Fitting, PartRef};
 use crate::layer_set::CopperIndex;
 use crate::layout::{copper_name, PadConnect};
@@ -104,30 +104,44 @@ fn number_and_unit(value: &Value) -> Option<(f64, Option<String>)> {
     }
 }
 
-/// A length in board units (nm): millimetres when no unit is written.
+/// A length in board units (nm): millimetres when no unit is written; any length unit the unit
+/// registry knows otherwise (`10 mil`, `0.1 in`, `25 um`).
 pub(super) fn length(field: &str, value: &Value) -> Result<Coord, EditError> {
     let bad = || EditError::new(format!("{field} takes a length such as 0.25 mm"));
     let (v, unit) = number_and_unit(value).ok_or_else(bad)?;
-    let per = match unit.as_deref() {
-        None | Some("mm") => NM_PER_MM as f64,
-        Some("um" | "µm") => NM_PER_MM as f64 / 1000.0,
-        Some("mil" | "mils") => NM_PER_MIL as f64,
-        Some("in") => NM_PER_MIL as f64 * 1000.0,
-        Some("cm") => NM_PER_MM as f64 * 10.0,
-        Some(_) => return Err(bad()),
+    let nm = match unit.as_deref() {
+        None => v * NM_PER_MM as f64,
+        Some(unit) => {
+            registry_value(v, unit, runmat_types::PhysicalDimension::LENGTH, 0).ok_or_else(bad)? * 1e9
+        }
     };
-    Ok((v * per).round() as Coord)
+    Ok(nm.round() as Coord)
 }
 
-/// An angle in degrees: degrees when no unit is written.
+/// An angle in degrees: degrees when no unit is written; any angle unit the registry knows.
 pub(super) fn angle(field: &str, value: &Value) -> Result<f64, EditError> {
     let bad = || EditError::new(format!("{field} takes an angle such as 90 deg"));
     let (v, unit) = number_and_unit(value).ok_or_else(bad)?;
     match unit.as_deref() {
         None | Some("deg" | "°") => Ok(v),
-        Some("rad") => Ok(v.to_degrees()),
-        Some(_) => Err(bad()),
+        Some(unit) => registry_value(v, unit, runmat_types::PhysicalDimension::DIMENSIONLESS, 1)
+            .map(f64::to_degrees)
+            .ok_or_else(bad),
     }
+}
+
+/// `v` written in `unit`, in SI, when the registry's `unit` measures `dimension` (with the angle
+/// power, 1 for an angle).
+fn registry_value(
+    v: f64,
+    unit: &str,
+    dimension: runmat_types::PhysicalDimension,
+    angle_power: i8,
+) -> Option<f64> {
+    let unit = runmat_types::physical::parse_unit_expression(unit).ok()?;
+    (unit.dimension() == dimension && unit.angle_power() == angle_power)
+        .then(|| unit.to_canonical(v).ok())
+        .flatten()
 }
 
 fn boolean(field: &str, value: &Value) -> Result<bool, EditError> {

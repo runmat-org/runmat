@@ -10,7 +10,8 @@ use crate::simulation::{
     SourceKind,
 };
 use runmat_design_syntax::json::format_f64;
-use runmat_rules::{parse_quantity, BuiltinUnits};
+use runmat_rules::{parse_quantity};
+use crate::units::RegistryUnits;
 
 const PREFIXES: &[(&str, f64)] = &[
     ("T", 1e12),
@@ -26,7 +27,7 @@ const PREFIXES: &[(&str, f64)] = &[
 ];
 
 fn reads_as(text: &str, v: f64) -> bool {
-    parse_quantity(text, &BuiltinUnits).is_ok_and(|q| q.value == v)
+    parse_quantity(text, &RegistryUnits).is_ok_and(|q| q.value == v)
 }
 
 /// The mantissa `m` printed in as few decimals as read back to `m · scale` = `v` exactly.
@@ -82,7 +83,7 @@ pub fn as_written(v: f64, unit: &str) -> f64 {
             .map(|(p, _)| format!("{p}{unit}"))
             .unwrap_or_else(|| unit.to_string())
     };
-    parse_quantity(&format!("{} {suffix}", format_f64(m)), &BuiltinUnits)
+    parse_quantity(&format!("{} {suffix}", format_f64(m)), &RegistryUnits)
         .map(|q| q.value)
         .unwrap_or(v)
 }
@@ -429,7 +430,8 @@ pub fn print(sim: &SimulationDef) -> String {
 #[cfg(test)]
 mod tests {
     use super::{as_written, qty};
-    use runmat_rules::{parse_quantity, BuiltinUnits};
+    use runmat_rules::{parse_quantity};
+use crate::units::RegistryUnits;
 
     #[test]
     fn quantities_print_with_a_prefix_and_read_back_exactly() {
@@ -462,7 +464,7 @@ mod tests {
         ] {
             for unit in ["s", "V", "Hz", "F", "A", "%"] {
                 let t = qty(v, unit);
-                assert_eq!(parse_quantity(&t, &BuiltinUnits).unwrap().value, v, "{t}");
+                assert_eq!(parse_quantity(&t, &RegistryUnits).unwrap().value, v, "{t}");
             }
         }
     }
@@ -479,7 +481,7 @@ mod tests {
         ] {
             let w = as_written(v, unit);
             assert_eq!(qty(w, unit), text);
-            assert_eq!(parse_quantity(text, &BuiltinUnits).unwrap().value, w);
+            assert_eq!(parse_quantity(text, &RegistryUnits).unwrap().value, w);
         }
     }
 }

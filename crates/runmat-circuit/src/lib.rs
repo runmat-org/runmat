@@ -94,4 +94,5 @@ pub mod route;
 pub mod router;
 pub mod spatial;
 pub mod syntax;
+pub mod units;
 pub mod zone;

@@ -139,12 +139,12 @@ distance needs a unit of length such as m; kg measures mass
 | `distance = input.load` | `needs a unit of length such as m; the value measures force` |
 
 - The underline covers the value (`10 kg`), not the whole statement.
-- The code names the language that raised it: `cad.value.unit` in a `.part`, `circuit.value.unit` in a `.circuit.layout`, and the `.fea` checker's own codes (`fea.semantic.mesh`, `fea.semantic.material`, `fea.semantic.model`). An assembly reports a wrong-unit input under `cad.asm.input_type`, with the same message after the input's name.
+- The code names the language that raised it: `cad.value.unit` in a `.part` or `.assembly`, `circuit.value.unit` in a `.circuit.layout`, and the `.fea` checker's own codes (`fea.semantic.mesh`, `fea.semantic.material`, `fea.semantic.model`). An assembly that sets an occurrence's input in the wrong unit (`input.thickness = 3 deg`) reports `cad.value.unit` at that value; `cad.asm.input_type` covers an input the definition doesn't declare.
 - The quick fix offers the same number in each common unit of the expected kind: `10 mm`, `10 cm`, `10 m` and `10 in` for a length. It never changes the number.
 
 ### Electrical files
 
-`.circuit` and `.circuit.layout` values take SI units with the SI prefixes `T`, `G`, `M`, `k`, `m`, `u` (also `µ`), `n`, `p` and `f`:
+`.circuit` and `.circuit.layout` values read their units from the same registry as mechanical files and `.fea`. These units take the SI prefixes `T`, `G`, `M`, `k`, `m`, `u` (also `µ`), `n`, `p` and `f`:
 
 | Quantity | Unit | Examples |
 |---|---|---|
@@ -159,7 +159,8 @@ distance needs a unit of length such as m; kg measures mass
 | Conductance | `S` | `1 mS` |
 | Length | `m` | `0.2 mm`; board lengths take every length unit of the registry, such as `mil` and `in`, on a 1 nm grid |
 | Temperature | `K`, `degC` | `25 degC` |
-| Tolerance | `%` | `± 1 %` |
+| Tolerance | `%`, `ppm` | `± 1 %`, `50 ppm` |
+| Copper weight | `oz` (34.79 µm of copper) | `1 oz` |
 
 The circuit printer writes quantities in SI units (`10000 ohm`), so a file reads back bit for bit; any of the forms above reads in.
 

@@ -4,7 +4,8 @@
 use runmat_circuit::fixture::{eco_edited_design, eco_synced_design, large_design, LargeParams};
 use runmat_circuit::ir::*;
 use runmat_circuit::syntax::{parse_circuit, print_circuit};
-use runmat_rules::{BuiltinUnits, Quantity, SourceKey};
+use runmat_circuit::units::RegistryUnits;
+use runmat_rules::{Quantity, SourceKey};
 
 fn sensor_node() -> Design {
     let mut d = Design::new("sensor-node");
@@ -223,7 +224,7 @@ fn designs_round_trip_through_text() {
 #[test]
 fn parameters_tolerances_and_variants_read_back_exactly() {
     let mut design = sensor_node();
-    let units = BuiltinUnits;
+    let units = RegistryUnits;
     let q = |text: &str| runmat_rules::parse_quantity(text, &units).unwrap();
     let sheet = design.sheets.get_mut("main").unwrap();
     let r = sheet

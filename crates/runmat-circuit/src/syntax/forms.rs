@@ -101,7 +101,7 @@ pub(super) fn si_of(expr: &Expr) -> Read<Quantity> {
     let (value, unit) = quantity_of(expr)?;
     match unit {
         None => Ok(Quantity::scalar(value)),
-        Some(unit) => parse_quantity(&format!("{} {unit}", format_f64(value)), &BuiltinUnits)
+        Some(unit) => parse_quantity(&format!("{} {unit}", format_f64(value)), &RegistryUnits)
             .map_err(|message| diagnostic(expr.span(), message)),
     }
 }
@@ -226,7 +226,7 @@ pub(super) fn param_of(expr: &Expr, source: SourceKey) -> Read<Param> {
         // The dimension the result takes; the number waits for the runtime.
         let dim = match &unit {
             Some(u) => {
-                parse_quantity(&format!("1 {u}"), &BuiltinUnits)
+                parse_quantity(&format!("1 {u}"), &RegistryUnits)
                     .map_err(|m| diagnostic(expr.span(), m))?
                     .dim
             }
