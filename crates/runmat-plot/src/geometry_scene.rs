@@ -384,6 +384,20 @@ impl GeometryScenePresentation {
     pub(crate) fn active_section(&self) -> Option<&GeometrySceneSection> {
         self.section.as_ref().and_then(Option::as_ref)
     }
+
+    /// Whether the active section keeps `point`: on the kept side of its plane, or, with a
+    /// second plane (a corner cutaway), of either plane. With no section every point is kept.
+    pub(crate) fn section_keeps(&self, point: Vec3) -> bool {
+        let Some(section) = self.active_section() else {
+            return true;
+        };
+        let keeps = |plane: &GeometrySceneSectionPlane| {
+            section_plane(plane)
+                .map(|(normal, origin)| (point - origin).dot(normal) >= 0.0)
+                .unwrap_or(true)
+        };
+        keeps(&section.plane) || section.second_plane.as_ref().is_some_and(keeps)
+    }
 }
 
 fn normalized_owner_node_id_set<'a, I>(ids: I) -> BTreeSet<String>
@@ -1035,6 +1049,12 @@ impl GeometrySceneChunk {
                 RegionPaint::Face(region.color),
             );
         }
+        // A section cap takes the body's (or its material's) color, so it is cut from the faces
+        // as they are before highlights, hover, selection and setup tints paint them.
+        let mut cap_source = presentation
+            .active_section()
+            .filter(|section| section.cap)
+            .map(|_| self.cap_colors(render_data.clone()));
         for highlight in &presentation.region_highlights {
             self.apply_region_color(
                 &mut render_data,
@@ -1083,9 +1103,26 @@ impl GeometrySceneChunk {
         if !presentation.hidden_region_ids.is_empty() {
             render_data =
                 self.render_data_without_regions(render_data, &presentation.hidden_region_ids);
+            cap_source = cap_source.map(|source| {
+                self.render_data_without_regions(source, &presentation.hidden_region_ids)
+            });
         }
         if let Some(section) = presentation.active_section() {
-            render_data = self.render_data_with_section(render_data, section);
+            render_data = self.render_data_with_section(render_data, cap_source.as_ref(), section);
+        }
+        render_data
+    }
+
+    /// The faces a section cap is cut from, in the body's color. A chunk whose material is
+    /// white takes its whole color from its vertices, as a result field's does; its cap is the
+    /// default body grey, never the field's colors.
+    fn cap_colors(&self, mut render_data: RenderData) -> RenderData {
+        let albedo = render_data.material.albedo;
+        if albedo.x >= 1.0 && albedo.y >= 1.0 && albedo.z >= 1.0 {
+            let body = cad_default_material().albedo;
+            for vertex in &mut render_data.vertices {
+                vertex.color = [body.x, body.y, body.z, vertex.color[3]];
+            }
         }
         render_data
     }
@@ -1126,13 +1163,14 @@ impl GeometrySceneChunk {
     fn render_data_with_section(
         &self,
         render_data: RenderData,
+        cap_source: Option<&RenderData>,
         section: &GeometrySceneSection,
     ) -> RenderData {
         let Some(plane) = section_plane(&section.plane) else {
             return render_data;
         };
         let second = section.second_plane.as_ref().and_then(section_plane);
-        section_cut::cut(render_data, plane, second, section.cap)
+        section_cut::cut(render_data, cap_source, plane, second, section.cap)
     }
 
     fn is_edge_chunk(&self) -> bool {

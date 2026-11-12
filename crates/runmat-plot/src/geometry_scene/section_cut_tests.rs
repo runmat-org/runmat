@@ -192,3 +192,72 @@ fn hidden_regions_draw_nothing_and_picks_pass_through_them() {
         "a hidden body is not picked"
     );
 }
+
+/// The cap's vertex colors: the cap faces away from the kept side (normal -x for a +x plane).
+fn cap_colors(render_data: &RenderData) -> Vec<[f32; 4]> {
+    render_data
+        .vertices
+        .iter()
+        .filter(|v| v.normal[0] < -0.9)
+        .map(|v| v.color)
+        .collect()
+}
+
+#[test]
+fn a_cap_takes_the_body_color_not_a_setup_tint() {
+    let section = Some(GeometrySceneSection {
+        plane: plane([1.0, 0.0, 0.0]),
+        second_plane: None,
+        cap: true,
+    });
+    let plain = cube().render_data_with_presentation(&GeometryScenePresentation {
+        section: Some(section.clone()),
+        ..Default::default()
+    });
+    // A load tint on the -y face, which the cut crosses.
+    let tinted = cube().render_data_with_presentation(&GeometryScenePresentation {
+        section: Some(section),
+        region_highlights: vec![GeometrySceneRegionHighlight {
+            region_id: "face_2".to_string(),
+            color: Some([0.9, 0.1, 0.5, 1.0]),
+            role: None,
+            label: None,
+        }],
+        ..Default::default()
+    });
+    assert!(!cap_colors(&plain).is_empty());
+    assert_eq!(cap_colors(&tinted), cap_colors(&plain));
+}
+
+#[test]
+fn a_cap_over_a_result_field_is_body_grey() {
+    // A result field: white material, the field's colors on the vertices.
+    let mut field = cube();
+    field.material.albedo = Vec4::ONE;
+    field.render_data.material.albedo = Vec4::ONE;
+    for v in &mut field.render_data.vertices {
+        v.color = [0.95, 0.15, 0.1, 1.0];
+    }
+    let render_data = field.render_data_with_presentation(&GeometryScenePresentation {
+        section: Some(Some(GeometrySceneSection {
+            plane: plane([1.0, 0.0, 0.0]),
+            second_plane: None,
+            cap: true,
+        })),
+        ..Default::default()
+    });
+    // The body grey, leaned toward the cut tint as every cap is.
+    let body = cad_default_material().albedo;
+    let expected = body.lerp(
+        Vec4::from_array(super::section_cap::SECTION_CAP_TINT),
+        super::section_cap::SECTION_CAP_TINT_SHARE,
+    );
+    let caps = cap_colors(&render_data);
+    assert!(!caps.is_empty());
+    for [r, g, b, _] in caps {
+        assert!(
+            (Vec3::new(r, g, b) - expected.truncate()).length() < 1e-4,
+            "a cap keeps no field color: {r} {g} {b}"
+        );
+    }
+}

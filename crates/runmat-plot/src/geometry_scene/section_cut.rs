@@ -21,9 +21,11 @@ fn flipped((normal, origin): Plane) -> Plane {
     (-normal, origin)
 }
 
-/// `render_data` cut by `first` (and `second`, when given), with caps when `cap` is set.
+/// `render_data` cut by `first` (and `second`, when given), with caps when `cap` is set. The
+/// caps are cut from `cap_source` when given: the same faces in the colors a cap takes.
 pub(super) fn cut(
     render_data: RenderData,
+    cap_source: Option<&RenderData>,
     first: Plane,
     second: Option<Plane>,
     cap: bool,
@@ -31,9 +33,11 @@ pub(super) fn cut(
     match render_data.pipeline_type {
         PipelineType::Triangles => {
             let triangles = triangles_of(&render_data);
+            let cap_triangles = cap_source.map(triangles_of);
+            let cap_triangles = cap_triangles.as_deref().unwrap_or(triangles.as_slice());
             let mut kept = clip_triangles(&triangles, first);
             let mut caps = if cap {
-                section_cap(&triangles, first)
+                section_cap(cap_triangles, first)
             } else {
                 Vec::new()
             };
@@ -42,7 +46,7 @@ pub(super) fn cut(
                 kept.extend(clip_triangles(&removed_by_first, second));
                 if cap {
                     caps = clip_triangles(&as_triangles(&caps), flipped(second));
-                    let second_caps = section_cap(&triangles, second);
+                    let second_caps = section_cap(cap_triangles, second);
                     caps.extend(clip_triangles(&as_triangles(&second_caps), flipped(first)));
                 }
             }
