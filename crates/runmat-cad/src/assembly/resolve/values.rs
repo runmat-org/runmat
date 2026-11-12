@@ -103,7 +103,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         summary: &DefinitionSummary,
         file: &FilePath,
         site: &Site,
-    ) -> Result<ConfigKey, (DiagCode, String)> {
+    ) -> Result<ConfigKey, SelectionError> {
         match sel {
             ConfigurationSelection::Default => Ok(ConfigKey::default()),
             ConfigurationSelection::Named { name } => {
@@ -120,7 +120,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 let mut inputs = BTreeMap::new();
                 let mut kinds = BTreeMap::new();
                 for (name, expr) in values {
-                    let si = self.typed_input(name, expr, env, summary)?;
+                    // A wrong unit underlines the input's value (`input.thickness = 3 deg`).
+                    let si = self.typed_input(name, expr, env, summary).map_err(|(code, message)| {
+                        SelectionError {
+                            param: (code == DiagCode::ValueUnit).then(|| name.0.clone()),
+                            code,
+                            message,
+                        }
+                    })?;
                     inputs.insert(name.clone(), si);
                     if let Some((_, kind)) = summary.inputs.iter().find(|(n, _)| n == name) {
                         kinds.insert(name.clone(), kind.clone());
@@ -191,20 +198,16 @@ impl<'a, 'b> Resolver<'a, 'b> {
             .eval(expr, env)
             .map_err(|e| (DiagCode::AsmInputType, format!("input `{}`: {}", name, e)))?;
         if q.dimension != info {
+            // The one wrong-unit diagnostic every design language reports.
             return Err((
-                DiagCode::AsmInputType,
-                format!(
-                    "input `{}` of `{}`: {}",
-                    name,
-                    s.definition,
-                    crate::value::unit_mismatch_text(
-                        Some(name.0.as_str()),
-                        info,
-                        q.dimension,
-                        &crate::value::Written::of(expr)
-                    )
-                    .message
-                ),
+                DiagCode::ValueUnit,
+                crate::value::unit_mismatch_text(
+                    Some(name.0.as_str()),
+                    info,
+                    q.dimension,
+                    &crate::value::Written::of(expr),
+                )
+                .message,
             ));
         }
         Ok(q.si)
@@ -241,4 +244,22 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     // ------------------------------------------------------------------ composition
+}
+
+/// Why an occurrence's configuration selection failed: the code and message, and for a wrong
+/// unit the input whose value the diagnostic underlines.
+pub(super) struct SelectionError {
+    pub code: DiagCode,
+    pub message: String,
+    pub param: Option<String>,
+}
+
+impl From<(DiagCode, String)> for SelectionError {
+    fn from((code, message): (DiagCode, String)) -> Self {
+        Self {
+            code,
+            message,
+            param: None,
+        }
+    }
 }

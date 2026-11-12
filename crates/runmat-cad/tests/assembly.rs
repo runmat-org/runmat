@@ -379,7 +379,18 @@ fn a03_typed_configurations_are_checked() {
     };
     src.add_assembly(top.clone());
     let r = run(&src, "rig.assembly", &ResolveRequest::default());
-    assert!(codes(&r).contains(&DiagCode::AsmInputType));
+    // The one wrong-unit diagnostic, at the input's value.
+    let wrong = r
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagCode::ValueUnit)
+        .unwrap_or_else(|| panic!("{:?}", errors(&r)));
+    assert_eq!(
+        wrong.message,
+        "thickness needs a unit of length such as m; deg measures angle"
+    );
+    assert_eq!(wrong.site.param.as_deref(), Some("thickness"));
     // Unknown configuration name.
     let br = top
         .occurrences
