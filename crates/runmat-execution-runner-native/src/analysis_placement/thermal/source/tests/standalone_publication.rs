@@ -29,7 +29,7 @@ impl CacheImport for CountedThermalObjects {
     }
 }
 
-fn standalone_preparation(
+pub(super) fn standalone_preparation(
     order: ElementOrder,
     transient: bool,
     identity: &str,
@@ -116,6 +116,7 @@ fn check(order: ElementOrder, transient: bool) {
             &mut pool,
             prepared,
             crate::ThermalStudyExecutionPolicy {
+                publication_memory_bytes: u64::MAX,
                 resources: ResourceRequest {
                     cpu_millicores: 1000,
                     memory_bytes: 64 * 1024 * 1024,

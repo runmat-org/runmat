@@ -27,6 +27,10 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct ThermalStudyExecutionPolicy {
     pub resources: ResourceRequest,
+    /// The memory this process may use to publish the completed study (the host's configured
+    /// publication budget, `runmat_runtime::analysis::publication_staging_budget`). Planning
+    /// refuses a study whose publication cannot fit it, before any solve.
+    pub publication_memory_bytes: u64,
     pub retry: RetryPolicy,
     pub deadline_unix_millis: Option<u64>,
     pub priority: i16,
@@ -109,8 +113,27 @@ pub(crate) async fn execute_with_pool(
         .map(|declaration| declaration.state_id.clone())
         .collect();
     let mut state_publications = BTreeMap::new();
-    let solve = coordinator
+    coordinator
         .prepare_solve()
+        .map_err(|e| protocol(format!("thermal solve preparation: {e}")))?;
+    // Publication runs in this process after the solve, within the memory the host admits for
+    // it. A study whose publication cannot fit is refused here, before any task runs.
+    let publication_budget = policy.publication_memory_bytes;
+    let publication_bytes = coordinator
+        .admit_publication(publication_budget)
+        .map_err(|error| match error {
+            runmat_analysis_execution::AnalysisBridgeError::Resource(error) => {
+                NativeExecutionError::Resource(error)
+            }
+            error => protocol(format!("thermal publication planning: {error}")),
+        })?;
+    tracing::info!(
+        publication_bytes,
+        publication_budget,
+        "thermal publication admitted"
+    );
+    let solve = coordinator
+        .prepared_solve()
         .map_err(|e| protocol(format!("thermal solve preparation: {e}")))?;
     crate::machine_capacity::trace_footprint("thermal solve prepared");
     let (executed, accounting) = execute_one(

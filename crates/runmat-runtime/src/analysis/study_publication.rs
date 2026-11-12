@@ -68,4 +68,7 @@ pub(in crate::analysis) use acoustic::{
     CompletedAcousticFrequencyStep,
 };
 pub use structural::{prepare_structural_study_publication, publish_structural_study_result};
-pub use thermal::{prepare_thermal_study_publication, publish_thermal_study_result};
+pub use thermal::{
+    prepare_thermal_study_publication, publish_thermal_study_result,
+    thermal_publication_retained_bytes,
+};

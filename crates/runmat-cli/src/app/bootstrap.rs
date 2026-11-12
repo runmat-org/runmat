@@ -434,8 +434,9 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .study_artifact_root
             .clone()
             .or_else(|| Some(artifact_root.join("studies"))),
-        // Sized from this host's admitted memory (the shared machine-capacity authority).
-        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes(),
+        // The run's admitted memory (the shared machine-capacity authority).
+        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes()
+            .map_err(|err| anyhow::anyhow!("Failed to size FEA publication memory: {err}"))?,
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
     Ok(())

@@ -112,6 +112,7 @@ pub(super) async fn run(
         config,
         preparation,
         ThermalStudyExecutionPolicy {
+            publication_memory_bytes: u64::MAX,
             resources,
             retry: runmat_execution::task::RetryPolicy::Never,
             deadline_unix_millis: None,
