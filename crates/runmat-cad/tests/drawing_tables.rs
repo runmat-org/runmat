@@ -692,6 +692,7 @@ fn t06_drawing_merges_field_by_field_by_stable_id() {
             AnnotationKind::Note {
                 text: "BREAK EDGES".into(),
                 leader: None,
+                width: None,
             },
         ),
     );
@@ -736,6 +737,7 @@ fn t07_drawing_merge_conflicts_and_re_resolution() {
             AnnotationKind::Note {
                 text: text.into(),
                 leader: None,
+                width: None,
             },
         ));
     }

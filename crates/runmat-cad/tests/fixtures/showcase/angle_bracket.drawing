@@ -65,10 +65,18 @@ drawing angle_bracket {
     annotation cb_dia = dimension(style = diameter, references = [feature.mount.face.counterbore_wall(a)], view = b)
     annotation cb_depth = dimension(style = linear, references = [feature.mount.face.counterbore(a), feature.body.face.side(profile.p5)], view = b)
 
-    annotation notes = note(
-        text = "NOTES:\n1. MATERIAL: {material}.\n2. FINISH: CLEAR ANODIZE, MIL-A-8625 TYPE II, CLASS 1.\n3. BREAK SHARP EDGES 0.2-0.5.\n4. DIMENSIONS IN MM. INTERPRET PER ASME Y14.5-2018.\n5. UNTOLERANCED DIMENSIONS: ISO 2768-m.\n6. PART MARK {part_number} REV {revision} ON THE BASE UNDERSIDE.",
-        view = iso,
-        at = [16, 70]
+    table notes = notes(
+        rows = [
+            "MATERIAL: {material}.",
+            "FINISH: CLEAR ANODIZE, MIL-A-8625 TYPE II, CLASS 1.",
+            "BREAK SHARP EDGES 0.2-0.5.",
+            "DIMENSIONS IN MM. INTERPRET PER ASME Y14.5-2018.",
+            "UNTOLERANCED DIMENSIONS: ISO 2768-m.",
+            "PART MARK {part_number} REV {revision} ON THE BASE UNDERSIDE."
+        ],
+        width = 125 mm,
+        sheet = "1",
+        at = [16, 66]
     )
 
     table revisions = revision(

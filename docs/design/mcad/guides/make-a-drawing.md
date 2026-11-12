@@ -76,9 +76,18 @@ drawing motor_plate {
     annotation flat = gdt(tolerance = seat_flat, view = side)
     annotation datum_a = datum_symbol(label = A, view = side)
     annotation seat = surface_finish(on = feature.body.face.start, view = side)
-    annotation n1 = note(text = "BREAK ALL SHARP EDGES. PART {part_number}.", view = iso)
+    annotation bore_note = note(text = "PRESS FIT FOR THE MOTOR'S PILOT", leader = feature.bore.face.wall(c), width = 40 mm, view = front)
 
     table holes = hole(view = front, origin = feature.body.face.side(outline.left), sheet = "1", at = [300, 260])
+    table notes = notes(
+        rows = [
+            "MATERIAL: {material}.",
+            "BREAK ALL SHARP EDGES 0.2 TO 0.5 MM; DEBURR ALL HOLES BOTH SIDES.",
+            "UNTOLERANCED DIMENSIONS: ISO 2768-mK.",
+            "MARK {part_number} ON THE UNDERSIDE."
+        ],
+        sheet = "1"
+    )
 }
 ```
 
@@ -120,6 +129,12 @@ A dimension names the faces it measures, and its value is measured from the mode
 In the Desktop, Projected view takes a view picked on the sheet and places the new view where you click; it stays aligned with its parent. Smart dimension takes the edges you pick in a view and places the dimension where you click. Here a side view joins the hinge mount's front view, and the clevis height is dimensioned:
 
 <!-- design:clip:mcad/drawing -->
+
+### Notes
+
+Put the sheet's notes (material, finish, edge breaks, general tolerances) in the general notes, `table notes = notes(rows = [...])`, with one note per row. The sheet draws them as a numbered list under "NOTES:" above the title block, and each note wraps in the title block's width with its lines indented under its number. A `{property}` field such as `{material}` fills in from the part. Avoid writing sheet notes as long single `note` annotations.
+
+A `note` annotation is for text tied to one place, often with a `leader` to a face. It wraps to its `width` when given one, otherwise to the room it has, and `\n` starts a new line. When a note has no room where its `at` puts it, the sheet moves it to the nearest free spot and the check warns on it, so set `at` to a free spot or give the note a `width`.
 
 A reference that stops resolving after an edit, such as a dimension to a face that was removed, is an error on that annotation, with the face it lost.
 

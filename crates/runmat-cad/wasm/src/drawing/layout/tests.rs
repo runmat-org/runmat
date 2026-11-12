@@ -6,10 +6,10 @@ use super::solver::{text_box, BoxR};
 use super::*;
 use crate::runtime::Files;
 
-const DRAWING: &str = include_str!("../../../../tests/fixtures/hand-built/hand.drawing");
-const PART: &str = include_str!("../../../../tests/fixtures/hand-built/bracket.part");
+pub(super) const DRAWING: &str = include_str!("../../../../tests/fixtures/hand-built/hand.drawing");
+pub(super) const PART: &str = include_str!("../../../../tests/fixtures/hand-built/bracket.part");
 
-fn compiled() -> Value {
+pub(super) fn compiled() -> Value {
     let files: Files = [
         ("/p/bracket.part".to_owned(), PART.to_owned()),
         ("/p/bracket.drawing".to_owned(), DRAWING.to_owned()),
@@ -23,11 +23,11 @@ fn compiled() -> Value {
     .unwrap()
 }
 
-fn sheet(out: &Value, name: &str) -> Value {
+pub(super) fn sheet(out: &Value, name: &str) -> Value {
     out["projection"]["data"]["layouts"][name].clone()
 }
 
-fn prims(layout: &Value) -> Vec<Prim> {
+pub(super) fn prims(layout: &Value) -> Vec<Prim> {
     layout["primitives"]
         .as_array()
         .unwrap()
@@ -82,7 +82,7 @@ fn prim_of(v: &Value) -> Prim {
     }
 }
 
-fn texts(p: &[Prim]) -> Vec<String> {
+pub(super) fn texts(p: &[Prim]) -> Vec<String> {
     p.iter()
         .filter_map(|p| {
             if let Shape::Text { text, .. } = &p.shape {
@@ -116,7 +116,7 @@ fn view_boxes(p: &[Prim]) -> Vec<(String, BoxR)> {
 }
 
 /// Labels: annotation figures and callouts, and view labels.
-fn labels(p: &[Prim]) -> Vec<(String, String, BoxR)> {
+pub(super) fn labels(p: &[Prim]) -> Vec<(String, String, BoxR)> {
     p.iter()
         .filter(|q| q.id.starts_with("annotation:") || q.kind == "viewlabel")
         .filter_map(|q| {
@@ -597,109 +597,22 @@ fn a_custom_sheet_lays_out_at_its_own_width_and_height() {
     }
 }
 
-#[test]
-fn general_notes_number_and_wrap_above_the_title_block_clear_of_the_centring_marks() {
-    let long = "Deburr and break all sharp edges 0.2 to 0.5 mm unless stated, on every machined, laser-cut and molded part of the assembly, before finishing";
-    let notes = format!("    table notes = notes(rows = [\"Dimensions in millimeters.\", \"{long}\"], sheet = \"1\", at = [0, 0])\n}}");
-    let at = DRAWING.rfind('}').unwrap();
-    let drawing = format!("{}{notes}{}", &DRAWING[..at], &DRAWING[at + 1..]);
-    let files: Files = [
-        ("/p/bracket.part".to_owned(), PART.to_owned()),
-        ("/p/bracket.drawing".to_owned(), drawing.clone()),
-    ]
-    .into();
-    let out: Value = serde_json::from_str(&crate::drawing::compile_json(
-        "/p/bracket.drawing",
-        &drawing,
-        &files,
-    ))
-    .unwrap();
-    let layout = sheet(&out, "1");
-    let p = prims(&layout);
-    let cells: Vec<String> = p
-        .iter()
-        .filter(|q| q.id == "table:notes")
-        .filter_map(|q| {
-            if let Shape::Text { text, .. } = &q.shape {
-                Some(text.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
-    for want in ["GENERAL NOTES", "1", "2", "Dimensions in millimeters."] {
-        assert!(cells.iter().any(|t| t == want), "no {want:?} in {cells:?}");
-    }
-    // The long note wraps onto more lines; every word is drawn.
-    let words: Vec<&str> = cells.iter().flat_map(|c| c.split(' ')).collect();
-    assert!(long.split(' ').all(|w| words.contains(&w)), "{cells:?}");
-    assert!(!cells.iter().any(|c| c == long), "{cells:?}");
-    // As wide as the title block, its box clear of the centring marks and of everything else.
-    let rects: Vec<BoxR> = p
-        .iter()
-        .filter(|q| q.id == "table:notes")
-        .filter_map(|q| match &q.shape {
-            Shape::Rect { x, y, w, h } => Some(BoxR::new(*x, *y, x + w, y + h)),
-            Shape::Polyline { points, .. } => {
-                let (xs, ys): (Vec<f64>, Vec<f64>) = points.chunks(2).map(|c| (c[0], c[1])).unzip();
-                Some(BoxR::new(
-                    xs.iter().cloned().fold(f64::MAX, f64::min),
-                    ys.iter().cloned().fold(f64::MAX, f64::min),
-                    xs.iter().cloned().fold(f64::MIN, f64::max),
-                    ys.iter().cloned().fold(f64::MIN, f64::max),
-                ))
-            }
-            _ => None,
-        })
-        .collect();
-    let b = rects.iter().skip(1).fold(rects[0], |a, r| {
-        BoxR::new(
-            a.x0.min(r.x0),
-            a.y0.min(r.y0),
-            a.x1.max(r.x1),
-            a.y1.max(r.y1),
-        )
-    });
-    assert!(
-        (b.x1 - b.x0 - runmat_cad::drawing::title_layout::BLOCK_WIDTH).abs() < 1e-6,
-        "{b:?}"
-    );
-    let size = [420.0, 297.0];
-    let frame = super::border::frame_box(size, false);
-    for (a, c) in super::border::centring_marks(size, &frame) {
-        assert!(
-            !b.crossed_by(a, c),
-            "notes {b:?} cross the centring mark {a:?}-{c:?}"
-        );
-    }
-    let before = sheet(&compiled(), "1")["findings"]
-        .as_array()
-        .unwrap()
-        .len();
-    assert_eq!(
-        layout["findings"].as_array().unwrap().len(),
-        before,
-        "{:#}",
-        layout["findings"]
-    );
-}
-
 /// A ring with 80 mm inner corners, a radius dimension on a corner, and a note placed at
 /// `note_at` on the sheet.
-fn ring_drawing(note_at: &str) -> Value {
+pub(super) fn ring_drawing(note_at: &str) -> Value {
     ring_drawing_with(&format!("view = top, at = {note_at}"))
 }
 
 const RING: &str = "runmat 0.7\nstd 1\n\npart ring {\n    sketch s on origin.xy {\n        ol1 = line(start = [-35 mm, -165 mm], end = [35 mm, -165 mm])\n        oa1 = arc(center = [35 mm, -45 mm], start = ol1.end, end = [155 mm, -45 mm])\n        ol2 = line(start = oa1.end, end = [155 mm, 45 mm])\n        oa2 = arc(center = [35 mm, 45 mm], start = ol2.end, end = [35 mm, 165 mm])\n        ol3 = line(start = oa2.end, end = [-35 mm, 165 mm])\n        oa3 = arc(center = [-35 mm, 45 mm], start = ol3.end, end = [-155 mm, 45 mm])\n        ol4 = line(start = oa3.end, end = [-155 mm, -45 mm])\n        oa4 = arc(center = [-35 mm, -45 mm], start = ol4.end, end = ol1.start)\n        il1 = line(start = [-35 mm, -125 mm], end = [35 mm, -125 mm])\n        ia1 = arc(center = [35 mm, -45 mm], start = il1.end, end = [115 mm, -45 mm])\n        il2 = line(start = ia1.end, end = [115 mm, 45 mm])\n        ia2 = arc(center = [35 mm, 45 mm], start = il2.end, end = [35 mm, 125 mm])\n        il3 = line(start = ia2.end, end = [-35 mm, 125 mm])\n        ia3 = arc(center = [-35 mm, 45 mm], start = il3.end, end = [-115 mm, 45 mm])\n        il4 = line(start = ia3.end, end = [-115 mm, -45 mm])\n        ia4 = arc(center = [-35 mm, -45 mm], start = il4.end, end = il1.start)\n    }\n    feature body = extrude(profile = sketch.s, distance = 8 mm)\n}\n";
 
 /// The ring drawing with its note's arguments after the text.
-fn ring_drawing_with(note_args: &str) -> Value {
+pub(super) fn ring_drawing_with(note_args: &str) -> Value {
     let drawing = format!("runmat 0.7\nstd 1\n\ndrawing ring {{\n    format a3 = {{ size = {{ size = iso, name = A3 }}, title_block = [] }}\n    sheet \"1\" = {{ format = a3, scale = [1, 2], projection = third_angle }}\n    view top = standard(orientation = top, sheet = \"1\", model = {{ part = ring }}, at = [200, 150], display = visible_lines)\n    annotation corner = dimension(style = radius, references = [feature.body.face.side(s.ia2)], view = top)\n    annotation notes = note(text = \"NOTES\", {note_args})\n}}\n");
     compile_ring(&drawing)
 }
 
 /// The ring part drawn by `drawing` (a `ring.drawing` text), laid out.
-fn compile_ring(drawing: &str) -> Value {
+pub(super) fn compile_ring(drawing: &str) -> Value {
     let drawing = drawing.to_owned();
     let files: Files = [
         ("/p/ring.part".to_owned(), RING.to_owned()),
@@ -720,21 +633,6 @@ fn compile_ring(drawing: &str) -> Value {
         &shown.to_string()[..shown.to_string().len().min(4000)]
     );
     out
-}
-
-#[test]
-fn a_note_placed_past_the_sheet_edge_raises_a_finding() {
-    let off = |at: &str| {
-        sheet(&ring_drawing(at), "1")["findings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|f| f["code"] == "note_off_sheet")
-            .count()
-    };
-    assert_eq!(off("[300, 40]"), 0, "a note on the sheet");
-    assert_eq!(off("[-60, 40]"), 1, "a note at a negative x");
-    assert_eq!(off("[300, 500]"), 1, "a note above the A3 sheet");
 }
 
 #[test]

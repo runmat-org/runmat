@@ -16,7 +16,8 @@
 //! 6. **Building marks**: level marks and door swings ([`plan_marks`]).
 //! 7. **Callouts** (hole callouts, frames, finishes, notes, weld symbols, datum targets,
 //!    balloons) take the free spot nearest what they point at, where their label overlaps
-//!    nothing and their leader crosses no text ([`callouts`], [`solver`]).
+//!    nothing and their leader crosses no text ([`callouts`], [`solver`]). Notes wrap to their
+//!    width or the room they have, and move off anything they would overprint ([`notes`]).
 //! 8. **Grids** last: each grid line runs to its bubble with a gap at every text it crosses
 //!    ([`plan_marks`]).
 //!
@@ -29,6 +30,7 @@ mod angular;
 mod callouts;
 mod dims;
 mod lining;
+pub(crate) mod notes;
 mod plan_marks;
 pub(crate) mod marks;
 pub(crate) mod solver;
@@ -37,6 +39,8 @@ mod views;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod notes_tests;
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -250,6 +254,8 @@ pub(crate) struct Ctx<'a> {
     pub frame: solver::BoxR,
     pub occ: solver::Occupancy,
     pub out: SheetLayout,
+    /// Plain notes placed by hand, as fitted before the views: annotation id → (top-left, lines).
+    pub note_spots: std::collections::BTreeMap<String, (Xy, notes::TextBlock)>,
 }
 
 impl<'a> Ctx<'a> {
@@ -293,6 +299,7 @@ impl<'a> Ctx<'a> {
                 size,
                 ..Default::default()
             },
+            note_spots: Default::default(),
         }
     }
 

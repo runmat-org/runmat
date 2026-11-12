@@ -175,10 +175,24 @@ impl Std {
 
     /// A leader: an arrow on `tip`, a line to `elbow`, a shoulder, and `t` on the shoulder.
     pub fn leader(&self, id: &str, tip: Xy, elbow: Xy, right: bool, t: &str) -> Vec<Prim> {
+        self.leader_lines(id, tip, elbow, right, &[t.to_owned()])
+    }
+
+    /// A leader to `tip` with lines of text on its shoulder at `elbow`: the first line beside
+    /// the shoulder, the rest under it, aligned on the shoulder's side.
+    pub fn leader_lines(
+        &self,
+        id: &str,
+        tip: Xy,
+        elbow: Xy,
+        right: bool,
+        lines: &[String],
+    ) -> Vec<Prim> {
         let s = if right { 1.0 } else { -1.0 };
         let shoulder = [elbow[0] + s * 3.0, elbow[1]];
         let d = unit(elbow, tip);
-        vec![
+        let pitch = self.line_pitch(self.text);
+        let mut out = vec![
             mark(
                 id,
                 "dimink",
@@ -192,31 +206,44 @@ impl Std {
                 ]),
             ),
             self.arrowhead(id, tip, d),
+        ];
+        out.extend(lines.iter().enumerate().filter(|(_, t)| !t.is_empty()).map(|(i, t)| {
             mark(
                 id,
                 "dimtext",
                 text(
                     shoulder[0] + s * 1.0,
-                    elbow[1] - self.text / 2.0,
+                    elbow[1] - self.text / 2.0 - i as f64 * pitch,
                     t,
                     self.text,
                     if right { "start" } else { "end" },
                 ),
-            ),
-        ]
+            )
+        }));
+        out
     }
 
     /// A leadered label's box: `t` on the shoulder at `elbow`.
     pub fn leader_box(&self, elbow: Xy, right: bool, t: &str) -> super::solver::BoxR {
-        let w = Std::text_width(t, self.text) + 4.0;
+        self.leader_lines_box(elbow, right, &[t.to_owned()])
+    }
+
+    /// The box of [`Std::leader_lines`]' text.
+    pub fn leader_lines_box(&self, elbow: Xy, right: bool, lines: &[String]) -> super::solver::BoxR {
+        let w = lines
+            .iter()
+            .map(|t| Std::text_width(t, self.text))
+            .fold(0.0, f64::max)
+            + 4.0;
         let (x0, x1) = if right {
             (elbow[0], elbow[0] + w)
         } else {
             (elbow[0] - w, elbow[0])
         };
+        let below = (lines.len().max(1) - 1) as f64 * self.line_pitch(self.text);
         super::solver::BoxR::new(
             x0,
-            elbow[1] - self.text * 0.75,
+            elbow[1] - self.text * 0.75 - below,
             x1,
             elbow[1] + self.text * 0.75,
         )

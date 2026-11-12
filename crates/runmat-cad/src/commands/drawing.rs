@@ -458,11 +458,12 @@ pub(super) fn add(catalog: &mut Catalog) {
             "drawing.note",
             "Note",
             "note",
-            "Add a note, with an optional leader.",
+            "Add a note, with an optional leader. Long text wraps to the width, else to the room the note has; put sheet-wide notes in the general notes list instead.",
         )
         .inputs(vec![
             text("text", "Text", None),
             pick("attach", "Leader to", &[K::Edge, K::View]).optional(),
+            length("width", "Width", 0.0).optional(),
             place(),
         ])
         .edit(annotation("note")),
@@ -627,6 +628,14 @@ pub(super) fn add(catalog: &mut Catalog) {
             place(),
         ])
         .edit(table("revision")),
+        drw(
+            "table.notes",
+            "General notes",
+            "note",
+            "Add a note to the sheet's numbered general notes, above the title block.",
+        )
+        .inputs(vec![text("text", "Note", None), place()])
+        .edit(table("notes")),
         drw(
             "table.bend",
             "Bend table",
@@ -1018,6 +1027,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                         c("table.bom"),
                         c("table.hole"),
                         c("table.revision"),
+                        c("table.notes"),
                         c("table.bend"),
                         c("table.weld"),
                         c("table.cut-list"),

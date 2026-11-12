@@ -1,0 +1,37 @@
+runmat 0.7
+std 1
+
+// An L bracket bent from 3 mm 6061 plate: a base leg and an upright leg, each 40 mm, 60 mm wide,
+// with three M5 clearance holes in each leg.
+part l_bracket {
+    sketch profile on origin.yz {
+        p1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])
+        p2 = line(start = [40 mm, 0 mm], end = [40 mm, 3 mm])
+        p3 = line(start = [40 mm, 3 mm], end = [3 mm, 3 mm])
+        p4 = line(start = [3 mm, 3 mm], end = [3 mm, 40 mm])
+        p5 = line(start = [3 mm, 40 mm], end = [0 mm, 40 mm])
+        p6 = line(start = [0 mm, 40 mm], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.profile, distance = 60 mm)
+    feature base_holes = hole(
+        face = feature.body.face.side(profile.p3),
+        at = { a = point(15 mm, 25 mm, 3 mm), b = point(30 mm, 25 mm, 3 mm), c = point(45 mm, 25 mm, 3 mm) },
+        diameter = 5.5 mm,
+        through_all
+    )
+    feature leg_holes = hole(
+        face = feature.body.face.side(profile.p4),
+        at = { a = point(15 mm, 3 mm, 25 mm), b = point(30 mm, 3 mm, 25 mm), c = point(45 mm, 3 mm, 25 mm) },
+        diameter = 5.5 mm,
+        through_all
+    )
+
+    output l_bracket = { body = feature.body.body, part_number = "LB-6061-60", material = "Aluminum 6061", properties = [{ name = description, value = { type = text, value = "L Bracket — Six M5 Clearance Holes" } }] }
+
+    datum A = { on = feature.body.face.side(profile.p1) }
+    datum B = { on = feature.body.face.side(profile.p6) }
+    datum C = { on = feature.body.face.start }
+    tolerance base_flat = { characteristic = flatness, on = [feature.body.face.side(profile.p1)], tolerance = 0.2 mm }
+    tolerance base_position = { characteristic = position, on = [feature.base_holes.face.wall(a), feature.base_holes.face.wall(b), feature.base_holes.face.wall(c)], tolerance = 0.2 mm, diametral = true, datums = [{ label = "A" }, { label = "B" }, { label = "C" }] }
+    tolerance leg_position = { characteristic = position, on = [feature.leg_holes.face.wall(a), feature.leg_holes.face.wall(b), feature.leg_holes.face.wall(c)], tolerance = 0.2 mm, diametral = true, datums = [{ label = "B" }, { label = "A" }, { label = "C" }] }
+}

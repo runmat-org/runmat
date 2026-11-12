@@ -1,13 +1,14 @@
 //! Tables on the sheet, snapped to its corners and zones the way the title block is: the
 //! revision table in the top right corner (ASME Y14.35), parts lists, cut lists and general notes
 //! on the title block's top edge, right-aligned (ISO 7573, ISO 7200), hole and bend tables in the
-//! top left corner.
+//! top left corner. General notes draw as a numbered list rather than a ruled grid ([`super::notes`]).
 //! Tables in one corner stack away from it. A table placed by hand (`at`) stays there: its
 //! top-left corner, or a revision table's top-right corner. A table whose corner is taken goes
 //! to the free spot nearest it.
 
 use super::marks::{line, prim, text};
 use super::solver::{nearest_free, BoxR, Class};
+use super::notes::NotesList;
 use super::{placed_at, Ctx, Prim, Shape, Xy};
 use serde_json::Value;
 
@@ -329,31 +330,43 @@ fn revision_grid(rows: &Value) -> Grid {
     }
 }
 
-/// General notes: numbered in order, each note wrapping in a column as wide as the title block.
-fn notes_grid(rows: &Value) -> Grid {
-    let note_width = runmat_cad::drawing::title_layout::BLOCK_WIDTH - NOTE_NUMBER_WIDTH;
-    let columns = vec![
-        ("NO.".into(), "middle", Some(NOTE_NUMBER_WIDTH)),
-        ("NOTE".into(), "start", Some(note_width)),
-    ];
-    let rows = rows
+/// General notes: "NOTES:" and the notes numbered in order, each wrapping with a hanging indent
+/// in a column `width` wide, else as wide as the title block.
+/// `shown` holds the notes with their `{field}`s filled, as the compile gives them.
+fn notes_list(st: &super::Std, kind: &Value, shown: &Value) -> NotesList {
+    let rows: Vec<String> = shown
         .as_array()
+        .or(kind["rows"].as_array())
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
-        .enumerate()
-        .map(|(i, note)| Row::Cells(vec![(i + 1).to_string(), note.to_owned()]))
+        .map(str::to_owned)
         .collect();
-    Grid {
-        title: Some("GENERAL NOTES".into()),
-        columns,
-        rows,
-        wrap: Some(1),
-    }
+    let width = super::notes::width_of(kind).unwrap_or(runmat_cad::drawing::title_layout::BLOCK_WIDTH);
+    NotesList::new(st, &rows, width)
 }
 
-/// The notes table's number column.
-const NOTE_NUMBER_WIDTH: f64 = 10.0;
+/// What a table draws as: a ruled grid, or the general notes' list.
+enum Block {
+    Grid(Grid),
+    Notes(NotesList),
+}
+
+impl Block {
+    fn size(&self) -> Xy {
+        match self {
+            Block::Grid(g) => g.size(),
+            Block::Notes(n) => n.size_wh(),
+        }
+    }
+
+    fn draw(&self, id: &str, top_left: Xy) -> Vec<Prim> {
+        match self {
+            Block::Grid(g) => g.draw(id, top_left),
+            Block::Notes(n) => n.draw(id, top_left),
+        }
+    }
+}
 
 fn fmt(v: f64, places: usize) -> String {
     runmat_cad::drawing::standard::metric_text(v, places)
@@ -408,7 +421,7 @@ enum Corner {
 pub fn place(ctx: &mut Ctx<'_>) {
     let data = ctx.data;
     let doc = ctx.doc();
-    let mut list: Vec<(String, Grid, Corner, Option<Xy>, bool)> = Vec::new();
+    let mut list: Vec<(String, Block, Corner, Option<Xy>, bool)> = Vec::new();
     let mut bend_views = Vec::new();
     for t in doc["tables"].as_array().into_iter().flatten() {
         if t["sheet"].as_str() != Some(ctx.sheet.as_str()) {
@@ -417,6 +430,11 @@ pub fn place(ctx: &mut Ctx<'_>) {
         let name = t["name"].as_str().unwrap_or("").to_owned();
         let at = placed_at(t);
         let (grid, corner) = match t["kind"]["table"].as_str() {
+            Some("notes") => {
+                let notes = notes_list(&ctx.std, &t["kind"], &data["notes"][&name]);
+                list.push((format!("table:{name}"), Block::Notes(notes), Corner::AboveTitle, at, false));
+                continue;
+            }
             Some("bom") => match data["bom_tables"].get(&name) {
                 Some(d) => (bom_grid(d), Corner::AboveTitle),
                 None => continue,
@@ -430,7 +448,6 @@ pub fn place(ctx: &mut Ctx<'_>) {
                 None => continue,
             },
             Some("revision") => (revision_grid(&t["kind"]["rows"]), Corner::TopRight),
-            Some("notes") => (notes_grid(&t["kind"]["rows"]), Corner::AboveTitle),
             Some("bend") => {
                 let view = t["kind"]["view"].as_str().unwrap_or("");
                 bend_views.push(view.to_owned());
@@ -443,7 +460,7 @@ pub fn place(ctx: &mut Ctx<'_>) {
         };
         // A revision table is placed by its top-right corner.
         let top_right = corner == Corner::TopRight;
-        list.push((format!("table:{name}"), grid, corner, at, top_right));
+        list.push((format!("table:{name}"), Block::Grid(grid), corner, at, top_right));
     }
     // A flat view with bends and no bend table of its own gets one.
     for v in doc["views"].as_array().into_iter().flatten() {
@@ -452,7 +469,7 @@ pub fn place(ctx: &mut Ctx<'_>) {
             continue;
         }
         if let Some(g) = bend_grid(&data["hlr"][name]["flat"]) {
-            list.push((format!("view:{name}"), g, Corner::TopLeft, None, false));
+            list.push((format!("view:{name}"), Block::Grid(g), Corner::TopLeft, None, false));
         }
     }
     let f = ctx.frame;
@@ -501,8 +518,15 @@ pub fn place(ctx: &mut Ctx<'_>) {
                                 "table_no_room",
                                 &id,
                                 format!(
-                                    "Table {} has no room on the sheet; it overlaps what is there",
-                                    &id[id.find(':').map_or(0, |i| i + 1)..]
+                                    "Table {} doesn't fit on the sheet: it needs {} x {} mm of free space and none is left, so it overlaps what is there. {}",
+                                    &id[id.find(':').map_or(0, |i| i + 1)..],
+                                    fmt(w, 0),
+                                    fmt(h, 0),
+                                    if matches!(grid, Block::Notes(_)) {
+                                        "Shorten the notes, give the list a wider `width` so it runs fewer lines, or use a larger sheet"
+                                    } else {
+                                        "Place it by hand with `at`, or use a larger sheet"
+                                    }
                                 ),
                             );
                             snapped
