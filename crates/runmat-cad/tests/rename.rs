@@ -177,3 +177,127 @@ fn every_corpus_feature_renames_cleanly() {
     }
     assert!(renamed > 15, "only {renamed} features renamed");
 }
+
+const BRACKET: &str = r#"runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 40 mm
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, 20 mm])
+        l3 = line(start = [input.width, 20 mm], end = [0 mm, 20 mm])
+        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = 10 mm)
+    region mount : face = { select = [feature.body.face.start], expect = exactly_one }
+    output bracket = { body = feature.body.body }
+}
+"#;
+
+/// Another part with an input of the same name: its values never follow.
+const SPACER: &str = r#"runmat 0.7
+std 1
+
+part spacer {
+    input width : length = 5 mm
+    sketch s1 on origin.xy {
+        c1 = circle(center = [0 mm, 0 mm], radius = input.width)
+    }
+    feature body = extrude(profile = sketch.s1, distance = 2 mm)
+    output spacer = { body = feature.body.body }
+}
+"#;
+
+const SUB: &str = r#"runmat 0.7
+std 1
+
+assembly sub {
+    use part bracket as left {
+        configuration = { select = inputs, values = { width = 30 mm } }
+    }
+    use part spacer as gap {
+        configuration = { select = inputs, values = { width = 6 mm } }
+    }
+}
+"#;
+
+const TOP: &str = r#"runmat 0.7
+std 1
+
+assembly top {
+    use assembly sub as unit {
+        override left {
+            input.width = 25 mm
+        }
+        override gap {
+            input.width = 7 mm
+        }
+    }
+    use part bracket as spare
+}
+"#;
+
+#[test]
+fn an_input_rename_reaches_assemblies_that_set_it() {
+    use runmat_cad::syntax::rename::{assemblies_in, rename_input_in_assembly};
+    let files = [
+        ("/p/bracket.part", BRACKET),
+        ("/p/spacer.part", SPACER),
+        ("/p/sub.assembly", SUB),
+        ("/p/top.assembly", TOP),
+    ];
+    let scope = ModuleScope::from_files(files);
+    let assemblies = assemblies_in(files, &scope);
+    assert_eq!(assemblies.len(), 2, "both assemblies read");
+    let follow = |path: &str, text: &str| {
+        rename_input_in_assembly(text, path, &scope, &assemblies, "/p/bracket.part", "width", "span")
+            .unwrap()
+    };
+    // The occurrence's own values follow; the spacer's input of the same name stays.
+    let sub = follow("/p/sub.assembly", SUB).expect("sub sets the bracket's width");
+    assert!(sub.source.contains("values = { span = 30 mm }"), "{}", sub.source);
+    assert!(sub.source.contains("values = { width = 6 mm }"), "{}", sub.source);
+    // An override whose target resolves through the sub-assembly to the bracket follows.
+    let top = follow("/p/top.assembly", TOP).expect("top overrides the bracket's width");
+    assert!(top.source.contains("input.span = 25 mm"), "{}", top.source);
+    assert!(top.source.contains("input.width = 7 mm"), "{}", top.source);
+    assert!(!top.reprinted, "{}", top.source);
+    // An assembly that sets no input of the part isn't touched.
+    let none = rename_input_in_assembly(SUB, "/p/sub.assembly", &scope, &assemblies, "/p/bracket.part", "depth", "d")
+        .unwrap();
+    assert!(none.is_none());
+}
+
+#[test]
+fn a_region_rename_reaches_studies_whose_geometry_reads_the_part() {
+    use runmat_cad::syntax::rename::rename_region_in_study;
+    let study = r#"geometry bracket {
+    file = "../parts/bracket.part"
+    units = mm
+    region mount : face { select name "mount"; expect exactly_one }
+}
+
+geometry scan {
+    file = "./scan.step"
+    units = mm
+    region mount : face { select name "mount"; expect exactly_one }
+}
+
+study bracket_static {
+    geometry = geometry.bracket
+    analysis static { structural static {} }
+}
+"#;
+    let change = rename_region_in_study(study, "/s/load.fea", "/parts/bracket.part", "mount", "base")
+        .unwrap()
+        .expect("the study reads the bracket's region");
+    // The bracket geometry's selection follows; the study's own region name and the STEP
+    // geometry's label of the same spelling stay.
+    assert_eq!(change.edits.len(), 1, "{}", change.source);
+    assert!(change.source.contains("region mount : face { select name \"base\"; expect exactly_one }\n}\n\ngeometry scan"), "{}", change.source);
+    assert!(change.source.contains("file = \"./scan.step\"\n    units = mm\n    region mount : face { select name \"mount\""), "{}", change.source);
+    // A study of another part isn't touched.
+    let other = rename_region_in_study(study, "/s/load.fea", "/parts/plate.part", "mount", "base").unwrap();
+    assert!(other.is_none());
+}
