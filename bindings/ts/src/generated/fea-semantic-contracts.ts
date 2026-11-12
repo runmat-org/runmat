@@ -3019,6 +3019,8 @@ export type QuantityKind = "length"
   | "electric_charge_density"
   | "stiffness"
   | "damping"
+  | "rotational_stiffness"
+  | "torsional_damping"
   | "foundation_modulus"
   | "rayleigh_mass_coefficient"
   | "rayleigh_stiffness_coefficient"
@@ -3247,6 +3249,10 @@ export type RigidResponsePolicy = "disabled"
 
 export interface Rotation {
   radians: number;
+}
+
+export interface RotationalStiffness {
+  newton_meters_per_radian: number;
 }
 
 export type SamplingPolicy = "final"
@@ -3826,6 +3832,10 @@ export interface TimeDerivativeRate {
 export type TopologyTransitionPolicy = "require_identical"
   | "project_with_evidence"
   | "adapted_mesh_lineage";
+
+export interface TorsionalDamping {
+  newton_meter_seconds_per_radian: number;
+}
 
 export interface Traction {
   pascals: number;
