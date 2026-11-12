@@ -3,7 +3,7 @@
   "cohort": "circuit-large-board-performance",
   "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "df1e2068ed02cd490c1a9ca307c98ab080f09c3a",
+    "source_revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
     "target": "macos-aarch64",
     "hardware": "Apple M4, 24 GiB RAM",
     "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
@@ -25,10 +25,11 @@
       "release": true,
       "debug": 0,
       "cargo_build_jobs": 1,
-      "incremental": false
+      "incremental": false,
+      "rust_test_nocapture": true
     },
-    "log_sha256": "e8396a7e425c84cd14ffe41caa907c063d0551495efe8e470a489e14990a5ac9",
-    "log_location": "runmat-air:/Users/runmat-air/logs/intake-df1e2068ed-circuit-receipt.tests.log",
+    "log_sha256": "b1c9548012705f306db2894f20d91bcc06590dd2a87cb8c83b975f71303e10c5",
+    "log_location": "runmat-air:/Users/runmat-air/logs/intake-35f5a6c647-circuit-receipt.tests.log",
     "passed": 1,
     "failed": 0,
     "ignored": 0,
@@ -39,21 +40,22 @@
     ],
     "selected_filter": null,
     "inputs": {
-      "sha256": "7b44e064576eeea41334aab4253f5ea1546f3e6a00c03187e7aba806101b18aa",
-      "files": 26104,
+      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
+      "files": 26112,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "artifacts": [
       {
-        "sha256": "f652728ad5ac036166cb00464a32b60806d2ce8f1e3ebe912db04593bf2f165a",
-        "location": "runmat-air:/Users/runmat-air/logs/runtime-scale-df1e2068ed-qualified"
+        "sha256": "ff391d179082800bbfd6026f9dbb9cb35c4589c9fa2dd7600a093a7e0b22f535",
+        "location": "runmat-air:/Users/runmat-air/logs/runtime-scale-35f5a6c647-qualified"
       }
     ],
     "source_verification": {
       "before_and_after": true,
-      "files": 27246,
-      "sha256": "4b64cf4deef5c33bf8a8c14332b108e3681d24d029533cc9dfd832bdd72dee5a"
-    }
+      "files": 27265,
+      "sha256": "f8e417808b079f3176a25bccc002eaec1b66abdcbf63e2e73152534efa551590"
+    },
+    "test_seconds": 72.55
   },
   "scope": "The unchanged 500 ms edit budget passed on the recorded native Apple M4. This receipt does not establish that budget on other processors. Earlier failed Linux measurements remain explicit comparisons.",
   "comparison_runs": [
@@ -79,22 +81,5 @@
       "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.circuit-large-board-performance.log",
       "disposition": "Renewed failed N1 comparison; the reference-Mac receipt retains the unchanged 500 ms budget."
     }
-  ],
-  "conservation": {
-    "measured_inputs": {
-      "sha256": "7b44e064576eeea41334aab4253f5ea1546f3e6a00c03187e7aba806101b18aa",
-      "files": 26104,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "accepted_inputs": {
-      "sha256": "ca414c8b6b4379438519fa5d90c3382b648a01333b825d5c37971c3f2796578c",
-      "files": 26104,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "reason": "The circuit benchmark source, its dependency implementations and threshold are unchanged since the measured snapshot. The complete intervening inventory contains four FEA formatting-only files and the separate design-tool sketch handler/regression. These edits do not execute through the circuit Session benchmark. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries. The unchanged cfg(test) module moves after the production items in modal/diagnostics.rs. Byte comparison proves that both the complete test module and production source are unchanged apart from module position and final whitespace. No arithmetic, diagnostic contents, accuracy policy, allocation, serialization contract or scientific assertion changes. Only the CAD syntax-test corpus JSON changes: the section-plane face reference is wrapped in the canonical tagged PlaneRef representation introduced by 484648602e. Every other byte, including floating-point numeric tokens, is preserved. The JSON is read by a separate integration-test target and does not change production Rust, dependencies, authored studies, scientific commands, arithmetic or thresholds. The 32 focused CAD syntax and corpus round-trip tests pass on Linux against all 27,256 verified source files. Existing scientific measurements retain their original producers, commands, binaries and outcomes.",
-    "review": {
-      "path": "qualification/scientific/reviews/circuit-air-df1e2068ed-to-2822ea6807.json",
-      "sha256": "7a0ead5eeba12195807b4fb839f746fe411c150ee8084180bd95b620a5a97e49"
-    }
-  }
+  ]
 }
