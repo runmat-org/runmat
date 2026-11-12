@@ -4,13 +4,12 @@
 // (BRepAlgoAPI_Defeaturing). A curved surface split into several faces counts as one: a hole
 // whose wall is two half cylinders (as STEP files often write it, and as a cut through two arcs
 // builds it) is removed whole when one of its faces is picked. Defeaturing can't lift a part of
-// a curved surface alone, and when it can't remove a feature it warns and returns the body
-// unchanged; that is reported as a failure, never as a delete that did nothing.
+// a curved surface alone, and when it can't remove a feature it returns the body with that face
+// still in it; that is reported as a failure, never as a delete that did nothing.
 
 #include "runmat-geometry-io/src/occt/kernel_ffi.rs.h"
 #include "exact_kernel.hxx"
 
-#include <BOPAlgo_Alerts.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Defeaturing.hxx>
 #include <GeomAbs_SurfaceType.hxx>
@@ -114,7 +113,8 @@ std::vector<TopoDS_Face> whole_surfaces(const TopoDS_Shape& body, const std::vec
 Tracked delete_faces_healed(const Tracked& src, const std::vector<TopoDS_Face>& picked) {
   BRepAlgoAPI_Defeaturing df;
   df.SetShape(src.shape);
-  for (const TopoDS_Face& f : whole_surfaces(src.shape, picked)) df.AddFaceToRemove(f);
+  const std::vector<TopoDS_Face> faces = whole_surfaces(src.shape, picked);
+  for (const TopoDS_Face& f : faces) df.AddFaceToRemove(f);
   df.SetRunParallel(Standard_False);
   df.SetToFillHistory(Standard_True);
   df.Build();
@@ -123,9 +123,11 @@ Tracked delete_faces_healed(const Tracked& src, const std::vector<TopoDS_Face>& 
     df.DumpErrors(m);
     fail("the faces could not be removed and healed: " + m.str());
   }
-  if (df.HasWarning(STANDARD_TYPE(BOPAlgo_AlertUnableToRemoveTheFeature)))
-    fail("the faces don't bound a feature the neighbouring faces can close over; pick every "
-         "face of the hole, boss or pocket");
+  // A feature defeaturing couldn't lift stays in the result, with or without a warning.
+  for (const TopoDS_Face& f : faces)
+    if (!df.IsDeleted(f))
+      fail("the faces don't bound a feature the neighbouring faces can close over; pick every "
+           "face of the hole, boss or pocket");
   Tracked out;
   out.shape = df.Shape();
   propagate_history(src, df.History(), out);
