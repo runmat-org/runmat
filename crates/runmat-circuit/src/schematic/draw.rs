@@ -104,12 +104,18 @@ pub(super) fn page(
             mm_to_nm(b[3]),
         ]
     };
+    // What a note may be beside, and what it must not cover.
+    let mut subjects: Vec<super::notes::Subject> = Vec::new();
+    let mut obstacles: Vec<[Coord; 4]> = Vec::new();
     for (ci, cell) in cells.iter().enumerate() {
         let pl = &places[ci];
         let lay = &cell.lay;
         let body = pl.rect([-lay.half_w, -lay.half_h, lay.half_w, lay.half_h]);
         walls.bodies.push(body);
-        bbox = grow(bbox, pl.rect(lay.extent()));
+        let reach = pl.rect(lay.extent());
+        bbox = grow(bbox, reach);
+        obstacles.push(reach);
+        let texts_before = walls.texts.len();
         // Pins: tips, sides and the lines from the body.
         let mut side_terms: BTreeMap<PinSide, Vec<usize>> = BTreeMap::new();
         for (k, lp) in lay.pins.iter().enumerate() {
@@ -185,29 +191,49 @@ pub(super) fn page(
                 page.sheet_symbols.push(sym);
             }
         }
+        let own = walls.texts[texts_before..]
+            .iter()
+            .fold(reach, |b, t| grow(b, *t));
+        obstacles.extend_from_slice(&walls.texts[texts_before..]);
+        let name = match cell.kind {
+            CellKind::Unit { .. } => cell.designator.clone(),
+            CellKind::Sheet { child } => sheets[child].0.leaf().to_string(),
+        };
+        subjects.push(super::notes::Subject {
+            name: name.to_ascii_lowercase(),
+            extent: own,
+        });
     }
     if bbox[0] > bbox[2] {
         bbox = [0, -GRID, GRID, 0];
     }
-    // Notes: at their recorded places (the lock's frame), else stacked above the drawing.
-    let mut stack = bbox[3] + 2 * GRID;
-    for (name, text) in nl
+    // Notes: at their recorded places (the lock's frame), else beside their subject or in the
+    // notes block ([`super::notes`]).
+    let notes: &[(String, String)] = nl
         .sheet_texts
         .get(sheet_name)
         .map(Vec::as_slice)
-        .unwrap_or(&[])
-    {
-        let at = match nl
-            .sch_places
+        .unwrap_or(&[]);
+    let recorded = |name: &str| {
+        nl.sch_places
             .get(&text_key(sheet_name, name))
             .filter(|p| p.page == 1 && !centre)
-        {
-            Some(s) => Point::new(s.x - MARGIN, MARGIN - s.y),
-            None => {
-                let p = Point::new(bbox[0], stack);
-                stack += 2 * GRID;
-                p
-            }
+            .map(|s| Point::new(s.x - MARGIN, MARGIN - s.y))
+    };
+    for (name, text) in notes {
+        if let Some(at) = recorded(name) {
+            obstacles.push(text_box(text, NOTE_TEXT, at.x, at.y, "start"));
+        }
+    }
+    let unplaced: Vec<(&str, &str)> = notes
+        .iter()
+        .filter(|(n, _)| recorded(n).is_none())
+        .map(|(n, t)| (n.as_str(), t.as_str()))
+        .collect();
+    let mut placed = super::notes::place(&unplaced, &subjects, &obstacles, bbox).into_iter();
+    for (name, text) in notes {
+        let Some(at) = recorded(name).or_else(|| placed.next()) else {
+            continue;
         };
         let b = text_box(text, NOTE_TEXT, at.x, at.y, "start");
         walls.texts.push(b);
@@ -379,7 +405,9 @@ fn symbol(
     let r = pl.rect([-hw, -hh, hw, hh]);
     let o = pl.origin;
     let (ds, vs) = (DESIGNATOR_TEXT, VALUE_TEXT);
-    let (designator_at, value_at, anchor) = if lay.art == Art::Box {
+    let (designator_at, value_at, anchor) = if lay.art == Art::Symbol {
+        symbol_text_places(lay, pl)
+    } else if lay.art == Art::Box {
         // Top-left and bottom-left corners, clear of the edge pins (right-aligned); a
         // mirrored box keeps them on the right.
         let (x, a) = if pl.mirror {
@@ -424,6 +452,16 @@ fn symbol(
             .iter()
             .map(|s| s.iter().map(|p| xy(pl.apply(*p))).collect())
             .collect(),
+        art_texts: lay
+            .declared
+            .iter()
+            .flat_map(|d| &d.texts)
+            .map(|t| ArtLabel {
+                text: t.text.clone(),
+                at: xy(pl.apply(t.at)),
+                size_mm: mm(t.size),
+            })
+            .collect(),
         pins,
         value: crate::index::component_value(c),
         designator_at: xy(designator_at),
@@ -432,6 +470,38 @@ fn symbol(
         pin_text_mm: mm(PIN_TEXT),
         designator_text_mm: mm(DESIGNATOR_TEXT),
         value_text_mm: mm(VALUE_TEXT),
+    }
+}
+
+/// Where a declared symbol's designator and value go: centred above everything it draws
+/// (designator on top), or below it when a pin leaves the top, or right of it when pins leave
+/// both the top and the bottom.
+fn symbol_text_places(lay: &UnitLayout, pl: &Place) -> (Point, Point, &'static str) {
+    let e = pl.rect(lay.extent());
+    let o = pl.origin;
+    let leaves = |s: PinSide| lay.pins.iter().any(|p| pl.side(p.side) == s);
+    let (ds, vs) = (DESIGNATOR_TEXT, VALUE_TEXT);
+    if !leaves(PinSide::Top) {
+        let value = Point::new(o.x, e[3] + TEXT_GAP + vs / 5);
+        (
+            Point::new(o.x, value.y + vs * 4 / 5 + TEXT_GAP + ds / 5),
+            value,
+            "middle",
+        )
+    } else if !leaves(PinSide::Bottom) {
+        let designator = Point::new(o.x, e[1] - TEXT_GAP - ds * 4 / 5);
+        (
+            designator,
+            Point::new(o.x, designator.y - ds / 5 - TEXT_GAP - vs * 4 / 5),
+            "middle",
+        )
+    } else {
+        let x = e[2] + 2 * TEXT_GAP;
+        (
+            Point::new(x, o.y + 2 * TEXT_GAP / 5),
+            Point::new(x, o.y - 2 * TEXT_GAP / 5 - vs),
+            "start",
+        )
     }
 }
 
@@ -520,9 +590,17 @@ pub fn page_boxes(page: &SchematicSheet) -> Vec<[f64; 4]> {
     out
 }
 
+/// How far inside the frame line content may reach on a page whose places are recorded
+/// (mm): a page that strays into its margin keeps its sheet size instead of jumping to a
+/// larger one with everything in a corner.
+const FRAME_CLEAR_MM: f64 = 2.0;
+
 /// Picks the smallest frame the page fits on, clear of the title block, and moves the content
 /// from its top-left corner (at the origin, y up) onto the paper.
-/// With `centre` (no recorded places on the page), the content is centred on the paper.
+/// - With `centre` (no recorded places on the page), the content is centred on the paper.
+/// - With recorded places, the content stays where the lock puts it. It may reach into the
+///   margin up to [`FRAME_CLEAR_MM`] inside the frame line; content above the top margin
+///   moves down by as much, rather than off the paper.
 fn frame(page: &mut SchematicSheet, nl: &Netlist, centre: bool) {
     let boxes = page_boxes(page);
     let content = boxes.iter().fold([0.0f64, 0.0, 0.0, 0.0], |b, p| {
@@ -534,12 +612,13 @@ fn frame(page: &mut SchematicSheet, nl: &Netlist, centre: bool) {
         ]
     });
     let margin = mm(MARGIN);
-    let rows = 5.0 + if nl.variant.is_some() { 1.0 } else { 0.0 };
-    let title_h = rows * TITLE_ROW_MM;
-    let fits = |w: f64, h: f64, dx: f64, dy: f64| {
-        if content[2] + dx > w - margin
-            || content[1] + dy < margin
-            || content[3] + dy > h - margin + 1e-6
+    let rows = 5 + usize::from(nl.variant.is_some());
+    let title_h = title_height_mm(rows);
+    let fits = |w: f64, h: f64, dx: f64, dy: f64, edge: f64| {
+        if content[0] + dx < edge - 1e-6
+            || content[2] + dx > w - edge + 1e-6
+            || content[1] + dy < edge - 1e-6
+            || content[3] + dy > h - edge + 1e-6
         {
             return false;
         }
@@ -554,30 +633,46 @@ fn frame(page: &mut SchematicSheet, nl: &Netlist, centre: bool) {
             b[0] < tb[2] && tb[0] < b[2] && b[1] < tb[3] && tb[1] < b[3]
         })
     };
+    let loose = FRAME_MM + FRAME_CLEAR_MM;
+    let dx0 = margin - content[0].min(0.0);
+    // The first fit, smallest sheet first: as recorded within the margin; as recorded, into
+    // the margin (recorded pages only); then moved down under the top margin.
+    let choose = |w: f64, h: f64| -> Option<(f64, f64)> {
+        let dy = h - margin;
+        if fits(w, h, dx0, dy, margin) {
+            return Some((dx0, dy));
+        }
+        if !centre && fits(w, h, dx0, dy, loose) {
+            return Some((dx0, dy));
+        }
+        let down = h - margin - content[3].max(0.0);
+        (content[3] > 0.0 && fits(w, h, dx0, down, margin)).then_some((dx0, down))
+    };
     let (mut name, mut w, mut h) = FRAMES[FRAMES.len() - 1];
-    let mut found = false;
+    let mut found = None;
     for f in FRAMES {
-        if fits(f.1, f.2, margin - content[0].min(0.0), f.2 - margin) {
+        if let Some(at) = choose(f.1, f.2) {
             (name, w, h) = f;
-            found = true;
+            found = Some(at);
             break;
         }
     }
-    if !found {
-        w = w.max(content[2] + 2.0 * margin + TITLE_W_MM);
-        h = h.max(-content[1] + 2.0 * margin + title_h);
+    if found.is_none() {
+        w = w.max(content[2] - content[0].min(0.0) + 2.0 * margin + TITLE_W_MM);
+        h = h.max(content[3].max(0.0) - content[1] + 2.0 * margin + title_h);
     }
     page.frame = name.to_owned();
     page.width_mm = w;
     page.height_mm = mm(mm_to_nm(h));
-    let (mut dx, mut dy) = (margin, page.height_mm - margin);
-    if centre && found {
+    let (mut dx, mut dy) = found.unwrap_or((dx0, page.height_mm - margin - content[3].max(0.0)));
+    if centre && found.is_some() {
         // Whole grid steps, so pins stay on KiCad's grid (y counted down from the top).
         let grid = mm(GRID);
         let steps = |v: f64| (v / grid).floor().max(0.0) * grid;
-        let cx = dx + steps((w - 2.0 * margin - (content[2] - content[0])) / 2.0 - content[0]);
-        let cy = dy - steps((h - 2.0 * margin - (content[3] - content[1])) / 2.0 + content[3]);
-        if fits(w, h, cx, cy) {
+        let (x0, y1) = (margin, page.height_mm - margin);
+        let cx = x0 + steps((w - 2.0 * margin - (content[2] - content[0])) / 2.0 - content[0]);
+        let cy = y1 - steps((h - 2.0 * margin - (content[3] - content[1])) / 2.0 + content[3]);
+        if fits(w, h, cx, cy, margin) {
             (dx, dy) = (cx, cy);
         }
     }
@@ -611,6 +706,9 @@ pub(super) fn shift(page: &mut SchematicSheet, dx: f64, dy: f64) {
         s.y_mm = r(s.y_mm + dy);
         s.body.iter_mut().flatten().for_each(m);
         s.strokes.iter_mut().flatten().for_each(m);
+        for t in &mut s.art_texts {
+            m(&mut t.at);
+        }
         m(&mut s.designator_at);
         m(&mut s.value_at);
         for p in &mut s.pins {

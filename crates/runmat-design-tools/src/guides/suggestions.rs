@@ -43,11 +43,30 @@ pub enum FileState {
     /// A part with sheet-metal features: its own checks (flat pattern, bend reliefs) replace
     /// a machined part's.
     SheetMetal,
+    /// A part with no body, only datum planes, axes, points and frames: a skeleton other parts
+    /// and assemblies place themselves by.
+    Reference,
+    /// A part of runs swept along paths in a pipe, duct, conduit or cable material: routing
+    /// questions replace a machined part's load and machining checks.
+    Piping,
+    /// A part of electrical boxes and devices.
+    Electrical,
+    /// A part of structural members (lumber, engineered wood, steel sections, rebar): member
+    /// lists and design-load checks.
+    Structural,
 }
 
 impl FileState {
     /// Every file state, for checks that walk them all.
-    pub const ALL: [FileState; 3] = [FileState::Empty, FileState::Written, FileState::SheetMetal];
+    pub const ALL: [FileState; 7] = [
+        FileState::Empty,
+        FileState::Written,
+        FileState::SheetMetal,
+        FileState::Reference,
+        FileState::Piping,
+        FileState::Electrical,
+        FileState::Structural,
+    ];
 }
 
 /// The names a suggestion's text takes from the open file.
@@ -95,7 +114,7 @@ fn when(state: FileState, s: Suggestion) -> Suggestion {
 
 /// Every suggestion, per editor and file state: the placeholder first, then the panel's.
 pub(super) fn catalog() -> Vec<Suggestion> {
-    use FileState::{Empty, SheetMetal, Written};
+    use FileState::{Electrical, Empty, Piping, Reference, SheetMetal, Structural, Written};
     use PickEntity::{Edge, Face, Net};
     use SuggestionNames::Occurrences;
     vec![
@@ -225,6 +244,84 @@ pub(super) fn catalog() -> Vec<Suggestion> {
                 "Check the flat pattern and bend reliefs",
                 None,
             ),
+        ),
+        when(
+            Reference,
+            suggestion(
+                "part",
+                None,
+                "Explain what these planes and frames lay out",
+                None,
+            ),
+        ),
+        when(
+            Reference,
+            suggestion("part", None, "List the frames other parts attach to", None),
+        ),
+        when(
+            Reference,
+            suggestion(
+                "part",
+                None,
+                "Add a level plane 10 ft above the top one",
+                Some("part.plane"),
+            ),
+        ),
+        when(
+            Piping,
+            suggestion("part", None, "Explain how these runs are routed", None),
+        ),
+        when(
+            Piping,
+            suggestion("part", None, "List each run with its size and length", None),
+        ),
+        when(
+            Piping,
+            suggestion(
+                "part",
+                None,
+                "Check the runs clear the framing and each other",
+                None,
+            ),
+        ),
+        when(
+            Electrical,
+            suggestion(
+                "part",
+                None,
+                "List the boxes and devices with their part numbers",
+                None,
+            ),
+        ),
+        when(
+            Electrical,
+            suggestion("part", None, "Explain where each box is mounted", None),
+        ),
+        when(
+            Electrical,
+            suggestion("part", None, "Check the box heights and spacing", None),
+        ),
+        when(
+            Structural,
+            suggestion(
+                "part",
+                None,
+                "List the members with their sizes and lengths",
+                None,
+            ),
+        ),
+        when(
+            Structural,
+            suggestion(
+                "part",
+                None,
+                "Check these members under their design loads",
+                Some("study.new"),
+            ),
+        ),
+        when(
+            Structural,
+            suggestion("part", None, "Explain how this framing is built", None),
         ),
         when(
             Empty,
@@ -466,6 +563,26 @@ mod tests {
             "{sheet:?}"
         );
         assert!(!sheet.iter().any(|t| t.contains("machined")), "{sheet:?}");
+        // A pipe run, an electrical box, a structural member and a skeleton each get their own
+        // suggestions: no machining, and a load check only for structural members.
+        for state in [
+            FileState::Reference,
+            FileState::Piping,
+            FileState::Electrical,
+            FileState::Structural,
+        ] {
+            let list = shown("part", state);
+            assert!(list.len() == MAX_PANEL_SUGGESTIONS, "{state:?}: {list:?}");
+            assert!(
+                !list
+                    .iter()
+                    .any(|t| t.contains("machined") || t.contains("2 kN")),
+                "{state:?}: {list:?}"
+            );
+        }
+        assert!(shown("part", FileState::Structural)
+            .iter()
+            .any(|t| t.contains("design loads")));
         assert_eq!(
             shown("assembly", FileState::Empty)[0],
             "Insert the parts this assembly brings together"

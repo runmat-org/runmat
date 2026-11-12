@@ -1,4 +1,5 @@
-//! ERC and DRC as structured violations: rule, objects, layer, location and source range.
+//! ERC, DRC and the schematic layout check as structured violations: rule, objects, layer,
+//! location and source range.
 
 use super::*;
 
@@ -33,7 +34,7 @@ impl SourceRange {
 /// One electrical (ERC) or design-rule (DRC) violation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Violation {
-    /// `erc` or `drc`.
+    /// `erc`, `drc`, or `schematic` (the drawn pages' layout check, listed with ERC).
     pub check: String,
     pub code: String,
     /// `error`, `warning` or `info`.
@@ -47,7 +48,7 @@ pub struct Violation {
     /// The copper layer (DRC), by its stack-up name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer: Option<String>,
-    /// Where on the board (DRC), in millimetres.
+    /// Where on the board (DRC) or the schematic page (layout check), in millimetres.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub at_mm: Option<[f64; 2]>,
     /// The measured value and the rule's required value, in [`Violation::unit`].
@@ -144,6 +145,24 @@ pub fn rule_check(
             required: None,
             source: source_of(&d.source),
         })
+        .chain(
+            crate::schematic::check::findings(&crate::schematic::layout(&project.netlist))
+                .into_iter()
+                .map(|f| Violation {
+                    check: "schematic".into(),
+                    code: f.code.into(),
+                    severity: "warning".into(),
+                    message: format!("{} ({})", f.message, f.sheet),
+                    rule: None,
+                    unit: None,
+                    items: f.items,
+                    layer: None,
+                    at_mm: Some(f.at_mm),
+                    actual: None,
+                    required: None,
+                    source: None,
+                }),
+        )
         .collect();
     let mut diagnostics = Vec::new();
     let drc = project.layout.as_ref().and_then(|layout| {

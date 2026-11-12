@@ -56,7 +56,7 @@ pub fn common() -> Catalog {
             "section",
             &[Part, Assembly, Circuit, CircuitLayout, Fea],
         )
-        .desc("Cut the view with one or more section planes.")
+        .desc("Cut the view with one or more section planes; flip one to keep the side below or behind it (a floor plan).")
         .kw(&["cut", "clip", "cross section"])
         .inputs(vec![
             choice(
@@ -71,6 +71,9 @@ pub fn common() -> Catalog {
             ),
             pick("reference", "Reference", &[K::Plane, K::Face]).shown("plane", &["selection"]),
             offset("offset", "Offset", 0.0).drag(Manipulator::Arrow),
+            // Flipped, the cut keeps the other side: a Top section then shows the floor plan
+            // below the plane instead of what is above it.
+            flag("flip", "Keep the other side", false),
             flag("second", "Second plane", false),
             choice(
                 "second_plane",

@@ -1009,9 +1009,9 @@ This file is generated from the command catalog.
 - `view.representation`: Choose how components load and draw in this view.
   - Required: `representation` (one of `full`, `display`, `envelope`, `defeatured`, default `full`)
 - `view.right`: Look at the model from the right.
-- `view.section`: Cut the view with one or more section planes.
+- `view.section`: Cut the view with one or more section planes; flip one to keep the side below or behind it (a floor plan).
   - Required: `plane` (one of `front`, `top`, `right`, `selection`, default `front`); `reference` (pick: plane or face) when `plane` is selection; `offset` (number in mm, default 0); `second_plane` (one of `front`, `top`, `right`, default `top`) when `second` is true
-  - Optional: `second` (true or false, default false); `cap` (true or false, default true)
+  - Optional: `flip` (true or false, default false); `second` (true or false, default false); `cap` (true or false, default true)
 - `view.section-off`: Remove the section planes.
 - `view.select-filter`: Choose what clicks in the view select.
   - Required: `filter` (one of `any`, `body`, `face`, `edge`, `vertex`, `feature`, `sketch`, default `any`)
