@@ -166,12 +166,7 @@ async fn wait_stopped(client: &LocalSupervisorClient, root: &std::path::Path) {
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
                 ) =>
                 {
-                    if runmat_filesystem::ExclusiveFileLock::try_acquire(
-                        &root.join("supervisor.lock"),
-                    )
-                    .unwrap()
-                    .is_some()
-                    {
+                    if fixture::supervisor_stopped(root) {
                         return;
                     }
                 }
