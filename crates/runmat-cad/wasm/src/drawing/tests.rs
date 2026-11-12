@@ -531,3 +531,94 @@ fn a_view_can_leave_its_centerlines_out() {
     assert_ne!(off, DRAWING);
     assert_eq!(centers(&off), 0);
 }
+
+/// On an assembly view, a dimension and a level mark name faces of the assembly's occurrences:
+/// the value is measured where the assembly places each one, the sheet draws the dimension,
+/// and a reference to a face the occurrence's part lacks is reported.
+#[test]
+fn assembly_view_annotations_measure_their_occurrences_where_they_are_placed() {
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 25 mm] } }\n    }\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 2], projection = third_angle }\n    view front = standard(orientation = front, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation overall = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l2)], occurrences = [[{ name = a }], [{ name = b }]], view = front)\n    annotation top_b = level(label = \"TOP OF B\", on = feature.body.face.end, occurrence = [{ name = b }], view = front)\n    annotation swing = door_swing(door = [{ name = b }], hinge = start, swing = negative, view = front)\n    annotation bad = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l7)], occurrences = [[{ name = a }], [{ name = b }]], view = front)\n}\n";
+    let files: Files = [
+        ("/p/bracket.part".to_owned(), BRACKET.to_owned()),
+        ("/p/rig.assembly".to_owned(), rig.to_owned()),
+    ]
+    .into();
+    let out: Value =
+        serde_json::from_str(&compile_json("/p/rig.drawing", drawing, &files)).unwrap();
+    let data = &out["projection"]["data"];
+    assert_eq!(data["text"]["overall"], "180", "{}", data["diagnostics"]);
+    assert_eq!(data["text"]["top_b"], "EL. 35", "{}", data["diagnostics"]);
+    assert_eq!(data["resolved"]["bad"], false);
+    assert!(
+        data["diagnostics"]
+            .to_string()
+            .contains("doesn't have"),
+        "{}",
+        data["diagnostics"]
+    );
+    let swing = &data["swings"]["swing"];
+    assert!(swing["arc"].as_array().is_some_and(|a| a.len() == 17), "{swing}");
+    let layout = &data["layouts"]["1"];
+    let dims = layout["dimensions"].as_array().unwrap();
+    assert!(
+        dims.iter().any(|d| d["id"] == "overall" && d["text"] == "180"),
+        "{}",
+        layout["dimensions"]
+    );
+    let drawn = |id: &str| {
+        layout["primitives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == format!("annotation:{id}"))
+    };
+    assert!(drawn("top_b") && drawn("swing"));
+    assert!(layout["primitives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["shape"]["text"] == "TOP OF B"));
+}
+
+/// Grids read the datum planes a skeleton occurrence publishes: the row between them measures
+/// the planes' spacing, and each grid ends in a bubble with its label; a level mark reads a
+/// published level datum's height.
+#[test]
+fn grids_and_level_marks_read_a_skeleton_s_published_datums() {
+    let skeleton = "runmat 0.7\nstd 1\n\npart skel {\n    feature g1 = plane.offset(base = origin.yz, distance = 0 mm)\n    feature g2 = plane.offset(base = origin.yz, distance = 120 mm)\n    feature g3 = plane.offset(base = origin.yz, distance = 200 mm)\n    feature floor = plane.offset(base = origin.xy, distance = 30 mm)\n    publish grid_1 = datum(datum = { datum = feature, feature = g1 })\n    publish grid_2 = datum(datum = { datum = feature, feature = g2 })\n    publish grid_3 = datum(datum = { datum = feature, feature = g3 })\n    publish floor = datum(datum = { datum = feature, feature = floor })\n}\n";
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part skel as skeleton\n    use part bracket as a\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 2], projection = third_angle }\n    view top = standard(orientation = top, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    view front = standard(orientation = front, sheet = \"1\", model = { assembly = rig }, at = [150, 60], display = visible_lines)\n    annotation grids = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3], labels = [\"1\", \"2\", \"3\"], view = top)\n    annotation floor = level(label = \"FLOOR\", datum = floor, occurrence = [{ name = skeleton }], view = front)\n    annotation nope = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_9], labels = [\"1\", \"9\"], view = top)\n}\n";
+    let files: Files = [
+        ("/p/bracket.part".to_owned(), BRACKET.to_owned()),
+        ("/p/skel.part".to_owned(), skeleton.to_owned()),
+        ("/p/rig.assembly".to_owned(), rig.to_owned()),
+    ]
+    .into();
+    let out: Value =
+        serde_json::from_str(&compile_json("/p/rig.drawing", drawing, &files)).unwrap();
+    let data = &out["projection"]["data"];
+    assert_eq!(data["text"]["grids"], "120 · 80", "{}", data["diagnostics"]);
+    assert_eq!(data["text"]["floor"], "EL. 30", "{}", data["diagnostics"]);
+    assert_eq!(data["resolved"]["nope"], false);
+    assert!(data["diagnostics"].to_string().contains("publishes no datum `grid_9`"));
+    let layout = &data["layouts"]["1"];
+    let prims = layout["primitives"].as_array().unwrap();
+    let bubbles = prims
+        .iter()
+        .filter(|p| p["id"] == "annotation:grids" && p["shape"]["type"] == "circle")
+        .count();
+    assert_eq!(bubbles, 3);
+    for label in ["1", "2", "3"] {
+        assert!(prims
+            .iter()
+            .any(|p| p["id"] == "annotation:grids" && p["shape"]["text"] == label));
+    }
+    let row: Vec<&Value> = layout["dimensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["id"] == "grids")
+        .collect();
+    assert_eq!(row.len(), 2, "{}", layout["dimensions"]);
+}

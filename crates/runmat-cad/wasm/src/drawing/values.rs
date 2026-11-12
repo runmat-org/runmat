@@ -10,6 +10,7 @@
 //! dropped (`80`, `12.5`); dimensions print in the drawing's units when its format sets them
 //! (`9'-1 1/8"`, [`runmat_cad::drawing::units`]).
 
+use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::AnnotationValues;
 use runmat_cad::drawing::{ArcCondition, DimensionStyle, ModelRef};
 use runmat_cad::model::PartDocument;
@@ -29,6 +30,41 @@ pub struct Values<'a> {
     pub documents: &'a BTreeMap<String, PartDocument>,
     /// The units dimension values print in (the drawing's sheet formats').
     pub units: runmat_cad::drawing::units::DrawingUnits,
+    /// Assembly occurrences the annotations name, each its faces placed in the assembly
+    /// ([`super::occurrences::scoped`]), by [`scoped_key`].
+    pub scoped: &'a BTreeMap<String, Value>,
+}
+
+/// The key a scoped occurrence display is kept under: the model file as the view wrote it and
+/// the occurrence path.
+pub fn scoped_key(file: &str, path: &str) -> String {
+    format!("{file}#{path}")
+}
+
+impl Values<'_> {
+    /// The faces a dimension's entities name: on the drawn part, or on each entity's occurrence
+    /// of the drawn assembly.
+    fn faces(
+        &self,
+        model: &ModelRef,
+        occurrences: &[RelPath],
+        entities: &[Vec<EntityName>],
+    ) -> Vec<(Vec<P3>, &Value)> {
+        let file = model.file.as_str();
+        entities
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                let display = if occurrences.is_empty() {
+                    self.displays.get(file)?
+                } else {
+                    self.scoped
+                        .get(&scoped_key(file, &occurrences.get(i)?.to_string()))?
+                };
+                face(display, &text_of(e.first()?)?)
+            })
+            .collect()
+    }
 }
 
 /// A number as a drawing prints it: two decimals at most, trailing zeros dropped.
@@ -227,15 +263,10 @@ impl AnnotationValues for Values<'_> {
         &self,
         model: &ModelRef,
         style: DimensionStyle,
+        occurrences: &[RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
-        let display = self.displays.get(model.file.as_str())?;
-        let faces: Vec<(Vec<P3>, &Value)> = entities
-            .iter()
-            .filter_map(|e| e.first())
-            .filter_map(text_of)
-            .filter_map(|t| face(display, &t))
-            .collect();
+        let faces = self.faces(model, occurrences, entities);
         match (style, faces.as_slice()) {
             (DimensionStyle::Radius, [(_, surface)]) => {
                 cylinder(surface).map(|(_, _, r)| format!("R{}", self.units.length(r)))
@@ -270,20 +301,15 @@ impl AnnotationValues for Values<'_> {
         model: &ModelRef,
         style: DimensionStyle,
         condition: ArcCondition,
+        occurrences: &[RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
         let sign = match condition {
-            ArcCondition::Center => return self.dimension(model, style, entities),
+            ArcCondition::Center => return self.dimension(model, style, occurrences, entities),
             ArcCondition::Min => -1.0,
             ArcCondition::Max => 1.0,
         };
-        let display = self.displays.get(model.file.as_str())?;
-        let faces: Vec<(Vec<P3>, &Value)> = entities
-            .iter()
-            .filter_map(|e| e.first())
-            .filter_map(text_of)
-            .filter_map(|t| face(display, &t))
-            .collect();
+        let faces = self.faces(model, occurrences, entities);
         let [a, b] = faces.as_slice() else {
             return None;
         };
@@ -293,6 +319,17 @@ impl AnnotationValues for Values<'_> {
             .map(|(_, _, r)| r)
             .sum();
         Some(self.units.length(linear(a, b)? + sign * radii))
+    }
+
+    fn elevation(&self, model: &ModelRef, occurrence: &RelPath, on: &Reference) -> Option<String> {
+        let file = model.file.as_str();
+        let display = if occurrence.is_empty() {
+            self.displays.get(file)?
+        } else {
+            self.scoped.get(&scoped_key(file, &occurrence.to_string()))?
+        };
+        let p = super::point_of(display, on)?;
+        Some(format!("EL. {}", self.units.elevation(p[2])))
     }
 
     fn tolerance_frame(&self, model: &ModelRef, tolerance: &str) -> Option<String> {

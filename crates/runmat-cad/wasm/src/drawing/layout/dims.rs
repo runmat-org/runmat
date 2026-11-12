@@ -87,14 +87,20 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
         .flatten()
     {
         let kind = &a["kind"];
-        let style = kind["style"].as_str().unwrap_or("");
+        // A plan's grids measure as a chain between neighbouring grid lines.
+        let grids = kind["annotation"] == "grids";
+        let style = if grids {
+            "chain"
+        } else {
+            kind["style"].as_str().unwrap_or("")
+        };
         let id = a["id"].as_str().unwrap_or("").to_owned();
         let side_on = style == "diameter"
             && views
                 .iter()
                 .find(|v| a["view"].as_str() == Some(v.name.as_str()))
                 .is_some_and(|v| side_on_diameter(data, &id, v).is_some());
-        if kind["annotation"] != "dimension"
+        if !(kind["annotation"] == "dimension" || grids)
             || !(side_on || matches!(style, "linear" | "ordinate" | "baseline" | "chain"))
         {
             continue;
@@ -112,7 +118,28 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
             continue;
         };
         let v = &views[vi];
-        let refs = kind["references"].as_array().cloned().unwrap_or_default();
+        // What each point is, for telling repeats apart: its reference, on its occurrence when
+        // the dimension names one (a grid: its datum on the occurrence).
+        let refs: Vec<Value> = if grids {
+            kind["datums"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|d| Value::String(format!("{}#{d}", kind["occurrence"])))
+                .collect()
+        } else {
+            let on = kind["occurrences"].as_array();
+            kind["references"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, r)| match on.and_then(|o| o.get(i)) {
+                    Some(o) => Value::String(format!("{o}#{r}")),
+                    None => r.clone(),
+                })
+                .collect()
+        };
         let n = refs.len();
         let pairs: Vec<(usize, usize)> = match style {
             "linear" | "ordinate" if n == 2 => vec![(0, 1)],
@@ -286,6 +313,23 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
                 st.first + ord_band + 1.5
             } else {
                 0.0
+            };
+            // Grid bubbles stand beyond the rows on the side their grids measure along.
+            let bubbles = data["document"]["annotations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|a| {
+                    a["kind"]["annotation"] == "grids"
+                        && a["view"].as_str() == Some(v.name.as_str())
+                        && dims.iter().any(|d| {
+                            d.view == vi && d.axis == axis && a["id"].as_str() == Some(d.id.as_str())
+                        })
+                });
+            let need = if bubbles {
+                need.max(st.first) + super::plan_marks::bubble_room(&st)
+            } else {
+                need
             };
             room[si] = room[si].max(need);
             offsets.insert((vi, si), offs);

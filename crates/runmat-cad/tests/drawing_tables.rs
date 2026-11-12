@@ -530,6 +530,7 @@ fn dim(refs: Vec<Reference>) -> AnnotationKind {
         group: None,
         reference: false,
         condition: Default::default(),
+        occurrences: Vec::new(),
     }
 }
 
