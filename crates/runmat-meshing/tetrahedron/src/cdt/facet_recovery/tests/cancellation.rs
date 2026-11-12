@@ -36,6 +36,9 @@ pub(in crate::cdt::facet_recovery) fn two_small_facets(
             source_edge_parameters: None,
         });
     }
+    constraints
+        .segments
+        .sort_by_key(|segment| segment.vertex_indices);
     let segments = segment_recovery(false, &constraints);
     (constraints, segments)
 }
