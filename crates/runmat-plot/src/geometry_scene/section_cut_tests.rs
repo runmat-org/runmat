@@ -261,3 +261,74 @@ fn a_cap_over_a_result_field_is_body_grey() {
         );
     }
 }
+
+/// The cube as a CAD import draws it: each face its own chunk of one mesh (body).
+fn cube_by_face() -> GeometryScene {
+    let whole = cube();
+    let indices = whole.indices.clone().unwrap();
+    let chunks = (0..6usize)
+        .map(|face| {
+            let mut chunk = GeometrySceneChunk::indexed_triangles(
+                format!("mesh_1:chunk_{face}"),
+                whole.vertices.clone(),
+                indices[face * 6..face * 6 + 6].to_vec(),
+                cad_default_material(),
+            )
+            .with_mesh_id("mesh_1")
+            .with_regions(vec![GeometrySceneRegion::new(
+                format!("face_{face}"),
+                None,
+                None,
+                vec![GeometrySceneTriangleRange::new(0, 2)],
+            )]);
+            chunk.chunk_id = format!("mesh_1:chunk_{face}");
+            chunk
+        })
+        .collect();
+    GeometryScene::new("cube-by-face", 1, chunks)
+}
+
+fn cap_nodes(presentation: &GeometryScenePresentation) -> Vec<RenderData> {
+    cube_by_face()
+        .nodes_with_presentation(presentation)
+        .into_iter()
+        .filter(|node| node.name == "Section cap")
+        .filter_map(|node| node.render_data)
+        .collect()
+}
+
+#[test]
+fn a_body_drawn_one_face_per_chunk_is_capped_across_its_chunks_in_the_body_color() {
+    let section = |cap| {
+        Some(Some(GeometrySceneSection {
+            plane: plane([0.0, 0.0, -1.0]),
+            second_plane: None,
+            cap,
+        }))
+    };
+    let plain = GeometryScenePresentation {
+        section: section(true),
+        ..Default::default()
+    };
+    let caps = cap_nodes(&plain);
+    assert_eq!(caps.len(), 1, "one cap for the one body");
+    // The whole 2 x 2 cut face, facing the removed side (+z).
+    assert!((area(&caps[0]) - 4.0).abs() < 1.0e-3, "{}", area(&caps[0]));
+    assert!(caps[0].vertices.iter().all(|v| v.normal[2] > 0.9));
+    // A load tint on a face the cut crosses (-y) leaves the cap in the body color.
+    let tinted = GeometryScenePresentation {
+        section: section(true),
+        region_highlights: vec![GeometrySceneRegionHighlight {
+            region_id: "face_2".to_string(),
+            color: Some([0.9, 0.1, 0.5, 1.0]),
+            role: None,
+            label: None,
+        }],
+        ..Default::default()
+    };
+    let colors = |caps: &[RenderData]| caps[0].vertices.iter().map(|v| v.color).collect::<Vec<_>>();
+    assert_eq!(colors(&cap_nodes(&tinted)), colors(&caps));
+    // Open, or with no section, there is no cap.
+    assert!(cap_nodes(&GeometryScenePresentation { section: section(false), ..Default::default() }).is_empty());
+    assert!(cap_nodes(&GeometryScenePresentation::default()).is_empty());
+}

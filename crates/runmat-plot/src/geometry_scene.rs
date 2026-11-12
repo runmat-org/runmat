@@ -9,7 +9,7 @@ use crate::core::{
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 mod annotations;
 mod edge_stroke;
@@ -29,6 +29,7 @@ pub use pick::{
     GeometryScenePickResult,
 };
 
+pub use edge_stroke::VIEW_EDGE_WIDTH_PX;
 pub use instances::GeometrySceneInstance;
 #[cfg(test)]
 use paint::GEOMETRY_HOVER_EDGE_COLOR;
@@ -167,6 +168,9 @@ impl GeometryScene {
         &self,
         presentation: &GeometryScenePresentation,
     ) -> Vec<SceneNode> {
+        // A section caps each body across all its chunks: a CAD import puts each face in its own
+        // chunk, and a chunk on its own is an open surface with nothing to fill.
+        let mut cap_sources: BTreeMap<Option<String>, (Material, Vec<[Vertex; 3]>)> = BTreeMap::new();
         let mut nodes: Vec<SceneNode> = self
             .chunks
             .iter()
@@ -197,7 +201,17 @@ impl GeometryScene {
                     parent: None,
                     children: Vec::new(),
                     render_data: Some(edge_stroke::widen(
-                        chunk.render_data_with_presentation(presentation),
+                        {
+                            let (render_data, cap_source) = chunk.presented(presentation, false);
+                            if let Some(source) = cap_source.filter(|_| chunk.visible) {
+                                cap_sources
+                                    .entry(chunk.mesh_id.clone())
+                                    .or_insert_with(|| (source.material.clone(), Vec::new()))
+                                    .1
+                                    .extend(triangles_of(&source));
+                            }
+                            render_data
+                        },
                         presentation.edge_width_px,
                     )),
                     bounds: chunk.bounds,
@@ -207,6 +221,7 @@ impl GeometryScene {
                 }
             })
             .collect();
+        nodes.extend(self.section_cap_nodes(presentation, &cap_sources));
         nodes.extend(self.annotation_nodes(presentation));
         nodes.extend(self.topology_selection_nodes(presentation));
         nodes
@@ -990,6 +1005,17 @@ impl GeometrySceneChunk {
         &self,
         presentation: &GeometryScenePresentation,
     ) -> RenderData {
+        self.presented(presentation, true).0
+    }
+
+    /// The chunk as `presentation` draws it. With `cap_here` a section caps the chunk's own
+    /// faces; without, the cut stays open and the faces a cap is cut from (in the cap's colors)
+    /// come back for the scene, which caps each body across all its chunks at once.
+    fn presented(
+        &self,
+        presentation: &GeometryScenePresentation,
+        cap_here: bool,
+    ) -> (RenderData, Option<RenderData>) {
         let mut render_data = self.render_data.clone();
         if presentation.rewrites_geometry_vertices() {
             // Presentation overlays rewrite CPU-side vertices/indices. A stale
@@ -1108,9 +1134,19 @@ impl GeometrySceneChunk {
             });
         }
         if let Some(section) = presentation.active_section() {
-            render_data = self.render_data_with_section(render_data, cap_source.as_ref(), section);
+            if cap_here {
+                render_data =
+                    self.render_data_with_section(render_data, cap_source.as_ref(), section);
+                cap_source = None;
+            } else {
+                let open = GeometrySceneSection {
+                    cap: false,
+                    ..section.clone()
+                };
+                render_data = self.render_data_with_section(render_data, None, &open);
+            }
         }
-        render_data
+        (render_data, cap_source)
     }
 
     /// The faces a section cap is cut from, in the body's color. A chunk whose material is

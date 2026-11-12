@@ -36,21 +36,13 @@ pub(super) fn cut(
             let cap_triangles = cap_source.map(triangles_of);
             let cap_triangles = cap_triangles.as_deref().unwrap_or(triangles.as_slice());
             let mut kept = clip_triangles(&triangles, first);
-            let mut caps = if cap {
-                section_cap(cap_triangles, first)
-            } else {
-                Vec::new()
-            };
             if let Some(second) = second {
                 let removed_by_first = as_triangles(&clip_triangles(&triangles, flipped(first)));
                 kept.extend(clip_triangles(&removed_by_first, second));
-                if cap {
-                    caps = clip_triangles(&as_triangles(&caps), flipped(second));
-                    let second_caps = section_cap(cap_triangles, second);
-                    caps.extend(clip_triangles(&as_triangles(&second_caps), flipped(first)));
-                }
             }
-            kept.extend(caps);
+            if cap {
+                kept.extend(caps(cap_triangles, first, second));
+            }
             with_vertices(render_data, kept)
         }
         PipelineType::Lines | PipelineType::LinesNoDepth => {
@@ -63,6 +55,87 @@ pub(super) fn cut(
             with_vertices(render_data, kept)
         }
         _ => render_data,
+    }
+}
+
+/// The caps where `first` (and `second`, when given) cut the closed meshes among `triangles`:
+/// with two planes, each plane's cap trimmed to where the removed corner meets it.
+pub(super) fn caps(triangles: &[[Vertex; 3]], first: Plane, second: Option<Plane>) -> Vec<Vertex> {
+    let mut caps = section_cap(triangles, first);
+    if let Some(second) = second {
+        caps = clip_triangles(&as_triangles(&caps), flipped(second));
+        let second_caps = section_cap(triangles, second);
+        caps.extend(clip_triangles(&as_triangles(&second_caps), flipped(first)));
+    }
+    caps
+}
+
+impl super::GeometryScene {
+    /// The section's caps, one node per body (mesh): each cut from the faces of all the body's
+    /// chunks together, since a CAD import gives each face its own chunk and a single face is an
+    /// open surface with no inside to fill. `cap_sources` holds each body's faces in the colors a
+    /// cap takes (body or material color, never setup tints or selection).
+    pub(super) fn section_cap_nodes(
+        &self,
+        presentation: &super::GeometryScenePresentation,
+        cap_sources: &std::collections::BTreeMap<Option<String>, (crate::core::Material, Vec<[Vertex; 3]>)>,
+    ) -> Vec<crate::core::SceneNode> {
+        let Some(section) = presentation.active_section().filter(|section| section.cap) else {
+            return Vec::new();
+        };
+        let Some(first) = super::section_plane(&section.plane) else {
+            return Vec::new();
+        };
+        let second = section.second_plane.as_ref().and_then(super::section_plane);
+        cap_sources
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (mesh_id, (material, triangles)))| {
+                let vertices = caps(triangles, first, second);
+                if vertices.is_empty() {
+                    return None;
+                }
+                let chunk_id = format!("__section_cap:{}", mesh_id.as_deref().unwrap_or("scene"));
+                let vertex_count = vertices.len();
+                let bounds = bounds_from_vertices(&vertices);
+                Some(crate::core::SceneNode {
+                    id: super::stable_node_id(
+                        &self.scene_id,
+                        self.revision,
+                        self.chunks.len() + 3 + index,
+                        &chunk_id,
+                    ),
+                    name: "Section cap".to_string(),
+                    transform: glam::Mat4::IDENTITY,
+                    visible: true,
+                    cast_shadows: false,
+                    receive_shadows: false,
+                    axes_index: 0,
+                    parent: None,
+                    children: Vec::new(),
+                    render_data: Some(RenderData {
+                        pipeline_type: PipelineType::Triangles,
+                        vertices,
+                        indices: None,
+                        gpu_vertices: None,
+                        bounds: Some(bounds),
+                        material: material.clone(),
+                        draw_calls: vec![DrawCall {
+                            vertex_offset: 0,
+                            vertex_count,
+                            index_offset: None,
+                            index_count: None,
+                            instance_count: 1,
+                        }],
+                        image: None,
+                    }),
+                    bounds,
+                    lod_levels: Vec::new(),
+                    current_lod: 0,
+                    instances: None,
+                })
+            })
+            .collect()
     }
 }
 

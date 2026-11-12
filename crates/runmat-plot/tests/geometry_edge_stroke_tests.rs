@@ -136,3 +136,72 @@ async fn edges_draw_at_their_css_pixel_width_on_the_gpu() {
         "a 3 px edge at 2x is about 6 device px: {wide_2x}"
     );
 }
+
+/// A saved geometry image (an FEA snapshot poster) through the exporter, with or without the
+/// live view's edge presentation, decoded back to RGBA.
+async fn poster(presentation: Option<&GeometryScenePresentation>, pixels_per_point: f32) -> Vec<u8> {
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
+    let mut exporter = ImageExporter::with_settings(ImageExportSettings {
+        width: WIDTH,
+        height: HEIGHT,
+        pixels_per_point,
+        ..ImageExportSettings::default()
+    })
+    .await
+    .unwrap();
+    exporter.set_theme_config(PlotThemeConfig {
+        variant: ThemeVariant::ClassicLight,
+        ..Default::default()
+    });
+    let mut camera = Camera::new();
+    camera.position = Vec3::new(0.0, 0.0, 5.0);
+    camera.target = Vec3::ZERO;
+    camera.up = Vec3::Y;
+    camera.axis_scale = Vec3::ONE;
+    camera.aspect_ratio = WIDTH as f32 / HEIGHT as f32;
+    camera.projection = ProjectionType::Orthographic {
+        left: -1.5,
+        right: 1.5,
+        bottom: -1.0,
+        top: 1.0,
+        near: 0.1,
+        far: 10.0,
+    };
+    camera.mark_dirty();
+    let png = match presentation {
+        Some(presentation) => exporter
+            .render_geometry_scene_png_bytes_with_presentation(&scene(), &camera, presentation)
+            .await
+            .unwrap(),
+        None => exporter
+            .render_geometry_scene_png_bytes_with_camera(&scene(), &camera)
+            .await
+            .unwrap(),
+    };
+    image::load_from_memory(&png).unwrap().to_rgba8().into_raw()
+}
+
+#[tokio::test]
+async fn a_poster_draws_edges_at_the_live_views_width() {
+    if std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").as_deref() != Ok("1") {
+        eprintln!("set RUNMAT_PLOT_FORCE_GPU_TESTS=1 to exercise the real renderer");
+        return;
+    }
+    if render(None, 1.0).await.is_none() {
+        eprintln!("no headless GPU adapter");
+        return;
+    }
+    let view = GeometryScenePresentation {
+        edge_width_px: Some(runmat_plot::geometry_scene::VIEW_EDGE_WIDTH_PX),
+        ..Default::default()
+    };
+    let hairline = edge_thickness(&poster(None, 2.0).await);
+    let at_2x = edge_thickness(&poster(Some(&view), 2.0).await);
+    let at_1x = edge_thickness(&poster(Some(&view), 1.0).await);
+    let widths = format!("hairline {hairline}, 2x {at_2x}, 1x {at_1x}");
+    eprintln!("poster edge widths: {widths}");
+    // The presentation's strokes scale with the poster's pixels per point: 1.25 CSS px is
+    // about 2.5 device px at 2x and never heavy, and wider than at 1x.
+    assert!((2..=4).contains(&at_2x), "{widths}");
+    assert!(at_1x < at_2x, "{widths}");
+}
