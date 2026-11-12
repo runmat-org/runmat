@@ -221,7 +221,8 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
         text.contains("\"RO.1\"]") && text.contains("measure i_ro"),
         "the daq section changed; update the scene"
     );
-    let files: Files = [("/p/daq.circuit".to_owned(), text)].into();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../runmat-circuit/tests/projects/daq");
+    let files = gather(dir, "daq.circuit", text);
     let out = call(
         "design.simulate",
         json!({ "path": "/p/daq.circuit", "maxPoints": 160 }),
@@ -252,7 +253,8 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
 #[test]
 fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
     const ESC: &str = include_str!("../../runmat-cad/wasm/tests/drone/electrical/esc/esc.circuit");
-    let files: Files = [("/p/esc.circuit".to_owned(), ESC.to_owned())].into();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../runmat-cad/wasm/tests/drone/electrical/esc");
+    let files = gather(dir, "esc.circuit", ESC.to_owned());
     let out = call(
         "design.simulate",
         json!({ "path": "/p/esc.circuit", "simulation": "current_sense", "maxPoints": 160 }),
@@ -296,6 +298,40 @@ fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
     let y = spread["yieldPercent"].as_f64().unwrap();
     assert!(y > 95.0 && y <= 100.0, "yield {y}");
     write_recording("RUNMAT_SIMULATION_SCENE_ESC_OUT", out, &files);
+}
+
+/// The circuit `entry` (with `text`) and every file it needs from `dir`, as the Desktop gathers
+/// them for a run (`runtime::dependencies`, read until nothing new is named), under `/p/`. A
+/// scene runs on exactly the files the Desktop's run of that circuit reads, so its recording's
+/// hashes are those files'.
+fn gather(dir: &str, entry: &str, text: String) -> Files {
+    let mut files: Files = [(format!("/p/{entry}"), text)].into();
+    let mut todo = vec![format!("/p/{entry}")];
+    while let Some(path) = todo.pop() {
+        let content = files[&path].clone();
+        for dep in runmat_circuit::runtime::dependencies(&path, &content) {
+            let names: Vec<String> = match dep.strip_suffix('/') {
+                Some(folder) => std::fs::read_dir(format!("{dir}{}", folder.trim_start_matches("/p")))
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| format!("{folder}/{}", e.file_name().to_string_lossy()))
+                    .collect(),
+                None => vec![dep],
+            };
+            for name in names {
+                if files.contains_key(&name) {
+                    continue;
+                }
+                let Some(rel) = name.strip_prefix("/p/") else { continue };
+                if let Ok(body) = std::fs::read_to_string(format!("{dir}/{rel}")) {
+                    files.insert(name.clone(), body);
+                    todo.push(name);
+                }
+            }
+        }
+    }
+    files
 }
 
 /// Writes a scene's report for the Desktop when `var` names a file, with its recording: when it
