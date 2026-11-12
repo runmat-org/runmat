@@ -480,6 +480,8 @@ pub fn resolve_assembly_in(
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     let mut problems = Vec::new();
     let mut digests: BTreeMap<String, String> = BTreeMap::new();
+    // Part files that failed to compile: reported once, as such, instead of "not in the project".
+    let mut failed_parts: Vec<String> = Vec::new();
     let top_path = top.path.clone();
     // Breadth-first over sub-assemblies, each definition once.
     let mut queue: Vec<(String, AssemblyDocument)> = vec![(path.to_owned(), top)];
@@ -635,7 +637,29 @@ pub fn resolve_assembly_in(
                             displays.insert(key.clone(), part.display.clone());
                             documents.insert(key.clone(), part.document.clone());
                         }
-                        Err(mut d) => problems.append(&mut d),
+                        Err(mut d) => {
+                            // A part that doesn't compile places nothing: say so at the
+                            // assembly's top too, since the part's own diagnostics name its file.
+                            for e in d.iter().filter(|e| e.severity == "error") {
+                                problems.push(Diagnostic {
+                                    path: path.to_owned(),
+                                    start: 0,
+                                    end: 0,
+                                    severity: "error".into(),
+                                    message: format!(
+                                        "{key} doesn't compile, so it draws nothing: {}",
+                                        e.message
+                                    ),
+                                });
+                            }
+                            problems.append(&mut d);
+                            failed_parts.push(
+                                runmat_cad::assembly::source::SourceError::NotFound {
+                                    file: runmat_cad::ids::FilePath::new(&key),
+                                }
+                                .to_string(),
+                            );
+                        }
                     }
                 }
             }
@@ -672,6 +696,9 @@ pub fn resolve_assembly_in(
     // What resolution could not do (a placement whose frame is missing, a pattern that does
     // not expand) is shown on the assembly, not dropped.
     for d in &resolved.diagnostics.diagnostics {
+        if failed_parts.iter().any(|missing| d.message.contains(missing)) {
+            continue;
+        }
         problems.push(Diagnostic {
             path: path.to_owned(),
             start: 0,
