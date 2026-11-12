@@ -29,6 +29,7 @@ pub mod merge;
 pub mod revision_table;
 pub mod standard;
 pub mod title_layout;
+pub mod units;
 
 use crate::assembly::bom::{Bom, BomItem, BomKind, IndentedRow};
 use crate::assembly::model::RelPath;
@@ -96,6 +97,10 @@ pub struct SheetFormat {
     /// ([`standard::DrawingStandard::style`]).
     #[serde(default, skip_serializing_if = "standard::DrawingStandard::is_iso")]
     pub standard: standard::DrawingStandard,
+    /// The units its sheets' dimensions and scale print in (`units = ft_in`; millimetres when
+    /// absent) ([`units::DrawingUnits`]).
+    #[serde(default, skip_serializing_if = "units::DrawingUnits::is_mm")]
+    pub units: units::DrawingUnits,
 }
 
 impl SheetFormat {
@@ -209,12 +214,29 @@ pub enum ViewKind {
     /// A cut through the model seen from `from`: the cutting line crosses the parent view
     /// through a point of `plane`, a face (`feature.body.face.end`) or an origin plane
     /// (`origin.xy`, `origin.yz`, `origin.zx`, through the model's origin).
+    ///
+    /// `offset` moves the cut from that point across the parent's cutting line, toward the
+    /// parent's top (or right, for a `vertical` cutting line): `offset = 4 ft` on a front
+    /// elevation cuts 4 ft above the plane's point. The section looks from the cutting line
+    /// toward the parent's top and keeps the model beyond it; `keep_other_side` looks the other
+    /// way and keeps the other side, so a horizontal cut through a front elevation is a floor
+    /// plan (the model below the cut, seen from above).
     Section {
         from: String,
         plane: crate::model::PlaneRef,
         label: String,
         #[serde(default)]
         aligned: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offset: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_other_side: bool,
+        /// The cutting line runs up the parent instead of across it: the cut's normal is the
+        /// parent's right, the section looks toward the parent's right (the other side: its
+        /// left), and `offset` moves the cut to the right. A vertical cut through a roof plan is
+        /// a cross section through the building.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        vertical: bool,
     },
     /// An enlarged circle of `from` around a model point.
     Detail {
@@ -329,6 +351,23 @@ pub struct View {
     /// lines), for assembly instructions and service views.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exploded: Option<String>,
+    /// The title under the view in place of the one its kind gives (`SECTION A-A`, `FRONT
+    /// VIEW`): `title = "FIRST FLOOR PLAN"`. A section keeps its letter on the cutting line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Whether the view draws center marks and centerlines on holes, bosses and shafts (on by
+    /// default). A floor plan sets `centerlines = false`: its posts, rods and fixtures read
+    /// without crosses.
+    #[serde(default = "drawn", skip_serializing_if = "is_drawn")]
+    pub centerlines: bool,
+}
+
+fn drawn() -> bool {
+    true
+}
+
+fn is_drawn(on: &bool) -> bool {
+    *on
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,6 +418,26 @@ impl ArcCondition {
     }
 }
 
+/// The end of a door's opening its leaf hangs from, along the door's x.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Hinge {
+    /// At the door's x = 0.
+    Start,
+    /// At the far end of the opening.
+    End,
+}
+
+/// The side of the wall a door's leaf opens to, along the door's y.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Swing {
+    /// Toward the door's +y.
+    Positive,
+    /// Toward the door's -y.
+    Negative,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "annotation")]
 pub enum AnnotationKind {
@@ -398,6 +457,43 @@ pub enum AnnotationKind {
         /// the near or far side of its outline, as an overall length over two bosses measures.
         #[serde(default, skip_serializing_if = "ArcCondition::is_center")]
         condition: ArcCondition,
+        /// On an assembly view, the occurrence each reference names a face of, one per
+        /// reference and in the same order: `occurrences = [[{ name = framing }, { name =
+        /// wall_1_l1 }], …]`. Empty on a part view, whose references name the part's own faces.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        occurrences: Vec<RelPath>,
+    },
+    /// A level mark on an elevation or section: a line out from a level to the mark, its
+    /// `label` above the line and the level's height below it (`EL. 10'-1 3/4"`), measured from
+    /// the model's origin. The level is the face `on` (of the occurrence `occurrence` on an
+    /// assembly view), or the datum plane `datum` the occurrence publishes (a skeleton's
+    /// `second_floor`): one of the two.
+    Level {
+        label: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<Reference>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        datum: Option<String>,
+        #[serde(default, skip_serializing_if = "RelPath::is_empty")]
+        occurrence: RelPath,
+    },
+    /// A plan's grid lines: the datum planes the occurrence `occurrence` publishes (a
+    /// skeleton's `grid_1` … `grid_5`), each drawn as a chain line across the view with its
+    /// label in a bubble at the end on the mark's side, and a row of dimensions between
+    /// neighbouring grids. `datums` and `labels` pair up in order.
+    Grids {
+        occurrence: RelPath,
+        datums: Vec<String>,
+        labels: Vec<String>,
+    },
+    /// A door's swing on a plan, drawn from the door occurrence `door`: the leaf open 90° from
+    /// its hinge and a quarter arc from the leaf's end to the closed position. The leaf is the
+    /// door's thinnest body across the wall; `hinge` is the end of the opening it hangs from
+    /// along the door's x, `swing` the side of the wall it opens to along the door's y.
+    DoorSwing {
+        door: RelPath,
+        hinge: Hinge,
+        swing: Swing,
     },
     HoleCallout {
         hole: Reference,
@@ -550,6 +646,20 @@ pub trait ModelReferences {
     fn property(&self, model: &ModelRef, name: &PropertyName) -> Option<String>;
     /// Whether an occurrence exists in the model (assembly views).
     fn occurrence(&self, model: &ModelRef, path: &RelPath) -> bool;
+    /// The entities a reference names on the part of the occurrence `path` in the assembly
+    /// `model`, or why it does not resolve.
+    fn resolve_in(
+        &self,
+        _model: &ModelRef,
+        path: &RelPath,
+        _reference: &Reference,
+    ) -> Result<Vec<Vec<EntityName>>, String> {
+        Err(format!("can't be read on the occurrence `{path}`"))
+    }
+    /// The datums the part of the occurrence `path` publishes, where the model knows them.
+    fn published_datums(&self, _model: &ModelRef, _path: &RelPath) -> Option<BTreeSet<String>> {
+        None
+    }
     /// PMI names the model declares: (tolerances, sizes and locations, datums).
     fn pmi(&self, model: &ModelRef) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
     /// The geometric characteristic of the model's PMI tolerance `name`, where the model
@@ -944,12 +1054,15 @@ pub fn check_drawing_with(
         };
         let (tols, sizes, datums) = model.pmi(&v.model);
         let mut refs: Vec<(&str, &Reference)> = Vec::new();
+        // References on an assembly view's occurrences: (parameter, occurrence, reference).
+        let mut on_occurrences: Vec<(&str, &RelPath, &Reference)> = Vec::new();
         match &a.kind {
             AnnotationKind::Dimension {
                 style,
                 references,
                 pmi,
                 condition,
+                occurrences,
                 ..
             } => {
                 if !condition.is_center()
@@ -990,7 +1103,138 @@ pub fn check_drawing_with(
                         err(&mut rep, DiagCode::DrawingReference, s("pmi"), format!("dimension `{}` inherits tolerance `{}`, a size or location the model does not declare", a.id, p));
                     }
                 }
-                refs.extend(references.iter().map(|r| ("references", r)));
+                if occurrences.is_empty() {
+                    refs.extend(references.iter().map(|r| ("references", r)));
+                } else if occurrences.len() != references.len() {
+                    err(
+                        &mut rep,
+                        DiagCode::DrawingInvalid,
+                        s("occurrences"),
+                        format!(
+                            "dimension `{}` names {} occurrences for {} references; it takes one per reference",
+                            a.id,
+                            occurrences.len(),
+                            references.len()
+                        ),
+                    );
+                    continue;
+                } else {
+                    on_occurrences.extend(
+                        occurrences
+                            .iter()
+                            .zip(references)
+                            .map(|(o, r)| ("references", o, r)),
+                    );
+                }
+            }
+            AnnotationKind::Level {
+                on,
+                datum,
+                occurrence,
+                ..
+            } => match (on, datum) {
+                (Some(on), None) if occurrence.is_empty() => refs.push(("on", on)),
+                (Some(on), None) => on_occurrences.push(("on", occurrence, on)),
+                (None, Some(datum)) if !occurrence.is_empty() => {
+                    if !model.occurrence(&v.model, occurrence) {
+                        err(
+                            &mut rep,
+                            DiagCode::DrawingReference,
+                            s("occurrence"),
+                            format!(
+                                "level `{}` reads `{}`, which is not in the model",
+                                a.id, occurrence
+                            ),
+                        );
+                        continue;
+                    }
+                    if model
+                        .published_datums(&v.model, occurrence)
+                        .is_some_and(|p| !p.contains(datum))
+                    {
+                        err(
+                            &mut rep,
+                            DiagCode::DrawingReference,
+                            s("datum"),
+                            format!(
+                                "level `{}`: `{}` publishes no datum `{}`",
+                                a.id, occurrence, datum
+                            ),
+                        );
+                        continue;
+                    }
+                }
+                _ => {
+                    err(
+                        &mut rep,
+                        DiagCode::DrawingInvalid,
+                        s("on"),
+                        format!(
+                            "level `{}` takes a face (`on`) or an occurrence's datum (`datum` with `occurrence`), one of the two",
+                            a.id
+                        ),
+                    );
+                    continue;
+                }
+            },
+            AnnotationKind::Grids {
+                occurrence,
+                datums,
+                labels,
+            } => {
+                if datums.len() != labels.len() || datums.len() < 2 {
+                    err(
+                        &mut rep,
+                        DiagCode::DrawingInvalid,
+                        s("labels"),
+                        format!(
+                            "grids `{}` take two or more datums with a label each; it has {} datums and {} labels",
+                            a.id,
+                            datums.len(),
+                            labels.len()
+                        ),
+                    );
+                }
+                if !model.occurrence(&v.model, occurrence) {
+                    err(
+                        &mut rep,
+                        DiagCode::DrawingReference,
+                        s("occurrence"),
+                        format!(
+                            "grids `{}` read `{}`, which is not in the model",
+                            a.id, occurrence
+                        ),
+                    );
+                    continue;
+                }
+                if let Some(published) = model.published_datums(&v.model, occurrence) {
+                    if let Some(missing) = datums.iter().find(|d| !published.contains(*d)) {
+                        err(
+                            &mut rep,
+                            DiagCode::DrawingReference,
+                            s("datums"),
+                            format!(
+                                "grids `{}`: `{}` publishes no datum `{}`",
+                                a.id, occurrence, missing
+                            ),
+                        );
+                        continue;
+                    }
+                }
+            }
+            AnnotationKind::DoorSwing { door, .. } => {
+                if !model.occurrence(&v.model, door) {
+                    err(
+                        &mut rep,
+                        DiagCode::DrawingReference,
+                        s("door"),
+                        format!(
+                            "door swing `{}` is for `{}`, which is not in the model",
+                            a.id, door
+                        ),
+                    );
+                    continue;
+                }
             }
             AnnotationKind::HoleCallout { hole } => refs.push(("hole", hole)),
             AnnotationKind::Gdt { tolerance } => {
@@ -1136,6 +1380,28 @@ pub fn check_drawing_with(
                 }
             }
         }
+        for (param, path, r) in on_occurrences {
+            let found = if model.occurrence(&v.model, path) {
+                model.resolve_in(&v.model, path, r)
+            } else {
+                Err("is on an occurrence the model doesn't have".to_owned())
+            };
+            match found {
+                Ok(e) => all.extend(e),
+                Err(m) => {
+                    dangling = true;
+                    err(
+                        &mut rep,
+                        DiagCode::DrawingReference,
+                        s(param),
+                        format!(
+                            "annotation `{}` on view `{}`: `{}` on `{}` {}",
+                            a.id, a.view, r, path, m
+                        ),
+                    );
+                }
+            }
+        }
         if !dangling {
             rep.resolved.insert(a.id.clone(), all);
         }
@@ -1159,7 +1425,7 @@ pub fn check_drawing_with(
                 FieldSource::Literal { text } => text.clone(),
                 FieldSource::SheetNumber => (i + 1).to_string(),
                 FieldSource::SheetCount => count.to_string(),
-                FieldSource::Scale => format!("{}:{}", sh.scale.0, sh.scale.1),
+                FieldSource::Scale => f.units.scale(sh.scale),
                 FieldSource::Image { .. } => String::new(),
                 FieldSource::Revision => model_of
                     .and_then(|m| model.property(m, &PropertyName::new("revision")))

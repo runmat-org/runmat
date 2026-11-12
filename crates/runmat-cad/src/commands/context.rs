@@ -38,9 +38,9 @@ pub(super) fn add(catalog: &mut Catalog) {
             "references",
             P,
         )
-        .desc("List what the item is built on and what is built on it.")
+        .desc("List what the feature is built on and what is built on it.")
         .kw(&["dependencies", "references"])
-        .when(selected_one(&[K::Feature, K::Sketch, K::Body]))
+        .when(selected_one(&[K::Feature, K::Sketch]))
         .edit(analyze("parents_children")),
         cmd("part.where-used", "Where used", "where-used", P)
             .desc(

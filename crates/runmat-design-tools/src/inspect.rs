@@ -573,6 +573,7 @@ fn evaluated_with(
     let request = runmat_cad_wasm::analyze::AnalyzeRequest {
         command: command.to_owned(),
         values,
+        selection: Vec::new(),
     };
     let a = runmat_cad_wasm::analyze::analyze(path, text, files, &request)?;
     Ok(json!({ "summary": a.summary, "result": a.data, "problems": a.problems }))

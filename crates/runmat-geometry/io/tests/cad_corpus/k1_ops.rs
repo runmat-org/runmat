@@ -791,6 +791,8 @@ fn k1_hole_table_reads_the_regenerated_part() {
         display: Display::VisibleLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
     };
     let t = hole_table("holes", &HoleTableSpec::default(), &view, &corner, &g);
     let rows: Vec<(String, String)> = t

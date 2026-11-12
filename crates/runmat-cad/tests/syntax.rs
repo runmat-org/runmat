@@ -207,12 +207,15 @@ fn drawing() -> DrawingDocument {
         display: Display::HiddenLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),
         header: Default::default(),
         formats: vec![SheetFormat {
             standard: Default::default(),
+            units: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![
@@ -268,6 +271,9 @@ fn drawing() -> DrawingDocument {
                     },
                     label: "A".into(),
                     aligned: false,
+                    offset: None,
+                    keep_other_side: false,
+                    vertical: false,
                 },
             ),
             View {
@@ -302,6 +308,7 @@ fn drawing() -> DrawingDocument {
                     group: None,
                     reference: false,
                     condition: Default::default(),
+                    occurrences: Vec::new(),
                 },
                 at: [0.0, 0.0],
             },
@@ -820,3 +827,86 @@ fn adding_a_publish_and_removing_it_restores_the_source() {
 
 #[allow(dead_code)]
 fn unused(_: BTreeMap<(), ()>, _: RelPath) {}
+
+#[test]
+fn a_section_view_keeps_its_title_offset_and_sides_through_text() {
+    let document: DrawingDocument = serde_json::from_value(serde_json::json!({
+        "path": "plans.drawing",
+        "formats": [{ "name": "d", "size": { "size": "ansi", "name": "D" }, "title_block": [], "units": "ft_in" }],
+        "sheets": [{ "name": "1", "format": "d", "scale": [1, 48], "projection": "third_angle" }],
+        "views": [
+            { "name": "key", "sheet": "1", "model": { "file": "house.part" }, "at": [80.0, 400.0], "display": "visible_lines",
+              "kind": { "view": "standard", "orientation": "front" }, "title": "KEY" },
+            { "name": "first", "sheet": "1", "model": { "file": "house.part" }, "at": [300.0, 300.0], "display": "visible_lines",
+              "kind": { "view": "section", "from": "key", "plane": { "on": "datum", "datum": { "datum": "origin_plane", "plane": "xy" } }, "label": "A",
+                        "offset": { "form": "quantity", "value": 4.0, "unit": "ft" }, "keep_other_side": true },
+              "title": "FIRST FLOOR PLAN" }
+        ],
+        "annotations": [],
+        "tables": []
+    }))
+    .expect("the document reads");
+    let text = runmat_cad::syntax::print_drawing(&document, &[]).expect("prints");
+    assert!(
+        text.contains("title = \"FIRST FLOOR PLAN\"") && text.contains("units = ft_in"),
+        "{text}"
+    );
+    let parsed = reparse_drawing("plans.drawing", &text, &document);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "{text}\n{:#?}",
+        parsed.diagnostics
+    );
+    assert_eq!(parsed.document.expect("parses"), document);
+}
+
+#[test]
+fn assembly_view_annotations_name_their_occurrences_through_text() {
+    let text = r#"runmat 0.7
+std 1
+
+drawing plans {
+    format d = { size = { size = ansi, name = D }, title_block = [], units = ft_in }
+    sheet "1" = { format = d, scale = [1, 48], projection = third_angle }
+    view plan = standard(orientation = top, sheet = "1", model = { assembly = house }, at = [300, 300], display = visible_lines)
+    annotation overall = dimension(style = linear, references = [feature.body.face.side(s.e0), feature.body.face.side(s.e2)], occurrences = [[{ name = framing }, { name = wall_1 }], [{ name = framing }, { name = wall_5 }]], view = plan)
+    annotation slab = level(label = "T.O. SLAB", on = feature.body.face.end, occurrence = [{ name = slab }], view = plan, at = [40, 200])
+    annotation floor2 = level(label = "2ND FLOOR", datum = second_floor, occurrence = [{ name = skeleton }], view = plan)
+    annotation grids_ew = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2], labels = ["1", "2"], view = plan)
+    annotation swing_1 = door_swing(door = [{ name = interior }, { name = door_1 }], hinge = end, swing = negative, view = plan)
+}
+"#;
+    let scope = stub_scope(
+        "plans.drawing",
+        text,
+        &serde_json::json!({ "model": { "file": "house.assembly" } }),
+    );
+    let parsed = runmat_cad::syntax::parse_drawing_in("plans.drawing", text, &scope);
+    assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+    let document = parsed.document.expect("parses");
+    let kinds: Vec<&AnnotationKind> = document.annotations.iter().map(|a| &a.kind).collect();
+    match kinds[0] {
+        AnnotationKind::Dimension { occurrences, .. } => assert_eq!(
+            occurrences,
+            &vec![
+                RelPath::new(&["framing", "wall_1"]),
+                RelPath::new(&["framing", "wall_5"])
+            ]
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(kinds[1], AnnotationKind::Level { label, occurrence, .. }
+        if label == "T.O. SLAB" && occurrence == &RelPath::new(&["slab"])));
+    assert!(matches!(kinds[2], AnnotationKind::Level { datum: Some(d), on: None, .. } if d == "second_floor"));
+    let kinds: Vec<&AnnotationKind> = kinds.into_iter().filter(|k| !matches!(k, AnnotationKind::Level { on: None, .. })).collect();
+    assert!(matches!(kinds[2], AnnotationKind::Grids { datums, labels, .. }
+        if datums.len() == 2 && labels == &vec!["1".to_owned(), "2".to_owned()]));
+    assert!(matches!(
+        kinds[3],
+        AnnotationKind::DoorSwing { hinge: Hinge::End, swing: Swing::Negative, .. }
+    ));
+    let printed = print_drawing(&document, &[]).expect("prints");
+    let again = reparse_drawing("plans.drawing", &printed, &document);
+    assert!(again.diagnostics.is_empty(), "{printed}\n{:#?}", again.diagnostics);
+    assert_eq!(again.document.expect("parses"), document);
+}

@@ -255,11 +255,50 @@ pub fn color_output_bodies(
     display: &mut crate::display::PartDisplay,
 ) {
     color_outputs(doc, result, display);
+    name_body_materials(doc, result, display);
     for (m, o) in doc.materials.iter().zip(&result.materials) {
         let rgba = material_appearance(Some(m.material.0.as_str())).1;
         for b in assigned_bodies(result, o) {
             if let Some(body) = display.bodies.iter_mut().find(|d| d.index as usize == b) {
                 body.color.get_or_insert(rgba);
+            }
+        }
+    }
+}
+
+/// Names each body's material, which a section view hatches its cut by: a `material = { body,
+/// material }` statement's first, then its output's, then, in a one-output part, the part's.
+fn name_body_materials(
+    doc: &crate::model::PartDocument,
+    result: &crate::regen::engine::RegenResult,
+    display: &mut crate::display::PartDisplay,
+) {
+    let mut name = |b: usize, material: &str| {
+        if let Some(body) = display.bodies.iter_mut().find(|d| d.index as usize == b) {
+            body.material.get_or_insert_with(|| material.to_owned());
+        }
+    };
+    for (m, o) in doc.materials.iter().zip(&result.materials) {
+        for b in assigned_bodies(result, o) {
+            name(b, &m.material.0);
+        }
+    }
+    for p in &doc.parts {
+        let Some(material) = &p.material else {
+            continue;
+        };
+        if let Some(b) = result
+            .parts
+            .get(&p.name)
+            .and_then(|o| crate::regen::slots::resolved_body(result, o))
+        {
+            name(b, &material.0);
+        }
+    }
+    if let [only] = doc.parts.as_slice() {
+        if let Some(material) = &only.material {
+            for body in display.bodies.iter_mut().filter(|b| !b.flat_pattern) {
+                body.material.get_or_insert_with(|| material.0.clone());
             }
         }
     }

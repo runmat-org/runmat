@@ -363,6 +363,8 @@ fn top_view() -> View {
         display: Display::VisibleLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
     }
 }
 
@@ -528,6 +530,7 @@ fn dim(refs: Vec<Reference>) -> AnnotationKind {
         group: None,
         reference: false,
         condition: Default::default(),
+        occurrences: Vec::new(),
     }
 }
 
@@ -553,6 +556,7 @@ fn drawing() -> DrawingDocument {
         header: Default::default(),
         formats: vec![SheetFormat {
             standard: Default::default(),
+            units: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![],

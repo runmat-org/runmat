@@ -7,6 +7,7 @@ use super::{
     check_drawing, AnnotationKind, ArcCondition, DimensionStyle, DrawingDocument, ModelRef,
     ModelReferences,
 };
+use crate::assembly::model::RelPath;
 use crate::diagnostics::Diagnostic;
 use crate::refs::name::EntityName;
 use crate::refs::reference::Reference;
@@ -23,6 +24,7 @@ pub trait AnnotationValues {
         &self,
         _model: &ModelRef,
         _style: DimensionStyle,
+        _occurrences: &[RelPath],
         _entities: &[Vec<EntityName>],
     ) -> Option<String> {
         None
@@ -34,12 +36,24 @@ pub trait AnnotationValues {
         model: &ModelRef,
         style: DimensionStyle,
         condition: ArcCondition,
+        occurrences: &[RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
         match condition {
-            ArcCondition::Center => self.dimension(model, style, entities),
+            ArcCondition::Center => self.dimension(model, style, occurrences, entities),
             ArcCondition::Min | ArcCondition::Max => None,
         }
+    }
+    /// A level mark's height, as the mark prints it under its line (`EL. 10'-1 3/4"`): the
+    /// height of the face `on` (of the occurrence `occurrence`, when not empty) above the
+    /// model's origin.
+    fn elevation(
+        &self,
+        _model: &ModelRef,
+        _occurrence: &RelPath,
+        _on: &Reference,
+    ) -> Option<String> {
+        None
     }
     /// A PMI tolerance's feature control frame as text: symbol, value and datums.
     fn tolerance_frame(&self, _model: &ModelRef, _tolerance: &str) -> Option<String> {
@@ -110,11 +124,12 @@ pub fn build_drawing_index(
                     pmi,
                     reference,
                     condition,
+                    occurrences,
                     ..
                 } => {
                     let tolerance = pmi.as_ref().and_then(|name| values.pmi_tolerance(at, name));
                     let value = match (
-                        values.dimension_to(at, *style, *condition, entities),
+                        values.dimension_to(at, *style, *condition, occurrences, entities),
                         tolerance,
                     ) {
                         (Some(v), Some(t)) => format!("{v} {t}"),
@@ -148,6 +163,14 @@ pub fn build_drawing_index(
                 },
                 AnnotationKind::CenterMark { .. } => "Center mark".into(),
                 AnnotationKind::Centerline { .. } => "Centerline".into(),
+                // A datum's height: the compile fills it in from the datum plane.
+                AnnotationKind::Level { on, occurrence, .. } => on
+                    .as_ref()
+                    .and_then(|on| values.elevation(at, occurrence, on))
+                    .unwrap_or_else(|| "Level".into()),
+                // The compile replaces it with the spacing its dimension row prints.
+                AnnotationKind::Grids { labels, .. } => format!("Grids {}", labels.join(", ")),
+                AnnotationKind::DoorSwing { .. } => "Door swing".into(),
             };
             Some((a.id.clone(), shown))
         })

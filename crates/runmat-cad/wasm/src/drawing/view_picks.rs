@@ -288,18 +288,21 @@ pub fn broken_out(
         hidden: clip(&parent.hidden, &poly, false),
         centers: parent.centers.clone(),
         hatch: Vec::new(),
+        hatch_symbols: Vec::new(),
     };
     out.visible.extend(clip(&cut.visible, &poly, true));
     // The cut regions inside the boundary, and the boundary itself (a thin freehand line).
-    out.hatch = cut
+    let symbols = cut.hatch_symbols.iter().copied();
+    (out.hatch, out.hatch_symbols) = cut
         .hatch
         .iter()
-        .filter_map(|h| {
+        .zip(symbols.chain(std::iter::repeat(Default::default())))
+        .filter_map(|(h, symbol)| {
             let ring: Vec<[f64; 2]> = h.chunks_exact(2).map(|p| [p[0], p[1]]).collect();
             let kept = within(&ring, &poly);
-            (kept.len() >= 3).then(|| kept.iter().flat_map(|p| [p[0], p[1]]).collect())
+            (kept.len() >= 3).then(|| (kept.iter().flat_map(|p| [p[0], p[1]]).collect(), symbol))
         })
-        .collect();
+        .unzip();
     let mut ring: Vec<f64> = poly.iter().flat_map(|p| [p[0], p[1]]).collect();
     ring.extend(poly.first().map(|p| [p[0], p[1]]).unwrap_or_default());
     out.visible.push(ring);

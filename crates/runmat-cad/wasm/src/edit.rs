@@ -11,7 +11,9 @@
 //! cut, intersect or a new body, sketch-plane or offset start, draft and thin walls),
 //! `part.delete`, `part.suppress`, `part.unsuppress` (in the active configuration when
 //! `values.configuration` names one), `part.move-up` and `part.move-down`; Properties and
-//! configuration commands ([`configuration`]); `simulate.publish` ([`publish`]).
+//! configuration commands ([`configuration`]); `simulate.publish` ([`publish`]); Rename and the
+//! rollback bar ([`history`]). While the model is rolled back, an added feature goes in at the
+//! bar.
 //! Sketches: `part.sketch` and the sketch tools ([`sketch`]).
 //! Assemblies: delete, suppress, fix, insert, move, pattern and mate ([`assembly`]). Every
 //! other part command that adds a feature is built by [`crate::features`] from
@@ -19,6 +21,7 @@
 
 pub(crate) mod assembly;
 mod configuration;
+mod history;
 mod manage;
 mod publish;
 mod sketch;
@@ -157,6 +160,11 @@ fn part_edit(
                         .iter()
                         .position(|f| f.id.0 == *id)
                         .ok_or_else(|| model(format!("the part has no feature `{id}`")))?;
+                    // The bar after a deleted feature stays after the one before it.
+                    if document.rollback_after.as_ref().is_some_and(|r| r.0 == *id) {
+                        document.rollback_after =
+                            at.checked_sub(1).map(|k| document.features[k].id.clone());
+                    }
                     document.features.remove(at);
                 }
                 Ok(())
@@ -245,6 +253,7 @@ fn part_edit(
             let place = if before { "before" } else { "after" };
             Ok((change, format!("Moved {id} {place} {anchor}")))
         }
+        "part.rollback-here" | "part.rollback-end" => history::rollback(path, text, request),
         "repair.repair" => crate::repairs::repair_part(path, text, &request.values),
         "simulate.publish" => {
             let parsed = parse_part(path, text);
@@ -450,8 +459,24 @@ pub fn edit(
                 .collect(),
             summary,
         });
+    } else if request.command == "part.rename"
+        || (request.command == "part.set-property" && request.values.contains_key("name"))
+    {
+        // Properties' Name field renames through the same handler as Rename.
+        let (change, summary, others) = history::rename(path, text, files, request)?;
+        let mut out = vec![file_change(path, text, change)];
+        out.extend(
+            others
+                .into_iter()
+                .map(|(p, old, change)| file_change(&p, &old, change)),
+        );
+        return Ok(EditOutput {
+            files: out,
+            summary,
+        });
     } else {
-        part_edit(path, text, request)?
+        let (change, summary) = part_edit(path, text, request)?;
+        (history::insert_at_bar(path, text, change)?, summary)
     };
     Ok(EditOutput {
         files: vec![file_change(path, text, change)],

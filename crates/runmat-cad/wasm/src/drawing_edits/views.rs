@@ -150,6 +150,8 @@ fn child(parent: &View, name: String, kind: ViewKind, at: [f64; 2]) -> View {
         display: parent.display,
         exclude: Vec::new(),
         exploded: None,
+        title: None,
+        centerlines: true,
     }
 }
 
@@ -218,6 +220,8 @@ pub fn edit(
                             display,
                             exclude: Vec::new(),
                             exploded: None,
+                            title: None,
+                            centerlines: true,
                         }
                     };
                 // A first view sits low left (room for dimensions under it and the title block
@@ -407,6 +411,9 @@ pub fn edit(
                     plane: runmat_cad::model::PlaneRef::Face { face: plane },
                     label: letter.clone(),
                     aligned: flag(values, "aligned", false),
+                    offset: None,
+                    keep_other_side: false,
+                    vertical: false,
                 };
                 let mut view = child(&parent, name.clone(), kind, at);
                 // Sections draw what the cut shows: no hidden lines (ISO 128-40).

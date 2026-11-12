@@ -140,6 +140,17 @@ This file is generated from the command catalog.
   - Required: `changes` (picks: change)
   - Runs on the `selection`: `eco_back_change`
 
+## `circuit.` commands (`.circuit`, `.circuit.layout`)
+
+- `circuit.delete`: Delete the selected items.
+  - Runs on the `selection`: `component`, `wire`, `track`, `via`, `zone`, `keepout`, `room`
+- `circuit.edit-value`: Set the component's value with its unit and tolerance.
+  - Required: `value` (text)
+  - Runs on the `selection`: `component`
+- `circuit.rename-net`: Rename the net; labels and ports follow.
+  - Required: `name` (text)
+  - Runs on the `selection`: `net`
+
 ## `direct.` commands (`.part`)
 
 - `direct.delete-face`: Delete faces and heal the gap from the neighbors.
@@ -393,6 +404,8 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `feature`
 - `part.move-up`: Move the feature one place earlier in the tree.
   - Runs on the `selection`: `feature`
+- `part.parents-children`: List what the feature is built on and what is built on it.
+  - Runs on the `selection`: `feature`
 - `part.pattern`: Repeat features, faces or bodies: linear, circular, curve, sketch, table, fill or variable.
   - Required: `layout` (one of `linear`, `circular`, `curve`, `sketch`, `table`, `fill`, `variable`, default `linear`); `seeds` (picks: feature or face or body); `direction` (pick: edge or axis or plane or face) when `layout` is linear or fill; `spacing` (number in mm, default 10) when `layout` is linear or fill; `instances` (whole number, default 3) when `layout` is linear or circular or curve; `direction2` (pick: edge or axis or plane) when `second_direction` is true; `spacing2` (number in mm, default 10) when `second_direction` is true; `instances2` (whole number, default 2) when `second_direction` is true; `axis` (pick: axis or edge or face) when `layout` is circular; `angle` (number in deg, default 360) when `layout` is circular; `curve` (pick: curve or edge or sketch) when `layout` is curve; `sketch` (pick: sketch) when `layout` is sketch; `table` (text) when `layout` is table or variable; `boundary` (pick: face or sketch) when `layout` is fill
   - Optional: `second_direction` (true or false, default false) when `layout` is linear; `equal_spacing` (true or false, default true) when `layout` is circular; `skip` (list of whole number, default 1)
@@ -401,6 +414,9 @@ This file is generated from the command catalog.
   - Optional: `flip` (true or false, default false)
 - `part.point`: Add a reference point.
   - Required: `type` (one of `coordinates`, `center`, `face_center`, `intersection`, `along_curve`, default `coordinates`); `references` (picks: edge or face or vertex or curve) when `type` is center or face_center or intersection or along_curve; `x` (number in mm, default 0) when `type` is coordinates; `y` (number in mm, default 0) when `type` is coordinates; `z` (number in mm, default 0) when `type` is coordinates; `parameter` (number, default 0.5) when `type` is along_curve
+- `part.rename`: Rename the item; references follow.
+  - Required: `name` (text)
+  - Runs on the `selection`: `feature`, `sketch`, `body`, `region`, `input`, `plane`, `mate_connector`
 - `part.reorder`: Move the feature before or after another one.
   - Required: `position` (one of `before`, `after`, default `before`); `anchor` (pick: feature or sketch)
   - Runs on the `selection`: `feature`, `sketch`
@@ -410,9 +426,15 @@ This file is generated from the command catalog.
 - `part.rib`: Add a thin wall from an open sketch.
   - Required: `profile` (pick: sketch); `thickness` (number in mm, default 2); `depth` (number in mm, default 10)
   - Optional: `reverse` (true or false, default false)
+- `part.rollback-end`: Move the rollback bar to the end of the tree.
+  - Runs on the `selection`: `feature`
+- `part.rollback-here`: Move the rollback bar to just after this feature.
+  - Runs on the `selection`: `feature`, `sketch`
 - `part.shell`: Hollow a body, with different thicknesses on chosen faces.
   - Required: `body` (pick: body); `thickness` (number in mm, default 2); `face_thickness` (number in mm, default 3) when `thick_faces` is set
   - Optional: `open_faces` (picks: face); `outward` (true or false, default false); `thick_faces` (picks: face)
+- `part.show-references`: Show what this item uses and what uses it.
+  - Runs on the `selection`: `feature`, `sketch`, `region`, `input`
 - `part.sketch`: Start a sketch on a plane or planar face.
   - Required: `plane` (pick: plane or face)
 - `part.split`: Split a body with a plane, face or surface.

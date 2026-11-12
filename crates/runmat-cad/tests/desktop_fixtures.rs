@@ -414,6 +414,7 @@ impl AnnotationValues for Model {
         &self,
         _: &ModelRef,
         _: DimensionStyle,
+        _: &[runmat_cad::assembly::model::RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
         (!entities.is_empty()).then(|| "10 mm".into())
@@ -495,12 +496,15 @@ fn drawing() -> DrawingDocument {
         display: Display::HiddenLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),
         header: Default::default(),
         formats: vec![SheetFormat {
             standard: Default::default(),
+            units: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![
@@ -556,6 +560,9 @@ fn drawing() -> DrawingDocument {
                     },
                     label: "A".into(),
                     aligned: false,
+                    offset: None,
+                    keep_other_side: false,
+                    vertical: false,
                 },
             ),
             View {
@@ -582,6 +589,7 @@ fn drawing() -> DrawingDocument {
                     group: None,
                     reference: false,
                     condition: Default::default(),
+                    occurrences: Vec::new(),
                 },
                 at: [0.0, 0.0],
             },

@@ -88,6 +88,10 @@ pub enum DefaultPolicy {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Decision {
     pub id: String,
+    /// The card's title: a short name for the decision ("Minimum wall"). The card shows it over
+    /// whatever the question's fields ask, so it never repeats the question and never names
+    /// another decision of the guide.
+    pub title: String,
     /// The question as the card asks it.
     pub question: String,
     /// The controls the card may use, in order of preference.
@@ -234,6 +238,7 @@ impl GuideCatalog {
                     problems.push(format!("{}: requirement names {}", g.id, r.decision));
                 }
             }
+            problems.extend(title_problems(g));
             for dec in &g.decisions {
                 if dec.controls.is_empty() {
                     problems.push(format!("{}.{}: no control", g.id, dec.id));
@@ -286,6 +291,51 @@ impl GuideCatalog {
         }
         problems
     }
+}
+
+/// The longest card title, in characters: it shares the card's header row with Later.
+pub const MAX_TITLE_CHARS: usize = 28;
+
+/// A title or question folded for comparison: lower case, letters and digits as words.
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Card titles that would mislead: empty, too long, phrased as the question, the same as the
+/// question (the card's field label asks it), or naming another decision (its title appears
+/// whole in this one's).
+fn title_problems(g: &Guide) -> Vec<String> {
+    let mut problems = Vec::new();
+    for dec in &g.decisions {
+        let at = format!("{}.{}", g.id, dec.id);
+        let title = dec.title.trim();
+        if title.is_empty() {
+            problems.push(format!("{at}: no title"));
+            continue;
+        }
+        if title.chars().count() > MAX_TITLE_CHARS {
+            problems.push(format!("{at}: title {title:?} is over {MAX_TITLE_CHARS} characters"));
+        }
+        if title.ends_with('?') {
+            problems.push(format!("{at}: title {title:?} is a question; the field label asks it"));
+        }
+        let mine = words(title);
+        let question = words(&dec.question);
+        // Equal to the question, or three or more of its words in a row.
+        if mine == question || (mine.len() >= 3 && question.windows(mine.len()).any(|w| w == mine.as_slice())) {
+            problems.push(format!("{at}: title {title:?} repeats the question {:?}", dec.question));
+        }
+        for other in g.decisions.iter().filter(|o| o.id != dec.id) {
+            let theirs = words(&other.title);
+            if !theirs.is_empty() && mine.windows(theirs.len()).any(|w| w == theirs.as_slice()) {
+                problems.push(format!("{at}: title {title:?} names {}'s title {:?}", other.id, other.title));
+            }
+        }
+    }
+    problems
 }
 
 /// Where a guide stands on a file.
@@ -383,6 +433,7 @@ pub fn status(guide: &Guide, path: &str, files: &Files) -> Result<GuideStatus, T
 
 fn decision(
     id: &str,
+    title: &str,
     question: &str,
     controls: &[ControlKind],
     pick: &[PickEntity],
@@ -392,6 +443,7 @@ fn decision(
 ) -> Decision {
     Decision {
         id: id.into(),
+        title: title.into(),
         question: question.into(),
         controls: controls.to_vec(),
         pick: pick.to_vec(),
@@ -481,17 +533,17 @@ pub fn catalog() -> GuideCatalog {
             ".part",
             vec![new_file(".part"), command("assembly.new-part"), EntryPoint::Agent],
             vec![
-                decision("function", "What does the part do?", &[SingleChoice], &[], true, Ask,
+                decision("function", "Part function", "What does the part do?", &[SingleChoice], &[], true, Ask,
                     "Mount, bracket, enclosure, shaft or plate, with the features each usually needs"),
-                decision("envelope", "What space must it fit in?", &[Quantity], &[], true, Ask,
+                decision("envelope", "Size limits", "What space must it fit in?", &[Quantity], &[], true, Ask,
                     "Width, depth and height limits, from a mating part or a drawing"),
-                decision("interfaces", "Which faces mount to the mating part?", &[EditorPick, ProjectFile], &[Face, Edge, SketchEntity], true, Ask,
+                decision("interfaces", "Mounting faces", "Which faces mount to the mating part?", &[EditorPick, ProjectFile], &[Face, Edge, SketchEntity], true, Ask,
                     "Faces of a mating part, a hole pattern, or a sketch on the base plane"),
-                decision("material", "What material?", &[SingleChoice], &[], true, Propose,
+                decision("material", "Material", "What material?", &[SingleChoice], &[], true, Propose,
                     "Aluminum 6061, steel 1018, stainless 304 or ABS, by strength, weight and cost"),
-                decision("process", "How will it be made?", &[SingleChoice], &[], true, Propose,
+                decision("process", "Manufacturing process", "How will it be made?", &[SingleChoice], &[], true, Propose,
                     "Machined, sheet metal, printed or cast, with the rules each brings"),
-                decision("published", "Which values should other files use?", &[MultipleChoice], &[], false, Propose,
+                decision("published", "Shared values", "Which values should other files use?", &[MultipleChoice], &[], false, Propose,
                     "Hole spacing, thickness and mounting faces, published for assemblies and drawings"),
             ],
             "design.check",
@@ -507,15 +559,15 @@ pub fn catalog() -> GuideCatalog {
             ".part",
             vec![open_file(&[".part"]), command("evaluate.draft"), command("evaluate.check-geometry"), EntryPoint::Agent],
             vec![
-                decision("process", "Which process will make it?", &[SingleChoice], &[], true, Infer,
+                decision("process", "Manufacturing process", "Which process will make it?", &[SingleChoice], &[], true, Infer,
                     "Machined, sheet metal, printed or molded, read from the part's features when it can be"),
-                decision("min_wall", "Minimum wall thickness?", &[Quantity], &[], true, Propose,
+                decision("min_wall", "Minimum wall", "Minimum wall thickness?", &[Quantity], &[], true, Propose,
                     "The process minimum for this material, with where the part is thinner"),
-                decision("draft", "Which walls need draft, and how much?", &[EditorPick, Quantity], &[Face], false, Propose,
+                decision("draft", "Draft angles", "Which walls need draft, and how much?", &[EditorPick, Quantity], &[Face], false, Propose,
                     "1 to 3 degrees on walls parallel to the pull direction"),
-                decision("radii", "Minimum inside bend radius?", &[Quantity], &[], true, Propose,
+                decision("radii", "Bend radius", "Minimum inside bend radius?", &[Quantity], &[], true, Propose,
                     "1 × thickness for 5052-H32, 1.5 × for 6061-T6, with the cracking risk below it"),
-                decision("tolerances", "Which features carry tight tolerances?", &[EditorPick, Quantity], &[Face, Edge], false, Ask,
+                decision("tolerances", "Tight tolerances", "Which features carry tight tolerances?", &[EditorPick, Quantity], &[Face, Edge], false, Ask,
                     "Bores, mating faces and hole positions; everything else at the general tolerance"),
             ],
             "design.check",
@@ -531,13 +583,13 @@ pub fn catalog() -> GuideCatalog {
             ".assembly",
             vec![new_file(".assembly"), command("assembly.mate"), EntryPoint::Agent],
             vec![
-                decision("parts", "Which parts go in?", &[ProjectFile, MultipleChoice], &[], true, Ask,
+                decision("parts", "Parts", "Which parts go in?", &[ProjectFile, MultipleChoice], &[], true, Ask,
                     "Parts in this project, with the ones other assemblies already use"),
-                decision("fixed", "Which part stays fixed?", &[EditorPick, SingleChoice], &[Occurrence], true, Propose,
+                decision("fixed", "Fixed part", "Which part stays fixed?", &[EditorPick, SingleChoice], &[Occurrence], true, Propose,
                     "The base or frame, usually the largest part"),
-                decision("mates", "How do the parts attach?", &[SingleChoice, EditorPick], &[Face, Edge], true, Ask,
+                decision("mates", "Attachments", "How do the parts attach?", &[SingleChoice, EditorPick], &[Face, Edge], true, Ask,
                     "Bolted, welded or snap fit, with the mates each one adds"),
-                decision("motion", "Should anything move?", &[SingleChoice], &[], false, Ask,
+                decision("motion", "Motion", "Should anything move?", &[SingleChoice], &[], false, Ask,
                     "Nothing, a hinge, a slider, or a mate controller over a range"),
             ],
             "design.check",
@@ -553,15 +605,15 @@ pub fn catalog() -> GuideCatalog {
             ".drawing",
             vec![new_file(".drawing"), command("drawing.auto"), EntryPoint::Agent],
             vec![
-                decision("sheet", "Which sheet size and standard?", &[SingleChoice], &[], true, Propose,
+                decision("sheet", "Sheet and standard", "Which sheet size and standard?", &[SingleChoice], &[], true, Propose,
                     "A3 or ANSI B, ISO 128 or ASME Y14.5, from the part's size and the project"),
-                decision("views", "Which views?", &[MultipleChoice], &[], true, Propose,
+                decision("views", "Views", "Which views?", &[MultipleChoice], &[], true, Propose,
                     "Front, top, right and isometric, plus a section through the holes"),
-                decision("critical", "Which dimensions are critical?", &[EditorPick, MultipleChoice], &[Dimension, Edge, Face], true, Ask,
+                decision("critical", "Critical dimensions", "Which dimensions are critical?", &[EditorPick, MultipleChoice], &[Dimension, Edge, Face], true, Ask,
                     "Hole positions, mating faces and overall size, dimensioned from the datums"),
-                decision("tolerances", "What tolerances apply?", &[Quantity, SingleChoice], &[], true, Propose,
+                decision("tolerances", "Tolerances", "What tolerances apply?", &[Quantity, SingleChoice], &[], true, Propose,
                     "ISO 2768-m generally, with GD&T on the critical features"),
-                decision("notes", "Which notes go on the sheet?", &[MultipleChoice], &[], false, Propose,
+                decision("notes", "Sheet notes", "Which notes go on the sheet?", &[MultipleChoice], &[], false, Propose,
                     "Material, finish, break sharp edges and the general tolerance"),
             ],
             "design.check",
@@ -577,15 +629,15 @@ pub fn catalog() -> GuideCatalog {
             ".circuit",
             vec![new_file(".circuit"), EntryPoint::Agent],
             vec![
-                decision("purpose", "What must the circuit do?", &[SingleChoice], &[], true, Ask,
+                decision("purpose", "Circuit purpose", "What must the circuit do?", &[SingleChoice], &[], true, Ask,
                     "A sensor node, motor driver, power supply, USB device or radio module, with the blocks each needs"),
-                decision("blocks", "Which blocks does the circuit have?", &[MultipleChoice], &[], true, Ask,
+                decision("blocks", "Blocks", "Which blocks does the circuit have?", &[MultipleChoice], &[], true, Ask,
                     "Power, MCU, radio, sensors and connectors, with a part for each"),
-                decision("interfaces", "How do the blocks connect?", &[SingleChoice, EditorPick], &[Net, Pin], true, Ask,
+                decision("interfaces", "Signal interfaces", "How do the blocks connect?", &[SingleChoice, EditorPick], &[Net, Pin], true, Ask,
                     "I2C, SPI, UART or GPIO, with pull-ups and level shifting where needed"),
-                decision("rails", "Which rail powers each block?", &[SingleChoice, EditorPick], &[Net], true, Ask,
+                decision("rails", "Power rails", "Which rail powers each block?", &[SingleChoice, EditorPick], &[Net], true, Ask,
                     "The rails on the sheet, with each one's voltage and the radio's supply range"),
-                decision("parts", "Which parts, and which alternates?", &[SingleChoice, ProjectFile, EditorPick], &[Component], true, Propose,
+                decision("parts", "Parts and alternates", "Which parts, and which alternates?", &[SingleChoice, ProjectFile, EditorPick], &[Component], true, Propose,
                     "Parts in the library with stock and a second source each"),
             ],
             "design.check",
@@ -607,13 +659,13 @@ pub fn catalog() -> GuideCatalog {
                 EntryPoint::Agent,
             ],
             vec![
-                decision("outline", "What is the board outline?", &[Quantity, ProjectFile], &[], true, Ask,
+                decision("outline", "Board outline", "What is the board outline?", &[Quantity, ProjectFile], &[], true, Ask,
                     "A rectangle with corner radii, or the enclosure's outline from its part"),
-                decision("stackup", "How many layers, and which stack-up?", &[SingleChoice], &[], true, Propose,
+                decision("stackup", "Layer stack-up", "How many layers, and which stack-up?", &[SingleChoice], &[], true, Propose,
                     "2 layers for simple boards, 4 with solid ground for RF and fast edges"),
-                decision("rules", "Which rules come from the net classes?", &[Quantity, SingleChoice], &[], true, Propose,
+                decision("rules", "Design rules", "Which rules come from the net classes?", &[Quantity, SingleChoice], &[], true, Propose,
                     "Track width and clearance per class, from current and voltage"),
-                decision("placement", "How are repeated channels placed?", &[ChangeReview, EditorPick], &[Room, Component], true, Propose,
+                decision("placement", "Channel placement", "How are repeated channels placed?", &[ChangeReview, EditorPick], &[Room, Component], true, Propose,
                     "Copy Room Formats from channel A to B, or place each by hand"),
             ],
             "design.check",
@@ -629,11 +681,11 @@ pub fn catalog() -> GuideCatalog {
             ".circuit.layout",
             vec![command("board.update-schematic"), command("schematic.update-board"), EntryPoint::Agent],
             vec![
-                decision("differences", "Apply the schematic's changes to the board?", &[ChangeReview, MultipleChoice, EditorPick], &[Component], true, Propose,
+                decision("differences", "Schematic changes", "Apply the schematic's changes to the board?", &[ChangeReview, MultipleChoice, EditorPick], &[Component], true, Propose,
                     "Apply all, apply the footprint changes only, or review each row"),
-                decision("relinks", "Re-link the parts whose designators changed?", &[SingleChoice], &[], false, Propose,
+                decision("relinks", "Re-links", "Re-link the parts whose designators changed?", &[SingleChoice], &[], false, Propose,
                     "Keep placement by unique id, or place them again"),
-                decision("rooms", "Update the rooms for the changed parts?", &[SingleChoice], &[], false, Propose,
+                decision("rooms", "Rooms", "Update the rooms for the changed parts?", &[SingleChoice], &[], false, Propose,
                     "Move changed parts into their rooms, or leave them where they are"),
             ],
             "design.check",
@@ -649,15 +701,15 @@ pub fn catalog() -> GuideCatalog {
             ".m",
             vec![new_file(".m"), open_file(&[".m"]), EntryPoint::Agent],
             vec![
-                decision("goal", "What do you want to compute?", &[SingleChoice], &[], true, Ask,
+                decision("goal", "Quantity to compute", "What do you want to compute?", &[SingleChoice], &[], true, Ask,
                     "A calculation, a model or simulation in code, data analysis, or matrix and linear algebra work"),
-                decision("inputs", "What are the inputs, and in which units?", &[Quantity, SingleChoice], &[], true, Ask,
+                decision("inputs", "Inputs and units", "What are the inputs, and in which units?", &[Quantity, SingleChoice], &[], true, Ask,
                     "Each known value with its unit, or a data file in the project"),
-                decision("method", "Which method should it use?", &[SingleChoice], &[], false, Propose,
+                decision("method", "Method", "Which method should it use?", &[SingleChoice], &[], false, Propose,
                     "A closed-form formula, a numerical solver, an ODE integrator or a fit, where the choice matters"),
-                decision("outputs", "What should it show?", &[MultipleChoice], &[], true, Propose,
+                decision("outputs", "Outputs", "What should it show?", &[MultipleChoice], &[], true, Propose,
                     "Printed values, a table, or plots"),
-                decision("check", "How should the result be checked?", &[SingleChoice, Quantity], &[], false, Propose,
+                decision("check", "Result check", "How should the result be checked?", &[SingleChoice, Quantity], &[], false, Propose,
                     "A known case, a hand calculation or a limit the answer must meet"),
             ],
             "runmat.check",
@@ -679,19 +731,19 @@ pub fn catalog() -> GuideCatalog {
                 EntryPoint::Agent,
             ],
             vec![
-                decision("goal", "What would you like to simulate?", &[SingleChoice], &[], true, Ask,
+                decision("goal", "Study goal", "What would you like to simulate?", &[SingleChoice], &[], true, Ask,
                     "Strength under load, stiffness, vibration modes or temperature, with what each answers"),
-                decision("supports", "Which faces hold the part?", &[EditorPick, SingleChoice], &[Face], true, Ask,
+                decision("supports", "Supports", "Which faces hold the part?", &[EditorPick, SingleChoice], &[Face], true, Ask,
                     "Bolted faces, a clamped edge or a symmetry plane, with how each constrains the part"),
-                decision("loads", "Where does the load act, and how large is it?", &[EditorPick, Quantity, Direction], &[Face], true, Ask,
+                decision("loads", "Loads", "Where does the load act, and how large is it?", &[EditorPick, Quantity, Direction], &[Face], true, Ask,
                     "A force on a face, a pressure, or a remote load through a point, with typical magnitudes"),
-                decision("material", "What material is it?", &[SingleChoice, Quantity], &[], true, Propose,
+                decision("material", "Material", "What material is it?", &[SingleChoice, Quantity], &[], true, Propose,
                     "Common alloys for the process, with yield strength and density"),
-                decision("acceptance", "What result passes?", &[Quantity, SingleChoice], &[], true, Propose,
+                decision("acceptance", "Pass criterion", "What result passes?", &[Quantity, SingleChoice], &[], true, Propose,
                     "A safety factor on yield, a deflection limit or a minimum frequency"),
-                decision("mesh", "How fine should the mesh be?", &[SingleChoice, Quantity], &[], false, Propose,
+                decision("mesh", "Mesh size", "How fine should the mesh be?", &[SingleChoice, Quantity], &[], false, Propose,
                     "Coarse for a quick check, refined near holes and fillets for stress"),
-                decision("run", "Run the study?", &[ChangeReview], &[], true, Propose,
+                decision("run", "Study run", "Run the study?", &[ChangeReview], &[], true, Propose,
                     "Run now on this machine, or keep the setup and run later"),
             ],
             "runmat.check",
@@ -707,11 +759,11 @@ pub fn catalog() -> GuideCatalog {
             ".fea",
             vec![open_file(&[".circuit.layout"]), command("simulate.studies"), EntryPoint::Agent],
             vec![
-                decision("sources", "Which parts give off heat, and how much?", &[EditorPick, Quantity], &[Component], true, Propose,
+                decision("sources", "Heat sources", "Which parts give off heat, and how much?", &[EditorPick, Quantity], &[Component], true, Propose,
                     "Power from each part's datasheet at the operating point"),
-                decision("enclosure", "Which enclosure holds the board?", &[ProjectFile, EditorPick], &[Occurrence], true, Ask,
+                decision("enclosure", "Enclosure", "Which enclosure holds the board?", &[ProjectFile, EditorPick], &[Occurrence], true, Ask,
                     "An assembly in the project, or the board alone in free air"),
-                decision("environment", "What environment does it see?", &[Quantity, SingleChoice], &[], true, Propose,
+                decision("environment", "Environment", "What environment does it see?", &[Quantity, SingleChoice], &[], true, Propose,
                     "Ambient temperature and airflow, or a vibration profile"),
             ],
             "runmat.check",

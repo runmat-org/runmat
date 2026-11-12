@@ -143,3 +143,16 @@ mod tests {
         );
     }
 }
+
+/// A written length in millimetres: a quantity in any length unit the catalog knows (`mm`, `in`,
+/// `ft`, …) or a bare number, which is millimetres. None for anything else.
+pub fn length_mm(v: &crate::value::ValueExpr) -> Option<f64> {
+    match v {
+        crate::value::ValueExpr::Quantity { value, unit } => {
+            let info = Units.unit(unit)?;
+            (dimension_of(&info) == Dimension::LENGTH).then_some(value * info.scale() * 1000.0)
+        }
+        crate::value::ValueExpr::Number { value } => Some(*value),
+        _ => None,
+    }
+}

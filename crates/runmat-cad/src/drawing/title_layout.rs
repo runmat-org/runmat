@@ -56,17 +56,7 @@ impl SheetSize {
 }
 
 fn side_mm(side: &crate::value::ValueExpr) -> Option<f64> {
-    use crate::units::Units;
-    let mm = match side {
-        crate::value::ValueExpr::Quantity { value, unit } => {
-            let info = Units.unit(unit)?;
-            (crate::units::dimension_of(&info) == crate::units::Dimension::LENGTH)
-                .then_some(value * info.scale() * 1000.0)?
-        }
-        crate::value::ValueExpr::Number { value } => *value,
-        _ => return None,
-    };
-    (mm.is_finite() && mm > 0.0).then_some(mm)
+    crate::units::length_mm(side).filter(|mm| mm.is_finite() && *mm > 0.0)
 }
 
 /// A text line placed on the sheet: its baseline's left end and its height.

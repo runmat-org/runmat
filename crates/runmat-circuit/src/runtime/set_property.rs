@@ -186,7 +186,7 @@ fn read_value(text: &str) -> Result<crate::ir::Param, EditError> {
  * --------------------------------------------------------------------------------------------- */
 
 /// The file's own sheet and the local name of the component with this designator.
-fn own_component(project: &Project, designator: &str) -> Result<(String, String), EditError> {
+pub(super) fn own_component(project: &Project, designator: &str) -> Result<(String, String), EditError> {
     let local = project
         .netlist
         .components
@@ -425,7 +425,7 @@ fn net_name(project: &Project, net: &str, value: &Value) -> Result<EditOutput, E
 }
 
 /// The `.circuit` rewritten for `own`, the file's own design after the edit.
-fn circuit_change(
+pub(super) fn circuit_change(
     project: &Project,
     own: &Design,
     summary: String,

@@ -132,6 +132,18 @@ impl ModelReferences for Model {
     fn occurrence(&self, _: &ModelRef, path: &RelPath) -> bool {
         path.to_string() == "bolts/b1"
     }
+    fn resolve_in(
+        &self,
+        model: &ModelRef,
+        path: &RelPath,
+        r: &Reference,
+    ) -> Result<Vec<Vec<EntityName>>, String> {
+        assert_eq!(path.to_string(), "bolts/b1");
+        self.resolve(model, r)
+    }
+    fn published_datums(&self, _: &ModelRef, _: &RelPath) -> Option<BTreeSet<String>> {
+        Some(["grid_1".to_string(), "grid_2".to_string()].into())
+    }
     fn pmi(&self, _: &ModelRef) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>) {
         (
             ["top_parallel".to_string(), "web_symmetry".to_string()].into(),
@@ -195,12 +207,15 @@ fn drawing() -> DrawingDocument {
         display: Display::HiddenLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),
         header: Default::default(),
         formats: vec![SheetFormat {
             standard: Default::default(),
+            units: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![
@@ -256,6 +271,9 @@ fn drawing() -> DrawingDocument {
                     },
                     label: "A".into(),
                     aligned: false,
+                    offset: None,
+                    keep_other_side: false,
+                    vertical: false,
                 },
             ),
             view(
@@ -279,6 +297,7 @@ fn drawing() -> DrawingDocument {
                     group: None,
                     reference: false,
                     condition: Default::default(),
+                    occurrences: Vec::new(),
                 },
                 at: [0.0, 0.0],
             },
@@ -401,6 +420,7 @@ fn d02_broken_references_are_reported_with_view_and_annotation() {
             group: None,
             reference: true,
             condition: Default::default(),
+            occurrences: Vec::new(),
         },
         at: [0.0, 0.0],
     });
@@ -425,6 +445,8 @@ fn d02_broken_references_are_reported_with_view_and_annotation() {
         display: Display::VisibleLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
     });
     let rep = check_drawing(&d, &Model);
     let refs: Vec<&str> = rep
@@ -445,4 +467,101 @@ fn d02_broken_references_are_reported_with_view_and_annotation() {
         "dangling annotations are kept but unresolved"
     );
     assert_eq!(rep.diagnostics.with_code(DiagCode::DrawingView).len(), 1);
+}
+
+#[test]
+fn d04_assembly_view_annotations_resolve_on_their_occurrences() {
+    let b1 = RelPath::new(&["bolts", "b1"]);
+    let dim = |id: &str, occurrences: Vec<RelPath>| Annotation {
+        id: id.into(),
+        view: "front".into(),
+        kind: AnnotationKind::Dimension {
+            style: DimensionStyle::Linear,
+            references: vec![Reference::start_cap("body"), Reference::end_cap("body")],
+            pmi: None,
+            group: None,
+            reference: false,
+            condition: Default::default(),
+            occurrences,
+        },
+        at: [0.0, 0.0],
+    };
+    let mut d = drawing();
+    d.annotations = vec![
+        dim("on_b1", vec![b1.clone(), b1.clone()]),
+        dim("one_short", vec![b1.clone()]),
+        dim("on_b9", vec![b1.clone(), RelPath::new(&["bolts", "b9"])]),
+        Annotation {
+            id: "slab".into(),
+            view: "front".into(),
+            kind: AnnotationKind::Level {
+                label: "T.O. SLAB".into(),
+                on: Some(Reference::end_cap("body")),
+                datum: None,
+                occurrence: b1.clone(),
+            },
+            at: [0.0, 0.0],
+        },
+        Annotation {
+            id: "floor".into(),
+            view: "front".into(),
+            kind: AnnotationKind::Level {
+                label: "FLOOR".into(),
+                on: None,
+                datum: Some("grid_2".into()),
+                occurrence: b1.clone(),
+            },
+            at: [0.0, 0.0],
+        },
+        Annotation {
+            id: "both".into(),
+            view: "front".into(),
+            kind: AnnotationKind::Level {
+                label: "BOTH".into(),
+                on: Some(Reference::end_cap("body")),
+                datum: Some("grid_2".into()),
+                occurrence: b1.clone(),
+            },
+            at: [0.0, 0.0],
+        },
+        Annotation {
+            id: "grids".into(),
+            view: "front".into(),
+            kind: AnnotationKind::Grids {
+                occurrence: b1.clone(),
+                datums: vec!["grid_1".into(), "grid_9".into()],
+                labels: vec!["1".into(), "9".into()],
+            },
+            at: [0.0, 0.0],
+        },
+        Annotation {
+            id: "swing".into(),
+            view: "front".into(),
+            kind: AnnotationKind::DoorSwing {
+                door: RelPath::new(&["doors", "d1"]),
+                hinge: Hinge::Start,
+                swing: Swing::Positive,
+            },
+            at: [0.0, 0.0],
+        },
+    ];
+    let rep = check_drawing(&d, &Model);
+    for id in ["on_b1", "slab", "floor"] {
+        assert!(rep.resolved.contains_key(id), "{id} didn't resolve");
+    }
+    for id in ["one_short", "on_b9", "grids", "swing", "both"] {
+        assert!(!rep.resolved.contains_key(id), "{id} resolved");
+    }
+    let messages: Vec<String> = rep
+        .diagnostics
+        .diagnostics
+        .iter()
+        .map(|d| d.message.clone())
+        .collect();
+    let has = |m: &str| messages.iter().any(|x| x.contains(m));
+    assert!(has("names 1 occurrences for 2 references"), "{messages:#?}");
+    assert!(has("on `bolts/b9` is on an occurrence the model doesn't have"), "{messages:#?}");
+    assert!(has("`bolts/b1` publishes no datum `grid_9`"), "{messages:#?}");
+    assert!(has("`doors/d1`, which is not in the model"), "{messages:#?}");
+    assert!(has("level `both` takes a face"), "{messages:#?}");
 }

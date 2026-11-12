@@ -40,6 +40,7 @@ pub mod forms;
 pub mod occurrence;
 pub mod projection;
 pub mod refs;
+pub mod rename;
 pub mod sketch;
 pub mod value;
 
@@ -209,7 +210,8 @@ pub const DRAWING: DocumentGrammar = DocumentGrammar {
                 field: "kind",
                 tag: "view",
                 extras: &[
-                    "sheet", "model", "at", "scale", "display", "exclude", "exploded",
+                    "sheet", "model", "at", "scale", "display", "exclude", "exploded", "title",
+                    "centerlines",
                 ],
             }),
             ..named("view", "views", "view")

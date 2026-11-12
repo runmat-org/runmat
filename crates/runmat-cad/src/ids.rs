@@ -1,8 +1,9 @@
 //! Identifiers used across the design layer.
 //!
 //! Authored identifiers (`FeatureId`, `SketchEntityId`, publish and region names) are the names
-//! written in the source text. They are compared as whole values and never parsed. Renames go
-//! through the lock section (`refs::lock`), which keeps the old path as an alias.
+//! written in the source text. They are compared as whole values and never parsed. A rename in
+//! the editor rewrites the declaration and every reference (`syntax::rename`); the lock section
+//! (`refs::lock`) keeps an old path as an alias for files that pin a released revision.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
