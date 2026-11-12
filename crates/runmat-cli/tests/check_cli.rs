@@ -1184,7 +1184,7 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
     assert_eq!(
         String::from_utf8_lossy(&strip_ansi(&output.stdout)),
         concat!(
-            "error[fea.semantic.model]: traction must be force per area, found N\n",
+            "error[fea.semantic.model]: traction needs a unit of force per area such as Pa; N measures force\n",
             " --> cantilever.fea:28:48\n",
             "   |\n",
             "28 | traction on geometry.beam.region.tip = [0, 0, -100000] N\n",
