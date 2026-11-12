@@ -2046,24 +2046,20 @@ Tracked do_box(const KInstr& in) {
 
 // ---- delete faces
 
+}  // namespace
+
+// Implemented in exact_delete_faces.cc: the faces removed and the body healed over them.
+Tracked delete_faces_healed(const Tracked& src, const std::vector<TopoDS_Face>& picked);
+
+namespace {
+
 Tracked do_defeature(const Exec& x, const KInstr& in) {
   const Tracked& src = x.slot(in.ints[0]);
   const std::int64_t operand = in.ints[1];
   const std::int64_t n = in.ints[2];
-  BRepAlgoAPI_Defeaturing df;
-  df.SetShape(src.shape);
-  for (std::int64_t i = 0; i < n; ++i) df.AddFaceToRemove(x.face(operand, in.ints[3 + i]));
-  df.SetRunParallel(Standard_False);
-  df.SetToFillHistory(Standard_True);
-  df.Build();
-  if (!df.IsDone() || df.HasErrors()) {
-    std::ostringstream m;
-    df.DumpErrors(m);
-    fail("the faces could not be removed and healed: " + m.str());
-  }
-  Tracked out;
-  out.shape = df.Shape();
-  propagate_history(src, df.History(), out);
+  std::vector<TopoDS_Face> faces;
+  for (std::int64_t i = 0; i < n; ++i) faces.push_back(x.face(operand, in.ints[3 + i]));
+  Tracked out = delete_faces_healed(src, faces);
   require_labels(out, "the face deletion");
   return out;
 }
