@@ -65,6 +65,42 @@ fn rename_follows_references_in_the_part_and_its_drawings() {
 }
 
 #[test]
+fn input_and_region_renames_follow_into_assemblies_and_studies() {
+    let part = PLATE.replace(
+        "\n}\n",
+        "\n    output plate = { body = feature.body.body }\n}\n",
+    );
+    let assembly = "runmat 0.7\nstd 1\n\nassembly frame {\n    use part plate as left {\n        configuration = { select = inputs, values = { width = 30 mm } }\n    }\n}\n";
+    let study = "geometry plate {\n    file = \"../p/plate.part\"\n    units = mm\n    region deck : face { select name \"top\"; expect exactly_one }\n}\n";
+    let files: Files = [
+        ("/p/frame.assembly".to_owned(), assembly.to_owned()),
+        ("/s/plate.fea".to_owned(), study.to_owned()),
+    ]
+    .into();
+    let out = run(
+        &part,
+        &files,
+        json!({ "command": "part.rename", "selection": ["input:width"], "values": { "name": "span" } }),
+    );
+    assert_eq!(out["ok"], true, "{out}");
+    assert_eq!(out["summary"], "Renamed width to span and in 1 assembly");
+    assert_eq!(out["files"][1]["path"], "/p/frame.assembly");
+    let text = out["files"][1]["text"].as_str().unwrap();
+    assert!(text.contains("values = { span = 30 mm }"), "{text}");
+    let out = run(
+        &part,
+        &files,
+        json!({ "command": "part.rename", "selection": ["region:top"], "values": { "name": "deck_face" } }),
+    );
+    assert_eq!(out["ok"], true, "{out}");
+    assert_eq!(out["summary"], "Renamed top to deck_face and in 1 study");
+    assert!(out["files"][0]["text"].as_str().unwrap().contains("region deck_face : face"), "{out}");
+    assert_eq!(out["files"][1]["path"], "/s/plate.fea");
+    let text = out["files"][1]["text"].as_str().unwrap();
+    assert!(text.contains("region deck : face { select name \"deck_face\";"), "{text}");
+}
+
+#[test]
 fn properties_name_field_and_rename_share_one_handler() {
     let text = applied(
         PLATE,

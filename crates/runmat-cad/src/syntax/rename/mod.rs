@@ -18,14 +18,16 @@
 //! Inputs are read as `input.<name>` and set by name in configurations; regions are named by
 //! publishes (`region = mount`) and links.
 //!
-//! [`rename_in_drawing`] carries a feature rename into a drawing whose views show the part:
-//! their section planes and annotations name the part's features in the same forms.
+//! [`follow`] carries a rename into the project files that name the part's items: drawings
+//! (features), assemblies (inputs) and `.fea` studies (regions).
 
-use super::edit::{diff_source, diff_source_in, EditFailure, SourceChange};
-use super::{parse_drawing_in, parse_part, DRAWING, PART};
-use crate::ids::{FeatureId, FilePath};
+mod follow;
+pub use follow::{assemblies_in, rename_in_drawing, rename_input_in_assembly, rename_region_in_study};
+
+use super::edit::{diff_source, EditFailure, SourceChange};
+use super::{parse_part, PART};
+use crate::ids::FeatureId;
 use crate::model::PartDocument;
-use crate::modules::ModuleScope;
 use crate::refs::name::{recipe_of, remember, EntityName, NameToken};
 use crate::regen::deps::DependencyGraph;
 use serde_json::{Map, Value};
@@ -69,7 +71,7 @@ const FEATURE_KEYS: &[&str] = &[
     "suppress",
 ];
 
-fn failure(message: impl Into<String>) -> EditFailure {
+pub(super) fn failure(message: impl Into<String>) -> EditFailure {
     EditFailure::Model(message.into())
 }
 
@@ -112,7 +114,7 @@ fn rename_path(items: &mut [Value], heads: &[&str], from: &str, to: &str) {
 
 /// Renames feature `from` to `to` wherever the JSON form of a model names it. `tag` skips the
 /// entry's own kind tag (`"feature": "extrude"`), which is a kind word.
-fn rename_feature_json(value: &mut Value, from: &str, to: &str, tag: bool) {
+pub(super) fn rename_feature_json(value: &mut Value, from: &str, to: &str, tag: bool) {
     match value {
         Value::Object(map) => {
             for (key, v) in map.iter_mut() {
@@ -394,56 +396,4 @@ pub fn rename_part_item(
     let site = |name: &str| format!("{}.{name}", kind.noun());
     let renames = vec![(site(from), site(to))];
     diff_source(&PART, path, source, &new, &parsed.uses, &renames)
-}
-
-/// Carries the rename of feature `from` of the part `part` into the drawing `path`: its views
-/// of that part and their annotations follow. `None` when the drawing doesn't name it.
-pub fn rename_in_drawing(
-    source: &str,
-    path: &str,
-    scope: &ModuleScope,
-    part: &str,
-    from: &str,
-    to: &str,
-) -> Result<Option<SourceChange>, EditFailure> {
-    let parsed = parse_drawing_in(path, source, scope);
-    let (Some(document), true) = (parsed.document.clone(), parsed.diagnostics.is_empty()) else {
-        // A drawing with errors isn't touched; it shows its own problems.
-        return Ok(None);
-    };
-    let part = FilePath::new(part);
-    let views: Vec<String> = document
-        .views
-        .iter()
-        .filter(|v| v.model.file == part)
-        .map(|v| v.name.to_string())
-        .collect();
-    if views.is_empty() {
-        return Ok(None);
-    }
-    let mut json = serde_json::to_value(&document).map_err(|e| failure(e.to_string()))?;
-    let shows = |entry: &Value, key: &str| {
-        entry
-            .get(key)
-            .and_then(Value::as_str)
-            .is_some_and(|v| views.iter().any(|n| n == v))
-    };
-    for (key, field) in [("views", "name"), ("annotations", "view")] {
-        for entry in json
-            .get_mut(key)
-            .and_then(Value::as_array_mut)
-            .into_iter()
-            .flatten()
-        {
-            if shows(entry, field) {
-                rename_feature_json(entry, from, to, false);
-            }
-        }
-    }
-    let new: crate::drawing::DrawingDocument =
-        serde_json::from_value(json).map_err(|e| failure(format!("the renamed drawing: {e}")))?;
-    if new == document {
-        return Ok(None);
-    }
-    diff_source_in(&DRAWING, path, source, &new, &parsed.uses, &[], scope).map(Some)
 }

@@ -140,6 +140,17 @@ This file is generated from the command catalog.
   - Required: `changes` (picks: change)
   - Runs on the `selection`: `eco_back_change`
 
+## `circuit.` commands (`.circuit`, `.circuit.layout`)
+
+- `circuit.delete`: Delete the selected items.
+  - Runs on the `selection`: `component`, `wire`, `track`, `via`, `zone`, `keepout`, `room`
+- `circuit.edit-value`: Set the component's value with its unit and tolerance.
+  - Required: `value` (text)
+  - Runs on the `selection`: `component`
+- `circuit.rename-net`: Rename the net; labels and ports follow.
+  - Required: `name` (text)
+  - Runs on the `selection`: `net`
+
 ## `direct.` commands (`.part`)
 
 - `direct.delete-face`: Delete faces and heal the gap from the neighbors.

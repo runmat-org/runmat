@@ -2,8 +2,11 @@
 //!
 //! - `part.rename` (`values.name`): the selected feature, sketch, plane, mate connector, input
 //!   or region takes the new name, in its declaration and every reference in the file
-//!   ([`runmat_cad::syntax::rename`]). Drawings among `files` whose views show this part follow
-//!   a feature rename. A taken or invalid name is refused with the reason.
+//!   ([`runmat_cad::syntax::rename`]). Among `files`, drawings whose views show this part follow
+//!   a feature rename, assemblies that set the input on an occurrence of the part (directly or
+//!   by override) follow an input rename, and `.fea` studies whose geometry reads the part
+//!   follow a region rename (`select name "<region>"`). A taken or invalid name is refused with
+//!   the reason; a body is named after its feature and refuses with that reason.
 //! - `part.rollback-here`: the rollback bar moves to just after the selected feature
 //!   (`rollback_after = <feature>` in the part); later features are not regenerated.
 //!   `part.rollback-end` takes the bar back to the end (the line goes).
@@ -15,7 +18,10 @@ use super::{feature_of, model, text_value, EditRequest};
 use crate::runtime::Files;
 use runmat_cad::modules::ModuleScope;
 use runmat_cad::syntax::edit::{edit_part, EditFailure, SourceChange};
-use runmat_cad::syntax::rename::{rename_in_drawing, rename_part_item, RenameKind};
+use runmat_cad::syntax::rename::{
+    assemblies_in, rename_in_drawing, rename_input_in_assembly, rename_part_item,
+    rename_region_in_study, RenameKind,
+};
 
 /// What an Outline id names, for a rename.
 fn rename_target(id: &str) -> Result<(RenameKind, &str), EditFailure> {
@@ -53,24 +59,49 @@ pub(super) fn rename(
     let to = text_value(&request.values, "name").trim();
     let change = rename_part_item(text, path, kind, from, to)?;
     let mut others = Vec::new();
-    if kind == RenameKind::Feature {
-        let scope = ModuleScope::from_files(
+    let scope = ModuleScope::from_files(
+        files
+            .iter()
+            .map(|(p, t)| (p.as_str(), t.as_str()))
+            .filter(|(p, _)| *p != path)
+            .chain([(path, text)]),
+    );
+    let assemblies = match kind {
+        RenameKind::Input => assemblies_in(
             files
                 .iter()
                 .map(|(p, t)| (p.as_str(), t.as_str()))
-                .filter(|(p, _)| *p != path)
-                .chain([(path, text)]),
-        );
-        for (other, source) in files.iter().filter(|(p, _)| p.ends_with(".drawing")) {
-            if let Some(follow) = rename_in_drawing(source, other, &scope, path, from, to)? {
-                others.push((other.clone(), source.clone(), follow));
+                .filter(|(p, _)| *p != path),
+            &scope,
+        ),
+        _ => Default::default(),
+    };
+    for (other, source) in files.iter().filter(|(p, _)| p.as_str() != path) {
+        let follow = match kind {
+            RenameKind::Feature if other.ends_with(".drawing") => {
+                rename_in_drawing(source, other, &scope, path, from, to)?
             }
+            RenameKind::Input if other.ends_with(".assembly") => {
+                rename_input_in_assembly(source, other, &scope, &assemblies, path, from, to)?
+            }
+            RenameKind::Region if other.to_ascii_lowercase().ends_with(".fea") => {
+                rename_region_in_study(source, other, path, from, to)?
+            }
+            _ => None,
+        };
+        if let Some(follow) = follow {
+            others.push((other.clone(), source.clone(), follow));
         }
     }
+    let noun = match kind {
+        RenameKind::Feature => ("drawing", "drawings"),
+        RenameKind::Input => ("assembly", "assemblies"),
+        RenameKind::Region => ("study", "studies"),
+    };
     let followed = match others.len() {
         0 => String::new(),
-        1 => " and in 1 drawing".to_owned(),
-        n => format!(" and in {n} drawings"),
+        1 => format!(" and in 1 {}", noun.0),
+        n => format!(" and in {n} {}", noun.1),
     };
     Ok((change, format!("Renamed {from} to {to}{followed}"), others))
 }
