@@ -172,6 +172,10 @@ impl Default for BomTableSpec {
 /// Item properties a table shows (description, finish, vendor …), from the definitions.
 pub trait BomProperties {
     fn property(&self, item: &BomItem, name: &PropertyName) -> Option<String>;
+    /// The item's defining file (and part output) as the table prints it.
+    fn definition(&self, item: &BomItem) -> String {
+        item.definition.to_string()
+    }
 }
 
 /// A material as a parts list names it: `material.aluminum_6061` → `Aluminum 6061` (the
@@ -494,7 +498,7 @@ pub fn render_bom_table(
                 .as_ref()
                 .map(|r| r.0.clone())
                 .unwrap_or_default(),
-            BomColumn::Definition => l.item.definition.to_string(),
+            BomColumn::Definition => props.definition(&l.item),
             BomColumn::Kind => kind_text(l.item.kind).into(),
             BomColumn::Level => l.level.to_string(),
             BomColumn::Property { name } => prop(name.as_str(), &mut missing),

@@ -23,7 +23,7 @@ pub(crate) struct BoardBody {
 }
 
 /// A closed ring (mm) as one profile loop (m) of line segments.
-fn ring_loop(ring: &[(f64, f64)], name: &str) -> Vec<ProfileSegment> {
+pub(crate) fn ring_loop(ring: &[(f64, f64)], name: &str) -> Vec<ProfileSegment> {
     let id = SketchEntityId::new(name);
     let pts: Vec<[f64; 2]> = ring.iter().map(|&(x, y)| [x * 1e-3, y * 1e-3]).collect();
     (0..pts.len())
@@ -40,7 +40,7 @@ fn ring_loop(ring: &[(f64, f64)], name: &str) -> Vec<ProfileSegment> {
 }
 
 /// A prism of `loops` from height `z0` to `z1` (m), combined with `operands` as `combine` says.
-fn prism(
+pub(crate) fn prism(
     kernel: &dyn DesignKernel,
     loops: Vec<Vec<ProfileSegment>>,
     z0: f64,

@@ -96,11 +96,12 @@ arc SW = { layer = F.Cu, width = 0.25, from = [0, 0], mid = [1, 1], to = [2, 0] 
 via GND = { at = [5, 5], size = 0.6, drill = 0.3 }
 pour GND = { name = gnd, layers = [F.Cu, B.Cu], outline = [[0, 0], [100, 0], [100, 80]], priority = 1 }
 text "REV A" = { layer = F.SilkS, at = [90, 5], size = 1, thickness = 0.15 }
-package R0402 {
-    smd = true
-    pad "1" = { shape = roundrect, size = [0.5, 0.6], ratio = 0.25, at = [-0.5, 0] }
-    pad "2" = { shape = roundrect, size = [0.5, 0.6], ratio = 0.25, at = [0.5, 0] }
-    courtyard = [[-1, -0.5], [1, -0.5], [1, 0.5], [-1, 0.5]]
+package R0402 = {
+    pads = [
+        { number = "1", shape = roundrect, size = [0.5, 0.6], at = [-0.5, 0], layers = smd },
+        { number = "2", shape = roundrect, size = [0.5, 0.6], at = [0.5, 0], layers = smd }
+    ],
+    courtyard = rect([-1, -0.5], [1, 0.5])
 }
 ```
 
@@ -118,7 +119,7 @@ package R0402 {
 | `diff_pair`, `component_class` | pairs and classes from the circuit, with board rules |
 | `room <name> = { outline, members }` | a placement area for a group, such as one channel |
 | `footprint <designator> = { package, at, rotation, side, locked, pads, value, properties }` | a placed component; `pads` maps each pad to its net |
-| `package <name> { pad …, courtyard, silk, fab, model, body }` | a footprint's package, defined once in the file so the board is self-contained |
+| `package <name> = { pads, courtyard, silk, fab, body }` | a footprint's package, defined once in the file so the board is self-contained; the same record as a library's `footprint <name> = { … }` |
 | `track`, `arc` | copper segments on a layer, named by net |
 | `via <net> = { at, size, drill, layers }` | a via; `layers` makes it blind or buried |
 | `pour <net> = { name, layers, outline, priority }` | a copper zone, filled around everything else |

@@ -216,6 +216,10 @@ pub(super) fn add(c: &mut Catalog) {
                 &[("fab_house", "Fab house"), ("assembly", "Assembly"), ("full", "Full package"), ("custom", "Custom")],
             )])
             .edit(export("fabrication")),
+        brd("board.export", "Export STEP", "export", "Export the board and its components as a STEP model for mechanical design.")
+            .kw(&["step", "3d model", "mcad", "enclosure", "mechanical", "ap242"])
+            .inputs(vec![flag("copper", "Copper layers", false), flag("mask", "Solder mask", true)])
+            .edit(export("step")),
         brd("board.to-enclosure", "To enclosure", "to-enclosure", "Place the board in an assembly and check its clearance.")
             .inputs(vec![text("assembly", "Assembly", Some("enclosure.assembly")), qty("clearance", "Minimum clearance", "length", Some(1.0))])
             .edit(edit(EditOp::CreateFile, Section::None).item("assembly_occurrence")),
@@ -401,7 +405,7 @@ pub(super) fn tab() -> DomainTab {
                     c("board.test-points"),
                 ],
             ),
-            group("outputs", "Outputs", vec![c("board.fab-outputs")]),
+            group("outputs", "Outputs", vec![c("board.fab-outputs"), c("board.export")]),
             group("mechanical", "Mechanical", vec![c("board.to-enclosure")]),
             group(
                 "analysis",
@@ -427,6 +431,9 @@ pub(super) fn tab_3d() -> DomainTab {
     runmat_design_commands::tab(
         "3d",
         "3D",
-        vec![group("check", "Check", vec![c("board.clearance-3d")])],
+        vec![
+            group("check", "Check", vec![c("board.clearance-3d")]),
+            group("outputs", "Outputs", vec![c("board.export")]),
+        ],
     )
 }

@@ -8042,6 +8042,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
+ "utoipa",
 ]
 
 [[package]]

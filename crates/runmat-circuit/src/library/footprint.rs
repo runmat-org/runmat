@@ -297,6 +297,32 @@ fn silk_around(body: Rect, pads: &[PadDef], clear: Coord) -> Vec<Graphic> {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Body materials of the generated packages, as material library ids. The material library
+/// (runmat-materials) holds their properties and sources; the board thermal study reads them
+/// per component block.
+///
+/// Epoxy mold compound: plastic SOT, SOIC, QFN, QFP and BGA bodies, and molded diodes.
+pub const MOLD_COMPOUND: &str = "material.mold_compound_epoxy";
+/// 96 % alumina: the substrate of a thick-film chip resistor.
+pub const ALUMINA: &str = "material.ceramic_alumina_96";
+/// X7R-class barium-titanate dielectric: a multilayer ceramic chip capacitor.
+pub const MLCC_CERAMIC: &str = "material.ceramic_x7r_mlcc";
+/// Nickel-zinc ferrite: a chip inductor or ferrite bead.
+pub const FERRITE: &str = "material.ferrite_nizn";
+/// PA66 with 30 % glass fibre: a pin header's or connector's housing.
+pub const CONNECTOR_HOUSING: &str = "material.pa66_gf30";
+
+/// The body material of a chip of `kind` (`R`, `C`, `L`, …).
+fn chip_material(kind: &str) -> Option<&'static str> {
+    match kind.to_ascii_uppercase().as_str() {
+        "R" => Some(ALUMINA),
+        "C" => Some(MLCC_CERAMIC),
+        "L" | "FB" => Some(FERRITE),
+        "D" | "LED" => Some(MOLD_COMPOUND),
+        _ => None,
+    }
+}
+
 fn finish(
     name: String,
     description: String,
@@ -307,6 +333,7 @@ fn finish(
     excess: f64,
     pin1: Option<Point>,
     smd: bool,
+    material: Option<&str>,
 ) -> Package {
     let body = body_rect(body_w, body_l);
     let mut silk = silk_around(body, &pads, mm(0.2));
@@ -339,6 +366,7 @@ fn finish(
             width: mm(body_w),
             length: mm(body_l),
             height: mm(height),
+            material: material.map(str::to_owned),
         }),
         name,
         description,
@@ -406,6 +434,7 @@ pub fn chip(kind: &str, code: &str, density: Density) -> Option<Package> {
         land.courtyard_excess,
         polar.then(|| Point::mm(-c - pl / 2.0 - 0.3, 0.0)),
         true,
+        chip_material(kind),
     ))
 }
 
@@ -562,6 +591,7 @@ pub fn leaded(spec: &LeadedSpec, density: Density) -> Package {
             first.y,
         )),
         true,
+        Some(MOLD_COMPOUND),
     )
 }
 
@@ -653,6 +683,7 @@ pub fn mounting_hole(drill: f64, pad: f64) -> Package {
         0.25,
         None,
         false,
+        None,
     );
     // The pad is the hole's whole footprint: no body outline in silk or fabrication art.
     pkg.silk.clear();
@@ -832,6 +863,7 @@ pub fn bga(
         excess * 0.25,
         Some(a1),
         true,
+        Some(MOLD_COMPOUND),
     )
 }
 
@@ -886,6 +918,7 @@ pub fn sot23(pins: u32, density: Density) -> Option<Package> {
         land.courtyard_excess,
         Some(at(-c - pl / 2.0 - 0.3, -0.95)),
         true,
+        Some(MOLD_COMPOUND),
     ))
 }
 
@@ -926,6 +959,7 @@ pub fn sot223(density: Density) -> Package {
         land.courtyard_excess,
         Some(Point::mm(-c - pl / 2.0 - 0.3, 2.3)),
         true,
+        Some(MOLD_COMPOUND),
     )
 }
 
@@ -985,6 +1019,7 @@ pub fn pin_header(rows: u32, cols: u32, pitch: f64) -> Package {
         0.5,
         None,
         false,
+        Some(CONNECTOR_HOUSING),
     );
     for p in &mut pkg.pads {
         p.copper = CopperSpan::All;
@@ -1034,6 +1069,7 @@ pub fn smd_connector(
         0.5,
         None,
         mounting.iter().all(|m| m.2.is_none()),
+        Some(CONNECTOR_HOUSING),
     )
 }
 

@@ -100,18 +100,18 @@ pub(crate) fn read_packages(
     let mut packages = Vec::with_capacity(blocks.len());
     let mut window_statements = Vec::with_capacity(blocks.len());
     for (statement, was) in blocks.iter().zip(&statements[first..last]) {
-        let Statement::Block(b) = statement else {
+        let Statement::Value(v) = statement else {
             return None;
         };
-        if b.keyword() != words::PACKAGE {
+        if v.keyword() != words::PACKAGE {
             return None;
         }
-        let key = b.name().map(|n| n.text()).unwrap_or_default();
+        let key = v.name().map(|n| n.text()).unwrap_or_default();
         let site = format!("{}.{key}", words::PACKAGE);
         if site != was.site {
             return None;
         }
-        let package = read_package(b, &key).ok()?;
+        let package = read_package(&key, v.value(), statement.span()).ok()?;
         let span = statement.span();
         window_statements.push(BoardStatement {
             group: Group::Package,

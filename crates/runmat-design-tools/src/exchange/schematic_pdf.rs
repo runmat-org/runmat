@@ -10,7 +10,10 @@
 //! right-aligned text by the font's 0.6-of-height character width.
 
 use crate::formats::sheet::{Shape, Sheet};
-use runmat_circuit::schematic::{NetLabel, SchematicSheet, FRAME_MM, TITLE_ROW_MM, TITLE_W_MM};
+use runmat_circuit::schematic::{
+    title_height_mm, NetLabel, SchematicSheet, FRAME_MM, TITLE_FIRST_ROW_SCALE, TITLE_ROW_MM,
+    TITLE_W_MM,
+};
 
 /// Courier's advance per character, as a fraction of the text height.
 const ADVANCE: f64 = 0.6;
@@ -57,18 +60,32 @@ fn frame(sheet: &mut Sheet, page: &SchematicSheet) {
         w - FRAME_MM,
         h - FRAME_MM,
     );
-    let rows = page.title_block.len().max(1) as f64;
     let (x0, x1) = (w - FRAME_MM - TITLE_W_MM, w - FRAME_MM);
-    let top = FRAME_MM + rows * TITLE_ROW_MM;
+    let top = FRAME_MM + title_height_mm(page.title_block.len().max(1));
     rect(sheet, "OUTLINE", x0, FRAME_MM, x1, top);
+    // Top row first: the title row is taller, its value larger, as the canvas draws it.
+    let mut y1 = top;
     for (k, (field, value)) in page.title_block.iter().enumerate() {
-        let y1 = top - k as f64 * TITLE_ROW_MM;
-        let y0 = y1 - TITLE_ROW_MM;
+        let title = field == "Title";
+        let row = if title {
+            TITLE_ROW_MM * TITLE_FIRST_ROW_SCALE
+        } else {
+            TITLE_ROW_MM
+        };
+        let y0 = y1 - row;
         if k > 0 {
             sheet.line("OUTLINE", [x0, y1], [x1, y1]);
         }
         text(sheet, [x0 + 1.5, y1 - 1.6], 1.2, "start", field);
-        text(sheet, [x0 + 16.0, y0 + 1.3], 2.5, "start", value);
+        let size = if title { 3.5 } else { 2.5 };
+        text(
+            sheet,
+            [x0 + 16.0, y0 + if title { 2.2 } else { 1.3 }],
+            size,
+            "start",
+            value,
+        );
+        y1 = y0;
     }
 }
 

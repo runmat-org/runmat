@@ -140,7 +140,7 @@ fn a_declaration_with_an_unknown_field_or_package_is_a_diagnostic() {
 
 #[test]
 fn a_part_on_a_footprint_file_opened_in_place_compiles_and_previews() {
-    use runmat_circuit::library::{catalog::CatalogPart, footprint, preview::preview_with};
+    use runmat_circuit::library::{catalog::PartRecord, footprint, preview::preview_with};
     let kicad_mod =
         runmat_circuit::kicad::footprint::write_mod(&footprint::from_string("SOT23-5").unwrap());
     let ldo = json!({ "mpn": "LDO_3V3", "manufacturer": "", "prefix": "U", "package": "libs/Power.pretty/SOT-23-5.kicad_mod",
@@ -183,7 +183,7 @@ fn a_part_on_a_footprint_file_opened_in_place_compiles_and_previews() {
         &CompileOptions::default(),
     );
     assert!(out.index.is_some(), "{:?}", out.diagnostics);
-    let part: CatalogPart = serde_json::from_value(ldo).unwrap();
+    let part: PartRecord = serde_json::from_value(ldo).unwrap();
     let preview = preview_with(&part, &|p| {
         (p == "libs/Power.pretty/SOT-23-5.kicad_mod").then(|| kicad_mod.clone())
     })

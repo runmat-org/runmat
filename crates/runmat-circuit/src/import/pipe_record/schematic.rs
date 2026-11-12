@@ -17,7 +17,7 @@ use crate::import::shape_json::schematic::{on_segment, Joins};
 use crate::import::xml_project::library::{find_attr, param_key};
 use crate::import::{file_safe, Report};
 use crate::ir::{ComponentDecl, Connection, Design, Endpoint, NetDecl, PartRef};
-use crate::library::catalog::{CatalogPart, CatalogPin};
+use crate::library::catalog::{PartRecord, PartPin};
 use crate::library::Package;
 use std::collections::BTreeMap;
 
@@ -56,7 +56,7 @@ struct Placed {
     value: String,
     footprint: String,
     params: BTreeMap<String, String>,
-    pins: Vec<CatalogPin>,
+    pins: Vec<PartPin>,
 }
 
 fn point(r: &Record, x: &str, y: &str) -> (f64, f64) {
@@ -182,7 +182,7 @@ pub fn read(
                             if pl.pins.iter().any(|q| q.pads.contains(&number)) {
                                 pin = format!("{pin}_{number}");
                             }
-                            pl.pins.push(CatalogPin { name: pin.clone(), pads: vec![number], kind: kind.into() });
+                            pl.pins.push(PartPin { name: pin.clone(), pads: vec![number], kind: kind.into() });
                         }
                         pins.push(Pin { designator: des.clone(), name: pin, at });
                         pin_sheet.push(sheet);
@@ -312,7 +312,7 @@ pub fn read(
             }
             params.insert(param_key(k), v.clone());
         }
-        let part = CatalogPart {
+        let part = PartRecord {
             mpn: mpn.clone(),
             manufacturer: find_attr(&pl.params, MAKER_KEYS).unwrap_or_default(),
             description: String::new(),

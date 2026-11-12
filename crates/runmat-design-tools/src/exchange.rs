@@ -4,7 +4,8 @@
 //! with the part's semantic PMI;
 //! a faceted AP214 B-rep in millimetres only on the grid test kernel), STL (binary, millimetres), 3MF (millimetres) and glTF (binary `.glb`, metres,
 //! Y up as glTF defines); drawing sheets and sheet-metal flat patterns as DXF and DWG (R2018; millimetres), drawing sheets as vector PDF;
-//! assemblies' bills of materials as CSV; circuits and boards as a KiCad project; boards as a
+//! assemblies' bills of materials as CSV; boards as STEP AP242 (the board, mask, components and,
+//! when asked, outer copper, each a named product: `runmat_cad_wasm::exchange::board`); circuits and boards as a KiCad project; boards as a
 //! fabrication set ([`fabrication`]: Gerber X2, Excellon, drill map, fabrication drawing,
 //! pick-and-place and BOM per variant, IPC-2581C, ODB++, IPC-D-356A); circuits as KiCad,
 //! SPICE and EDIF 2.0.0 netlists ([`netlist`]). A product
@@ -292,6 +293,21 @@ pub struct ExportInput {
     /// Fabrication: which outputs to make (all by default).
     #[serde(default)]
     pub fabrication: Option<FabricationOptions>,
+    /// A board's STEP: what it writes beside the substrate and the component bodies.
+    #[serde(default)]
+    pub board: Option<BoardStepInput>,
+}
+
+/// A board's STEP options. The board (substrate, outline, holes) and each fitted component (its
+/// package's STEP model, else its body box) are always written.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoardStepInput {
+    /// The outer copper (tracks, via rings, pads) as thin solids, one product per layer
+    /// (default off: a mechanical model needs the envelope).
+    pub copper: Option<bool>,
+    /// The solder mask's extent on each face (default on).
+    pub mask: Option<bool>,
 }
 
 /// One exported file.
@@ -488,6 +504,37 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
             )?
         }
         ExportFormat::Bom => vec![family::bom_csv(&input.path, files)?],
+        ExportFormat::Step if matches!(kind, DesignKind::Circuit | DesignKind::Layout) => {
+            let defaults = runmat_cad_wasm::exchange::board::BoardStepOptions::default();
+            let given = input.board.clone().unwrap_or_default();
+            let options = runmat_cad_wasm::exchange::board::BoardStepOptions {
+                copper: given.copper.unwrap_or(defaults.copper),
+                mask: given.mask.unwrap_or(defaults.mask),
+            };
+            match runmat_cad_wasm::exchange::board::board_step(&input.path, files, options)
+                .map_err(|m| ToolError::new("not_compiled", format!("{}: {m}", input.path)))?
+            {
+                Some(out) => {
+                    notes.push("STEP AP242: the board, its solder mask, each component (its package's STEP model, else its body box) and, when asked, the outer copper, each a product under its name".into());
+                    notes.push(format!(
+                        "components: {} from their package's STEP model, {} as body boxes",
+                        out.models, out.boxes
+                    ));
+                    notes.extend(out.notes);
+                    vec![text_file(
+                        format!("{name}.step"),
+                        "model/step",
+                        String::from_utf8_lossy(&out.step).into_owned(),
+                    )]
+                }
+                None => {
+                    return Err(ToolError::new(
+                        "unsupported",
+                        "a board's STEP needs the exact geometry kernel, which this build doesn't have",
+                    ))
+                }
+            }
+        }
         ExportFormat::Step
         | ExportFormat::Stl
         | ExportFormat::ThreeMf

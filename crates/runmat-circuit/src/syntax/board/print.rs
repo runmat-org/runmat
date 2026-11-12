@@ -3,7 +3,6 @@
 use super::super::layout::{print_sync, SyncSection};
 use super::*;
 use crate::geom::poly::Polygon;
-use crate::ids::Uuid;
 use crate::library::Package;
 use runmat_design_syntax::document::UseItem;
 use runmat_design_syntax::json::INDENT;
@@ -93,75 +92,6 @@ pub(super) fn stackup_text(s: &Stackup) -> String {
             name_text(&l.name),
             r.text()
         ));
-    }
-    out.push_str(INDENT);
-    out.push('}');
-    out
-}
-
-pub(super) fn package_text(key: &str, p: &Package) -> String {
-    let inner = INDENT.repeat(2);
-    let mut out = format!("{} {} {{\n", words::PACKAGE, name_text(key));
-    let mut line = |head: String, value: String| {
-        out.push_str(&inner);
-        out.push_str(&head);
-        out.push_str(" = ");
-        out.push_str(&value);
-        out.push('\n');
-    };
-    if p.name != key {
-        line(words::NAME.into(), name_text(&p.name));
-    }
-    if p.uuid != Uuid::NIL {
-        line(
-            words::UUID.into(),
-            crate::syntax::values::name_text(&p.uuid.to_string()),
-        );
-    }
-    if !p.description.is_empty() {
-        line(words::DESCRIPTION.into(), name_text(&p.description));
-    }
-    if p.smd {
-        line(words::SMD.into(), "true".into());
-    }
-    for pad in &p.pads {
-        line(
-            format!("{} {}", words::PAD, name_text(&pad.name)),
-            pad_text(pad),
-        );
-    }
-    for ring in &p.courtyard {
-        line(words::COURTYARD.into(), ring_text(ring));
-    }
-    for (word, graphics) in [(words::SILK, &p.silk), (words::FAB, &p.fab)] {
-        for g in graphics {
-            let (kind, text) = graphic_text(g, Rec::new());
-            line(format!("{word} {kind}"), text);
-        }
-    }
-    if let Some(m) = &p.model {
-        let mut r = Rec::new();
-        r.put("path", name_text(&m.path));
-        if m.offset != (0.0, 0.0, 0.0) {
-            r.put("offset", floats3_text(m.offset));
-        }
-        if m.rotation != (0.0, 0.0, 0.0) {
-            r.put("rotation", floats3_text(m.rotation));
-        }
-        if m.scale != (1.0, 1.0, 1.0) {
-            r.put("scale", floats3_text(m.scale));
-        }
-        if m.origin != "footprint" {
-            r.put("origin", name_text(&m.origin));
-        }
-        line(words::MODEL.into(), r.text());
-    }
-    if let Some(b) = &p.body {
-        let mut r = Rec::new();
-        r.len("width", b.width)
-            .len("length", b.length)
-            .len("height", b.height);
-        line(words::BODY.into(), r.text());
     }
     out.push_str(INDENT);
     out.push('}');

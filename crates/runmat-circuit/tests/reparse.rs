@@ -159,7 +159,7 @@ fn other_changes_read_whole() {
 fn package_changes_re_read_their_footprints() {
     let old = source();
     // Widen the 0402 capacitor's pads: every C_0402 footprint re-reads, nothing else does.
-    let head = "package C_0402_1005Metric_IPCN {";
+    let head = "package C_0402_1005Metric_IPCN = {";
     let at = old.find(head).expect("the 0402 package");
     let end = at + old[at..].find("\n    }").unwrap();
     let block = old[at..end].replace("size = [0.515, 0.57]", "size = [0.6, 0.57]");
@@ -209,6 +209,6 @@ fn package_changes_re_read_their_footprints() {
     );
     check(&old, &new, false);
     // Renaming a package changes which footprints it serves: a whole read.
-    let renamed = old.replacen(head, "package C_0402_Renamed {", 1);
+    let renamed = old.replacen(head, "package C_0402_Renamed = {", 1);
     check(&old, &renamed, true);
 }

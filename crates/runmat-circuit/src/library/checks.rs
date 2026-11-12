@@ -9,7 +9,7 @@
 //! - every pad has a pin, or the part lists it in `nc`;
 //! - a part's pins and its symbol's pins match by name.
 
-use super::catalog::CatalogPart;
+use super::catalog::PartRecord;
 use super::{Package, PadDef, PadKind, Symbol};
 use crate::geom::poly::PolySet;
 use crate::geom::{to_mm, Point};
@@ -86,7 +86,7 @@ fn pad_corners(pad: &PadDef) -> Vec<Point> {
 
 /// What is wrong with part `part` on its footprint `package`: pins on pads it lacks, and pads
 /// with no pin that the part doesn't list in `nc`.
-pub fn part_findings(part: &CatalogPart, package: &Package) -> Vec<String> {
+pub fn part_findings(part: &PartRecord, package: &Package) -> Vec<String> {
     let mut out = Vec::new();
     let mut used = BTreeSet::new();
     for pin in &part.pins {
@@ -141,7 +141,7 @@ pub fn part_findings(part: &CatalogPart, package: &Package) -> Vec<String> {
 }
 
 /// Whether part `part`'s pins and symbol `name`'s pins match by name.
-pub fn pins_match_symbol(part: &CatalogPart, name: &str, symbol: &Symbol) -> Result<(), String> {
+pub fn pins_match_symbol(part: &PartRecord, name: &str, symbol: &Symbol) -> Result<(), String> {
     let pins: BTreeSet<&str> = part.pins.iter().map(|p| p.name.as_str()).collect();
     let drawn: BTreeSet<&str> = symbol.pins.iter().map(|p| p.pin.as_str()).collect();
     if let Some(p) = pins.difference(&drawn).next() {

@@ -445,7 +445,7 @@ pub struct Design {
     /// `simulation` sections, by name.
     pub simulations: BTreeMap<String, crate::simulation::SimulationDef>,
     /// The file's `part` declarations, by MPN: catalog parts embedded where they are used.
-    pub parts: BTreeMap<String, crate::library::catalog::CatalogPart>,
+    pub parts: BTreeMap<String, crate::library::catalog::PartRecord>,
     /// The file's `footprint` declarations, by name.
     pub footprints: BTreeMap<String, crate::library::Package>,
     /// The file's `symbol` declarations, by name.

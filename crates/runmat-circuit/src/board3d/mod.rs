@@ -21,6 +21,9 @@ use crate::library::PadKind;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+mod solid;
+pub use solid::*;
+
 /// One face of a body: flat triangle soup.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Face3d {
@@ -76,7 +79,7 @@ pub mod colors {
 }
 
 /// Mask and silk thicknesses as drawn (they lift each layer just off the one below).
-const MASK_T: f64 = 0.02;
+pub(crate) const MASK_T: f64 = 0.02;
 const SILK_T: f64 = 0.01;
 const TOL: i64 = 20_000;
 
@@ -580,87 +583,5 @@ fn component(m: &mut Model, f: &Footprint, n: CopperIndex, top: f64) {
             m.mesh("Pins", colors::FINISH)
                 .prism(&rect(pc, 0.64, 0.64, f.rotation), pz0, pz1);
         }
-    }
-}
-
-/// A component body of [`BoardSolid`]: its outline on the board and the heights it spans (mm).
-#[derive(Clone, Debug, PartialEq)]
-pub struct SolidBody {
-    /// `component:<designator>`.
-    pub reference: String,
-    pub ring: Vec<(f64, f64)>,
-    pub z0: f64,
-    pub z1: f64,
-}
-
-/// The board as an exact solid's input, in the 3D view's frame (mm, z = 0 at the bottom face):
-/// the outline (outer ring, then its cut-outs) extruded to the board's thickness, less its
-/// drilled holes, and each fitted component's body as a prism. Interference and clearance checks
-/// in an assembly read the board as this solid, so a screw through a mounting hole clears it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BoardSolid {
-    pub outline: Vec<Vec<(f64, f64)>>,
-    /// Each footprint's drilled hole through the board, plated or not: a circle at its drill
-    /// diameter, or a slot's stadium. Vias are left in (they are filled or tented, and nothing
-    /// passes through them). A hole that breaks the board edge, meets a cut-out or overlaps
-    /// another hole is left out, so every ring is a separate inner loop of the outline.
-    pub holes: Vec<Vec<(f64, f64)>>,
-    pub thickness: f64,
-    pub bodies: Vec<SolidBody>,
-}
-
-/// The rings of `board`'s drilled footprint holes that lie wholly inside its outline, apart from
-/// its cut-outs and from each other.
-fn drilled_holes(board: &Board) -> Vec<Vec<(f64, f64)>> {
-    let mut kept: Vec<Prim> = Vec::new();
-    let mut rings = Vec::new();
-    for (_, h) in crate::fab::drill::footprint_holes(board) {
-        let r = h.dia / 2;
-        let (prim, ring) = match h.slot {
-            Some((a, b)) => (
-                Prim::segment(a, b, h.dia),
-                crate::geom::poly::capsule_ring(a, b, r, TOL),
-            ),
-            None => (
-                Prim::circle(h.at, r),
-                crate::geom::poly::circle_ring(h.at, r, TOL),
-            ),
-        };
-        let inside = ring
-            .iter()
-            .all(|p| board.outline.contains(*p) == Some(true));
-        if !inside || kept.iter().any(|k| k.gap(&prim) <= 0.0) {
-            continue;
-        }
-        kept.push(prim);
-        rings.push(ring_mm(&ring));
-    }
-    rings
-}
-
-pub fn board_solid(board: &Board) -> BoardSolid {
-    let thickness = thickness_mm(board);
-    let n = board.copper_count();
-    let mut outline = vec![ring_mm(&board.outline.outer)];
-    outline.extend(board.outline.holes.iter().map(|r| ring_mm(r)));
-    let bodies = board
-        .footprints
-        .values()
-        .filter(|f| f.fitted)
-        .filter_map(|f| {
-            let (ring, z0, z1) = body_extent(f, n, thickness)?;
-            Some(SolidBody {
-                reference: ItemRef::Component(f.reference.clone()).to_string(),
-                ring,
-                z0,
-                z1,
-            })
-        })
-        .collect();
-    BoardSolid {
-        outline,
-        holes: drilled_holes(board),
-        thickness,
-        bodies,
     }
 }

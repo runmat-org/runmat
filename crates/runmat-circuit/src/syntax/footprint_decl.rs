@@ -1,5 +1,6 @@
-//! `footprint <name> = { … }`: the text form of a [`Package`], in a library `.circuit` or a
-//! design's own file. A generated package prints to the same form.
+//! The one text form of a [`Package`]: `footprint <name> = { … }` in a library `.circuit` or a
+//! design's own file, and `package <name> = { … }` in a `.circuit.layout` (where `footprint`
+//! places a part). A generated package prints to the same form.
 //!
 //! ```text
 //! footprint gps_module_lcc18 = {
@@ -11,13 +12,16 @@
 //!     courtyard = rect([-5.3, -5.1], [5.3, 5.1]),
 //!     silk = [line([-5.05, -4.85], [5.05, -4.85]), circle([-5.6, -4.6], 0.15)],
 //!     fab = [rect([-5.05, -4.85], [5.05, 4.85])],
-//!     body = { height = 2.4, model = "gps_module.step" }
+//!     body = { height = 2.4, material = "material.mold_compound_epoxy", model = "gps_module.step" }
 //! }
 //! ```
 //!
 //! Lengths are mm. A pad's `layers` is `smd` (top copper, paste and mask), `through` (every
 //! copper layer and mask, with a plated `drill`), `hole` (an unplated mechanical hole) or
-//! `edge` (edge-connector fingers: copper and mask, no paste). Drawings take `line`, `rect`,
+//! `edge` (edge-connector fingers: copper and mask, no paste). A pad's `side` (`front`, `back`
+//! or `all`) and `plated` are written only when they differ from what its `layers` gives.
+//! `uuid` and `smd` are written only when they differ from the ones the name and the pads
+//! give. Drawings take `line`, `rect`,
 //! `circle`, `arc`, `polygon` and `text`. The courtyard is closed: a rectangle, a polygon, a
 //! circle, or lines and arcs that join end to end.
 
@@ -383,8 +387,11 @@ fn pad_of(v: &Val, footprint: &str) -> Read<PadDef> {
         }
     };
     let at = f.or("at", Point::ORIGIN, point)?;
+    // `drill = none` writes a through pad with no hole, as an imported board can hold.
+    let no_drill = matches!(f.get("drill"), Some(d) if matches!(&d.v, V::Word(w) if w == "none"));
     let drill = match f.get("drill") {
         None => None,
+        Some(_) if no_drill => None,
         Some(d) => Some(match &d.v {
             V::Rec(_) => {
                 let mut df = Fields::of(d, "drill")?;
@@ -404,7 +411,7 @@ fn pad_of(v: &Val, footprint: &str) -> Read<PadDef> {
         }),
     };
     match kind {
-        PadKind::Tht | PadKind::Npth if drill.is_none() => {
+        PadKind::Tht | PadKind::Npth if drill.is_none() && !no_drill => {
             return Err(diagnostic(v.span, format!("footprint `{footprint}`: pad `{number}` goes through the board and needs a `drill`")))
         }
         PadKind::Smd | PadKind::Connector if drill.is_some() => {
@@ -412,14 +419,22 @@ fn pad_of(v: &Val, footprint: &str) -> Read<PadDef> {
         }
         _ => {}
     }
-    let copper = match (kind, f.opt("side", text)?.as_deref()) {
-        (PadKind::Tht | PadKind::Npth, _) => CopperSpan::All,
-        (_, Some("back")) => CopperSpan::Back,
-        (_, Some("front") | None) => CopperSpan::Front,
-        (_, Some(other)) => {
+    let drill = match drill {
+        Some(mut d) => {
+            d.plated = f.or("plated", d.plated, boolean)?;
+            Some(d)
+        }
+        None => None,
+    };
+    let copper = match f.opt("side", text)?.as_deref() {
+        None => default_copper(kind),
+        Some("front") => CopperSpan::Front,
+        Some("back") => CopperSpan::Back,
+        Some("all") => CopperSpan::All,
+        Some(other) => {
             return Err(diagnostic(
                 v.span,
-                format!("`side = {other}`: a pad's side is `front` or `back`"),
+                format!("`side = {other}`: a pad's side is `front`, `back` or `all`"),
             ))
         }
     };
@@ -441,7 +456,15 @@ fn pad_of(v: &Val, footprint: &str) -> Read<PadDef> {
     Ok(pad)
 }
 
-fn pad_text(p: &PadDef) -> Result<String, PrintError> {
+/// The copper a pad's `layers` gives: the front for a surface pad, every layer for a hole.
+fn default_copper(kind: PadKind) -> CopperSpan {
+    match kind {
+        PadKind::Smd | PadKind::Connector => CopperSpan::Front,
+        PadKind::Tht | PadKind::Npth => CopperSpan::All,
+    }
+}
+
+fn pad_text(p: &PadDef) -> String {
     let mut r: Vec<(String, String)> = vec![("number".into(), quote(&p.name))];
     let mut put = |k: &str, v: String| r.push((k.into(), v));
     let size = |w: Coord, h: Coord| format!("[{}, {}]", mm_text(w), mm_text(h));
@@ -504,6 +527,9 @@ fn pad_text(p: &PadDef) -> Result<String, PrintError> {
         .map(|(w, _)| *w)
         .unwrap_or("smd");
     put("layers", layers.into());
+    if p.drill.is_none() && matches!(p.kind, PadKind::Tht | PadKind::Npth) {
+        put("drill", "none".into());
+    }
     if let Some(d) = &p.drill {
         match d.slot {
             None => put("drill", mm_text(d.diameter)),
@@ -517,8 +543,18 @@ fn pad_text(p: &PadDef) -> Result<String, PrintError> {
             ),
         }
     }
-    if p.copper == CopperSpan::Back && matches!(p.kind, PadKind::Smd | PadKind::Connector) {
-        put("side", "back".into());
+    if let Some(d) = &p.drill {
+        if d.plated != (p.kind == PadKind::Tht) {
+            put("plated", d.plated.to_string());
+        }
+    }
+    if p.copper != default_copper(p.kind) {
+        let side = match p.copper {
+            CopperSpan::Front => "front",
+            CopperSpan::Back => "back",
+            CopperSpan::All => "all",
+        };
+        put("side", side.into());
     }
     if !p.mask {
         put("mask", "false".into());
@@ -536,7 +572,7 @@ fn pad_text(p: &PadDef) -> Result<String, PrintError> {
         put("thermal", "true".into());
     }
     let inner: Vec<String> = r.iter().map(|(k, v)| format!("{k} = {v}")).collect();
-    Ok(format!("{{ {} }}", inner.join(", ")))
+    format!("{{ {} }}", inner.join(", "))
 }
 
 /// Joins courtyard lines and arcs end to end into closed rings; `None` names an open end.
@@ -713,17 +749,40 @@ fn triple_text(t: (f64, f64, f64)) -> String {
     )
 }
 
-/// Reads `footprint <name> = { … }`.
+/// Reads `footprint <name> = { … }`. A declared footprint needs its pads.
 pub(super) fn read(name: String, expr: Option<Expr>, span: Span) -> Read<Package> {
+    let package = read_fields(name, record_of(expr, span)?)?;
+    if package.pads.is_empty() {
+        return Err(diagnostic(
+            span,
+            format!("footprint `{}` needs its `pads`", package.name),
+        ));
+    }
+    Ok(package)
+}
+
+/// Whether every pad of a package sits on a surface (the package's `smd` unless written).
+fn all_surface(pads: &[PadDef]) -> bool {
+    pads.iter()
+        .all(|p| matches!(p.kind, PadKind::Smd | PadKind::Connector))
+}
+
+/// Reads the fields of a footprint record into the package `name`. A layout's packages read
+/// here too; one with no pads (a logo, a mounting mark) reads as one.
+pub(crate) fn read_fields(name: String, fields: Vec<(String, Expr)>) -> Read<Package> {
     let mut description = String::new();
+    let mut uuid_text: Option<Val> = None;
+    let mut smd: Option<bool> = None;
     let mut pads = Vec::new();
     let mut courtyard = Vec::new();
     let mut silk = Vec::new();
     let mut fab = Vec::new();
     let mut body_val: Option<Val> = None;
-    for (field, value) in record_of(expr, span)? {
+    for (field, value) in fields {
         match field.as_str() {
             "description" => description = text(&val(&value)?)?,
+            "uuid" => uuid_text = Some(val(&value)?),
+            "smd" => smd = Some(boolean(&val(&value)?)?),
             "pads" => {
                 let v = val(&value)?;
                 pads = super::values::list(&v)?.iter().map(|p| pad_of(p, &name)).collect::<Read<_>>()?;
@@ -735,16 +794,10 @@ pub(super) fn read(name: String, expr: Option<Expr>, span: Span) -> Read<Package
             other => {
                 return Err(diagnostic(
                     value.span(),
-                    format!("a footprint has no `{other}`; it takes description, pads, courtyard, silk, fab and body"),
+                    format!("a footprint has no `{other}`; it takes description, pads, courtyard, silk, fab, body, uuid and smd"),
                 ))
             }
         }
-    }
-    if pads.is_empty() {
-        return Err(diagnostic(
-            span,
-            format!("footprint `{name}` needs its `pads`"),
-        ));
     }
     let (mut body, mut model) = (None, None);
     if let Some(v) = body_val {
@@ -758,11 +811,12 @@ pub(super) fn read(name: String, expr: Option<Expr>, span: Span) -> Read<Package
                 width,
                 length,
                 height,
+                material: f.opt("material", text)?,
             });
-        } else if f.get("size").is_some() {
+        } else if f.get("size").is_some() || f.get("material").is_some() {
             return Err(diagnostic(
                 v.span,
-                format!("footprint `{name}`: a body with a `size` needs its `height`"),
+                format!("footprint `{name}`: a body with a `size` or `material` needs its `height`"),
             ));
         }
         if let Some(path) = f.opt("model", text)? {
@@ -776,11 +830,17 @@ pub(super) fn read(name: String, expr: Option<Expr>, span: Span) -> Read<Package
         }
         f.finish()?;
     }
-    let smd = pads
-        .iter()
-        .all(|p| matches!(p.kind, PadKind::Smd | PadKind::Connector));
+    let smd = smd.unwrap_or_else(|| all_surface(&pads));
+    let uuid = match uuid_text {
+        None => uuid("package", &name),
+        Some(v) => {
+            let t = text(&v)?;
+            crate::ids::Uuid::parse(&t)
+                .ok_or_else(|| diagnostic(v.span, format!("`{t}` is not a UUID")))?
+        }
+    };
     Ok(Package {
-        uuid: uuid("package", &name),
+        uuid,
         name,
         description,
         pads,
@@ -803,25 +863,35 @@ fn layer(d: Drawn, width: f64) -> Read<Vec<Graphic>> {
 /// The value written after `footprint <name> = `, which [`read`] reads back to `package`
 /// (named `name`).
 pub fn print(package: &Package) -> Result<String, PrintError> {
-    let mut entries: Vec<(String, String)> = Vec::new();
-    if !package.description.is_empty() {
-        entries.push(("description".into(), quote(&package.description)));
-    }
     if package.pads.is_empty() {
         return Err(PrintError(format!(
             "footprint `{}` has no pads",
             package.name
         )));
     }
-    let pads = package
-        .pads
-        .iter()
-        .map(pad_text)
-        .collect::<Result<Vec<_>, _>>()?;
-    entries.push((
-        "pads".into(),
-        format!("[\n{INDENT}{}\n]", pads.join(&format!(",\n{INDENT}"))),
-    ));
+    Ok(record(&entries(package)))
+}
+
+/// The fields of `package`'s record, in print order: [`print`] without the record braces, so a
+/// layout can put its own `name` first.
+pub(crate) fn entries(package: &Package) -> Vec<(String, String)> {
+    let mut entries: Vec<(String, String)> = Vec::new();
+    if !package.description.is_empty() {
+        entries.push(("description".into(), quote(&package.description)));
+    }
+    if package.uuid != uuid("package", &package.name) {
+        entries.push(("uuid".into(), quote(&package.uuid.to_string())));
+    }
+    if package.smd != all_surface(&package.pads) {
+        entries.push(("smd".into(), package.smd.to_string()));
+    }
+    let pads: Vec<String> = package.pads.iter().map(pad_text).collect();
+    if !pads.is_empty() {
+        entries.push((
+            "pads".into(),
+            format!("[\n{INDENT}{}\n]", pads.join(&format!(",\n{INDENT}"))),
+        ));
+    }
     if !package.courtyard.is_empty() {
         entries.push(("courtyard".into(), courtyard_text(&package.courtyard)));
     }
@@ -840,6 +910,9 @@ pub fn print(package: &Package) -> Result<String, PrintError> {
             ));
         }
         body.push(("height".into(), mm_text(b.height)));
+        if let Some(m) = &b.material {
+            body.push(("material".into(), quote(m)));
+        }
     }
     if let Some(m) = &package.model {
         body.push(("model".into(), quote(&m.path)));
@@ -859,7 +932,7 @@ pub fn print(package: &Package) -> Result<String, PrintError> {
     if !body.is_empty() {
         entries.push(("body".into(), record(&body)));
     }
-    Ok(record(&entries))
+    entries
 }
 
 /// The whole statement, `footprint <name> = { … }`.

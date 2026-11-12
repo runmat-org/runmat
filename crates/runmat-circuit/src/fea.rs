@@ -352,6 +352,7 @@ pub fn pcb_source(
             height: f
                 .package
                 .body
+                .as_ref()
                 .map(|b| b.height as f64 * 1e-9)
                 .unwrap_or(1e-3),
             power,

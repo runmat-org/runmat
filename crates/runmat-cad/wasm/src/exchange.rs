@@ -10,6 +10,9 @@
 //!   reads back as authored; a sub-assembly placed twice is one product used twice. A part file placed in several configurations is one product per
 //!   configuration, regenerated in it.
 //!
+//! - **Boards.** A `.circuit` or `.circuit.layout` as the 3D tab shows it, one named product
+//!   per solid ([`board`]).
+//!
 //! The kernel that cannot write STEP (the grid test double) gives `None`.
 
 use crate::configured::regenerate_configured;
@@ -25,6 +28,7 @@ use runmat_cad::regen::kernel::{
 use runmat_cad::regen::RegenResult;
 use std::collections::BTreeMap;
 
+pub mod board;
 pub mod export;
 pub mod flat;
 pub mod meshes;

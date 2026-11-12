@@ -597,6 +597,10 @@ pub trait ModelReferences {
     ) -> Option<String> {
         None
     }
+    /// A BOM item's defining file as a parts list prints it: relative to the project.
+    fn item_definition(&self, _model: &ModelRef, item: &BomItem) -> String {
+        item.definition.to_string()
+    }
 }
 
 struct ItemProps<'a> {
@@ -607,6 +611,9 @@ struct ItemProps<'a> {
 impl BomProperties for ItemProps<'_> {
     fn property(&self, item: &BomItem, name: &PropertyName) -> Option<String> {
         self.model.item_property(self.at, item, name)
+    }
+    fn definition(&self, item: &BomItem) -> String {
+        self.model.item_definition(self.at, item)
     }
 }
 

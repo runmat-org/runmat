@@ -12,9 +12,7 @@
 //!   page's frame and off its title block.
 
 use super::place::{reach, Placed};
-use super::{
-    Cell, CellKind, NetInfo, Place, FRAMES, FRAME_MM, GRID, MARGIN, TITLE_ROW_MM, TITLE_W_MM,
-};
+use super::{Cell, CellKind, NetInfo, Place, FRAMES, FRAME_MM, GRID, MARGIN, TITLE_W_MM};
 use crate::geom::{Coord, Point};
 use crate::ids::SchPlace;
 use std::collections::BTreeMap;
@@ -216,7 +214,7 @@ struct Room {
 
 impl Room {
     fn of(bodies: &[Rect], title_rows: f64) -> Room {
-        let title_h = title_rows * TITLE_ROW_MM;
+        let title_h = super::title_height_mm(title_rows as usize);
         let frame = |w: f64, h: f64| {
             let area = [0, -(nm(h) - 2 * MARGIN), nm(w) - 2 * MARGIN, 0];
             let title = [

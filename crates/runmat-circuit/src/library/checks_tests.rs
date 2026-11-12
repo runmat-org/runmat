@@ -1,7 +1,7 @@
 use super::*;
 use crate::geom::poly::rect_ring;
 use crate::geom::{mm, Rect};
-use crate::library::catalog::CatalogPin;
+use crate::library::catalog::PartPin;
 use crate::library::footprint::from_string;
 use crate::library::{PadDef, PadShape};
 
@@ -81,13 +81,13 @@ fn each_footprint_finding_names_the_footprint_and_the_pad() {
 
 #[test]
 fn every_pad_has_a_pin_or_is_listed_nc() {
-    let pin = |name: &str, pad: &str| CatalogPin {
+    let pin = |name: &str, pad: &str| PartPin {
         name: name.into(),
         pads: vec![pad.into()],
         kind: "passive".into(),
     };
     let package = from_string("SOT23-5").unwrap();
-    let mut part = CatalogPart {
+    let mut part = PartRecord {
         mpn: "X".into(),
         package: "SOT23-5".into(),
         pins: vec![pin("A", "1"), pin("B", "2"), pin("C", "3"), pin("D", "9")],

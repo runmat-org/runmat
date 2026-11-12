@@ -19,6 +19,12 @@ runmat-rules = { path = "../runmat-rules", version = "=0.7.1" }
 runmat-design-commands = { path = "../runmat-design-commands", version = "=0.7.1" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The server's API schema for the part record (library::catalog), under `openapi`.
+utoipa = { version = "4", optional = true }
+
+[features]
+# Derives utoipa ToSchema on the part record, for the server's part search API.
+openapi = ["dep:utoipa"]
 
 [dev-dependencies]
 # An independent Gerber reader (MIT OR Apache-2.0): the fabrication tests parse every Gerber

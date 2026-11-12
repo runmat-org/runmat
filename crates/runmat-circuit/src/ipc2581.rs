@@ -204,7 +204,7 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
             "{ind}<Package name=\"{}\" type=\"OTHER\" pinOne=\"{}\" pinOneOrientation=\"OTHER\" height=\"{}\">",
             esc(name),
             esc(pkg.pads.first().map(|p| p.name.as_str()).unwrap_or("1")),
-            n(pkg.body.map(|b| b.height).unwrap_or(0))
+            n(pkg.body.as_ref().map(|b| b.height).unwrap_or(0))
         );
         // The outline: the courtyard, else the box around the pads.
         let pad_box = || {

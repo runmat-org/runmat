@@ -698,6 +698,18 @@ impl Session {
         state.parsed.board.as_ref().map(crate::board3d::board_solid)
     }
 
+    /// The last compiled board's outer copper as thin solids ([`crate::board3d::outer_copper`])
+    /// and its solder mask's extent on each face ([`crate::board3d::mask_extent`]), for its STEP.
+    pub fn board_surfaces(
+        &self,
+    ) -> Option<(Vec<crate::board3d::CopperSolid>, [(f64, f64); 2])> {
+        let board = self.board.as_ref()?.parsed.board.as_ref()?;
+        Some((
+            crate::board3d::outer_copper(board),
+            crate::board3d::mask_extent(board),
+        ))
+    }
+
     /// The board's mass properties ([`crate::mass::board_mass`]), with the library parts' masses
     /// when the schematic compiled.
     pub fn board_mass(&self) -> Option<crate::mass::BoardMass> {

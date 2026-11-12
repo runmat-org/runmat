@@ -262,14 +262,14 @@ impl Reader<'_> {
                         stackups.push(s);
                     }
                 }
-                Statement::Block(b) if b.keyword() == words::PACKAGE => {
-                    let key = b.name().map(|n| n.text()).unwrap_or_default();
+                Statement::Value(v) if v.keyword() == words::PACKAGE => {
+                    let key = v.name().map(|n| n.text()).unwrap_or_default();
                     let site = self.sites.named(words::PACKAGE, &key);
                     self.record(Group::Package, site, statement.span(), None);
-                    if let Some(p) = self.note(read_package(b, &key)) {
+                    if let Some(p) = self.note(read_package(&key, v.value(), statement.span())) {
                         if packages.insert(key.clone(), p).is_some() {
                             self.out.diagnostics.push(diagnostic(
-                                b.keyword_span(),
+                                statement.span(),
                                 format!("package `{key}` is given twice"),
                             ));
                         }
@@ -337,7 +337,7 @@ impl Reader<'_> {
             let at = statement.span();
             if let Statement::Block(b) = statement {
                 match b.keyword().as_str() {
-                    words::STACKUP | words::PACKAGE => {}
+                    words::STACKUP => {}
                     words::SYNC => {
                         self.record(Group::Sync, "sync".into(), at, None);
                         if sync.is_some() {
@@ -364,6 +364,10 @@ impl Reader<'_> {
                         format!("`{other} {{ … }}` is not a layout section"),
                     )),
                 }
+                continue;
+            }
+            // Packages were read in pass 1; their drawings aren't plain values.
+            if matches!(statement, Statement::Value(v) if v.keyword() == words::PACKAGE) {
                 continue;
             }
             let h = match head(statement) {

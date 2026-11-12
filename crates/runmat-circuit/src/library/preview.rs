@@ -4,7 +4,7 @@
 //! The symbol comes from the same placer the schematic uses (a one-component design laid out
 //! on its own), so the preview matches what placing the part draws.
 
-use super::catalog::{add_to_pool_with, CatalogPart};
+use super::catalog::{add_to_pool_with, PartRecord};
 use super::{Graphic, PadKind, PadShape, Pool};
 use crate::elab::{elaborate, ElabOptions};
 use crate::geom::{to_mm, Point};
@@ -108,13 +108,13 @@ fn lines(graphics: &[Graphic], dots: &mut Vec<[f64; 3]>) -> Vec<Vec<Xy>> {
 }
 
 /// The previews of `part`, or why the record cannot be drawn.
-pub fn preview(part: &CatalogPart) -> Result<PartPreview, String> {
+pub fn preview(part: &PartRecord) -> Result<PartPreview, String> {
     preview_with(part, &|_| None)
 }
 
 /// [`preview`], reading a footprint-file package through `file` (by the path as written).
 pub fn preview_with(
-    part: &CatalogPart,
+    part: &PartRecord,
     file: &dyn Fn(&str) -> Option<String>,
 ) -> Result<PartPreview, String> {
     let mut pool = Pool::new();
@@ -222,15 +222,15 @@ pub fn preview_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::catalog::CatalogPin;
+    use crate::library::catalog::PartPin;
 
-    fn buck() -> CatalogPart {
-        let pin = |name: &str, pad: &str, kind: &str| CatalogPin {
+    fn buck() -> PartRecord {
+        let pin = |name: &str, pad: &str, kind: &str| PartPin {
             name: name.into(),
             pads: vec![pad.into()],
             kind: kind.into(),
         };
-        CatalogPart {
+        PartRecord {
             mpn: "BUCK-36V-2A".into(),
             manufacturer: "Generic".into(),
             category: "regulator".into(),
@@ -262,18 +262,18 @@ mod tests {
 
     #[test]
     fn a_resistor_previews_with_its_standard_art() {
-        let r = CatalogPart {
+        let r = PartRecord {
             mpn: "R0402-10K".into(),
             manufacturer: "Generic".into(),
             category: "resistor".into(),
             package: "R0402".into(),
             pins: vec![
-                CatalogPin {
+                PartPin {
                     name: "1".into(),
                     pads: vec!["1".into()],
                     kind: "passive".into(),
                 },
-                CatalogPin {
+                PartPin {
                     name: "2".into(),
                     pads: vec!["2".into()],
                     kind: "passive".into(),

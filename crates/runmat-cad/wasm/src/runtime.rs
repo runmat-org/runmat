@@ -1,5 +1,6 @@
 //! The CAD document runtime behind the wasm entry points, in plain Rust so it tests natively.
 
+pub mod assembly_stages;
 pub mod part_cache;
 mod prototype_reuse;
 mod published_frames;
@@ -150,8 +151,15 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         return crate::drawing::dependencies(path, text);
     }
     if path.ends_with(".circuit") || path.ends_with(".circuit.layout") {
-        // A circuit placed in an assembly draws its board: the layout, the circuit and its lock.
-        return runmat_circuit::runtime::dependencies(path, text);
+        // A circuit placed in an assembly draws its board: the layout, the circuit and its lock,
+        // and the STEP models its packages name (a board's STEP places them).
+        let mut out = runmat_circuit::runtime::dependencies(path, text);
+        out.extend(
+            runmat_circuit::board3d::model_paths(path, text)
+                .iter()
+                .map(|m| resolve_path(path, m, &Files::new())),
+        );
+        return out;
     }
     if !is_assembly(path) {
         // A part needs the files its imports read (STEP text the kernel is handed).
@@ -603,6 +611,18 @@ pub fn resolve_assembly_in(
                                 if summary.part_number.is_none() {
                                     summary.part_number = output.part_number.clone();
                                 }
+                            }
+                            if part.document.parts.len() > 1 {
+                                summary.outputs = part
+                                    .document
+                                    .parts
+                                    .iter()
+                                    .map(|o| runmat_cad::assembly::source::OutputSummary {
+                                        name: o.name.as_str().to_owned(),
+                                        part_number: o.part_number.clone(),
+                                        material: o.material.clone(),
+                                    })
+                                    .collect();
                             }
                             summary.digest = format!("text:{}", text.len());
                             let configured = ConfiguredSummary {
