@@ -84,14 +84,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "9eb1fb59fa44dd2efb55fa6a409b30adeedc4f3eafc74e3c8a55040acadfc3f0",
+      "sha256": "ca414c8b6b4379438519fa5d90c3382b648a01333b825d5c37971c3f2796578c",
       "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The complete eight-file delta consists of four formatting-only FEA files, an unchanged modal diagnostic test module moved after production items, the separate CAD fixture comparator and its equivalent rotation constants, and the Desktop part.sketch handler with its integration test. These recovery tests execute FEA requests and driver replacement; they do not dispatch the Desktop part.sketch command. Exact byte comparisons and the rotation-value witness qualify the test-only edits. Solver arithmetic, admission, checkpoint fencing, recovery publication, case inventory and required command remain unchanged.",
+    "reason": "The complete eight-file delta consists of four formatting-only FEA files, an unchanged modal diagnostic test module moved after production items, the separate CAD fixture comparator and its equivalent rotation constants, and the Desktop part.sketch handler with its integration test. These recovery tests execute FEA requests and driver replacement; they do not dispatch the Desktop part.sketch command. Exact byte comparisons and the rotation-value witness qualify the test-only edits. Solver arithmetic, admission, checkpoint fencing, recovery publication, case inventory and required command remain unchanged. Only the CAD syntax-test corpus JSON changes: the section-plane face reference is wrapped in the canonical tagged PlaneRef representation introduced by 484648602e. Every other byte, including floating-point numeric tokens, is preserved. The JSON is read by a separate integration-test target and does not change production Rust, dependencies, authored studies, scientific commands, arithmetic or thresholds. The 32 focused CAD syntax and corpus round-trip tests pass on Linux against all 27,256 verified source files. Existing scientific measurements retain their original producers, commands, binaries and outcomes.",
     "review": {
       "path": "qualification/scientific/reviews/recovery-ceae-to-793f9ae2b3.json",
-      "sha256": "c4aa0efdd78f10b17548fb33e29eb5f1617670d4127f318f1b805cea69200c07"
+      "sha256": "bad05a7e36a4b761ab81c0cef15752c4b2a5068951a47d712de6a28469192798"
     }
   }
 }

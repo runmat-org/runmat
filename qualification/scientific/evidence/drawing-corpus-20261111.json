@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "source_revision": "3b85f60438ddbe57c9c7113a6d6ddf60a6e6856a",
+  "previous_source_revision": "e72f35195b6fe4d013cf6fa064f0d3274b8cf74e",
+  "changed_input": "crates/runmat-cad/tests/corpus/documents/rig.drawing.json",
+  "passed": 32,
+  "failed": 0,
+  "ignored": 0,
+  "exit_code": 0,
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "runmat-cad",
+    "--test",
+    "syntax_forms",
+    "--test",
+    "syntax"
+  ],
+  "log_sha256": "82d1673837c929d880bdf1beaf086c5fb39dbcf811cca1864dbf08a60834bf7a",
+  "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-3b85f60438-cad-corpus.test.log",
+  "artifacts": [
+    {
+      "location": "/home/nallana/rm1293/targets/debug/deps/syntax-ac781451dd7dc400",
+      "bytes": 32922528,
+      "sha256": "387f678624a38bbfe78f992a90a13bd8f4dd8cdf003236e66a41725a797f3e45"
+    },
+    {
+      "location": "/home/nallana/rm1293/targets/debug/deps/syntax_forms-9bd1810881e34bda",
+      "bytes": 32169784,
+      "sha256": "0da3807d23cbedc4c40e74263e7915cfd0ac9eb35d8914eb7c689ca2e9b97edb"
+    }
+  ],
+  "source_verification": {
+    "at": "2026-11-12T02:42:10.460Z",
+    "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+    "stage": "/home/nallana/rm1293/incoming/intake-3b85f60438-source",
+    "status": "verified",
+    "files": 27256
+  },
+  "scope": "Only the CAD syntax-test corpus JSON changes: the section-plane face reference is wrapped in the canonical tagged PlaneRef representation introduced by 484648602e. Every other byte, including floating-point numeric tokens, is preserved. The JSON is read by a separate integration-test target and does not change production Rust, dependencies, authored studies, scientific commands, arithmetic or thresholds. The 32 focused CAD syntax and corpus round-trip tests pass on Linux against all 27,256 verified source files. Existing scientific measurements retain their original producers, commands, binaries and outcomes.",
+  "limitations": "Focused Linux fixture repair evidence; final ordinary cross-platform CI remains separate."
+}
