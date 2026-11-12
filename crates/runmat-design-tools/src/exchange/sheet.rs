@@ -220,7 +220,12 @@ pub(super) fn drawing_sheet(
             continue;
         }
         let id = p["id"].as_str().unwrap_or("");
-        let dim = dim_ids.iter().position(|d| d == id);
+        // A dimension's block holds its lines, arrows and figures. A center line under the same
+        // id (a plan's grid line beside its row of dimensions) keeps its own layer and line type.
+        let dim = dim_ids
+            .iter()
+            .position(|d| d == id)
+            .filter(|_| !matches!(style, "center" | "bendup"));
         let layer = layer_of(p, dim.is_some());
         for shape in shapes_of(p) {
             match dim {

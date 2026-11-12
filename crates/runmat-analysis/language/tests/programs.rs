@@ -365,7 +365,7 @@ mesh incomplete on geometry.part {
     }));
     assert!(program.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "fea.semantic.mesh"
-            && diagnostic.message == "target size must be length, found s"
+            && diagnostic.message == "target size needs a unit of length such as m; s measures time"
             && diagnostic.label.as_deref() == Some("expected m")
     }));
 }
@@ -392,7 +392,7 @@ material invalid {
     assert!(!program.is_valid());
     assert!(program.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "fea.semantic.material"
-            && diagnostic.message == "youngs modulus must be force per area, found m"
+            && diagnostic.message == "youngs modulus needs a unit of force per area such as Pa; m measures length"
             && diagnostic.label.as_deref() == Some("expected Pa")
     }));
     assert!(program.materials.is_empty());

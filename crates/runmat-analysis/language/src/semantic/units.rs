@@ -167,7 +167,8 @@ fn type_word(value_type: &crate::FeaType) -> String {
 }
 
 /// When `value` is a quantity whose authored unit measures something other than `expected`,
-/// returns the message (`<subject> must be <what>, found <unit>`) and the caret label
+/// returns the message (`<subject> needs a unit of <what> such as <SI unit>; <unit> measures <what>`)
+/// and the caret label
 /// (`expected <SI unit>`) for a diagnostic located at the value.
 pub(crate) fn unit_mismatch(
     subject: &str,
@@ -193,10 +194,13 @@ pub(crate) fn unit_mismatch(
         return None;
     }
     let (description, expected_unit) =
-        dimension_requirement(expected).unwrap_or(("a different physical quantity", "SI units"));
+        dimension_requirement(expected).unwrap_or(("another physical quantity", "SI units"));
+    let found_description = dimension_requirement(found.dimension())
+        .map(|(found_description, _)| found_description)
+        .unwrap_or("a different physical quantity");
     Some((
         format!(
-            "{} must be {description}, found {unit}",
+            "{} needs a unit of {description} such as {expected_unit}; {unit} measures {found_description}",
             subject.replace('_', " ")
         ),
         format!("expected {expected_unit}"),
