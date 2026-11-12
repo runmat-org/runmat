@@ -588,7 +588,7 @@ fn assembly_view_annotations_measure_their_occurrences_where_they_are_placed() {
 fn grids_and_level_marks_read_a_skeleton_s_published_datums() {
     let skeleton = "runmat 0.7\nstd 1\n\npart skel {\n    feature g1 = plane.offset(base = origin.yz, distance = 0 mm)\n    feature g2 = plane.offset(base = origin.yz, distance = 120 mm)\n    feature g3 = plane.offset(base = origin.yz, distance = 200 mm)\n    feature floor = plane.offset(base = origin.xy, distance = 30 mm)\n    publish grid_1 = datum(datum = { datum = feature, feature = g1 })\n    publish grid_2 = datum(datum = { datum = feature, feature = g2 })\n    publish grid_3 = datum(datum = { datum = feature, feature = g3 })\n    publish floor = datum(datum = { datum = feature, feature = floor })\n}\n";
     let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part skel as skeleton\n    use part bracket as a\n}\n";
-    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 2], projection = third_angle }\n    view top = standard(orientation = top, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    view front = standard(orientation = front, sheet = \"1\", model = { assembly = rig }, at = [150, 60], display = visible_lines)\n    annotation grids = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3], labels = [\"1\", \"2\", \"3\"], view = top)\n    annotation floor = level(label = \"FLOOR\", datum = floor, occurrence = [{ name = skeleton }], view = front)\n    annotation nope = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_9], labels = [\"1\", \"9\"], view = top)\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 2], projection = third_angle }\n    view top = standard(orientation = top, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    view front = standard(orientation = front, sheet = \"1\", model = { assembly = rig }, at = [150, 60], display = visible_lines)\n    annotation grids = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3], labels = [\"1\", \"2\", \"3\"], view = top)\n    annotation floor = level(label = \"FLOOR\", datum = floor, occurrence = [{ name = skeleton }], view = front)\n    annotation nope = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_9], labels = [\"1\", \"9\"], view = top)\n    annotation grids_front = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3], labels = [\"1\", \"2\", \"3\"], view = front)\n}\n";
     let files: Files = [
         ("/p/bracket.part".to_owned(), BRACKET.to_owned()),
         ("/p/skel.part".to_owned(), skeleton.to_owned()),
@@ -621,4 +621,12 @@ fn grids_and_level_marks_read_a_skeleton_s_published_datums() {
         .filter(|d| d["id"] == "grids")
         .collect();
     assert_eq!(row.len(), 2, "{}", layout["dimensions"]);
+    // The same grids on a second view draw their row there too (plans each carry theirs).
+    let again = layout["dimensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["id"] == "grids_front")
+        .count();
+    assert_eq!(again, 2, "{}", layout["findings"]);
 }

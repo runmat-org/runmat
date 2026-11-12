@@ -184,7 +184,12 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
                 refs[j.min(n - 1)].to_string(),
             ];
             key_refs.sort();
-            let key = format!("{model}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement);
+            // A plan's grids repeat on every plan they're drawn on: their row is keyed by view.
+            let key = if grids {
+                format!("{model}|{vi}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement)
+            } else {
+                format!("{model}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement)
+            };
             let label = texts
                 .get(k)
                 .or(texts.first())
