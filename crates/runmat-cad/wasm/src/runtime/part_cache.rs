@@ -88,10 +88,58 @@ struct Cache {
     misses: u64,
 }
 
-/// A [`probe`] in progress: the digests it may regenerate, and those it left out.
+/// A [`probe`] in progress: the digests it may regenerate, those it left out, and every entry it
+/// met.
 struct Probe {
     allow: HashSet<String>,
     misses: Vec<String>,
+    met: Vec<ProbeEntry>,
+}
+
+/// What an entry a [`probe`] met is: the file it regenerates, and how.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryKind {
+    /// A part file regenerated for an assembly.
+    Part,
+    /// A part file in a configuration an occurrence uses (a named one, or input values).
+    Configured,
+    /// A circuit board's 3D model.
+    Board,
+}
+
+/// An entry a [`probe`] met, in the order met: what the Desktop's load progress counts
+/// (`runtime::assembly_stages`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ProbeEntry {
+    pub digest: String,
+    pub kind: EntryKind,
+    /// The file it regenerates: a part's or a layout's workspace path.
+    pub path: String,
+    /// Whether the cache held it when the probe met it (it costs nothing to load).
+    pub held: bool,
+}
+
+/// What a [`probe`] found.
+#[derive(Debug, Default)]
+pub struct ProbeReport {
+    /// The digests it left out, each once, in the order met.
+    pub misses: Vec<String>,
+    /// Every part, configured part and board entry it met, each once, in the order met. Views
+    /// are left out: they are a drawing's, and a drawing counts its own stages.
+    pub entries: Vec<ProbeEntry>,
+}
+
+/// The kind and file of the entry under `key` (its prefix and first field); none for a view.
+fn entry_of(key: &str) -> Option<(EntryKind, &str)> {
+    let mut fields = key.split('\0');
+    let kind = match fields.next()? {
+        "assembly" => EntryKind::Part,
+        "configured" => EntryKind::Configured,
+        "board" => EntryKind::Board,
+        _ => return None,
+    };
+    Some((kind, fields.next()?))
 }
 
 thread_local! {
@@ -269,8 +317,8 @@ fn insert(key: String, entry: Entry, bytes: usize) -> bool {
 
 /// Runs `run` (a compile) as a probe: an entry the cache doesn't hold is regenerated only when
 /// its digest is in `allow`; any other is left out ([`skip`]) and listed. Returns `run`'s result
-/// and the digests it left out, each once, in the order met.
-pub fn probe<T>(allow: HashSet<String>, run: impl FnOnce() -> T) -> (T, Vec<String>) {
+/// and what it found: the digests it left out and every entry it met.
+pub fn probe<T>(allow: HashSet<String>, run: impl FnOnce() -> T) -> (T, ProbeReport) {
     struct Restore(Option<Probe>);
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -282,15 +330,19 @@ pub fn probe<T>(allow: HashSet<String>, run: impl FnOnce() -> T) -> (T, Vec<Stri
         p.borrow_mut().replace(Probe {
             allow,
             misses: Vec::new(),
+            met: Vec::new(),
         })
     }));
     let out = run();
-    let misses = PROBE
+    let report = PROBE
         .with(|p| p.borrow_mut().take())
-        .map(|p| p.misses)
+        .map(|p| ProbeReport {
+            misses: p.misses,
+            entries: p.met,
+        })
         .unwrap_or_default();
     drop(restore);
-    (out, misses)
+    (out, report)
 }
 
 /// Whether a compile should leave out the entry under `key`: only during a [`probe`], when the
@@ -302,7 +354,18 @@ pub fn skip(key: &str) -> bool {
             return false;
         };
         let d = digest(key);
-        if probe.allow.contains(&d) || CACHE.with(|c| c.borrow().slots.contains_key(&d)) {
+        let held = CACHE.with(|c| c.borrow().slots.contains_key(&d));
+        if let Some((kind, path)) = entry_of(key) {
+            if !probe.met.iter().any(|m| m.digest == d) {
+                probe.met.push(ProbeEntry {
+                    digest: d.clone(),
+                    kind,
+                    path: path.to_owned(),
+                    held,
+                });
+            }
+        }
+        if held || probe.allow.contains(&d) {
             return false;
         }
         if !probe.misses.contains(&d) {
@@ -704,9 +767,10 @@ mod tests {
         assert!(take_fresh().is_empty(), "the list starts over");
 
         clear();
-        let (_, misses) = probe(Default::default(), || {
+        let (_, report) = probe(Default::default(), || {
             compile_json("/p/rig.assembly", RIG, &files)
         });
+        let misses = report.misses;
         assert_eq!(stats().misses, 0, "a probe regenerates nothing");
         // `wide`'s configured digest needs b's document, so only a and b show before seeding.
         assert_eq!(misses.len(), 2, "{misses:?}");
@@ -718,8 +782,8 @@ mod tests {
         let all: Vec<u8> = fresh.iter().flat_map(|(_, f)| f.iter().copied()).collect();
         assert_eq!(seed(&all), 3);
         assert!(take_fresh().is_empty(), "seeded entries aren't fresh");
-        let (out, misses) = probe(Default::default(), || compile(&files));
-        assert!(misses.is_empty(), "{misses:?}");
+        let (out, report) = probe(Default::default(), || compile(&files));
+        assert!(report.misses.is_empty(), "{:?}", report.misses);
         let s = stats();
         assert_eq!((s.hits, s.misses), (3, 0));
         assert_eq!(out, first);

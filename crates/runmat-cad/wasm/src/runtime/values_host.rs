@@ -126,7 +126,14 @@ pub fn compile_json_with_values(
     let known = super::prototype_reuse::known_from_options(options);
     // A drawing compiles in the stage the options ask for (drawing/progress.rs).
     let stage = crate::drawing::progress::Stage::from_options(options);
+    // An assembly's parts stage regenerates parts only (runtime/assembly_stages.rs).
+    let parts_only = super::is_assembly(path)
+        && super::assembly_stages::Stage::from_options(options)
+            == super::assembly_stages::Stage::Parts;
     let out = with_value_host(host, || {
+        if parts_only {
+            return super::assembly_stages::compile_parts(path, text, files);
+        }
         crate::drawing::progress::with_stage(stage, || {
             super::compile_json_known(path, text, files, configuration.as_deref(), &known)
         })
