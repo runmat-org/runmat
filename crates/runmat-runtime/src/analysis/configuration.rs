@@ -32,9 +32,7 @@ pub(super) fn current_fea_runtime_config() -> FeaRuntimeConfig {
 }
 
 /// Resource authority cannot silently revert to a default ceiling after lock poisoning.
-/// The memory one study publication may use, as configured by the host (the CLI sets the run's
-/// admitted memory). Planning reads the same value to refuse a study whose publication cannot fit.
-pub fn publication_staging_budget() -> Result<u64, String> {
+pub(super) fn publication_staging_budget() -> Result<u64, String> {
     fea_runtime_config()
         .read()
         .map(|guard| guard.publication_staging_bytes)
