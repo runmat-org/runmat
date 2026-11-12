@@ -785,6 +785,41 @@
       ]
     },
     {
+      "id": "mcad-exploded",
+      "route": "/docs/mcad/assembly/exploded-views",
+      "title": "Exploded views",
+      "summary": "Reference for exploded views in a RunMat assembly. Ordered translate, rotate and radial steps, steps that move a whole pattern or mirror, spacing, base views, sub-assembly views and explode lines.",
+      "keywords": [
+        "exploded view",
+        "explode steps",
+        "assembly instructions",
+        "radial explode",
+        "explode lines",
+        "trail lines",
+        "pattern explode",
+        "mirror explode",
+        "service view"
+      ],
+      "group": "MCAD reference",
+      "order": 6,
+      "narrative": "docs/design/mcad/assembly/exploded-views.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Patterns, mirrors and fasteners",
+          "href": "/docs/mcad/assembly/patterns-and-mirrors"
+        },
+        {
+          "title": "Drawing views and annotations",
+          "href": "/docs/mcad/drawing/views-and-annotations"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        }
+      ]
+    },
+    {
       "id": "mcad-drawings",
       "route": "/docs/mcad/drawing/views-and-annotations",
       "title": "Drawing views and annotations",
@@ -806,7 +841,7 @@
         "third angle projection"
       ],
       "group": "MCAD reference",
-      "order": 6,
+      "order": 7,
       "narrative": "docs/design/mcad/drawing/views-and-annotations.md",
       "examples": [],
       "related_topics": [
@@ -843,7 +878,7 @@
         "draft analysis"
       ],
       "group": "MCAD reference",
-      "order": 7,
+      "order": 8,
       "narrative": "docs/design/mcad/evaluate.md",
       "examples": [],
       "related_topics": [
@@ -882,7 +917,7 @@
         "CAD interoperability"
       ],
       "group": "MCAD reference",
-      "order": 8,
+      "order": 9,
       "narrative": "docs/design/mcad/import-export.md",
       "examples": [],
       "related_topics": [
@@ -922,7 +957,7 @@
         "what-if"
       ],
       "group": "MCAD reference",
-      "order": 9,
+      "order": 10,
       "narrative": "docs/design/mcad/scripting.md",
       "examples": [],
       "related_topics": [

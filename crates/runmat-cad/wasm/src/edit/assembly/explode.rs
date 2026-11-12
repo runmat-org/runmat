@@ -152,6 +152,8 @@ pub(super) fn step(
     view.steps.push(ExplodeStep {
         id: id.clone(),
         occurrences: names.iter().map(|n| RelPath::new(&[n])).collect(),
+        patterns: Vec::new(),
+        mirrors: Vec::new(),
         motion,
     });
     Ok(format!(
