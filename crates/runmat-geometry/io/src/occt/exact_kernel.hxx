@@ -14,6 +14,7 @@
 #include "rust/cxx.h"
 
 #include <BRepBuilderAPI_MakeShape.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepTools_History.hxx>
 #include <NCollection_IndexedDataMap.hxx>
@@ -24,6 +25,7 @@
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <gp_Ax3.hxx>
+#include <gp.hxx>
 #include <gp_Trsf.hxx>
 
 #include <cstdint>
@@ -172,6 +174,46 @@ Tracked boolean_op(int op, const std::vector<const Tracked*>& args,
                    const std::vector<const Tracked*>& tools);
 
 constexpr std::uint32_t kNoLabel = 0xffffffffu;
+
+// OCCT's blend approximations use absolute tolerances tuned for millimetre models (a variable
+// radius fillet on a metre-scale box fails where the same box in millimetres blends): such an
+// operation works on a copy scaled up by 1000 and scales the result back, carrying origins and
+// kept faces through both transforms. Every fillet runs in that frame: a constant 3 mm fillet
+// built in metres whose blend crosses a nearby hole left edges ending 1.5 mm off their faces
+// and split planar faces whose triangles overlapped their neighbours.
+struct MmFrame {
+  bool on = false;
+  std::unique_ptr<BRepBuilderAPI_Transform> up;
+  Tracked work;
+
+  MmFrame(const Tracked& src, bool scale) : on(scale) {
+    if (!on) {
+      work = src;
+      return;
+    }
+    gp_Trsf t;
+    t.SetScale(gp::Origin(), 1000.0);
+    up = std::make_unique<BRepBuilderAPI_Transform>(src.shape, t, Standard_True);
+    work.shape = up->Shape();
+    work.sheet = src.sheet;
+    propagate(src, *up, work);
+    for (int i = 1; i <= src.kept.Extent(); ++i) work.kept.Add(up->ModifiedShape(src.kept.FindKey(i)), 1);
+  }
+  TopoDS_Shape image(const TopoDS_Shape& s) const { return on ? up->ModifiedShape(s) : s; }
+  double len(double v) const { return on ? v * 1000.0 : v; }
+  Tracked back(const Tracked& res) const {
+    if (!on) return res;
+    gp_Trsf t;
+    t.SetScale(gp::Origin(), 1e-3);
+    BRepBuilderAPI_Transform down(res.shape, t, Standard_True);
+    Tracked out;
+    out.shape = down.Shape();
+    out.sheet = res.sheet;
+    propagate(res, down, out);
+    for (int i = 1; i <= res.kept.Extent(); ++i) out.kept.Add(down.ModifiedShape(res.kept.FindKey(i)), 1);
+    return out;
+  }
+};
 
 // Every K1 entry point holds this lock: OCCT's blend builder keeps shared state, so two fillets
 // built at once on different threads can produce invalid solids. Kernel calls run one at a time.
