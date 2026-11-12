@@ -109,3 +109,34 @@ fn delete_face_on_half_of_a_split_hole_wall_removes_the_hole() {
         volume(&total)
     );
 }
+
+/// Delete face on the plate's top face: the side walls stand parallel and the hole's wall runs
+/// along them, so no neighbour can close over the gap. The edit is written, and the part says
+/// what went wrong on that line rather than keeping the face and reporting success.
+#[test]
+fn delete_face_that_nothing_can_close_over_is_a_named_failure() {
+    let request = json!({
+        "command": "direct.delete-face",
+        "values": { "faces": ["feature.body.face.end"], "heal": "heal" }
+    })
+    .to_string();
+    let out = call("edit", &["/p/plate.part", PLATE, "{}", &request]);
+    assert_eq!(out["ok"], true, "{out}");
+    let text = out["files"][0]["text"].as_str().unwrap().to_owned();
+    let line = "feature delete_face1 = direct.delete_faces(faces = [feature.body.face.end])";
+    assert!(text.contains(line), "{text}");
+    let compiled = call("compile", &["/p/plate.part", &text, "{}", "{}"]);
+    let errors: Vec<&Value> = compiled["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["severity"] == "error")
+        .collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    let message = errors[0]["message"].as_str().unwrap();
+    assert!(message.contains("pick every face of the hole, boss or pocket"), "{message}");
+    // The diagnostic points at the delete feature's line.
+    let start = errors[0]["start"].as_u64().unwrap() as usize;
+    let end = errors[0]["end"].as_u64().unwrap() as usize;
+    assert!(text[start..end].contains("direct.delete_faces("), "{}", &text[start..end]);
+}
