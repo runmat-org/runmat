@@ -444,3 +444,15 @@ fn a_component_param_is_written_as_typed_and_read_by_its_name() {
     )
     .is_err());
 }
+
+#[test]
+fn every_component_names_the_package_its_footprint_uses() {
+    let index = index(&files());
+    let c1 = index
+        .components
+        .iter()
+        .find(|c| c.designator == "C1")
+        .unwrap();
+    assert_eq!(c1.footprint.as_deref(), Some("C_0402_1005Metric_IPCN"));
+    assert!(index.components.iter().all(|c| c.footprint.is_some()));
+}
