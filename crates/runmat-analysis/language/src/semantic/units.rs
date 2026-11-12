@@ -69,9 +69,7 @@ pub(crate) fn unit_mismatch(
 ) -> Option<(String, String)> {
     let expected_dimension =
         runmat_types::physical::DynamicDimension::try_new(expected, None).ok()?;
-    if matches!(value.kind, crate::CheckedExpressionKind::Number(_))
-        && expected != PhysicalDimension::DIMENSIONLESS
-    {
+    if is_plain_number(value) && expected != PhysicalDimension::DIMENSIONLESS {
         let text = unit_mismatch_message(subject, expected_dimension, FoundUnit::Missing);
         return Some((text.message, text.label));
     }
@@ -97,6 +95,19 @@ pub(crate) fn unit_mismatch(
     // message every design language reports.
     let text = unit_mismatch_message(subject, expected_dimension, FoundUnit::Authored(unit, found));
     Some((text.message, text.label))
+}
+
+/// Whether `value` is written without a unit: a number, a negated number, or a list of them
+/// (the load form `[0, 0, -10]`).
+fn is_plain_number(value: &crate::CheckedExpression) -> bool {
+    match &value.kind {
+        crate::CheckedExpressionKind::Number(_) => true,
+        crate::CheckedExpressionKind::Unary { operand, .. } => is_plain_number(operand),
+        crate::CheckedExpressionKind::List(items) => {
+            !items.is_empty() && items.iter().all(is_plain_number)
+        }
+        _ => false,
+    }
 }
 
 /// Whether `value` is a quantity (or quantity vector) of exactly `dimension`.
