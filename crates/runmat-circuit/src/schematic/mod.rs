@@ -7,10 +7,14 @@
 //! deterministically, the way an engineer draws a sheet:
 //!
 //! - **Pages.** One per sheet instance (`/`, `/ch[0]`), holding the components whose parent is
-//!   that instance and a sheet symbol per child instance. The frame is the smallest of A4 to A0
-//!   the page fits on, clear of the title block.
+//!   that instance and a sheet symbol per child instance, with an entry per port. The frame is
+//!   the smallest of A4 to A0 the page fits on, clear of the title block; a page whose places
+//!   are recorded keeps its size while its content strays into the margin.
+//! - **Notes** ([`notes`]): unplaced ones beside their subject or in a notes block inside the
+//!   sheet. The layout check ([`check`]) reports what lands off the sheet or over other text.
 //! - **Symbols** ([`symbol`]): supplies on the top edge and grounds on the bottom, inputs left,
-//!   outputs right; R, C, L and D with their standard art. A gate with more than 64 pins splits
+//!   outputs right; R, C, L and D with their standard art; a part with a declared library
+//!   `symbol` with that symbol's art. A gate with more than 64 pins splits
 //!   into units by bank, port prefix and power ([`units`]).
 //! - **Placement** ([`place`]): signal flow left to right (connector, front end, converter,
 //!   FPGA), shunts upright under their nets, decoupling caps in a row under their IC, feedback
@@ -27,7 +31,9 @@
 //! Lengths are millimetres on the page (origin bottom left, y up); every list is sorted by
 //! placement, so identical designs give identical bytes.
 
+pub mod check;
 pub(crate) mod hand;
+mod notes;
 mod pages;
 mod place;
 pub mod route;
@@ -68,6 +74,18 @@ pub(super) const MARGIN: Coord = 20 * GRID;
 /// ISO 7200's proportions, narrow beside the sheet's parts, its rows one text line tall.
 pub const TITLE_W_MM: f64 = 100.0;
 pub const TITLE_ROW_MM: f64 = 5.0;
+/// The title row (the design's name, in larger type) is this many rows tall.
+pub const TITLE_FIRST_ROW_SCALE: f64 = 1.6;
+
+/// The title block's height (mm) for `rows` rows: the title row [`TITLE_FIRST_ROW_SCALE`]
+/// rows tall, the others one row each. The canvas, the PDF and the frame's reservation all
+/// draw this height.
+pub fn title_height_mm(rows: usize) -> f64 {
+    match rows {
+        0 => 0.0,
+        n => TITLE_ROW_MM * (TITLE_FIRST_ROW_SCALE + (n - 1) as f64),
+    }
+}
 /// The frame's inset from the paper edge (mm).
 pub const FRAME_MM: f64 = 10.0;
 /// Sheet sizes tried in order, landscape (mm).
@@ -150,8 +168,8 @@ pub struct SchematicSheet {
     pub labels: Vec<NetLabel>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub no_connects: Vec<Xy>,
-    /// The sheet's notes (`text` statements), at their recorded places or, unrecorded, in a
-    /// column above the drawing's top-left corner.
+    /// The sheet's notes (`text` statements), at their recorded places or, unrecorded, beside
+    /// their subject or in a notes block inside the sheet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub texts: Vec<SheetText>,
     /// The sheet's blankets: a dashed box round the wires, labels and pins of the nets each
@@ -220,6 +238,9 @@ pub struct SchematicSymbol {
     /// The art's strokes (open lines) for a part drawn by its symbol, not its box.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub strokes: Vec<Vec<Xy>>,
+    /// Texts in a declared symbol's art (`kWh` in a meter), each centred on its point.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub art_texts: Vec<ArtLabel>,
     pub pins: Vec<SchematicPin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -231,6 +252,14 @@ pub struct SchematicSymbol {
     pub pin_text_mm: f64,
     pub designator_text_mm: f64,
     pub value_text_mm: f64,
+}
+
+/// A text in a symbol's art, centred on `at` (mm).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArtLabel {
+    pub text: String,
+    pub at: Xy,
+    pub size_mm: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -586,13 +615,14 @@ fn page(
             } else {
                 is_rail(&n.name, n.class.as_deref()) && n.global
             };
-            // A net leaving this page is labelled as a port, and so is a net on one of the root
-            // sheet's own ports (a one-sheet filter's IN and OUT), which leaves the design. A
-            // child sheet's port nets already leave its page.
-            let on_port =
-                path.depth() == 0 && ports.iter().any(|p| n.name == *p || n.aliases.contains(p));
+            // A net leaving this page is labelled as a port, and so is a net on one of the
+            // sheet's own ports: the root's (a one-sheet filter's IN and OUT) leave the design,
+            // and a child's leave its page even when only this page's parts are on the net (a
+            // branch circuit fed from the parent's power-flagged net).
+            let bears_port = ports.iter().any(|p| n.name == *p || n.aliases.contains(p));
+            let on_port = path.depth() == 0 && bears_port;
             let external =
-                !n.global && (on_port || net_sheets[k].iter().any(|s| !s.starts_with(path)));
+                !n.global && (bears_port || net_sheets[k].iter().any(|s| !s.starts_with(path)));
             NetInfo {
                 rail,
                 ground: route::text_is_ground(short(&n.name)),
@@ -611,7 +641,7 @@ fn page(
         let c = &nl.components[ci];
         let us = units(c);
         for (g, u) in us.iter().enumerate() {
-            let lay = UnitLayout::of(c, u, us.len());
+            let lay = UnitLayout::of(c, u, us.len(), nl.symbol_of(c));
             let mut unused: Vec<usize> = u.pins.clone();
             let pins: Vec<usize> = lay
                 .pins
@@ -661,11 +691,26 @@ fn page(
     };
     for &k in &children {
         let child = &sheets[k].0;
+        // The child's own ports: each is an entry, whether or not the parent's net reaches a
+        // part on this page (power ports fed from a power-flagged net reach none).
+        let child_ports: Vec<String> = nl
+            .sheet_ports
+            .get(&sheets[k].1)
+            .map(|ps| {
+                ps.iter()
+                    .map(|p| crate::elab::port_net_name(child, p))
+                    .collect()
+            })
+            .unwrap_or_default();
         let crossing: Vec<usize> = (0..nl.nets.len())
             .filter(|n| {
-                !nl.nets[*n].global
+                let net = &nl.nets[*n];
+                let on_port = child_ports
+                    .iter()
+                    .any(|p| net.name == *p || net.aliases.contains(p));
+                !net.global
                     && net_sheets[*n].iter().any(|s| s.starts_with(child))
-                    && net_sheets[*n].iter().any(|s| !s.starts_with(child))
+                    && (on_port || net_sheets[*n].iter().any(|s| !s.starts_with(child)))
             })
             .collect();
         let sheet_out: Vec<bool> = crossing
@@ -694,6 +739,7 @@ fn page(
             half_h: 4 * GRID,
             pin_len: 0,
             art: Art::Box,
+            declared: None,
         };
         restack_sheet(&mut lay);
         let parent_sheet = sheet_name;

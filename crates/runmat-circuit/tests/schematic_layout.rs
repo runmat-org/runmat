@@ -637,12 +637,12 @@ fn a_new_regulator_lands_with_its_caps_on_a_recorded_sheet() {
             })
             .collect()
     };
-    use runmat_circuit::schematic::{FRAME_MM, TITLE_ROW_MM, TITLE_W_MM};
+    use runmat_circuit::schematic::{title_height_mm, FRAME_MM, TITLE_W_MM};
     let title = [
         pwr.width_mm - FRAME_MM - TITLE_W_MM - 2.0,
         0.0,
         pwr.width_mm,
-        FRAME_MM + 5.0 * TITLE_ROW_MM + 2.0,
+        FRAME_MM + title_height_mm(5) + 2.0,
     ];
     for b in &new_boxes {
         assert!(

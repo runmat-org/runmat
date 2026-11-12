@@ -321,7 +321,12 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
         let us = units(c);
         let layouts: Vec<(UnitLayout, Option<String>)> = us
             .iter()
-            .map(|u| (UnitLayout::of(c, u, us.len()), u.label.clone()))
+            .map(|u| {
+                (
+                    UnitLayout::of(c, u, us.len(), nl.symbol_of(c)),
+                    u.label.clone(),
+                )
+            })
             .collect();
         let mut lib = format!("RunMat:{}", sanitize(&ename));
         let mut k = 1;

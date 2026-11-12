@@ -170,9 +170,15 @@ pub struct Netlist {
     pub sheet_texts: BTreeMap<String, Vec<(String, String)>>,
     /// Each sheet definition's declared port names, in source order.
     pub sheet_ports: BTreeMap<String, Vec<String>>,
+    /// The declared library symbol each one-gate entity draws with, by entity.
+    pub symbols: BTreeMap<Uuid, crate::library::Symbol>,
 }
 
 impl Netlist {
+    /// The declared library symbol a component draws with, if its part has one.
+    pub fn symbol_of(&self, c: &CompInst) -> Option<&crate::library::Symbol> {
+        self.symbols.get(&c.entity?)
+    }
     pub fn component(&self, designator: &str) -> Option<(usize, &CompInst)> {
         self.components
             .iter()
@@ -1458,7 +1464,24 @@ pub fn elaborate(
     diags.sort();
     let mut sheets = cx.sheets;
     sheets.sort();
+    // Declared symbols, for the one-gate entities the design uses.
+    let symbols: BTreeMap<Uuid, crate::library::Symbol> = cx
+        .comps
+        .iter()
+        .filter_map(|c| c.entity)
+        .collect::<BTreeSet<Uuid>>()
+        .into_iter()
+        .filter_map(|e| {
+            let ent = pool.entities.get(&e)?;
+            let [gate] = ent.gates.as_slice() else {
+                return None;
+            };
+            let sym = pool.symbols.values().find(|s| s.unit == gate.unit)?;
+            Some((e, sym.clone()))
+        })
+        .collect();
     Netlist {
+        symbols,
         design: design.name.clone(),
         variant: opts.variant.clone(),
         components: cx.comps,
