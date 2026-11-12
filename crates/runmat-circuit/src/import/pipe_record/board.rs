@@ -845,6 +845,7 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
                 pad_nets: pl.pad_nets,
                 fitted: true,
                 properties: Default::default(),
+                written: Default::default(),
             },
         );
     }

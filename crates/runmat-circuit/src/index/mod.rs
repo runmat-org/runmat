@@ -102,6 +102,10 @@ pub struct ComponentRow {
     pub value: Option<String>,
     /// Parameter name → display value (`10 kΩ ±1 %`).
     pub params: BTreeMap<String, String>,
+    /// Parameter name → the quantity as the file writes it (`0.35 g`, `100 nF ± 10 %`), for
+    /// Properties to edit as written.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub written: BTreeMap<String, String>,
     pub fitting: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_w: Option<f64>,
@@ -360,6 +364,11 @@ pub fn build_index(
                     .params
                     .iter()
                     .map(|(k, v)| (k.clone(), param_display(v)))
+                    .collect(),
+                written: c
+                    .params
+                    .iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.written.clone()?)))
                     .collect(),
                 fitting: match c.fitting {
                     FitState::Fitted => "fitted",

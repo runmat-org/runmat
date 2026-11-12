@@ -319,6 +319,7 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
                         pad_nets,
                         fitted: true,
                         properties: f.properties,
+                        written: Default::default(),
                     },
                 );
                 origin.insert(idx, Key::Footprint(id));

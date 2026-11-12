@@ -500,6 +500,7 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
                         pad_nets,
                         fitted: true,
                         properties: Default::default(),
+                        written: Default::default(),
                     },
                 );
             }
@@ -713,6 +714,7 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
                         pad_nets: BTreeMap::new(),
                         fitted: true,
                         properties: Default::default(),
+                        written: Default::default(),
                     },
                 );
             }

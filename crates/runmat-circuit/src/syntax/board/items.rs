@@ -7,6 +7,14 @@ use crate::library::Package;
 use runmat_types::Span;
 use std::collections::HashMap;
 
+/// A number written with a unit other than `default` (`3.5 in`), as text.
+fn written_in(v: &Val, default: &str) -> Option<String> {
+    match &v.v {
+        V::Qty(number, unit) if unit != default => Some(format!("{number} {unit}")),
+        _ => None,
+    }
+}
+
 pub(super) struct Ctx<'a> {
     pub(super) layers: &'a Layers,
     pub(super) nets: &'a HashMap<String, NetId>,
@@ -61,19 +69,35 @@ impl Ctx<'_> {
             }
             None => BTreeMap::new(),
         };
+        let value = f.or("value", String::new(), text)?;
+        let at_value = f.need("at")?;
+        let at = point(at_value)?;
+        let rotation = f.or("rotation", 0.0, angle)?;
+        let rotation_value = f.get("rotation");
+        let [x_value, y_value] = list(at_value)? else {
+            unreachable!("point read two values")
+        };
+        let written = WrittenPlacement {
+            x: written_in(x_value, "mm").map(|t| (t, at.x)),
+            y: written_in(y_value, "mm").map(|t| (t, at.y)),
+            rotation: rotation_value
+                .and_then(|v| written_in(v, "deg"))
+                .map(|t| (t, rotation)),
+        };
         let fp = Footprint {
             id,
             reference,
             component: None,
-            value: f.or("value", String::new(), text)?,
+            value,
             package,
-            at: point(f.need("at")?)?,
-            rotation: f.or("rotation", 0.0, angle)?,
+            at,
+            rotation,
             side: f.or("side", Side::Top, side_of)?,
             locked: f.or("locked", false, boolean)?,
             pad_nets,
             fitted: f.or("fitted", true, boolean)?,
             properties,
+            written,
         };
         f.finish()?;
         Ok(fp)
