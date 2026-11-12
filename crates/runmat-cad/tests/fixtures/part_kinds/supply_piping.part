@@ -1,0 +1,39 @@
+runmat 0.7
+std 1
+
+// An excerpt of the house's supply piping (construction/house/mep/plumbing/supply_piping.part):
+// the PEX manifold, the service from under the slab and one cold run from the water heater.
+part supply_piping {
+    feature p_yz_6 = plane.offset(base = origin.yz, distance = 303.5 in)
+    feature p_zx_5 = plane.offset(base = origin.zx, distance = 92 in)
+    feature p_xy_4 = plane.offset(base = origin.xy, distance = -14 in)
+    feature p_yz_3 = plane.offset(base = origin.yz, distance = 302 in)
+    feature p_xy_1 = plane.offset(base = origin.xy, distance = 54 in)
+    sketch manifold_s on plane.p_xy_1 {
+        l0 = line(start = [300.5 in, 70 in], end = [303.5 in, 70 in])
+        l1 = line(start = [303.5 in, 70 in], end = [303.5 in, 96 in])
+        l2 = line(start = [303.5 in, 96 in], end = [300.5 in, 96 in])
+        l3 = line(start = [300.5 in, 96 in], end = [300.5 in, 70 in])
+    }
+    feature manifold = extrude(profile = sketch.manifold_s, distance = 6 in, mode = new)
+    material = { body = feature.manifold.body, material = "material.pex" }
+    sketch service_0_path on plane.p_yz_3 {
+        l0 = line(start = [30 in, -14 in], end = [30 in, 40 in])
+        l1 = line(start = [30 in, 40 in], end = [74 in, 40 in])
+        l2 = line(start = [74 in, 40 in], end = [74 in, 54 in])
+    }
+    sketch service_0_p on plane.p_xy_4 {
+        c = circle(center = [302 in, 30 in], radius = 0.4375 in)
+    }
+    feature service_0 = sweep(profile = sketch.service_0_p, path = sketch.service_0_path, follow_path = true)
+    material = { body = feature.service_0.body, material = "material.pex" }
+    sketch heater_cold_0_path on plane.p_zx_5 {
+        l0 = line(start = [57.5 in, 303.5 in], end = [57.5 in, 308 in])
+        l1 = line(start = [57.5 in, 308 in], end = [66 in, 308 in])
+    }
+    sketch heater_cold_0_p on plane.p_yz_6 {
+        c = circle(center = [92 in, 57.5 in], radius = 0.3125 in)
+    }
+    feature heater_cold_0 = sweep(profile = sketch.heater_cold_0_p, path = sketch.heater_cold_0_path, follow_path = true)
+    material = { body = feature.heater_cold_0.body, material = "material.pex" }
+}

@@ -1,0 +1,23 @@
+runmat 0.7
+std 1
+
+// An excerpt of the house's wall framing (construction/house/framing/wall_framing.part): the
+// sill and bottom plates of one wall (the bottom plate suppressed, as on the slab), in lumber.
+part wall_framing {
+    input len : length = 480 in
+    sketch sill_s on origin.zx {
+        e0 = line(start = [0 in, 0 in], end = [1.5 in, 0 in])
+        e1 = line(start = [1.5 in, 0 in], end = [1.5 in, input.len])
+        e2 = line(start = [1.5 in, input.len], end = [0 in, input.len])
+        e3 = line(start = [0 in, input.len], end = [0 in, 0 in])
+    }
+    feature sill = extrude(profile = sketch.sill_s, distance = 5.5 in, mode = new)
+    sketch bottom_s on origin.zx {
+        e0 = line(start = [0 in, 0 in], end = [1.5 in, 0 in])
+        e1 = line(start = [1.5 in, 0 in], end = [1.5 in, input.len])
+        e2 = line(start = [1.5 in, input.len], end = [0 in, input.len])
+        e3 = line(start = [0 in, input.len], end = [0 in, 0 in])
+    }
+    feature bottom = extrude(profile = sketch.bottom_s, distance = 5.5 in, mode = new, suppressed = true)
+    output wall_framing = { body = feature.sill.body, part_number = "W-A1", material = "material.douglas_fir_lumber" }
+}

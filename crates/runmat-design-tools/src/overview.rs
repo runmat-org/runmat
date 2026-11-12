@@ -27,6 +27,7 @@ pub mod layout;
 mod links;
 
 use crate::{kind_of, text_of, DesignKind, Files, ToolError};
+use runmat_cad::index::FileState;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -125,6 +126,9 @@ pub struct CheckCounts {
 pub struct OverviewOutput {
     pub path: String,
     pub kind: DesignKind,
+    /// What the file holds (`design.check`'s `fileState`): empty or written, and for a part its
+    /// kind. Guides and next steps that don't fit it aren't offered.
+    pub file_state: FileState,
     /// What the file is, in one line, from the check's counts (`Schematic: 63 components, 48
     /// nets on 6 sheets`).
     pub about: String,
@@ -142,15 +146,16 @@ pub fn overview(input: &OverviewInput, files: &Files) -> Result<OverviewOutput, 
     text_of(files, &input.path)?;
     let path = input.path.as_str();
     let mut ran = Ran::default();
-    let (about, state, counts) = facts::state(kind, path, files, &mut ran)?;
+    let checked = facts::state(kind, path, files, &mut ran)?;
     let links = links::links(kind, path, files, &mut ran);
     Ok(OverviewOutput {
         path: path.to_owned(),
         kind,
-        about,
-        state,
+        file_state: checked.file_state,
+        about: checked.about,
+        state: checked.facts,
         links,
-        counts,
+        counts: checked.counts,
         checks: ran.0,
         project: layout::layout(path, files),
     })
