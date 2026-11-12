@@ -621,7 +621,11 @@ pub fn code_actions(
     } else {
         Vec::new()
     };
-    to_js(&actions)
+    // As plain objects: an edit's `changes` is a map keyed by URI, which the default serializer
+    // writes as a JS Map that the editor can't read.
+    actions
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen(js_name = "quickInformation")]
