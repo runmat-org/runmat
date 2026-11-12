@@ -14,6 +14,13 @@ pub(super) struct ProcessContainment {
     job: std::os::windows::io::OwnedHandle,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TerminationStart {
+    Signaled,
+    #[cfg(target_vendor = "apple")]
+    GroupSignalDenied,
+}
+
 #[cfg(unix)]
 pub(super) fn configure(command: &mut Command, placement: ProcessGroupPlacement) {
     if placement == ProcessGroupPlacement::OwnGroup {
@@ -163,9 +170,10 @@ pub(super) async fn await_retirement(
     process_id: Option<u32>,
     containment: Option<&ProcessContainment>,
     placement: ProcessGroupPlacement,
+    initial_probe_error: Option<std::io::Error>,
 ) -> std::io::Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let mut first_probe_error = None;
+    let mut first_probe_error = initial_probe_error;
     loop {
         let observation = tree_retired(child, process_id, containment, placement)?;
         if retirement_observed(
@@ -184,9 +192,10 @@ pub(super) fn await_retirement_blocking(
     process_id: Option<u32>,
     containment: Option<&ProcessContainment>,
     placement: ProcessGroupPlacement,
+    initial_probe_error: Option<std::io::Error>,
 ) -> std::io::Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let mut first_probe_error = None;
+    let mut first_probe_error = initial_probe_error;
     loop {
         let observation = tree_retired(child, process_id, containment, placement)?;
         if retirement_observed(
@@ -206,7 +215,7 @@ pub(super) fn begin_termination(
     containment: Option<&ProcessContainment>,
     placement: ProcessGroupPlacement,
     unreaped_exit_observed: bool,
-) -> std::io::Result<()> {
+) -> std::io::Result<TerminationStart> {
     #[cfg(unix)]
     {
         let _ = containment;
@@ -214,32 +223,19 @@ pub(super) fn begin_termination(
             if child.try_wait()?.is_none() {
                 child.start_kill()?;
             }
-            return Ok(());
+            return Ok(TerminationStart::Signaled);
         }
         let group = owned_group(process_id)?;
         let result = unsafe { libc::kill(-group, libc::SIGKILL) };
-        if result != 0 {
-            let error = std::io::Error::last_os_error();
-            // Darwin can refuse signaling a group containing only an exited,
-            // unreaped leader. Its PID is still pinned by our exit observation.
-            // Proceed only to reaping/absence checks, never another signal;
-            // surviving members still prevent a retirement certificate.
-            match error.raw_os_error() {
-                Some(libc::ESRCH) => {}
-                Some(libc::EPERM) => {
-                    // The child can exit between the caller's state check and
-                    // this signal. Observe that exact child without reaping or
-                    // releasing its PID; no second group signal is issued.
-                    let terminal = unreaped_exit_observed
-                        || super::exit_observation::try_wait_unreaped(process_id)?.is_some();
-                    if !terminal {
-                        return Err(error);
-                    }
-                }
-                _ => return Err(error),
-            }
-        }
-        Ok(())
+        let signal = if result == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        };
+        group_signal_outcome(signal, || {
+            Ok(unreaped_exit_observed
+                || super::exit_observation::try_wait_unreaped(process_id)?.is_some())
+        })
     }
     #[cfg(windows)]
     {
@@ -249,7 +245,7 @@ pub(super) fn begin_termination(
             if child.try_wait()?.is_none() {
                 child.start_kill()?;
             }
-            return Ok(());
+            return Ok(TerminationStart::Signaled);
         }
         use std::os::windows::io::AsRawHandle as _;
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
@@ -260,7 +256,7 @@ pub(super) fn begin_termination(
         if unsafe { TerminateJobObject(job.job.as_raw_handle() as _, 1) } == 0 {
             return Err(std::io::Error::last_os_error());
         }
-        Ok(())
+        Ok(TerminationStart::Signaled)
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -275,6 +271,37 @@ pub(super) fn begin_termination(
             std::io::ErrorKind::Unsupported,
             "owned process-tree retirement is unsupported on this platform",
         ))
+    }
+}
+
+#[cfg(unix)]
+fn group_signal_outcome(
+    signal: std::io::Result<()>,
+    terminal: impl FnOnce() -> std::io::Result<bool>,
+) -> std::io::Result<TerminationStart> {
+    let error = match signal {
+        Ok(()) => return Ok(TerminationStart::Signaled),
+        Err(error) => error,
+    };
+    match error.raw_os_error() {
+        Some(libc::ESRCH) => Ok(TerminationStart::Signaled),
+        Some(libc::EPERM) => {
+            #[cfg(target_vendor = "apple")]
+            {
+                let _ = terminal;
+                // Darwin can omit an exiting member before waitid reports its
+                // terminal status. Commit to observation without re-signaling;
+                // the owned leader and whole group must still retire.
+                Ok(TerminationStart::GroupSignalDenied)
+            }
+            #[cfg(not(target_vendor = "apple"))]
+            if terminal()? {
+                Ok(TerminationStart::Signaled)
+            } else {
+                Err(error)
+            }
+        }
+        _ => Err(error),
     }
 }
 
@@ -482,6 +509,63 @@ fn unix_process_id(process_id: u32) -> std::io::Result<i32> {
     any(target_os = "linux", target_os = "android", target_vendor = "apple")
 ))]
 mod tests {
+
+    #[tokio::test]
+    async fn cancellation_racing_with_leader_exit_preserves_owned_retirement() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        for attempt in 0..96 {
+            let mut command = crate::HostCommand::new("/bin/sh");
+            command.arguments = vec!["-c".into(), "printf ready; read finish; exit 7".into()];
+            let mut child = command.spawn().await.expect("owned child");
+            let mut stdio = child.take_stdio().expect("owned pipes");
+            let mut ready = [0_u8; 5];
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                stdio.stdout.read_exact(&mut ready),
+            )
+            .await
+            .expect("child reaches its exit gate")
+            .expect("child readiness");
+            assert_eq!(&ready, b"ready");
+            stdio.stdin.write_all(b"finish\n").await.unwrap();
+            // Sample the interval between exit beginning and waitable status
+            // publication, as well as cancellation before and after that exit.
+            for _ in 0..attempt % 32 {
+                std::hint::spin_loop();
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(2), child.terminate_tree())
+                .await
+                .unwrap_or_else(|error| panic!("retirement attempt {attempt}: {error}"))
+                .unwrap_or_else(|error| panic!("retirement attempt {attempt}: {error}"));
+            let exit = child.wait().await.expect("retained terminal status");
+            assert!(
+                (exit.code == Some(7) && exit.signal.is_none())
+                    || (exit.code.is_none() && exit.signal == Some(libc::SIGKILL)),
+                "unexpected terminal outcome at {attempt}: {exit:?}"
+            );
+            child.terminate_tree().await.expect("idempotent retirement");
+        }
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn denied_group_signal_commits_to_observation_before_waitable_exit() {
+        let start = super::group_signal_outcome(
+            Err(std::io::Error::from_raw_os_error(libc::EPERM)),
+            || panic!("an exiting leader need not be waitable yet"),
+        )
+        .unwrap();
+        assert_eq!(start, super::TerminationStart::GroupSignalDenied);
+        for code in [libc::EIO, libc::EACCES] {
+            let error =
+                super::group_signal_outcome(Err(std::io::Error::from_raw_os_error(code)), || {
+                    panic!("unrelated errors do not inspect leader exit")
+                })
+                .unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(code));
+        }
+    }
 
     #[tokio::test]
     async fn terminal_leader_can_retire_before_lifecycle_observes_its_exit() {
