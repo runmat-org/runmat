@@ -80,14 +80,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+      "sha256": "e1104f3daf51ca75bcf96cfa0a78abb3c28098976e89531f328c240bda2420c8",
       "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The complete inventory delta changes FEA modal/eigen qualification, a highlighting grammar, the separate sketch edit-handler route and independent fixture tests. The staged airliner CAD compile, its models, geometric kernel, allocations and heap ceiling are unchanged. The review enumerates every changed input and distinguishes renewed G32 physics evidence from this conserved CAD measurement.",
+    "reason": "The complete inventory delta changes FEA modal/eigen qualification, a highlighting grammar, the separate sketch edit-handler route and independent fixture tests. The staged airliner CAD compile, its models, geometric kernel, allocations and heap ceiling are unchanged. The review enumerates every changed input and distinguishes renewed G32 physics evidence from this conserved CAD measurement. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries.",
     "review": {
       "path": "qualification/scientific/reviews/airliner-b85-to-2822ea6807.json",
-      "sha256": "475c5f3768cf637928ac18ad225d86c628bc6aaa61e1eff436d3a3d338f670f5"
+      "sha256": "6bca2241cb21b07ee549e09896b93b18339adf1494036c192c7418600ba3ab44"
     }
   }
 }

@@ -6,7 +6,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+    "sha256": "e1104f3daf51ca75bcf96cfa0a78abb3c28098976e89531f328c240bda2420c8",
     "files": 26104,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -66,9 +66,9 @@
       "after": [
         "100644",
         "blob",
-        "57dfd2c4531f377805f966a1829c363e50ce11fb"
+        "27e8873d14a5e21ce506b0d0907cf97a20ebd10b"
       ],
-      "reason": "Only the CAD integration fixture comparator changes: dimensionless world rotation cells allow one f64 epsilon; every other JSON field remains exact. New tests reject larger rotation differences, changed translations, identities and lengths. This separate integration-test target does not execute in the authored CLI cohort; production CAD and scientific code are unchanged."
+      "reason": "Only the CAD integration fixture comparator changes: dimensionless world rotation cells allow one f64 epsilon; every other JSON field remains exact. New tests reject larger rotation differences, changed translations, identities and lengths. This separate integration-test target does not execute in the authored CLI cohort; production CAD and scientific code are unchanged. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries."
     },
     {
       "path": "crates/runmat-design-tools/src/commands.rs",
@@ -117,6 +117,10 @@
     {
       "path": "qualification/scientific/evidence/authored-cli-ceae-20261111.json",
       "sha256": "03436da01e3893c2cabee7236c0753ec9f78010b4538594c424794365690d561"
+    },
+    {
+      "path": "qualification/scientific/evidence/rotation-constant-20261111.json",
+      "sha256": "6f8b79f0a30aa363bb9a33bcd31dba5c0431b18a1295984e99e01e269811345b"
     }
   ]
 }

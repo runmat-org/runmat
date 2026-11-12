@@ -83,14 +83,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+      "sha256": "e1104f3daf51ca75bcf96cfa0a78abb3c28098976e89531f328c240bda2420c8",
       "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The complete seven-file source delta contains four formatting-only changes, one isolated CAD integration fixture repair and the selected-plane sketch handler with its separate regression. The authored FEA CLI cohort does not dispatch part.sketch. Its scientific arithmetic, admission, publication, test cases and required command remain unchanged.",
+    "reason": "The complete seven-file source delta contains four formatting-only changes, one isolated CAD integration fixture repair and the selected-plane sketch handler with its separate regression. The authored FEA CLI cohort does not dispatch part.sketch. Its scientific arithmetic, admission, publication, test cases and required command remain unchanged. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries.",
     "review": {
       "path": "qualification/scientific/reviews/authored-ceae-to-793f9ae2b3.json",
-      "sha256": "b3e4d75f5d50696cfe9affad4f18315171c200cd46698e5b8ab3df09dd045106"
+      "sha256": "d769f41f7561b9d069349368a1273eb727c7c5f134ff1c2d3404e61cc62a4bc5"
     }
   }
 }

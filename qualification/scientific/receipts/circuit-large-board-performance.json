@@ -87,14 +87,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+      "sha256": "e1104f3daf51ca75bcf96cfa0a78abb3c28098976e89531f328c240bda2420c8",
       "files": 26104,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The circuit benchmark source, its dependency implementations and threshold are unchanged since the measured snapshot. The complete intervening inventory contains four FEA formatting-only files and the separate design-tool sketch handler/regression. These edits do not execute through the circuit Session benchmark.",
+    "reason": "The circuit benchmark source, its dependency implementations and threshold are unchanged since the measured snapshot. The complete intervening inventory contains four FEA formatting-only files and the separate design-tool sketch handler/regression. These edits do not execute through the circuit Session benchmark. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries.",
     "review": {
       "path": "qualification/scientific/reviews/circuit-air-df1e2068ed-to-2822ea6807.json",
-      "sha256": "a06e22bf569739bf2404a2687dcc164070e9fefc7a9a04f28639f825a59d2e5b"
+      "sha256": "5a17090fbf3dc12fcda1a2a2c15d627d10d89a980b985aa2892337c09a41f36b"
     }
   }
 }

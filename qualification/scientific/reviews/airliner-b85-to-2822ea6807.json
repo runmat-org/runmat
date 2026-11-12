@@ -6,7 +6,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+    "sha256": "e1104f3daf51ca75bcf96cfa0a78abb3c28098976e89531f328c240bda2420c8",
     "files": 26104,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -464,9 +464,9 @@
       "after": [
         "100644",
         "blob",
-        "57dfd2c4531f377805f966a1829c363e50ce11fb"
+        "27e8873d14a5e21ce506b0d0907cf97a20ebd10b"
       ],
-      "reason": "Separate Desktop fixture test comparison bounds last-bit world-rotation differences and tests rejection of other changes. This integration-test source is not linked into cad_airliner_drawing; the CAD implementation and measured airliner assertion remain unchanged."
+      "reason": "Separate Desktop fixture test comparison bounds last-bit world-rotation differences and tests rejection of other changes. This integration-test source is not linked into cad_airliner_drawing; the CAD implementation and measured airliner assertion remain unchanged. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries."
     },
     {
       "path": "crates/runmat-design-syntax/grammar/fea.tmLanguage.json",
@@ -637,6 +637,10 @@
     {
       "path": "qualification/scientific/evidence/airliner-b85-callgraph-20261111.json",
       "sha256": "1a0f858e91ea2fa782c8a2f52d9b1cd1ad9a981a110d8d1ba80ec2f05b344db0"
+    },
+    {
+      "path": "qualification/scientific/evidence/rotation-constant-20261111.json",
+      "sha256": "6f8b79f0a30aa363bb9a33bcd31dba5c0431b18a1295984e99e01e269811345b"
     }
   ]
 }

@@ -6,7 +6,7 @@
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
   "accepted_inputs": {
-    "sha256": "e2df49ab3e924eec9dd5b8c5d1056b0f112b6aa21fadca1c73dcc0d3471bb32c",
+    "sha256": "e1104f3daf51ca75bcf96cfa0a78abb3c28098976e89531f328c240bda2420c8",
     "files": 26104,
     "encoding": "git-mode-type-blob-path-tuples-v1"
   },
@@ -97,12 +97,30 @@
         "0cf4c19e9dea5268b18b918faa06af53a1156e49"
       ],
       "reason": "Rustfmt joins an existing accuracy assertion. Runtime FEA tests are not linked into the circuit benchmark."
+    },
+    {
+      "path": "crates/runmat-cad/tests/desktop_fixtures.rs",
+      "before": [
+        "100644",
+        "blob",
+        "57dfd2c4531f377805f966a1829c363e50ce11fb"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "27e8873d14a5e21ce506b0d0907cf97a20ebd10b"
+      ],
+      "reason": "The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries."
     }
   ],
   "qualification_evidence": [
     {
       "path": "qualification/scientific/evidence/circuit-air-m4-20261111.json",
       "sha256": "362f6ec02cff94e5c7747cc401233716fcd925632fd70932736131be924237d1"
+    },
+    {
+      "path": "qualification/scientific/evidence/rotation-constant-20261111.json",
+      "sha256": "6f8b79f0a30aa363bb9a33bcd31dba5c0431b18a1295984e99e01e269811345b"
     }
   ]
 }
