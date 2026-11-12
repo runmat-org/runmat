@@ -209,13 +209,17 @@ fn a_value_typed_in_another_unit_is_written_as_typed() {
         .filter(|l| l.contains("width = 12 mil"))
         .collect();
     assert_eq!(changed.len(), 1, "{changed:?}");
-    assert_eq!(
-        next[LAYOUT].lines().count(),
-        files[LAYOUT].lines().count()
-    );
+    assert_eq!(next[LAYOUT].lines().count(), files[LAYOUT].lines().count());
     // It reads as 12 mil: 0.3048 mm.
     let reread = runmat_circuit::syntax::board::parse_board(LAYOUT, &next[LAYOUT]);
-    let width = reread.board.expect("reads").tracks.values().next().unwrap().width;
+    let width = reread
+        .board
+        .expect("reads")
+        .tracks
+        .values()
+        .next()
+        .unwrap()
+        .width;
     assert_eq!(width, 304_800);
     // A footprint's x in inches keeps its y as written.
     let next = ok(&files, "component:C900", "x", typed(3.5, "in"));
@@ -335,4 +339,120 @@ fn fitting_needs_the_variant_and_shown_fields_are_refused() {
     })
     .expect_err("empty");
     assert_eq!(e.message, "Value can't be empty");
+}
+
+/// The compiled projection of `files`.
+fn index(files: &Files) -> runmat_circuit::index::CircuitIndex {
+    let mut session = Session::new();
+    let out = session.compile(CIRCUIT, &files[CIRCUIT], files, &CompileOptions::default());
+    out.index.expect("the project compiles")
+}
+
+#[test]
+fn a_footprints_placement_shows_as_written_while_it_still_reads_so() {
+    let files = files();
+    let next = ok(&files, "component:C900", "x", typed(3.5, "in"));
+    let next = ok(&next, "component:C900", "rotation", json!("0.5 rad"));
+    let board = index(&next).board.expect("a board");
+    let row = board
+        .footprints
+        .iter()
+        .find(|f| f.reference == "C900")
+        .unwrap();
+    assert!((row.x_mm - 88.9).abs() < 1e-6, "{}", row.x_mm);
+    assert_eq!(row.written.get("x").map(String::as_str), Some("3.5 in"));
+    assert_eq!(
+        row.written.get("rotation").map(String::as_str),
+        Some("0.5 rad")
+    );
+    // y is written in mm, which Properties shows as the number.
+    assert_eq!(row.written.get("y"), None);
+    // Moved in mm, x shows the new number.
+    let moved = ok(&next, "component:C900", "x", json!(90));
+    let board = index(&moved).board.expect("a board");
+    let row = board
+        .footprints
+        .iter()
+        .find(|f| f.reference == "C900")
+        .unwrap();
+    assert_eq!(row.written.get("x"), None);
+    assert_eq!(
+        row.written.get("rotation").map(String::as_str),
+        Some("0.5 rad")
+    );
+}
+
+#[test]
+fn a_component_param_is_written_as_typed_and_read_by_its_name() {
+    let mut files = files();
+    let circuit = files[CIRCUIT].replace(
+        "component C900 = { part = \"C0805-10U\" }",
+        "component C900 = { part = \"C0805-10U\", mass = 0.35 g }",
+    );
+    files.insert(CIRCUIT.into(), circuit);
+    let row = |files: &Files| {
+        index(files)
+            .components
+            .into_iter()
+            .find(|c| c.designator == "C900")
+            .unwrap()
+    };
+    // The projection carries the param as written, for Properties to edit.
+    assert_eq!(
+        row(&files).written.get("mass").map(String::as_str),
+        Some("0.35 g")
+    );
+    // A mass typed in grams is written as typed and reads as grams.
+    let next = ok(&files, "component:C900", "param.mass", json!("0.5 g"));
+    assert!(line(&next[CIRCUIT], "component C900").contains("mass = 0.5 g"));
+    assert_eq!(
+        row(&next).written.get("mass").map(String::as_str),
+        Some("0.5 g")
+    );
+    // A library part's param is written on the component, overriding the part's.
+    let library = row(&files);
+    let (param, _) = library
+        .params
+        .iter()
+        .find(|(name, _)| name.as_str() == "voltage_rating")
+        .expect("the part rates its voltage");
+    let next = ok(
+        &files,
+        "component:C900",
+        &format!("param.{param}"),
+        json!("25 V"),
+    );
+    assert!(line(&next[CIRCUIT], "component C900").contains("voltage_rating = 25 V"));
+    // A value of another kind is refused.
+    let refused = set(
+        &files,
+        "component:C900",
+        "param.mass",
+        json!("5 V"),
+        CompileOptions::default(),
+    )
+    .err()
+    .expect("volts aren't a mass");
+    assert!(refused.message.contains("mass"), "{}", refused.message);
+    // So is a param the component doesn't have.
+    assert!(set(
+        &files,
+        "component:C900",
+        "param.color",
+        json!("red"),
+        CompileOptions::default()
+    )
+    .is_err());
+}
+
+#[test]
+fn every_component_names_the_package_its_footprint_uses() {
+    let index = index(&files());
+    let c1 = index
+        .components
+        .iter()
+        .find(|c| c.designator == "C1")
+        .unwrap();
+    assert_eq!(c1.footprint.as_deref(), Some("C_0402_1005Metric_IPCN"));
+    assert!(index.components.iter().all(|c| c.footprint.is_some()));
 }

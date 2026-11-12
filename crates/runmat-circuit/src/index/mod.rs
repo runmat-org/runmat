@@ -96,12 +96,19 @@ pub struct ComponentRow {
     pub manufacturer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The package its footprint uses (`C_0402_1005Metric`), for Properties' Footprint field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footprint: Option<String>,
     /// The value a schematic and BOM show (`10 kΩ ±1%`): the `Value` property, else the first of
     /// resistance, capacitance, inductance and frequency.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     /// Parameter name → display value (`10 kΩ ±1 %`).
     pub params: BTreeMap<String, String>,
+    /// Parameter name → the quantity as the file writes it (`0.35 g`, `100 nF ± 10 %`), for
+    /// Properties to edit as written.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub written: BTreeMap<String, String>,
     pub fitting: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_w: Option<f64>,
@@ -355,11 +362,21 @@ pub fn build_index(
                 part: part.as_ref().map(|p| p.0.clone()),
                 manufacturer: part.as_ref().map(|p| p.1.clone()).filter(|s| !s.is_empty()),
                 description: part.as_ref().map(|p| p.2.clone()).filter(|s| !s.is_empty()),
+                footprint: c
+                    .package
+                    .and_then(|u| pool.packages.get(&u))
+                    .map(|p| p.name.clone())
+                    .or_else(|| c.unresolved_package.clone()),
                 value: component_value(c),
                 params: c
                     .params
                     .iter()
                     .map(|(k, v)| (k.clone(), param_display(v)))
+                    .collect(),
+                written: c
+                    .params
+                    .iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.written.clone()?)))
                     .collect(),
                 fitting: match c.fitting {
                     FitState::Fitted => "fitted",

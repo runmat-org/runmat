@@ -8,7 +8,9 @@
 //! form (`{ base, angle }`, see [`wire`]).
 
 pub use runmat_types::physical::DynamicDimension as Dimension;
-use runmat_types::physical::{parse_unit_expression, QuantityKind, UnitDefinition};
+use runmat_types::physical::{
+    parse_unit_expecting, parse_unit_expression, QuantityKind, UnitDefinition,
+};
 use runmat_types::PhysicalDimension;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -55,6 +57,15 @@ impl Units {
         match expression.trim() {
             "" | "1" => UnitDefinition::try_new(PhysicalDimension::DIMENSIONLESS, 1.0, 0.0).ok(),
             written => parse_unit_expression(written).ok(),
+        }
+    }
+
+    /// [`Units::unit`] where the value must measure `expected`: where a mass is expected, `g`
+    /// is the gram (`0.35 g`), and elsewhere standard gravity.
+    pub fn unit_expecting(&self, expression: &str, expected: Dimension) -> Option<UnitDefinition> {
+        match expression.trim() {
+            "" | "1" => self.unit(expression),
+            written => parse_unit_expecting(written, expected.dimension()).ok(),
         }
     }
 
@@ -118,8 +129,14 @@ mod tests {
     #[test]
     fn reads_kinds_and_units_from_the_one_authority() {
         let units = Units;
-        assert_eq!(units.kind(&QuantityKindId::new("distance")), Some(Dimension::LENGTH));
-        assert_eq!(units.kind(&QuantityKindId::new("angle")), Some(Dimension::ANGLE));
+        assert_eq!(
+            units.kind(&QuantityKindId::new("distance")),
+            Some(Dimension::LENGTH)
+        );
+        assert_eq!(
+            units.kind(&QuantityKindId::new("angle")),
+            Some(Dimension::ANGLE)
+        );
         assert_eq!(
             units.kind(&QuantityKindId::new("count")),
             Some(Dimension::DIMENSIONLESS)
@@ -136,7 +153,10 @@ mod tests {
     #[test]
     fn dimensions_keep_the_catalog_wire_form() {
         let json = serde_json::to_value(wire::to_wire(Dimension::ANGLE)).unwrap();
-        assert_eq!(json, serde_json::json!({ "base": [0, 0, 0, 0, 0, 0, 0, 0], "angle": 1 }));
+        assert_eq!(
+            json,
+            serde_json::json!({ "base": [0, 0, 0, 0, 0, 0, 0, 0], "angle": 1 })
+        );
         assert_eq!(
             wire::from_wire(wire::to_wire(Dimension::LENGTH)),
             Dimension::LENGTH

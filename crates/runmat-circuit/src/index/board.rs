@@ -232,6 +232,10 @@ pub struct FootprintRow {
     pub rotation: f64,
     pub side: String,
     pub locked: bool,
+    /// `x`, `y` and `rotation` as the file writes them in another unit (`3.5 in`), for
+    /// Properties to show as written.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub written: BTreeMap<String, String>,
     /// Courtyard rings, closed, in board coordinates.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub courtyard: Vec<Vec<crate::display::Xy>>,
@@ -576,6 +580,7 @@ pub fn add_board_reusing(
             }
             .to_owned(),
             locked: f.locked,
+            written: f.written.current(f),
         }
     };
     let footprints = board

@@ -122,13 +122,13 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 let mut display = BTreeMap::new();
                 for (name, expr) in values {
                     // A wrong unit underlines the input's value (`input.thickness = 3 deg`).
-                    let q = self.typed_input(name, expr, env, summary).map_err(|(code, message)| {
-                        SelectionError {
-                            param: (code == DiagCode::ValueUnit).then(|| name.0.clone()),
-                            code,
-                            message,
-                        }
-                    })?;
+                    let q =
+                        self.typed_input(name, expr, env, summary)
+                            .map_err(|(code, message)| SelectionError {
+                                param: (code == DiagCode::ValueUnit).then(|| name.0.clone()),
+                                code,
+                                message,
+                            })?;
                     inputs.insert(name.clone(), q.si);
                     if let Some(written) = crate::value::written_literal(expr, &q) {
                         display.insert(name.clone(), written);
@@ -200,7 +200,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         };
         let q = self
             .ev()
-            .eval(expr, env)
+            .eval_expecting(expr, env, info)
             .map_err(|e| (DiagCode::AsmInputType, format!("input `{}`: {}", name, e)))?;
         if q.dimension != info {
             // The one wrong-unit diagnostic every design language reports.

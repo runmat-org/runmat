@@ -595,6 +595,50 @@ pub struct Footprint {
     pub pad_nets: BTreeMap<String, NetId>,
     pub fitted: bool,
     pub properties: BTreeMap<String, String>,
+    /// X, Y and rotation as the layout file writes them in another unit (`3.5 in`, `0.5 rad`).
+    pub written: WrittenPlacement,
+}
+
+/// A footprint's placement values the file writes in a unit other than mm or deg, each with
+/// the value it read as. Properties shows the text while the footprint still sits there, so
+/// a footprint moved in code shows its new place. Empty for a footprint built in code.
+#[derive(Clone, Debug, Default)]
+pub struct WrittenPlacement {
+    pub x: Option<(String, Coord)>,
+    pub y: Option<(String, Coord)>,
+    pub rotation: Option<(String, f64)>,
+}
+
+/// How a place is written (`3.5 in` or `88.9`) doesn't make it another place: two footprints
+/// that differ only in their written text are equal, as [`crate::ir::Param`]s are, so an
+/// edited file that reads back as the edited board keeps the engineer's units.
+impl PartialEq for WrittenPlacement {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl WrittenPlacement {
+    /// The written texts that still read as the footprint's place: `x`, `y`, `rotation`.
+    pub fn current(&self, f: &Footprint) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        if let Some((text, x)) = &self.x {
+            if *x == f.at.x {
+                out.insert("x".to_owned(), text.clone());
+            }
+        }
+        if let Some((text, y)) = &self.y {
+            if *y == f.at.y {
+                out.insert("y".to_owned(), text.clone());
+            }
+        }
+        if let Some((text, r)) = &self.rotation {
+            if (r - f.rotation).abs() <= 1e-9 {
+                out.insert("rotation".to_owned(), text.clone());
+            }
+        }
+        out
+    }
 }
 
 /// A pad in board coordinates.
@@ -965,6 +1009,7 @@ impl Board {
                 pad_nets: BTreeMap::new(),
                 fitted: true,
                 properties: BTreeMap::new(),
+                written: WrittenPlacement::default(),
             },
         );
         id
