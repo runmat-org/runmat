@@ -28,6 +28,8 @@ _November 10, 2026_
 * Added a Settings menu with theme switching and links to account, usage, members, agent, navigation, and runtime settings. The agent panel shows thread and turn credit usage, and warns when less than 20% of the weekly allowance remains.
 * New agent threads open on the Guide tab. Available guides reflect the project's files; examples open their entry document, including assemblies, parts, and circuits.
 * Editor tabs that do not fit move into an overflow menu. Context chips stay on one line, with additional chips grouped under a count.
+* Project ▸ Export lists the open document's supported formats. Properties applies values on Enter or blur, reverts them on Escape, and preserves authored units.
+* Circuit simulation results show measurement limits, plot tabs and saved figure titles. Selecting a measurement opens its plot; overflowing figure tabs use the editor's overflow menu.
 
 #### Fixed
 
@@ -35,6 +37,9 @@ _November 10, 2026_
 * Fixed notebook scrolling unexpectedly zooming figures and detached notebook anchors leaving plots blank. Past-run figure tabs retain their recorded titles.
 * Fixed context menus accidentally executing the item under the mouse when the opening right-click was released.
 * Fixed simulation-usage reporting and settlement abandoning transient network or server errors; retries are bounded by the lease and retry limit. Fixed native and browser execution admission, including native test-worker attribution.
+* Fixed guide answers settling unrelated questions. Typed answers bind to the displayed card and revision, explanation requests leave the card open, and quantity questions derive their dimensions from the declared quantity kind. Rejected replies identify the field that needs correction.
+* Fixed saving during file loading overwriting content with empty text. Shared-file saves use the loaded collaborative document, and design checks read current unsaved edits through the save path.
+* Circuit recordings appear only when their source hashes match the current files. Signed-out runs request sign-in, and failed or refused runs clear earlier results.
 
 ### Mechanical Design
 
@@ -64,6 +69,7 @@ _November 10, 2026_
 * Added reusable footprint, symbol, and part declarations in library `.circuit` files, imported with `use`. Standard package strings generate their land patterns; custom footprints can be declared once and referenced by name.
 * Added circuit simulation sections with analyses, waveform probes, and measures checked against declared limits. Supported analyses include operating point, DC, AC, transient, noise, temperature, and seeded Monte Carlo runs.
 * Added fabrication exports including Gerber X2, Excellon drills, IPC-D-356A netlists, BOMs, pick-and-place files, IPC-2581C, and ODB++. Fabrication settings can be saved in the board.
+* Added STEP export for board assemblies and their placed components.
 * Added design inspection, rendering, checks, import/export, and staged source-edit tools for design documents, plus `runmat-design` commands for supported checks and exports.
 
 #### Changed
@@ -95,6 +101,7 @@ _November 10, 2026_
 * Added saved histories for sampled study outputs, including acoustic frequency histories.
 * Improved convergence for convection-dominated fluid solves and reused the preceding fluid solution during fluid–structure coupling iterations.
 * Replaced fixed size limits on model-scaled numerical arrays and run data with limits derived from the admitted budget or platform. Memory-admission errors report required and available memory and scratch space.
+* Fixed planned CPU and accelerator time overflowing during resource reconciliation for studies without a wall-time ceiling. Facet recovery polls cancellation between facets while retaining per-facet search limits.
 * Improved snapshot cameras, legend readability, and millimeter-scale clipping. Saved views record their study output and, for modal and buckling views, their mode number.
 * Linear-static structural solves currently require CPU execution. Authored frequency fan-out, cooperative partitioning, and resilience settings remain checked contracts where scheduler wiring and qualification are incomplete.
 
