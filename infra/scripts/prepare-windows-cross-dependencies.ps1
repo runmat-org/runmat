@@ -18,7 +18,7 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     throw 'Chocolatey is required to prepare Windows cross-build dependencies.'
 }
 
-& choco install pkgconfiglite strawberryperl cmake --yes --no-progress --installargs 'ADD_CMAKE_TO_PATH=System'
+& choco install strawberryperl cmake --yes --no-progress --installargs 'ADD_CMAKE_TO_PATH=System'
 if ($LASTEXITCODE -ne 0) {
     throw "Chocolatey dependency installation failed with exit code $LASTEXITCODE"
 }
@@ -119,6 +119,7 @@ $environment = [ordered]@{
     ZMQ_PATH = $prefix
     ZMQ_INCLUDE_DIR = "$prefix\include"
     ZMQ_LIB_DIR = "$prefix\lib"
+    PKG_CONFIG = $env:PKG_CONFIG
     PKG_CONFIG_PATH = "$prefix\lib\pkgconfig"
     BLAS_LIB_DIR = "$prefix\lib"
     BLAS_LIBS = 'openblas'

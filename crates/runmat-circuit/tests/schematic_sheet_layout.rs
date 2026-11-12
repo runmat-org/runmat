@@ -250,8 +250,10 @@ fn a_recorded_page_that_strays_into_the_margin_keeps_its_sheet() {
         .fold(f64::MIN, f64::max)
         .max(m1.designator_at[1] + 1.6);
     let lift = (page.height_mm - 25.4 - top) + 0.2;
-    let mut lock = runmat_circuit::ids::LockSection::default();
-    lock.places = places.clone();
+    let mut lock = runmat_circuit::ids::LockSection {
+        places: places.clone(),
+        ..Default::default()
+    };
     let key = &m1.key;
     let p = lock.places.get_mut(key).unwrap();
     p.y -= (lift * 1e6).round() as i64;

@@ -296,7 +296,6 @@ fn silk_around(body: Rect, pads: &[PadDef], clear: Coord) -> Vec<Graphic> {
     out
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Body materials of the generated packages, as material library ids. The material library
 /// (runmat-materials) holds their properties and sources; the board thermal study reads them
 /// per component block.
@@ -323,6 +322,7 @@ fn chip_material(kind: &str) -> Option<&'static str> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finish(
     name: String,
     description: String,

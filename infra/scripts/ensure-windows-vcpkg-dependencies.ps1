@@ -32,6 +32,7 @@ function Install-VcpkgPackage {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Package,
+        [string]$PackageTriplet = $Triplet,
         [string[]]$ExtraArguments = @(),
         [int]$MaximumAttempts = 3
     )
@@ -39,21 +40,42 @@ function Install-VcpkgPackage {
     for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
         # Keep installed SDKs, downloaded tools, binary caches and build logs.
         # Completed native objects and package-staging copies are disposable.
-        & $vcpkg install "${Package}:$Triplet" "--overlay-ports=$OverlayPorts" `
+        & $vcpkg install "${Package}:$PackageTriplet" "--overlay-ports=$OverlayPorts" `
             --clean-buildtrees-after-build --clean-packages-after-build @ExtraArguments
         if ($LASTEXITCODE -eq 0) {
             return
         }
 
         if ($attempt -eq $MaximumAttempts) {
-            throw "vcpkg install ${Package}:$Triplet failed after $MaximumAttempts attempts"
+            throw "vcpkg install ${Package}:$PackageTriplet failed after $MaximumAttempts attempts"
         }
 
         $delaySeconds = 15 * [Math]::Pow(2, $attempt - 1)
-        Write-Warning "vcpkg install ${Package}:$Triplet failed on attempt $attempt of $MaximumAttempts; retrying in $delaySeconds seconds"
+        Write-Warning "vcpkg install ${Package}:$PackageTriplet failed on attempt $attempt of $MaximumAttempts; retrying in $delaySeconds seconds"
         Start-Sleep -Seconds $delaySeconds
     }
 }
+
+# pkgconf runs on the build host, including when the requested libraries target
+# another architecture. The pinned port verifies its source checksum; static
+# linkage keeps this setup tool independent of the target's runtime DLLs.
+$pkgconfTriplet = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
+    'X64' { 'x64-windows-static' }
+    'Arm64' { 'arm64-windows-static' }
+    'X86' { 'x86-windows-static' }
+    default { throw 'Unsupported Windows host architecture for pkgconf' }
+}
+Install-VcpkgPackage -Package 'pkgconf' -PackageTriplet $pkgconfTriplet
+$pkgconf = Join-Path $VcpkgRoot "installed\$pkgconfTriplet\tools\pkgconf\pkgconf.exe"
+if (-not (Test-Path -LiteralPath $pkgconf -PathType Leaf)) {
+    throw "The managed pkgconf executable is missing: $pkgconf"
+}
+$pkgconfVersion = (Get-Content -LiteralPath (Join-Path $VcpkgRoot 'ports\pkgconf\vcpkg.json') -Raw | ConvertFrom-Json).version
+$actualPkgconfVersion = & $pkgconf --version
+if ($LASTEXITCODE -ne 0 -or $actualPkgconfVersion.Trim() -ne $pkgconfVersion) {
+    throw "Expected managed pkgconf $pkgconfVersion, found $actualPkgconfVersion"
+}
+$env:PKG_CONFIG = $pkgconf
 
 $opencascadeExtraArguments = @()
 if ($Triplet -eq 'arm64-windows') {

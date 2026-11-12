@@ -155,7 +155,10 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 }
-choco install -y git pkgconfiglite 7zip strawberryperl cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+choco install -y git 7zip strawberryperl cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+if ($LASTEXITCODE -ne 0) {
+    throw "Chocolatey helper installation failed with exit code $LASTEXITCODE"
+}
 
 Write-Host 'Installing Rust toolchain'
 $env:CARGO_HOME = $cargoHome
@@ -256,6 +259,7 @@ $lapackLibs = if (Test-Path (Join-Path $vcpkgInstalled 'lib\libf2c.lib')) { 'lap
 [Environment]::SetEnvironmentVariable('ZMQ_INCLUDE_DIR', (Join-Path $vcpkgInstalled 'include'), 'Machine')
 [Environment]::SetEnvironmentVariable('ZMQ_LIB_DIR', (Join-Path $vcpkgInstalled 'lib'), 'Machine')
 [Environment]::SetEnvironmentVariable('PKG_CONFIG_PATH', (Join-Path $vcpkgInstalled 'lib\pkgconfig'), 'Machine')
+[Environment]::SetEnvironmentVariable('PKG_CONFIG', $env:PKG_CONFIG, 'Machine')
 [Environment]::SetEnvironmentVariable('HDF5_DIR', $vcpkgInstalled, 'Machine')
 [Environment]::SetEnvironmentVariable('RUNMAT_OCCT_ROOT', $vcpkgInstalled, 'Machine')
 [Environment]::SetEnvironmentVariable('RUNMAT_OCCT_INCLUDE_DIR', (Join-Path $vcpkgInstalled 'include\opencascade'), 'Machine')

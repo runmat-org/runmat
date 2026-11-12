@@ -700,7 +700,7 @@ impl Session {
 
     /// The last compiled board's outer copper as thin solids ([`crate::board3d::outer_copper`])
     /// and its solder mask's extent on each face ([`crate::board3d::mask_extent`]), for its STEP.
-    pub fn board_surfaces(&self) -> Option<(Vec<crate::board3d::CopperSolid>, [(f64, f64); 2])> {
+    pub fn board_surfaces(&self) -> Option<crate::board3d::BoardSurfaces> {
         let board = self.board.as_ref()?.parsed.board.as_ref()?;
         Some((
             crate::board3d::outer_copper(board),
