@@ -158,6 +158,7 @@ fn dimension(
             group: None,
             reference: false,
             condition: ArcCondition::Center,
+            occurrences: Vec::new(),
         },
         at,
     });

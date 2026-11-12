@@ -20,6 +20,7 @@ pub mod auto;
 mod cuts;
 mod holes;
 pub mod layout;
+pub(crate) mod occurrences;
 pub mod progress;
 pub(crate) mod props;
 pub mod title;
@@ -72,6 +73,12 @@ pub struct CompiledModels {
     cut_lists: BTreeMap<String, Vec<(String, Vec<runmat_cad::model::weldment::CutListRow>)>>,
     /// The project root (the folder holding `runmat.toml`), which parts lists print files from.
     root: Option<String>,
+    /// Assembly occurrences the annotations name, their faces placed in the assembly, by
+    /// [`values::scoped_key`].
+    scoped: BTreeMap<String, Value>,
+    /// Occurrences grids read, by [`values::scoped_key`]: each datum their part publishes →
+    /// the datum feature it names.
+    published: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 fn names_in(reference: &Value, out: &mut Vec<Value>) {
@@ -127,6 +134,49 @@ impl ModelReferences for CompiledModels {
         self.occurrences
             .get(model.file.as_str())
             .is_some_and(|o| o.contains(&path.to_string()))
+    }
+    fn resolve_in(
+        &self,
+        model: &ModelRef,
+        path: &RelPath,
+        reference: &Reference,
+    ) -> Result<Vec<Vec<EntityName>>, String> {
+        let file = model.file.as_str();
+        let Some(scoped) = self
+            .scoped
+            .get(&values::scoped_key(file, &path.to_string()))
+        else {
+            return Err(format!(
+                "can't be read: `{path}` has no faces in {file} (it draws as a box)"
+            ));
+        };
+        let mut names = Vec::new();
+        names_in(
+            &serde_json::to_value(reference).unwrap_or(Value::Null),
+            &mut names,
+        );
+        for name in names {
+            let text = serde_json::from_value::<EntityName>(name)
+                .ok()
+                .and_then(|n| {
+                    runmat_cad::syntax::refs::print_reference(&Reference::Name {
+                        kind: runmat_cad::refs::name::TopoKind::Face,
+                        name: n,
+                    })
+                });
+            if !text.is_some_and(|t| occurrences::has_face(scoped, &t)) {
+                return Err(format!("names a face the part of `{path}` doesn't have"));
+            }
+        }
+        if let Reference::Name { name, .. } = reference {
+            return Ok(vec![vec![name.clone()]]);
+        }
+        Ok(vec![Vec::new()])
+    }
+    fn published_datums(&self, model: &ModelRef, path: &RelPath) -> Option<BTreeSet<String>> {
+        self.published
+            .get(&values::scoped_key(model.file.as_str(), &path.to_string()))
+            .map(|p| p.keys().cloned().collect())
     }
     fn pmi(&self, model: &ModelRef) -> PmiNames {
         self.pmi
@@ -433,6 +483,53 @@ pub fn compile_json_in(
     // bytes, so no inline copy of an assembly's display (tens of megabytes) is held.
     let models_out = displays;
     let displays = &models_out;
+    // The occurrences the annotations name: their faces placed in the assembly, and the datums
+    // a grid's part publishes.
+    for a in &document.annotations {
+        let Some(view) = document.views.iter().find(|v| v.name == a.view) else {
+            continue;
+        };
+        let file = view.model.file.as_str();
+        let Some(display) = displays.get(file) else {
+            continue;
+        };
+        use runmat_cad::drawing::AnnotationKind as K;
+        let paths: Vec<&RelPath> = match &a.kind {
+            K::Dimension { occurrences, .. } => occurrences.iter().collect(),
+            K::Level {
+                occurrence,
+                on: Some(_),
+                ..
+            } if !occurrence.is_empty() => vec![occurrence],
+            K::Level {
+                occurrence,
+                datum: Some(_),
+                ..
+            }
+            | K::Grids { occurrence, .. } => {
+                let key = values::scoped_key(file, &occurrence.to_string());
+                if !models.published.contains_key(&key) {
+                    let datums = occurrences::file_of(display, &occurrence.to_string())
+                        .map(|part| {
+                            let assembly = resolve_path(path, file, files);
+                            published_datums(&resolve_path(&assembly, &part, files), files)
+                        })
+                        .unwrap_or_default();
+                    models.published.insert(key, datums);
+                }
+                Vec::new()
+            }
+            _ => Vec::new(),
+        };
+        for occurrence in paths {
+            let key = values::scoped_key(file, &occurrence.to_string());
+            if !models.scoped.contains_key(&key) {
+                if let Some(s) = occurrences::scoped(display, &occurrence.to_string()) {
+                    models.scoped.insert(key, s);
+                }
+            }
+        }
+    }
     let index = build_drawing_index(
         &document,
         &models,
@@ -445,6 +542,7 @@ pub fn compile_json_in(
                 .map(|f| f.units)
                 .find(|u| !u.is_mm())
                 .unwrap_or_default(),
+            scoped: &models.scoped,
         },
     );
     let mut data = serde_json::to_value(&index).unwrap_or(Value::Null);
@@ -722,6 +820,11 @@ pub fn compile_json_in(
     // the axis (mm, from the anchor), so a view that shows the cylinder side-on dimensions it
     // across its two outline lines.
     let mut cylinders = serde_json::Map::new();
+    // Door swings by annotation id (leaf and arc, mm in the assembly), and grids' planes.
+    let mut swings = serde_json::Map::new();
+    let mut grid_texts: BTreeMap<String, Vec<([f64; 3], [[f64; 3]; 2])>> = BTreeMap::new();
+    // Level marks on datums: their height (mm), which the compile prints as the mark's text.
+    let mut level_texts: BTreeMap<String, f64> = BTreeMap::new();
     for a in &document.annotations {
         let Some(view) = document.views.iter().find(|v| v.name == a.view) else {
             continue;
@@ -729,6 +832,101 @@ pub fn compile_json_in(
         let Some(display) = displays.get(view.model.file.as_str()) else {
             continue;
         };
+        let file = view.model.file.as_str();
+        let scoped = |path: &RelPath| {
+            models
+                .scoped
+                .get(&values::scoped_key(file, &path.to_string()))
+        };
+        match &a.kind {
+            // A level mark starts at its face's height.
+            runmat_cad::drawing::AnnotationKind::Level {
+                on,
+                datum,
+                occurrence,
+                ..
+            } => {
+                let at = if occurrence.is_empty() {
+                    Some(display)
+                } else {
+                    scoped(occurrence)
+                };
+                let point = match (on, datum) {
+                    (Some(on), _) => at.and_then(|d| point_of(d, on)),
+                    (None, Some(datum)) => {
+                        let feature = models
+                            .published
+                            .get(&values::scoped_key(file, &occurrence.to_string()))
+                            .and_then(|p| p.get(datum))
+                            .cloned()
+                            .unwrap_or_else(|| datum.clone());
+                        let plane = occurrences::datum_planes(
+                            display,
+                            &occurrence.to_string(),
+                            std::slice::from_ref(&feature),
+                        )
+                        .pop()
+                        .flatten();
+                        if let Some((c, _)) = plane {
+                            level_texts.insert(a.id.clone(), c[2]);
+                        }
+                        plane.map(|(c, _)| c)
+                    }
+                    _ => None,
+                };
+                if let Some(p) = point {
+                    anchors.insert(a.id.clone(), json!([p]));
+                }
+                continue;
+            }
+            // Grids: each datum plane's centre and box, measured as a chain between neighbours.
+            runmat_cad::drawing::AnnotationKind::Grids {
+                occurrence, datums, ..
+            } => {
+                let features: Vec<String> = datums
+                    .iter()
+                    .map(|d| {
+                        models
+                            .published
+                            .get(&values::scoped_key(file, &occurrence.to_string()))
+                            .and_then(|p| p.get(d))
+                            .cloned()
+                            .unwrap_or_else(|| d.clone())
+                    })
+                    .collect();
+                let planes: Option<Vec<_>> =
+                    occurrences::datum_planes(display, &occurrence.to_string(), &features)
+                        .into_iter()
+                        .collect();
+                let Some(planes) = planes else {
+                    problems.push(warn(format!(
+                        "grids `{}`: `{occurrence}` draws no plane for one of {}",
+                        a.id,
+                        datums.join(", ")
+                    )));
+                    continue;
+                };
+                anchors.insert(
+                    a.id.clone(),
+                    json!(planes.iter().map(|(c, _)| c).collect::<Vec<_>>()),
+                );
+                extents.insert(
+                    a.id.clone(),
+                    json!(planes.iter().map(|(_, b)| b).collect::<Vec<_>>()),
+                );
+                grid_texts.insert(a.id.clone(), planes);
+                continue;
+            }
+            runmat_cad::drawing::AnnotationKind::DoorSwing { door, hinge, swing } => {
+                if let Some(s) =
+                    occurrences::door_swing(display, &door.to_string(), *hinge, *swing)
+                {
+                    swings.insert(a.id.clone(), s);
+                }
+                continue;
+            }
+            _ => {}
+        }
         // Frames, datum symbols, finish marks and note leaders point at what they annotate.
         if let Some(target) =
             values::leader_target(&a.kind, documents.get(view.model.file.as_str()))
@@ -743,23 +941,48 @@ pub fn compile_json_in(
             }
             continue;
         }
-        let (references, condition) = match &a.kind {
+        let no_occurrences = Vec::new();
+        let (references, condition, on) = match &a.kind {
             runmat_cad::drawing::AnnotationKind::Dimension {
                 references,
                 condition,
+                occurrences,
                 ..
-            } => (references, *condition),
-            runmat_cad::drawing::AnnotationKind::Centerline { between } => {
-                (between, runmat_cad::drawing::ArcCondition::Center)
-            }
+            } => (references, *condition, occurrences),
+            runmat_cad::drawing::AnnotationKind::Centerline { between } => (
+                between,
+                runmat_cad::drawing::ArcCondition::Center,
+                &no_occurrences,
+            ),
             _ => continue,
         };
-        let points: Option<Vec<[f64; 3]>> =
-            references.iter().map(|r| point_of(display, r)).collect();
+        // Each reference's model: the drawn part, or its occurrence of the drawn assembly.
+        let models_of: Option<Vec<&Value>> = (0..references.len())
+            .map(|i| {
+                if on.is_empty() {
+                    Some(display)
+                } else {
+                    scoped(on.get(i)?)
+                }
+            })
+            .collect();
+        let Some(models_of) = models_of else {
+            continue;
+        };
+        let display = models_of.first().copied().unwrap_or(display);
+        let points: Option<Vec<[f64; 3]>> = references
+            .iter()
+            .zip(&models_of)
+            .map(|(r, d)| point_of(d, r))
+            .collect();
         if let Some(mut points) = points {
             values::arc_anchors(display, references, &mut points, condition);
             anchors.insert(a.id.clone(), json!(points));
-            let boxes: Vec<Value> = references.iter().map(|r| extent_of(display, r)).collect();
+            let boxes: Vec<Value> = references
+                .iter()
+                .zip(&models_of)
+                .map(|(r, d)| extent_of(d, r))
+                .collect();
             extents.insert(a.id.clone(), Value::Array(boxes));
             if let (
                 runmat_cad::drawing::AnnotationKind::Dimension {
@@ -829,6 +1052,33 @@ pub fn compile_json_in(
         o.insert("radii".into(), Value::Object(radii));
         o.insert("normals".into(), Value::Object(normals));
         o.insert("cylinders".into(), Value::Object(cylinders));
+        o.insert("swings".into(), Value::Object(swings));
+        // A grid row's text: the distance between each grid and the next, along the line
+        // through their centres.
+        if let Some(Value::Object(texts)) = o.get_mut("text") {
+            let units = document
+                .formats
+                .iter()
+                .map(|f| f.units)
+                .find(|u| !u.is_mm())
+                .unwrap_or_default();
+            for (id, planes) in &grid_texts {
+                let bays: Vec<String> = planes
+                    .windows(2)
+                    .map(|w| {
+                        let d: f64 = (0..3).map(|i| (w[1].0[i] - w[0].0[i]).powi(2)).sum();
+                        units.length(d.sqrt())
+                    })
+                    .collect();
+                texts.insert(id.clone(), Value::String(bays.join(" · ")));
+            }
+            for (id, z) in &level_texts {
+                texts.insert(
+                    id.clone(),
+                    Value::String(format!("EL. {}", units.elevation(*z))),
+                );
+            }
+        }
         o.insert(
             "hole_tables".into(),
             holes::hole_tables(&document, &exact, displays),
@@ -862,6 +1112,27 @@ pub fn compile_json_in(
         serde_json::to_value(&problems).unwrap_or(Value::Null),
     );
     json_text(&Value::Object(answer))
+}
+
+/// The datums the part file `at` publishes, each with the datum feature it names (a skeleton's
+/// `grid_1` → `grid_1`).
+fn published_datums(at: &str, files: &Files) -> BTreeMap<String, String> {
+    let Some(source) = files.get(at) else {
+        return BTreeMap::new();
+    };
+    let Some(document) = runmat_cad::syntax::parse_part(at, source).document else {
+        return BTreeMap::new();
+    };
+    document
+        .publishes
+        .iter()
+        .filter_map(|p| {
+            let feature = serde_json::to_value(&p.target).ok()?["datum"]["feature"]
+                .as_str()?
+                .to_owned();
+            Some((p.name.to_string(), feature))
+        })
+        .collect()
 }
 
 /// `{ "kind": kind, "data": data }`, holding `data` as it is: `json!` would serialize a copy of
