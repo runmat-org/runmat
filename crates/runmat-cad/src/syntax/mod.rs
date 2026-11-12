@@ -40,6 +40,7 @@ pub mod forms;
 pub mod occurrence;
 pub mod projection;
 pub mod refs;
+pub mod rename;
 pub mod sketch;
 pub mod value;
 

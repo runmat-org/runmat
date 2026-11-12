@@ -19,6 +19,8 @@
 //!   to draw on the model ([`crate::measure`]).
 //! - `simulate.check`: the fit and mass checks a study runs before it meshes
 //!   ([`crate::study_checks`]; `values.gap`, mm, for open contacts).
+//! - `part.parents-children`: what the selected feature is built on and what is built on it
+//!   ([`crate::parents`]).
 //!
 //! The assembly Evaluate tab's `assembly.mass-properties`, `assembly.interference` and
 //! `assembly.clearance` run the same checks.
@@ -36,6 +38,9 @@ pub struct AnalyzeRequest {
     pub command: String,
     #[serde(default)]
     pub values: Map<String, Value>,
+    /// The Outline ids the command started from (Parents and children's feature).
+    #[serde(default)]
+    pub selection: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -704,6 +709,9 @@ pub fn analyze(
             })
         }
         "view.measure" => crate::measure::measure(path, text, files, &request.values),
+        "part.parents-children" | "part.show-references" if !assembly => {
+            crate::parents::parents_children(path, text, &request.selection)
+        }
         other => Err(format!(
             "`{other}` isn't an Evaluate command for parts and assemblies"
         )),

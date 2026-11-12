@@ -343,7 +343,7 @@ fn analyze(path: &str, text: &str, files: &Files, request: &RunRequest) -> Value
         .find(|(id, _)| *id == request.command)
         .map(|(_, to)| *to)
         .unwrap_or(&request.command);
-    let body = json!({ "command": command, "values": request.values });
+    let body = json!({ "command": command, "values": request.values, "selection": request.selection });
     let out: Value = serde_json::from_str(&runmat_cad_wasm::analyze::analyze_json(
         path,
         text,
