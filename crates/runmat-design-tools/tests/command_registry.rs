@@ -94,7 +94,12 @@ fn every_design_command_has_a_handler_on_its_surfaces() {
             assert!(route.surfaces.is_empty(), "{}", route.id);
             let (out, unhandled) = run(path, &request(&route.id, json!({}), &[]));
             let label = &commands::catalog().command(&route.id).unwrap().label;
-            assert_eq!(out["message"], commands::unavailable_reason(label), "{}", route.id);
+            assert_eq!(
+                out["message"],
+                commands::unavailable_reason(label),
+                "{}",
+                route.id
+            );
             assert!(!unhandled, "{}", route.id);
         } else {
             assert!(
@@ -226,9 +231,8 @@ fn surfaces_are_current(gaps: &[(&str, &str)], write: bool) {
     .unwrap()
         + "\n";
     let doc = commands::catalog().commands_reference(|id, editor| {
-        commands::route(id, editor).is_some_and(|r| {
-            r.handler != Handler::Shell && !gaps.contains(&(id, editor.as_str()))
-        })
+        commands::route(id, editor)
+            .is_some_and(|r| r.handler != Handler::Shell && !gaps.contains(&(id, editor.as_str())))
     });
     for line in [
         "- `part.sketch`: Start a sketch on a plane or planar face.",

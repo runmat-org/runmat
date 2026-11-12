@@ -28,7 +28,7 @@
 
 use super::printer::{list, name, names, record, PrintError};
 use super::*;
-use crate::library::catalog::{PartRecord, PartPin, PartSpice};
+use crate::library::catalog::{PartPin, PartRecord, PartSpice};
 
 fn text_of(expr: Expr, span: Span) -> Read<String> {
     word_of(Some(expr), span)

@@ -17,7 +17,10 @@ fn project() -> BTreeMap<String, String> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runmat-cad/wasm/tests/drone");
     let mut all = BTreeMap::new();
     read_tree(&dir, "/p/drone", &mut all);
-    assert!(all.contains_key(FC), "the drone project is checked in at {dir:?}");
+    assert!(
+        all.contains_key(FC),
+        "the drone project is checked in at {dir:?}"
+    );
     all
 }
 
@@ -99,11 +102,23 @@ fn shown(files: &BTreeMap<String, String>) -> Shown {
         let name = body.reference.as_deref().unwrap_or("");
         let part = !matches!(
             name,
-            "Board edge" | "Solder mask" | "Copper" | "Pads" | "Drills" | "Silkscreen" | "Terminals" | "Leads" | "Pins"
+            "Board edge"
+                | "Solder mask"
+                | "Copper"
+                | "Pads"
+                | "Drills"
+                | "Silkscreen"
+                | "Terminals"
+                | "Leads"
+                | "Pins"
         );
         for face in &body.faces {
             if part {
-                if let Some(r) = face.reference.as_deref().and_then(|r| r.strip_prefix("component:")) {
+                if let Some(r) = face
+                    .reference
+                    .as_deref()
+                    .and_then(|r| r.strip_prefix("component:"))
+                {
                     bodies.insert(r.to_owned());
                 }
             }
@@ -125,7 +140,12 @@ fn shown(files: &BTreeMap<String, String>) -> Shown {
             }
         }
     }
-    Shown { min, max, top, bodies }
+    Shown {
+        min,
+        max,
+        top,
+        bodies,
+    }
 }
 
 #[test]
@@ -135,8 +155,14 @@ fn the_flight_controller_exports_one_named_solid_per_part_and_reads_back_in_its_
     let out = export(&files, json!({}));
     assert_eq!(out["name"], "flight_controller.step");
     let step = out["text"].as_str().unwrap();
-    assert!(step.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING"), "not AP242");
-    assert!(step.contains("ADVANCED_FACE") && !step.contains("FACETED_BREP"), "not an exact B-rep");
+    assert!(
+        step.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING"),
+        "not AP242"
+    );
+    assert!(
+        step.contains("ADVANCED_FACE") && !step.contains("FACETED_BREP"),
+        "not an exact B-rep"
+    );
 
     let names = products(step);
     let tab = shown(&files);
@@ -152,11 +178,26 @@ fn the_flight_controller_exports_one_named_solid_per_part_and_reads_back_in_its_
     let (solids, min, max) = read_back(step);
     assert_eq!(solids, want.len(), "one solid per product");
     for k in 0..2 {
-        assert!((min[k] - tab.min[k]).abs() < 1e-5 && (max[k] - tab.max[k]).abs() < 1e-5, "x/y {min:?}..{max:?} vs the outline {:?}..{:?}", tab.min, tab.max);
+        assert!(
+            (min[k] - tab.min[k]).abs() < 1e-5 && (max[k] - tab.max[k]).abs() < 1e-5,
+            "x/y {min:?}..{max:?} vs the outline {:?}..{:?}",
+            tab.min,
+            tab.max
+        );
     }
     // The tallest part on top sets the top; the bottom mask (or a bottom part) the bottom.
-    assert!((max[2] - tab.max[2]).abs() < 1e-5, "top {} vs the tallest part {}", max[2], tab.max[2]);
-    assert!((min[2] - tab.min[2].min(-0.02e-3)).abs() < 1e-5, "bottom {} vs {}", min[2], tab.min[2]);
+    assert!(
+        (max[2] - tab.max[2]).abs() < 1e-5,
+        "top {} vs the tallest part {}",
+        max[2],
+        tab.max[2]
+    );
+    assert!(
+        (min[2] - tab.min[2].min(-0.02e-3)).abs() < 1e-5,
+        "bottom {} vs {}",
+        min[2],
+        tab.min[2]
+    );
 }
 
 #[test]
@@ -165,9 +206,23 @@ fn copper_is_written_per_outer_layer_when_asked_and_the_mask_can_be_left_out() {
     let files = project();
     let out = export(&files, json!({ "copper": true, "mask": false }));
     let names = products(out["text"].as_str().unwrap());
-    assert!(names.contains(&"copper F.Cu".to_owned()) && names.contains(&"copper B.Cu".to_owned()), "{names:?}");
-    assert!(!names.iter().any(|n| n.starts_with("solder mask")), "{names:?}");
-    assert!(out["notes"].as_array().unwrap().iter().all(|n| !n.as_str().unwrap().contains("copper items")), "{}", out["notes"]);
+    assert!(
+        names.contains(&"copper F.Cu".to_owned()) && names.contains(&"copper B.Cu".to_owned()),
+        "{names:?}"
+    );
+    assert!(
+        !names.iter().any(|n| n.starts_with("solder mask")),
+        "{names:?}"
+    );
+    assert!(
+        out["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|n| !n.as_str().unwrap().contains("copper items")),
+        "{}",
+        out["notes"]
+    );
 }
 
 const CHIP: &str = r#"runmat 0.7
@@ -200,7 +255,8 @@ fn a_package_model_in_the_project_replaces_its_body_box() {
         }],
         occurrences: Vec::new(),
     };
-    let model = String::from_utf8(chip.kernel.export(&doc, ExchangeFormat::Ap242).unwrap()).unwrap();
+    let model =
+        String::from_utf8(chip.kernel.export(&doc, ExchangeFormat::Ap242).unwrap()).unwrap();
     let mut files = project();
     let before = shown(&files);
     // The 0402 capacitors take the model, lifted 5 mm so the box it reads back in shows it.
@@ -210,9 +266,15 @@ fn a_package_model_in_the_project_replaces_its_body_box() {
     );
     assert_ne!(layout, files[FC], "the 0402 package names a model");
     files.insert(FC.into(), layout);
-    files.insert("/p/drone/electrical/flight_controller/models/c0402.step".into(), model);
+    files.insert(
+        "/p/drone/electrical/flight_controller/models/c0402.step".into(),
+        model,
+    );
     let deps = runmat_cad_wasm::runtime::dependencies(FC, &files[FC]);
-    assert!(deps.iter().any(|d| d.ends_with("/models/c0402.step")), "the CAD host gathers the model: {deps:?}");
+    assert!(
+        deps.iter().any(|d| d.ends_with("/models/c0402.step")),
+        "the CAD host gathers the model: {deps:?}"
+    );
 
     let out = export(&files, json!({}));
     let notes = out["notes"].to_string();
@@ -221,5 +283,9 @@ fn a_package_model_in_the_project_replaces_its_body_box() {
     // The model's 0.5 mm box, 5 mm up from the mask on the board's top face, is the tallest thing.
     let want = before.top + 0.02e-3 + 5.5e-3;
     assert!(want > before.max[2], "{want} vs {}", before.max[2]);
-    assert!((max[2] - want).abs() < 1e-5, "the model's top {} vs {want}", max[2]);
+    assert!(
+        (max[2] - want).abs() < 1e-5,
+        "the model's top {} vs {want}",
+        max[2]
+    );
 }

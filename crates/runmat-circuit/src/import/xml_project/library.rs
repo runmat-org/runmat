@@ -4,7 +4,7 @@
 use super::super::Report;
 use crate::geom::{mm, Coord, Point};
 use crate::import::xml::Element;
-use crate::library::catalog::{PartRecord, PartPin};
+use crate::library::catalog::{PartPin, PartRecord};
 use crate::library::{make, CopperSpan, Graphic, Package, PadDef, PadKind, PadShape};
 use std::collections::BTreeMap;
 

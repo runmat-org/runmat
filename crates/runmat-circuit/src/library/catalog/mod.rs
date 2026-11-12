@@ -57,8 +57,12 @@ pub fn check(part: &PartRecord) -> Result<(), String> {
     if part.footprint.is_some() || is_footprint_file(&part.package) || has_no_package(part) {
         return check_pins(part, None);
     }
-    let package = footprint::from_string(&part.package)
-        .ok_or_else(|| format!("part `{}`: `{}` is not a package the footprint generator makes, nor a footprint file", part.mpn, part.package))?;
+    let package = footprint::from_string(&part.package).ok_or_else(|| {
+        format!(
+            "part `{}`: `{}` is not a package the footprint generator makes, nor a footprint file",
+            part.mpn, part.package
+        )
+    })?;
     check_pins(part, Some(&package))
 }
 
