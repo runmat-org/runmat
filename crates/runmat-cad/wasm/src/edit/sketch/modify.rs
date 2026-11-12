@@ -71,7 +71,7 @@ pub(super) fn shape(sketch: &Sketch, e: &SketchEntity) -> Option<Shape> {
             };
             Shape::Round(at(center)?, r, 0.0, TAU)
         }
-        G::Point { .. } | G::Spline { .. } | G::Ellipse { .. } => return None,
+        G::Point { .. } | G::Spline { .. } | G::Ellipse { .. } | G::Text { .. } => return None,
     })
 }
 
@@ -212,6 +212,7 @@ pub(super) fn detach(sketch: &mut Sketch, id: &SketchEntityId) {
                 fix(center);
                 start.iter_mut().chain(end.iter_mut()).for_each(fix);
             }
+            G::Text { at, .. } => fix(at),
         }
     }
 }

@@ -37,6 +37,11 @@ pub fn closed_profile(picks: &Picks, id: &str) -> bool {
                 ..
             } => ends.extend([start, end]),
             SketchGeometry::Ellipse { .. } => {}
+            // Lettering is closed outlines.
+            SketchGeometry::Text { text, .. } if text.chars().any(|c| !c.is_whitespace()) => {
+                return true
+            }
+            SketchGeometry::Text { .. } => {}
             SketchGeometry::Line { start, end } | SketchGeometry::Arc { start, end, .. } => {
                 ends.extend([start, end])
             }

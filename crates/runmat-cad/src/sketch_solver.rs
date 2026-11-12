@@ -12,7 +12,7 @@ use crate::ids::SketchEntityId;
 use crate::model::sketch::{
     EllipseMeasure, PointExpr, PointRole, Sketch, SketchConstraintKind as K, SketchGeometry as G,
     SketchSolveFailure, SketchSolveStatus, SketchTarget, SolvedCache, SolvedEllipse, SolvedKey,
-    SolvedSketch,
+    SolvedSketch, SolvedText,
 };
 use crate::units::Dimension;
 use crate::value::{Evaluator, ValueEnv};
@@ -186,6 +186,44 @@ fn starting_points(
     Ok((points, radii, ellipses))
 }
 
+/// Each text's capital height, stroke width and angle, evaluated (they aren't solved).
+fn text_sizes(
+    sketch: &Sketch,
+    eval: &Evaluator<'_>,
+    env: &ValueEnv,
+) -> Result<BTreeMap<SketchEntityId, SolvedText>, SketchSolveFailure> {
+    let mut out = BTreeMap::new();
+    for e in &sketch.entities {
+        if let G::Text {
+            height,
+            angle,
+            stroke,
+            ..
+        } = &e.geometry
+        {
+            let value = |v: &crate::value::ValueExpr, dim: Dimension| {
+                eval.eval_as(v, env, dim).map_err(|e| fail(e.to_string()))
+            };
+            let height = value(height, Dimension::LENGTH)?;
+            out.insert(
+                e.id.clone(),
+                SolvedText {
+                    height,
+                    stroke: match stroke {
+                        Some(w) => value(w, Dimension::LENGTH)?,
+                        None => 0.15 * height,
+                    },
+                    angle: match angle {
+                        Some(a) => value(a, Dimension::ANGLE)?,
+                        None => 0.0,
+                    },
+                },
+            );
+        }
+    }
+    Ok(out)
+}
+
 fn cache_of(
     points: &Points,
     radii: &BTreeMap<SketchEntityId, f64>,
@@ -300,6 +338,7 @@ pub fn last_solved(
         points,
         radii,
         ellipses,
+        texts: text_sizes(sketch, eval, env)?,
         status: SketchSolveStatus::Explicit,
         entity_dof: BTreeMap::new(),
         dof: None,
@@ -333,6 +372,7 @@ impl SketchSolver for ExplicitSketchSolver {
             points,
             radii,
             ellipses,
+            texts: text_sizes(sketch, eval, env)?,
             status: SketchSolveStatus::Explicit,
             entity_dof: BTreeMap::new(),
             dof: None,
@@ -467,6 +507,8 @@ impl ConstraintSketchSolver {
                     }
                     first.expect("a spline has points")
                 }
+                // The text moves as one: its anchor is a free point and names it.
+                G::Text { .. } => get_point(&mut sys, &e.id, PointRole::At),
                 G::Ellipse { start: ends, .. } => {
                     let c = get_point(&mut sys, &e.id, PointRole::Center);
                     let s = ellipses0.get(&e.id).copied().unwrap_or_default();
@@ -481,7 +523,7 @@ impl ConstraintSketchSolver {
                     }
                 }
             };
-            if e.construction && !matches!(e.geometry, G::Spline { .. }) {
+            if e.construction && !matches!(e.geometry, G::Spline { .. } | G::Text { .. }) {
                 sys.set_construction(id, true);
             }
             curves.insert(e.id.clone(), id);
@@ -744,6 +786,7 @@ impl ConstraintSketchSolver {
             points,
             radii,
             ellipses,
+            texts: text_sizes(sketch, eval, env)?,
             status,
             entity_dof,
             dof: Some(report.dof as u32),

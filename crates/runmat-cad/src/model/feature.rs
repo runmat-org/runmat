@@ -1062,6 +1062,18 @@ impl FeatureKind {
                                 .chain(end.iter())
                                 .for_each(|p| pe(&mut ptrs, p));
                         }
+                        G::Text {
+                            at,
+                            height,
+                            angle,
+                            stroke,
+                            ..
+                        } => {
+                            pe(&mut ptrs, at);
+                            ptrs.push(height);
+                            ptrs.extend(angle.iter());
+                            ptrs.extend(stroke.iter());
+                        }
                     }
                 }
                 for c in &s.constraints {

@@ -607,6 +607,8 @@ This file is generated from the command catalog.
 - `sketch.dimension`: Add a driving or driven dimension.
   - Required: `type` (one of `smart`, `horizontal`, `vertical`, `ordinate`, `path_length`, default `smart`); `entities` (picks: sketch entity or sketch point)
   - Optional: `value` (number in mm); `driven` (true or false, default false)
+- `sketch.ellipse`: Draw an ellipse, a partial ellipse, a parabola or a conic.
+  - Required: `type` (one of `full`, `partial`, `parabola`, `conic`, default `full`); `center` (pick: sketch point or vertex or point); `major` (number in mm, default 20); `minor` (number in mm, default 10); `angle` (number in deg, default 0); `start` (pick: sketch point or vertex or point) when `type` is partial; `end` (pick: sketch point or vertex or point) when `type` is partial; `rho` (number, default 0.5) when `type` is conic
 - `sketch.extend`: Extend an entity to the next one it meets.
   - Required: `entities` (picks: sketch entity)
 - `sketch.fillet`: Round sketch corners.
@@ -638,6 +640,9 @@ This file is generated from the command catalog.
   - Optional: `closed` (true or false, default false)
 - `sketch.split`: Split an entity at a point.
   - Required: `entity` (pick: sketch entity); `at` (pick: sketch point or vertex or point)
+- `sketch.text`: Place text that features can extrude or emboss.
+  - Required: `text` (text); `at` (pick: sketch point or vertex or point); `height` (number in mm, default 5); `angle` (number in deg, default 0); `font` (one of `single_line`, default `single_line`); `stroke` (number in mm, default 0.75)
+  - Optional: `along` (pick: sketch entity)
 - `sketch.transform`: Move, copy, rotate or scale entities.
   - Required: `type` (one of `move`, `copy`, `rotate`, `scale`, default `move`); `entities` (picks: sketch entity or sketch point); `base` (pick: sketch point or vertex or point); `dx` (number in mm, default 0) when `type` is move or copy; `dy` (number in mm, default 0) when `type` is move or copy; `angle` (number in deg, default 0) when `type` is rotate; `factor` (number, default 1) when `type` is scale
 - `sketch.trim`: Trim entities by power trim, to a corner, inside or outside.

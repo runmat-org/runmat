@@ -101,11 +101,6 @@ sketch.ellipse assembly type=conic
 sketch.ellipse assembly type=full
 sketch.ellipse assembly type=parabola
 sketch.ellipse assembly type=partial
-sketch.ellipse part
-sketch.ellipse part type=conic
-sketch.ellipse part type=full
-sketch.ellipse part type=parabola
-sketch.ellipse part type=partial
 sketch.extend assembly
 sketch.fillet assembly
 sketch.line assembly
@@ -133,7 +128,6 @@ sketch.spline assembly type=style
 sketch.spline assembly type=through_points
 sketch.split assembly
 sketch.text assembly
-sketch.text part
 sketch.transform assembly
 sketch.transform assembly type=copy
 sketch.transform assembly type=move

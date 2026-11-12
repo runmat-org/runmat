@@ -14,8 +14,9 @@
 //! centre-point arcs, straight slots (two lines and two arcs, tangent), points, offsets of lines
 //! and circles, trim and extend (`modify`), mirror, pattern, transform, split and the
 //! construction toggle (`repeat`), fillet and chamfer (`corners`), auto-constrain (`infer`), and
-//! the relations and dimensions the sketch model has, splines through points, and ellipses and
-//! elliptical arcs. A tool the sketch model lacks (parabolas, conics, control-point splines)
+//! the relations and dimensions the sketch model has, splines through points, ellipses and
+//! elliptical arcs, and text. A tool the sketch model lacks (parabolas, conics, control-point splines,
+//! text along a curve)
 //! says so.
 
 use super::{model, EditFailure, SourceChange};
@@ -385,6 +386,7 @@ fn draw(
         }
         "sketch.polygon" => polygon(values, &mut name),
         "sketch.ellipse" => ellipse::draw(values, kind, &mut name),
+        "sketch.text" => text::draw(values, &mut name),
         "sketch.spline" => {
             if !kind.is_empty() && kind != "through_points" {
                 let what = match kind {
@@ -832,9 +834,13 @@ mod ellipse;
 mod infer;
 mod modify;
 mod repeat;
+mod text;
 
 #[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 mod ellipse_tests;
+
+#[cfg(test)]
+mod text_tests;

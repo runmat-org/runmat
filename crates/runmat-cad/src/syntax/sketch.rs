@@ -6,6 +6,7 @@
 //!     l2 = line(start = l1.end, end = [80 mm, 50 mm])
 //!     c1 = circle(center = [40 mm, 25 mm], radius = 5 mm, construction)
 //!     e1 = ellipse(center = [40 mm, 25 mm], major = 20 mm, minor = 8 mm, angle = 30 deg)
+//!     t1 = text(text = "RUNMAT", at = [10 mm, 40 mm], height = 6 mm, font = single_line, stroke = 1 mm)
 //!     constrain horizontal(l1)
 //!     constrain distance(l1.start, l2.end, id = d1) = 60 mm
 //!     constrain limit(length(l1, value = 80 mm), min = 60 mm, max = 90 mm)
@@ -26,6 +27,10 @@
 //!   from the x axis (0 when left out). With `start` and `end` it is the elliptical arc
 //!   counter-clockwise between them. `major_radius(e1)` and `minor_radius(e1)` dimension its
 //!   semi-axes; `horizontal(e1)` and `vertical(e1)` set its major axis's direction.
+//! - Text sets `text` from `at` (the left end of the first line's baseline) at capital height
+//!   `height`, turned `angle` (0 when left out). `font` names the typeface; `single_line`, the
+//!   default and today the only one, draws each glyph as a pen stroke `stroke` wide (0.15 of
+//!   the height when left out), and that stroke's outline is the text's profile.
 //! - `solved { }` holds the solver's last output in SI units, so the file reloads without
 //!   re-solving: `<entity>.<point> = [x, y]`, `<entity>.radius = r`, an ellipse's
 //!   `<entity>.major`, `.minor` and `.angle` (radians), and `<constraint>.hidden_<n> = v` for
@@ -37,14 +42,15 @@ use super::value::{lower_value, print_value};
 use crate::ids::{ConstraintId, SketchEntityId};
 use crate::model::datum::PlaneRef;
 use crate::model::sketch::{
-    EllipseMeasure, PointExpr, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K,
+    EllipseMeasure, PointExpr, TextFont, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K,
     SketchEntity, SketchGeometry, SketchTarget, SolvedCache, SolvedKey,
 };
 use crate::value::ValueExpr;
 use runmat_design_syntax::ast::{self, Argument, Expr, Headed, Statement};
 use runmat_design_syntax::document::BlockEntry;
 use runmat_design_syntax::json::{
-    format_f64, is_identifier, lower_expr, print_json, Json, LowerError, ValueSyntax, INDENT,
+    format_f64, is_identifier, lower_expr, print_json, quote, Json, LowerError, ValueSyntax,
+    INDENT,
 };
 use runmat_types::Span;
 
@@ -130,6 +136,28 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
             }
             arguments
         }
+        SketchGeometry::Text {
+            text,
+            at,
+            height,
+            angle,
+            font,
+            stroke,
+        } => {
+            let mut arguments = vec![
+                format!("text = {}", quote(text)),
+                format!("at = {}", print_point(at)?),
+                format!("height = {}", print_value(height)?),
+            ];
+            if let Some(angle) = angle {
+                arguments.push(format!("angle = {}", print_value(angle)?));
+            }
+            arguments.push(format!("font = {}", font.word()));
+            if let Some(stroke) = stroke {
+                arguments.push(format!("stroke = {}", print_value(stroke)?));
+            }
+            arguments
+        }
     };
     if entity.construction {
         arguments.push("construction".into());
@@ -141,6 +169,7 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
         SketchGeometry::Circle { .. } => "circle",
         SketchGeometry::Spline { .. } => "spline",
         SketchGeometry::Ellipse { .. } => "ellipse",
+        SketchGeometry::Text { .. } => "text",
     };
     Some(format!(
         "{} = {kind}({})",
@@ -533,11 +562,43 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
                 end,
             }
         }
+        "text" => {
+            let text = match call.need("text", span)? {
+                Expr::String(text) => text.value(),
+                other => return Err(error(other.span(), "a text's `text` is a quoted string")),
+            };
+            let at = lower_point(&call.need("at", span)?)?;
+            let height = lower_value(&call.need("height", span)?)?;
+            let angle = call.take("angle").map(|a| lower_value(&a)).transpose()?;
+            let font = match call.take("font") {
+                None => TextFont::default(),
+                Some(Expr::Reference(r))
+                    if r.segments().len() == 1 && TextFont::from_word(&r.segments()[0]).is_some() =>
+                {
+                    TextFont::from_word(&r.segments()[0]).expect("checked")
+                }
+                Some(other) => {
+                    return Err(error(
+                        other.span(),
+                        "a text's `font` is `single_line`, the one font sketches set text in",
+                    ))
+                }
+            };
+            let stroke = call.take("stroke").map(|w| lower_value(&w)).transpose()?;
+            SketchGeometry::Text {
+                text,
+                at,
+                height,
+                angle,
+                font,
+                stroke,
+            }
+        }
         other => {
             return Err(error(
                 span,
                 format!(
-                    "`{other}` is not a sketch entity (point, line, arc, circle, spline, ellipse)"
+                    "`{other}` is not a sketch entity (point, line, arc, circle, spline, ellipse, text)"
                 ),
             ))
         }

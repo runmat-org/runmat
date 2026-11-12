@@ -1,6 +1,6 @@
 ---
-description: Reference for RunMat sketches. Sketch planes, lines, arcs, circles, splines, points and construction geometry, shared points, geometric and dimensional constraints, limits and the solved cache.
-keywords: [sketch, 2D sketch, constraints, parametric sketch, coincident, tangent, horizontal, vertical, midpoint, symmetric, dimension, construction geometry, spline, sketch solver]
+description: Reference for RunMat sketches. Sketch planes, lines, arcs, circles, splines, ellipses, text, points and construction geometry, shared points, geometric and dimensional constraints, limits and the solved cache.
+keywords: [sketch, 2D sketch, constraints, parametric sketch, coincident, tangent, horizontal, vertical, midpoint, symmetric, dimension, construction geometry, spline, ellipse, elliptical arc, sketch text, engraving, embossing, sketch solver]
 ---
 # Sketches and constraints
 
@@ -56,12 +56,32 @@ A sketch on a face moves with the face when an earlier feature changes.
 | Arc | `a1 = arc(center = [0 mm, 0 mm], start = [10 mm, 0 mm], end = [0 mm, 10 mm])` |
 | Circle | `c1 = circle(center = [40 mm, 25 mm], radius = 5 mm)` |
 | Spline | `lobe = spline(points = [[10 mm, 0 mm], [0 mm, 10 mm], [-10 mm, 0 mm]], closed)` |
+| Ellipse | `e1 = ellipse(center = [0 mm, 0 mm], major = 20 mm, minor = 8 mm, angle = 30 deg)` |
+| Elliptical arc | `e2 = ellipse(center = [0 mm, 0 mm], major = 20 mm, minor = 8 mm, start = [20 mm, 0 mm], end = [-20 mm, 0 mm])` |
+| Text | `t1 = text(text = "RUNMAT", at = [5 mm, 5 mm], height = 6 mm, font = single_line, stroke = 1 mm)` |
 | Point | `p1 = point(at = [3 mm, 4 mm])` |
 
 - A point is `[x, y]` with a unit on each coordinate, or `[x, y] mm` with one unit after the list.
 - **Shared points.** Writing another entity's point (`start = bottom.end`) makes the two the same point, so the loop stays closed as the solver moves it. Entity points are `start`, `end` and `center`; a point entity's position is `p1.at`.
 - **Construction geometry.** `construction` after an entity's arguments makes it a reference for constraints only; it never becomes part of a profile.
+- **Ellipses.** `major` and `minor` are the semi-axes, and `angle` turns the major axis counter-clockwise from the sketch's x axis (0 when left out). With `start` and `end`, the ellipse is the arc that runs counter-clockwise from `start` to `end`; both points lie on the ellipse. A closed ellipse is a profile on its own, and an elliptical arc closes a loop with other curves. Features cut and extrude it as an exact ellipse.
 - Sketch points are read elsewhere as `sketch.<sketch>.<entity>.<point>`, such as a hole at `sketch.marks.p1.at`.
+
+### Text
+
+Text places lettering that features extrude (embossed) or cut (engraved). `at` is the left end of the first line's baseline, `height` is the capital height, and `angle` turns the baseline counter-clockwise (0 when left out). `\n` in the string starts a line below the first.
+
+`font` names the typeface. `single_line` is the default and the only font today: each glyph is drawn as pen strokes, and the profile is the outline of those strokes drawn with a round pen `stroke` wide. When `stroke` is left out, it is 0.15 of the height. The outline is exact lines and arcs, so a letter with a counter, such as `A` or `B`, cuts with its island left standing. Lowercase letters are small capitals, and a character outside the font draws as an empty box.
+
+```part fragment
+sketch label on feature.body.face.end {
+    t1 = text(text = "RUNMAT", at = [8 mm, 6 mm], height = 6 mm, font = single_line, stroke = 1 mm)
+    constrain fix(t1.at)
+}
+feature engrave = extrude(profile = sketch.label, distance = 0.5 mm, reverse, mode = cut)
+```
+
+The text's anchor is the point `t1.at`, so constraints place it like any other point. Text along a curve is not in the sketch model yet.
 
 ## Constraints
 
@@ -71,17 +91,18 @@ A sketch on a face moves with the face when an earlier feature changes.
 |---|---|
 | Fix | `constrain fix(p1)`, `constrain fix(l1.start)` |
 | Coincident | `constrain coincident(l1.end, l2.start)` |
-| Horizontal, vertical | `constrain horizontal(l1)`, `constrain vertical(l2)` |
+| Horizontal, vertical | `constrain horizontal(l1)`, `constrain vertical(l2)`; on an ellipse, its major axis |
 | Parallel, perpendicular | `constrain parallel(l1, l3)`, `constrain perpendicular(l1, l2)` |
-| Tangent | `constrain tangent(l1, a1)` |
-| Equal | `constrain equal(a1, a2)` |
+| Tangent | `constrain tangent(l1, a1)`; lines, circles, arcs and ellipses in any pair except two lines |
+| Equal | `constrain equal(a1, a2)`; two ellipses take equal semi-axes |
 | Midpoint | `constrain midpoint(p1.at, l1)`: the point sits halfway along the line |
-| Concentric, coradial | `constrain concentric(c1, c2)` (one center), `constrain coradial(c1, a1)` (one center and one radius) |
+| Concentric, coradial | `constrain concentric(c1, c2)` (one center, ellipses included), `constrain coradial(c1, a1)` (one center and one radius) |
 | Collinear | `constrain collinear(l1, l5)`: both lines lie on one infinite line |
 | Symmetric | `constrain symmetric(l1.start, l2.end, axis)`: two points mirror each other in a line |
 | Distance | `constrain distance(l1.start, l2.end) = 60 mm` |
 | Length | `constrain length(l1) = 80 mm` |
 | Radius, diameter | `constrain radius(c1) = 5 mm`, `constrain diameter(c1) = 10 mm` |
+| Ellipse semi-axes | `constrain major_radius(e1) = 20 mm`, `constrain minor_radius(e1) = 8 mm` |
 | Angle | `constrain angle(l1, l2) = 90 deg` |
 | Limit | `constrain limit(length(l3, value = 80 mm), min = 60 mm, max = 90 mm)`: a dimension that may move between bounds |
 
@@ -89,7 +110,7 @@ A sketch on a face moves with the face when an earlier feature changes.
 
 ## Solving
 
-The check reports a sketch that is over-constrained (with the conflicting constraints), under-constrained (with the free directions), or has redundant constraints, and a profile that does not close (`cad.sketch.open_profile`). The editor writes the solver's last result in a `solved { … }` block inside the sketch, in SI units, so a file reopens without re-solving:
+The check reports a sketch that is over-constrained (with the conflicting constraints), under-constrained (with the free directions), or has redundant constraints, and a profile that does not close (`cad.sketch.open_profile`). The editor writes the solver's last result in a `solved { … }` block inside the sketch, in SI units, so a file reopens without re-solving. An ellipse's entries are `e1.major`, `e1.minor` and `e1.angle` (radians):
 
 ```part fragment
 sketch s1 on origin.xy {

@@ -69,6 +69,44 @@ pub enum SketchGeometry {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         end: Option<PointExpr>,
     },
+    /// Lettering: `text` set from `at` (the left end of the first line's baseline), `height`
+    /// the capital height, turned `angle` counter-clockwise (0 when not written). In the
+    /// single-line `font` each glyph is a pen stroke `stroke` wide (0.15 of the height when not
+    /// written); its outline is the profile that extrudes and cuts.
+    Text {
+        text: String,
+        at: PointExpr,
+        height: ValueExpr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<ValueExpr>,
+        #[serde(default)]
+        font: TextFont,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke: Option<ValueExpr>,
+    },
+}
+
+/// The typeface sketch text is set in. Only the single-line font exists today; the name is
+/// written in the file so other faces can join without a format change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextFont {
+    /// The original single-line (monoline) glyph set the circuit legend also uses
+    /// ([`runmat_types::font`]).
+    #[default]
+    SingleLine,
+}
+
+impl TextFont {
+    pub fn word(self) -> &'static str {
+        match self {
+            TextFont::SingleLine => "single_line",
+        }
+    }
+
+    pub fn from_word(word: &str) -> Option<Self> {
+        (word == "single_line").then_some(TextFont::SingleLine)
+    }
 }
 
 impl SketchGeometry {
@@ -110,6 +148,7 @@ impl SketchGeometry {
                 }
                 points
             }
+            SketchGeometry::Text { at, .. } => vec![(PointRole::At, at)],
         }
     }
 
@@ -427,6 +466,14 @@ impl SolvedEllipse {
     }
 }
 
+/// Sketch text's sizes, evaluated: capital height, stroke width (metres) and angle (radians).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SolvedText {
+    pub height: f64,
+    pub stroke: f64,
+    pub angle: f64,
+}
+
 /// Solved sketch geometry in sketch coordinates (SI).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SolvedSketch {
@@ -435,6 +482,8 @@ pub struct SolvedSketch {
     pub radii: BTreeMap<SketchEntityId, f64>,
     #[serde(default)]
     pub ellipses: BTreeMap<SketchEntityId, SolvedEllipse>,
+    #[serde(default)]
+    pub texts: BTreeMap<SketchEntityId, SolvedText>,
     pub status: SketchSolveStatus,
     /// Remaining DOF per entity, where the solver reports it.
     #[serde(default)]
@@ -456,6 +505,36 @@ pub struct SolvedSketch {
 impl SolvedSketch {
     pub fn point(&self, entity: &SketchEntityId, role: PointRole) -> Option<[f64; 2]> {
         self.points.get(&(entity.clone(), role)).copied()
+    }
+
+    /// Sketch text's outline as closed loops of lines and arcs (outers counter-clockwise, holes
+    /// clockwise), each tagged with the text's id; empty when the text has nothing to draw.
+    pub fn text_loops(
+        &self,
+        entity: &SketchEntityId,
+        text: &str,
+    ) -> Vec<Vec<runmat_geometry_kernel::op::ProfileSegment>> {
+        use runmat_types::font::{layout, Anchor, CAP};
+        let (Some(at), Some(t)) = (self.point(entity, PointRole::At), self.texts.get(entity)) else {
+            return Vec::new();
+        };
+        if !(t.height > 0.0) {
+            return Vec::new();
+        }
+        let u = t.height / CAP;
+        let (s, c) = t.angle.sin_cos();
+        let strokes: Vec<Vec<[f64; 2]>> = layout(text, Anchor::BaselineLeft)
+            .into_iter()
+            .map(|pl| {
+                pl.into_iter()
+                    .map(|(gx, gy)| {
+                        let (x, y) = (gx * u, gy * u);
+                        [at[0] + x * c - y * s, at[1] + x * s + y * c]
+                    })
+                    .collect()
+            })
+            .collect();
+        runmat_geometry_kernel::stroke::stroke_outline(&strokes, t.stroke / 2.0, entity)
     }
 
     /// A solved ellipse as a kernel segment: the whole ellipse from the end of its major axis,

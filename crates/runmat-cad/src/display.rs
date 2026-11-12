@@ -244,7 +244,7 @@ pub struct FrameDisplay {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SketchEntityDisplay {
     pub id: String,
-    /// `point`, `line`, `arc`, `circle`, `spline` or `ellipse`.
+    /// `point`, `line`, `arc`, `circle`, `spline`, `ellipse` or `text`.
     pub kind: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub construction: bool,
@@ -260,6 +260,13 @@ pub struct SketchEntityDisplay {
     /// An ellipse's semi-major and semi-minor axes and its major axis's angle (radians).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ellipse: Option<[f32; 3]>,
+    /// Text's outline as closed rings (outers counter-clockwise, holes clockwise), each
+    /// starting and ending at the same point.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outlines: Vec<Vec<[f32; 2]>>,
+    /// Text's string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     /// Remaining degrees of freedom, where the solver reports them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dof: Option<u32>,
@@ -809,6 +816,26 @@ fn spline_samples(
         .collect()
 }
 
+/// Text outline loops as closed rings: lines by their ends, arcs and circles sampled.
+fn text_rings(loops: &[Vec<runmat_geometry_kernel::op::ProfileSegment>]) -> Vec<Vec<[f32; 2]>> {
+    use runmat_geometry_kernel::op::SegmentKind;
+    loops
+        .iter()
+        .map(|l| {
+            let mut ring: Vec<[f32; 2]> = l
+                .first()
+                .map(|s| s.start.map(|x| x as f32))
+                .into_iter()
+                .collect();
+            for s in l {
+                let n = if matches!(s.kind, SegmentKind::Line) { 1 } else { 12 };
+                ring.extend(s.polyline(n).into_iter().skip(1).map(|p| p.map(|x| x as f32)));
+            }
+            ring
+        })
+        .collect()
+}
+
 /// The solved sketches of a regenerated part, in document order.
 pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<SketchDisplay> {
     let f32s = |v: [f64; 3]| v.map(|x| x as f32);
@@ -835,6 +862,7 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                         SketchGeometry::Circle { .. } => "circle",
                         SketchGeometry::Spline { .. } => "spline",
                         SketchGeometry::Ellipse { .. } => "ellipse",
+                        SketchGeometry::Text { .. } => "text",
                     };
                     let points = entity
                         .geometry
@@ -872,6 +900,16 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                             .ellipses
                             .get(&entity.id)
                             .map(|e| [e.major as f32, e.minor as f32, e.angle as f32]),
+                        outlines: match &entity.geometry {
+                            SketchGeometry::Text { text, .. } => {
+                                text_rings(&solved.text_loops(&entity.id, text))
+                            }
+                            _ => Vec::new(),
+                        },
+                        text: match &entity.geometry {
+                            SketchGeometry::Text { text, .. } => Some(text.clone()),
+                            _ => None,
+                        },
                         dof: solved.entity_dof.get(&entity.id).copied(),
                     }
                 })

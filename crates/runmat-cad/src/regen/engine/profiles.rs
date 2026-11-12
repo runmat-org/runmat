@@ -93,7 +93,8 @@ pub(super) fn build_loops(
                 spline_segment(id, points.len(), *closed, solved)
             }
             SketchGeometry::Ellipse { start, .. } => solved.ellipse_segment(id, start.is_some()),
-            SketchGeometry::Point { .. } => None,
+            // Text is closed loops of its own (`text_loops`), not one segment.
+            SketchGeometry::Point { .. } | SketchGeometry::Text { .. } => None,
         }
     };
     let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
@@ -102,6 +103,15 @@ pub(super) fn build_loops(
         // Each listed loop in chain order, whatever order and direction its curves are listed
         // in (a region picked in the view lists them as found).
         for l in explicit {
+            // A text listed alone is every loop of its outline.
+            if let [id] = l.as_slice() {
+                if let Some(SketchGeometry::Text { text, .. }) =
+                    sketch.entities.iter().find(|e| &e.id == id).map(|e| &e.geometry)
+                {
+                    loops.extend(solved.text_loops(id, text));
+                    continue;
+                }
+            }
             let mut pool = Vec::new();
             for id in l {
                 pool.push(seg_of(id).ok_or_else(|| format!("`{}` is not a profile curve", id))?);
@@ -139,6 +149,11 @@ pub(super) fn build_loops(
             loops.push(chain);
         }
     } else {
+        for e in sketch.entities.iter().filter(|e| !e.construction) {
+            if let SketchGeometry::Text { text, .. } = &e.geometry {
+                loops.extend(solved.text_loops(&e.id, text));
+            }
+        }
         let mut pool: Vec<ProfileSegment> = sketch
             .entities
             .iter()
