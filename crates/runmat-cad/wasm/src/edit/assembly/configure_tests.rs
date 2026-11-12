@@ -113,9 +113,17 @@ fn an_input_written_in_inches_reads_as_written_in_properties() {
     );
     let (index, _, problems) =
         compile_assembly(PATH, &text, &files()).unwrap_or_else(|d| panic!("{d:?}"));
-    assert!(problems.iter().all(|d| d.severity != "error"), "{problems:?}");
+    assert!(
+        problems.iter().all(|d| d.severity != "error"),
+        "{problems:?}"
+    );
     // Properties' Configuration reads this label; the Outline's detail reads the same text.
-    assert_eq!(arm(&index)["configuration"], "length 3.5 in", "{}", arm(&index));
+    assert_eq!(
+        arm(&index)["configuration"],
+        "length 3.5 in",
+        "{}",
+        arm(&index)
+    );
 }
 
 #[test]
@@ -126,15 +134,31 @@ fn a_component_whose_part_does_not_compile_says_so_on_the_assembly() {
         ARM.replace("distance = 5 mm", "distance = length"),
     )]
     .into();
-    let (_, _, problems) =
+    let (index, _, problems) =
         compile_assembly(PATH, RIG, &broken).unwrap_or_else(|d| panic!("{d:?}"));
+    // The index (what the language server and the Desktop's status read) says the same thing,
+    // and nothing calls the part's file missing.
+    let index_text = index["diagnostics"].to_string();
+    assert!(
+        index_text.contains("doesn't compile, so it draws nothing")
+            && !index_text.contains("is not in the project"),
+        "{index_text}"
+    );
+    assert!(
+        problems
+            .iter()
+            .all(|d| !d.message.contains("is not in the project")),
+        "{problems:?}"
+    );
     let top: Vec<_> = problems
         .iter()
         .filter(|d| d.path == PATH && d.severity == "error")
         .collect();
     assert_eq!(top.len(), 1, "{problems:?}");
     assert!(
-        top[0].message.contains("doesn't compile, so it draws nothing")
+        top[0]
+            .message
+            .contains("doesn't compile, so it draws nothing")
             && top[0].message.contains("write `input.length`"),
         "{}",
         top[0].message

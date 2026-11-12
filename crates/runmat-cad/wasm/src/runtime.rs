@@ -442,6 +442,13 @@ pub struct AssemblyResolution {
     pub digests: BTreeMap<String, String>,
 }
 
+/// A part file an assembly uses that failed to compile: resolution's "not in the project" text
+/// for it, and what the assembly says in its place.
+struct FailedPart {
+    missing: String,
+    message: String,
+}
+
 /// Resolves the assembly `path` from its text; syntax errors are the `Err` diagnostics.
 pub fn resolve_assembly(
     path: &str,
@@ -480,8 +487,8 @@ pub fn resolve_assembly_in(
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     let mut problems = Vec::new();
     let mut digests: BTreeMap<String, String> = BTreeMap::new();
-    // Part files that failed to compile: reported once, as such, instead of "not in the project".
-    let mut failed_parts: Vec<String> = Vec::new();
+    // Part files that failed to compile: reported as such, instead of "not in the project".
+    let mut failed_parts: Vec<FailedPart> = Vec::new();
     let top_path = top.path.clone();
     // Breadth-first over sub-assemblies, each definition once.
     let mut queue: Vec<(String, AssemblyDocument)> = vec![(path.to_owned(), top)];
@@ -638,27 +645,23 @@ pub fn resolve_assembly_in(
                             documents.insert(key.clone(), part.document.clone());
                         }
                         Err(mut d) => {
-                            // A part that doesn't compile places nothing: say so at the
-                            // assembly's top too, since the part's own diagnostics name its file.
-                            for e in d.iter().filter(|e| e.severity == "error") {
-                                problems.push(Diagnostic {
-                                    path: path.to_owned(),
-                                    start: 0,
-                                    end: 0,
-                                    severity: "error".into(),
-                                    message: format!(
-                                        "{key} doesn't compile, so it draws nothing: {}",
-                                        e.message
-                                    ),
-                                });
-                            }
+                            // A part that doesn't compile places nothing. Resolution reports its
+                            // file as missing; that report is reworded below to say why.
+                            let first = d
+                                .iter()
+                                .find(|e| e.severity == "error")
+                                .map(|e| e.message.clone())
+                                .unwrap_or_default();
                             problems.append(&mut d);
-                            failed_parts.push(
-                                runmat_cad::assembly::source::SourceError::NotFound {
+                            failed_parts.push(FailedPart {
+                                missing: runmat_cad::assembly::source::SourceError::NotFound {
                                     file: runmat_cad::ids::FilePath::new(&key),
                                 }
                                 .to_string(),
-                            );
+                                message: format!(
+                                    "{key} doesn't compile, so it draws nothing: {first}"
+                                ),
+                            });
                         }
                     }
                 }
@@ -692,13 +695,34 @@ pub fn resolve_assembly_in(
         configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
         ..ResolveRequest::default()
     };
-    let resolved = resolve(&top_path, &request, &ctx);
+    let mut resolved = resolve(&top_path, &request, &ctx);
+    // Resolution sees a part that failed to compile as a missing file. Its diagnostic (code and
+    // span on the `use` line) is reworded at the source, so the index, the language server and
+    // the Desktop all say the part doesn't compile.
+    for failed in &failed_parts {
+        let mut found = false;
+        for d in resolved
+            .diagnostics
+            .diagnostics
+            .iter_mut()
+            .filter(|d| d.message.contains(&failed.missing))
+        {
+            d.message = failed.message.clone();
+            found = true;
+        }
+        if !found {
+            problems.push(Diagnostic {
+                path: path.to_owned(),
+                start: 0,
+                end: 0,
+                severity: "error".into(),
+                message: failed.message.clone(),
+            });
+        }
+    }
     // What resolution could not do (a placement whose frame is missing, a pattern that does
     // not expand) is shown on the assembly, not dropped.
     for d in &resolved.diagnostics.diagnostics {
-        if failed_parts.iter().any(|missing| d.message.contains(missing)) {
-            continue;
-        }
         problems.push(Diagnostic {
             path: path.to_owned(),
             start: 0,
