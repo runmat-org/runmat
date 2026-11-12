@@ -12,7 +12,7 @@
 //! write `Sim.Device`, `Sim.Name`, `Sim.Library` and `Sim.Pins`; KiCad 6 and earlier wrote
 //! `Spice_Primitive`, `Spice_Model`, `Spice_Lib_File` and `Spice_Node_Sequence`.
 
-use super::catalog::{CatalogPart, CatalogPin, CatalogSpice};
+use super::catalog::{PartRecord, PartPin, PartSpice};
 use crate::kicad::sch::parse_lib_symbol;
 use crate::kicad::sexpr;
 use crate::library::PinType;
@@ -42,7 +42,7 @@ fn category(prefix: &str) -> &'static str {
 /// The parts of a `.kicad_sym` library: each symbol with a footprint, as a catalog part whose
 /// package is that footprint's `.kicad_mod` path relative to the library's folder. Symbols
 /// without a footprint (power symbols, generic graphics) are left out; `skipped` names them.
-pub fn read(text: &str) -> Result<(Vec<CatalogPart>, Vec<String>), String> {
+pub fn read(text: &str) -> Result<(Vec<PartRecord>, Vec<String>), String> {
     let root = sexpr::parse(text).map_err(|e| e.to_string())?;
     if root.head() != Some("kicad_symbol_lib") {
         return Err("not a KiCad symbol library".into());
@@ -56,7 +56,7 @@ pub fn read(text: &str) -> Result<(Vec<CatalogPart>, Vec<String>), String> {
             skipped.push(symbol.name.clone());
             continue;
         };
-        let mut pins: Vec<CatalogPin> = Vec::new();
+        let mut pins: Vec<PartPin> = Vec::new();
         for pin in symbol.units.values().flatten() {
             let pin_name = pin_name_of(&pin.name, &pin.number);
             let kind = if pin.kind == PinType::Unspecified {
@@ -67,7 +67,7 @@ pub fn read(text: &str) -> Result<(Vec<CatalogPart>, Vec<String>), String> {
             match pins.iter_mut().find(|p| p.name == pin_name) {
                 Some(p) if !p.pads.contains(&pin.number) => p.pads.push(pin.number.clone()),
                 Some(_) => {}
-                None => pins.push(CatalogPin {
+                None => pins.push(PartPin {
                     name: pin_name,
                     pads: vec![pin.number.clone()],
                     kind: kind.name().into(),
@@ -87,7 +87,7 @@ pub fn read(text: &str) -> Result<(Vec<CatalogPart>, Vec<String>), String> {
                 .map(|p| (p.number.clone(), pin_name_of(&p.name, &p.number)))
                 .collect::<Vec<_>>(),
         );
-        parts.push(CatalogPart {
+        parts.push(PartRecord {
             mpn: property(node, "Value").unwrap_or(&symbol.name).to_string(),
             manufacturer: String::new(),
             description: property(node, "Description")
@@ -127,7 +127,7 @@ fn pin_name_of(name: &str, number: &str) -> String {
 /// - The node order: `Sim.Pins` pairs (`1=VIN 2=GND`, symbol pin = model pin) in model-pin
 ///   order when the model pins are numbers, else as written; the legacy `Spice_Node_Sequence`
 ///   lists symbol pin numbers in node order; with neither, the symbol's pins by number.
-pub fn sim_model(node: &sexpr::SExpr, pins: &[(String, String)]) -> Option<CatalogSpice> {
+pub fn sim_model(node: &sexpr::SExpr, pins: &[(String, String)]) -> Option<PartSpice> {
     let device = property(node, "Sim.Device")
         .or_else(|| property(node, "Spice_Primitive"))
         .unwrap_or("SUBCKT")
@@ -178,7 +178,7 @@ pub fn sim_model(node: &sexpr::SExpr, pins: &[(String, String)]) -> Option<Catal
         .iter()
         .map(|n| name_of(n).unwrap_or_else(|| n.clone()))
         .collect();
-    Some(CatalogSpice {
+    Some(PartSpice {
         model,
         library,
         nodes,
@@ -188,7 +188,7 @@ pub fn sim_model(node: &sexpr::SExpr, pins: &[(String, String)]) -> Option<Catal
 
 /// `part` with its package rebased from the symbol library's folder `lib_dir` to `base`, the
 /// folder of the circuit that will declare it (both workspace paths, `/`-separated).
-pub fn rebase(part: &CatalogPart, lib_dir: &str, base: &str) -> CatalogPart {
+pub fn rebase(part: &PartRecord, lib_dir: &str, base: &str) -> PartRecord {
     let from: Vec<&str> = base.split('/').filter(|s| !s.is_empty()).collect();
     let rel = |path: &str| -> String {
         let target: Vec<&str> = lib_dir
@@ -203,7 +203,7 @@ pub fn rebase(part: &CatalogPart, lib_dir: &str, base: &str) -> CatalogPart {
     };
     // A model library beside the symbol library moves with it; an absolute path or one through
     // a KiCad path variable (`${KICAD7_...}`) stays as written.
-    let spice = part.spice.as_ref().map(|s| CatalogSpice {
+    let spice = part.spice.as_ref().map(|s| PartSpice {
         library: s.library.as_ref().map(|l| {
             if l.starts_with('/') || l.starts_with("${") {
                 l.clone()
@@ -213,7 +213,7 @@ pub fn rebase(part: &CatalogPart, lib_dir: &str, base: &str) -> CatalogPart {
         }),
         ..s.clone()
     });
-    CatalogPart {
+    PartRecord {
         package: rel(&part.package),
         spice,
         ..part.clone()

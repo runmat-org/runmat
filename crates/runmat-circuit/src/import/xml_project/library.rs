@@ -4,7 +4,7 @@
 use super::super::Report;
 use crate::geom::{mm, Coord, Point};
 use crate::import::xml::Element;
-use crate::library::catalog::{CatalogPart, CatalogPin};
+use crate::library::catalog::{PartRecord, PartPin};
 use crate::library::{make, CopperSpan, Graphic, Package, PadDef, PadKind, PadShape};
 use std::collections::BTreeMap;
 
@@ -311,7 +311,7 @@ fn pin_type(direction: Option<&str>) -> &'static str {
 /// A device set's device: its catalog part (pins as `gate.pin` when a pin name repeats across
 /// gates) and, per gate and pin, the part's pin name.
 pub struct DevicePart {
-    pub part: CatalogPart,
+    pub part: PartRecord,
     /// (gate, symbol pin) → part pin.
     pub pins: BTreeMap<(String, String), String>,
 }
@@ -399,7 +399,7 @@ pub fn device_part(
             pin.clone()
         };
         pins.insert((gate.clone(), pin.clone()), name.clone());
-        part_pins.push(CatalogPin {
+        part_pins.push(PartPin {
             name,
             pads: pads.clone(),
             kind: pin_type(direction(gate, pin).as_deref()).into(),
@@ -427,7 +427,7 @@ pub fn device_part(
         }
         params.insert(param_key(k), v.clone());
     }
-    let part = CatalogPart {
+    let part = PartRecord {
         mpn,
         manufacturer: find_attr(attrs, MAKER_KEYS).unwrap_or_default(),
         description,

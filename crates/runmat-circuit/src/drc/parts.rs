@@ -74,7 +74,7 @@ impl Drc {
                 if k.rules.footprints || k.rules.max_height.is_some() {
                     let ko = Prim::polygon(k.outline.rings().cloned().collect());
                     if p.gap(&ko) < 0.0 {
-                        let too_tall = match (k.rules.max_height, fa.package.body) {
+                        let too_tall = match (k.rules.max_height, &fa.package.body) {
                             (Some(h), Some(b)) => b.height > h,
                             (Some(_), None) => false,
                             (None, _) => true,

@@ -214,14 +214,14 @@ fn small_edits_on_a_large_board_stay_within_budget() {
     let text = &files[LAYOUT];
     // The printer quotes a name that isn't a plain word.
     let at = [
-        format!("package {name} {{"),
-        format!("package \"{name}\" {{"),
+        format!("package {name} = {{"),
+        format!("package \"{name}\" = {{"),
     ]
     .iter()
     .find_map(|head| text.find(head.as_str()).map(|at| at + head.len()))
     .expect("the package block");
     let edited = format!(
-        "{}\n        description = \"edited\"{}",
+        "{}\n        description = \"edited\",{}",
         &text[..at],
         &text[at..]
     );

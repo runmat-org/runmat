@@ -28,14 +28,14 @@
 
 use super::printer::{list, name, names, record, PrintError};
 use super::*;
-use crate::library::catalog::{CatalogPart, CatalogPin, CatalogSpice};
+use crate::library::catalog::{PartRecord, PartPin, PartSpice};
 
 fn text_of(expr: Expr, span: Span) -> Read<String> {
     word_of(Some(expr), span)
 }
 
-fn pin_of(expr: Expr, span: Span) -> Read<CatalogPin> {
-    let mut pin = CatalogPin {
+fn pin_of(expr: Expr, span: Span) -> Read<PartPin> {
+    let mut pin = PartPin {
         name: String::new(),
         pads: vec![],
         kind: "passive".into(),
@@ -62,8 +62,8 @@ fn pin_of(expr: Expr, span: Span) -> Read<CatalogPin> {
     Ok(pin)
 }
 
-fn spice_of(expr: Expr, span: Span) -> Read<CatalogSpice> {
-    let mut spice = CatalogSpice::default();
+fn spice_of(expr: Expr, span: Span) -> Read<PartSpice> {
+    let mut spice = PartSpice::default();
     for (field, value) in record_of(Some(expr), span)? {
         match field.as_str() {
             "model" => spice.model = text_of(value, span)?,
@@ -80,8 +80,8 @@ fn spice_of(expr: Expr, span: Span) -> Read<CatalogSpice> {
 }
 
 /// Reads `part "<mpn>" = { … }`.
-pub(super) fn read(mpn: String, expr: Option<Expr>, span: Span) -> Read<CatalogPart> {
-    let mut part = CatalogPart {
+pub(super) fn read(mpn: String, expr: Option<Expr>, span: Span) -> Read<PartRecord> {
+    let mut part = PartRecord {
         mpn,
         ..Default::default()
     };
@@ -135,12 +135,12 @@ pub(super) fn read(mpn: String, expr: Option<Expr>, span: Span) -> Read<CatalogP
             format!("part `{}` needs its `package`: a footprint, or `package = none` for a part wired in the field", part.mpn),
         ));
     }
-    part.check().map_err(|m| diagnostic(span, m))?;
+    crate::library::catalog::check(&part).map_err(|m| diagnostic(span, m))?;
     Ok(part)
 }
 
 /// The value written after `part "<mpn>" = `, which [`read`] reads back to `part`.
-pub fn print(part: &CatalogPart) -> Result<String, PrintError> {
+pub fn print(part: &PartRecord) -> Result<String, PrintError> {
     let mut entries: Vec<(String, String)> =
         vec![("manufacturer".into(), quote(&part.manufacturer))];
     if !part.description.is_empty() {
@@ -229,7 +229,7 @@ pub fn print(part: &CatalogPart) -> Result<String, PrintError> {
 }
 
 /// The whole statement, `part "<mpn>" = { … }`.
-pub fn statement(part: &CatalogPart) -> Result<String, PrintError> {
+pub fn statement(part: &PartRecord) -> Result<String, PrintError> {
     Ok(format!(
         "{} {} = {}",
         words::PART,

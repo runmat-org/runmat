@@ -383,6 +383,7 @@ fn rich_board() -> Board {
         width: mm(8.0),
         length: mm(6.0),
         height: mm(1.2),
+        material: Some("material.mold_compound_epoxy".into()),
     });
     let gnd = b.net("GND").unwrap_or(NetId(0));
     let id = b.place("U99", p.clone(), Point::mm(50.0, 50.0), 270.0, Side::Bottom);

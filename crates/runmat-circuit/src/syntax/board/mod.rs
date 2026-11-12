@@ -40,12 +40,13 @@
 //!     text "REV A" = { layer = F.SilkS, at = [90, 5], size = 1, thickness = 0.15 }
 //!     graphic line = { layer = F.SilkS, points = [[0, 0], [5, 0]], width = 0.12 }
 //!     dimension = { layer = "User.1", from = [0, 0], to = [100, 0], offset = 5, precision = 2 }
-//!     package R0402 {
-//!         uuid = "…"
-//!         smd = true
-//!         pad "1" = { shape = roundrect, size = [0.5, 0.6], ratio = 0.25, at = [-0.5, 0] }
-//!         courtyard = [[-1, -0.5], [1, -0.5], [1, 0.5], [-1, 0.5]]
-//!         silk line = { points = [[-0.2, 0.4], [0.2, 0.4]], width = 0.12 }
+//!     package R0402 = {
+//!         pads = [
+//!             { number = "1", shape = roundrect, size = [0.5, 0.6], at = [-0.5, 0], layers = smd },
+//!             { number = "2", shape = roundrect, size = [0.5, 0.6], at = [0.5, 0], layers = smd }
+//!         ],
+//!         courtyard = rect([-1, -0.5], [1, 0.5]),
+//!         silk = line([-0.2, 0.4], [0.2, 0.4])
 //!     }
 //!     sync { … }
 //! }
