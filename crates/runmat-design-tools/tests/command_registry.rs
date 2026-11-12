@@ -280,7 +280,10 @@ fn a_drawing_exports_as_pdf_dxf_and_dwg() {
 fn sketch_on_a_plane_writes_the_new_sketch() {
     let route = commands::route("part.sketch", EditorKind::Part).expect("part.sketch");
     assert_eq!(route.handler, Handler::Edit);
-    let (out, unhandled) = run("/p/plate.part", &request("part.sketch", json!({ "plane": "origin.xy" }), &[]));
+    let (out, unhandled) = run(
+        "/p/plate.part",
+        &request("part.sketch", json!({ "plane": "origin.xy" }), &[]),
+    );
     assert_eq!(out["ok"], true, "{out}");
     assert!(!unhandled);
 }

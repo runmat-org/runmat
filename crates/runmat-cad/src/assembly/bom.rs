@@ -15,8 +15,8 @@ use crate::assembly::fasteners::FastenerPart;
 use crate::assembly::model::{AssemblyDocument, DefinitionKind, DefinitionRef, MirrorHand};
 use crate::assembly::options::Condition;
 use crate::assembly::resolve::{NodeId, ResolvedAssembly};
-use crate::assembly::source::DesignSource;
-use crate::ids::{FilePath, MaterialRef, RevisionId};
+use crate::assembly::source::{DesignSource, OutputSummary};
+use crate::ids::{FilePath, MaterialRef, PartName, RevisionId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -100,32 +100,46 @@ fn kind(k: DefinitionKind) -> BomKind {
     }
 }
 
-/// Part numbers per prototype: a configuration's dash number when its summary has one,
-/// else the definition's. One summary fetch per prototype.
-fn prototype_numbers(
-    tree: &ResolvedAssembly,
-    source: Option<&dyn DesignSource>,
-) -> Vec<Option<String>> {
-    tree.prototypes
-        .iter()
-        .map(|p| {
-            source.and_then(|s| {
-                if p.definition.kind == DefinitionKind::Assembly {
-                    return None;
-                }
-                s.configured(&p.definition, p.revision.as_ref(), &p.configuration)
-                    .ok()
-                    .and_then(|c| c.part_number.clone())
-            })
-        })
-        .collect()
+/// What the BOM reads per prototype: its part number (a configuration's dash number when its
+/// summary has one, else the definition's), and for a part file that makes several outputs,
+/// those outputs with the definition's own material. One summary fetch per prototype.
+struct PrototypeFacts {
+    numbers: Vec<Option<String>>,
+    outputs: Vec<(Vec<OutputSummary>, Option<MaterialRef>)>,
 }
 
-fn item_of(tree: &ResolvedAssembly, n: NodeId, numbers: &[Option<String>]) -> BomItem {
+fn prototype_facts(tree: &ResolvedAssembly, source: Option<&dyn DesignSource>) -> PrototypeFacts {
+    let mut facts = PrototypeFacts {
+        numbers: Vec::new(),
+        outputs: Vec::new(),
+    };
+    for p in &tree.prototypes {
+        let part = p.definition.kind == DefinitionKind::Part;
+        facts.numbers.push(source.and_then(|s| {
+            if p.definition.kind == DefinitionKind::Assembly {
+                return None;
+            }
+            s.configured(&p.definition, p.revision.as_ref(), &p.configuration)
+                .ok()
+                .and_then(|c| c.part_number.clone())
+        }));
+        let outputs = source
+            .filter(|_| part && p.definition.part.is_none())
+            .and_then(|s| s.definition(&p.definition, p.revision.as_ref()).ok())
+            .filter(|d| d.outputs.len() > 1)
+            .map(|d| (d.outputs.clone(), d.material.clone()))
+            .unwrap_or_default();
+        facts.outputs.push(outputs);
+    }
+    facts
+}
+
+fn item_of(tree: &ResolvedAssembly, n: NodeId, facts: &PrototypeFacts) -> BomItem {
     let node = tree.node(n);
     BomItem {
         kind: kind(node.definition.kind),
-        part_number: numbers
+        part_number: facts
+            .numbers
             .get(node.prototype as usize)
             .cloned()
             .flatten()
@@ -135,6 +149,44 @@ fn item_of(tree: &ResolvedAssembly, n: NodeId, numbers: &[Option<String>]) -> Bo
         configuration: node.configuration.label(),
         material: node.material.clone(),
     }
+}
+
+/// The BOM items one occurrence counts as: its item, or for a part file that makes several
+/// outputs one item per output (a display unit's screen and its case), each with its own part
+/// number and material. The first output keeps a configuration's dash number, and a material
+/// the occurrence sets applies to every output.
+fn items_of(tree: &ResolvedAssembly, n: NodeId, facts: &PrototypeFacts) -> Vec<BomItem> {
+    let item = item_of(tree, n, facts);
+    let node = tree.node(n);
+    let Some((outputs, own)) = facts
+        .outputs
+        .get(node.prototype as usize)
+        .filter(|(o, _)| !o.is_empty())
+    else {
+        return vec![item];
+    };
+    let overridden = node.material.is_some() && node.material != *own;
+    outputs
+        .iter()
+        .enumerate()
+        .map(|(i, o)| BomItem {
+            part_number: if i == 0 {
+                item.part_number.clone()
+            } else {
+                o.part_number.clone()
+            },
+            definition: DefinitionRef {
+                part: Some(PartName::new(o.name.as_str())),
+                ..item.definition.clone()
+            },
+            material: if overridden {
+                item.material.clone()
+            } else {
+                o.material.clone()
+            },
+            ..item.clone()
+        })
+        .collect()
 }
 
 /// The key occurrences of one BOM line share: the item itself, or for a part that carries a
@@ -169,7 +221,7 @@ pub fn flat_bom(
     source: Option<&dyn DesignSource>,
     opts: &BomOptions,
 ) -> Bom {
-    let numbers = prototype_numbers(tree, source);
+    let facts = prototype_facts(tree, source);
     let mut rows: BTreeMap<BomItem, (BomItem, u64, Vec<String>)> = BTreeMap::new();
     let mut parts = 0;
     for (i, n) in tree.nodes.iter().enumerate().skip(1) {
@@ -179,16 +231,17 @@ pub fn flat_bom(
         if !(leaf || opts.include_assemblies) {
             continue;
         }
-        let item = item_of(tree, i as NodeId, &numbers);
-        let e = rows
-            .entry(group_key(&item))
-            .or_insert_with(|| (item, 0, Vec::new()));
-        e.1 += 1;
-        if e.2.len() < opts.paths_per_row {
-            e.2.push(tree.path(i as NodeId));
-        }
-        if !is_asm {
-            parts += 1;
+        for item in items_of(tree, i as NodeId, &facts) {
+            let e = rows
+                .entry(group_key(&item))
+                .or_insert_with(|| (item, 0, Vec::new()));
+            e.1 += 1;
+            if e.2.len() < opts.paths_per_row {
+                e.2.push(tree.path(i as NodeId));
+            }
+            if !is_asm {
+                parts += 1;
+            }
         }
     }
     let mut fasteners = 0;
@@ -232,23 +285,24 @@ pub fn indented_bom(
     tree: &ResolvedAssembly,
     source: Option<&dyn DesignSource>,
 ) -> Vec<IndentedRow> {
-    let numbers = prototype_numbers(tree, source);
+    let facts = prototype_facts(tree, source);
     let mut out = Vec::new();
     fn walk(
         tree: &ResolvedAssembly,
         n: NodeId,
-        numbers: &[Option<String>],
+        facts: &PrototypeFacts,
         out: &mut Vec<IndentedRow>,
     ) {
         let node = tree.node(n);
         let mut groups: BTreeMap<BomItem, (BomItem, u64, Vec<NodeId>)> = BTreeMap::new();
         for &c in &node.children {
-            let item = item_of(tree, c, numbers);
-            let e = groups
-                .entry(group_key(&item))
-                .or_insert_with(|| (item, 0, Vec::new()));
-            e.1 += 1;
-            e.2.push(c);
+            for item in items_of(tree, c, facts) {
+                let e = groups
+                    .entry(group_key(&item))
+                    .or_insert_with(|| (item, 0, Vec::new()));
+                e.1 += 1;
+                e.2.push(c);
+            }
         }
         let mut fasteners: BTreeMap<BomItem, u64> = BTreeMap::new();
         for f in tree.fasteners.iter().filter(|f| f.owner == n) {
@@ -275,7 +329,7 @@ pub fn indented_bom(
             if expand {
                 if let Some(&first) = members.first() {
                     if tree.node(first).expanded {
-                        walk(tree, first, numbers, out);
+                        walk(tree, first, facts, out);
                     }
                 }
             }
@@ -290,7 +344,7 @@ pub fn indented_bom(
             });
         }
     }
-    walk(tree, 0, &numbers, &mut out);
+    walk(tree, 0, &facts, &mut out);
     out
 }
 

@@ -313,7 +313,10 @@ impl Impact {
     /// Canvas region ids (`component:R1`, `pad:R1.2`, `net:GND`, `track:12`…), as the Outline uses.
     pub fn regions(&self) -> Vec<String> {
         let pad = |p: &String| match p.split_once('.') {
-            Some((component, pad)) => ItemRef::Pad { component: component.into(), pad: pad.into() },
+            Some((component, pad)) => ItemRef::Pad {
+                component: component.into(),
+                pad: pad.into(),
+            },
             None => ItemRef::Component(p.clone()),
         };
         let mut v: Vec<ItemRef> = Vec::new();

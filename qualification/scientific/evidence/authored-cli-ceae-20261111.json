@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "source_revision": "ceae94b5da5d3c95f00cb6ba01a151a536f5fbcb",
+  "accepted_source_revision": "793f9ae2b347c213224dca746a3ed82da92b8f5d",
+  "target": "linux-x86_64",
+  "passed": 12,
+  "failed": 0,
+  "ignored": 0,
+  "filtered_out": 0,
+  "exit_code": 0,
+  "test_seconds": 2317.41,
+  "case_names": [
+    "acoustic::authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog",
+    "acoustic::duct::authored_incident_duct_refines_and_reopens_full_partial_complex_components",
+    "acoustic::duct::authored_matched_duct_refines_and_reopens_full_partial_complex_components",
+    "acoustic::duct::authored_volume_velocity_duct_refines_and_reopens_full_partial_complex_components",
+    "acoustic::response::pressure_transient_publishes_its_complete_time_history",
+    "acoustic::response::rigid_cube_cavity_modes_match_rectangular_room_frequencies",
+    "assessments::authored_transient_and_frequency_assessments_reopen_without_re_solving_the_numerical_run",
+    "authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium",
+    "electrical::authored_charged_poisson_tet10_signed_gauge_and_cold_publication",
+    "electrical::authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold",
+    "generated_and_derived_geometry_complete_the_typed_study_pipeline",
+    "harmonic::authored_harmonic_generated_and_explicit_sources_preserve_rod_response_and_phase"
+  ],
+  "log_sha256": "458b119514332cd25b996529050c1601de1a2c22ef42af1a5f5dc313d77c523d",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--release",
+    "--all-features",
+    "-p",
+    "runmat",
+    "--test",
+    "typed_fea_geometry_cli",
+    "--",
+    "--test-threads=1"
+  ],
+  "source_verification": {
+    "at": "2026-11-12T00:02:14.039Z",
+    "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+    "stage": "/home/nallana/rm1293/incoming/intake-ceae94b5da-source",
+    "status": "verified",
+    "files": 27246
+  },
+  "scope": "The complete seven-file source delta contains four formatting-only changes, one isolated CAD integration fixture repair and the selected-plane sketch handler with its separate regression. The authored FEA CLI cohort does not dispatch part.sketch. Its scientific arithmetic, admission, publication, test cases and required command remain unchanged.",
+  "limitations": "This conservation review applies only to the authored CLI physics cohort. It does not qualify the separate Desktop sketch command or replace final combined-product acceptance."
+}

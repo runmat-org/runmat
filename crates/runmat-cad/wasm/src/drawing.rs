@@ -25,7 +25,10 @@ pub mod title;
 pub(crate) mod values;
 mod view_picks;
 
-use crate::runtime::{compile_assembly_indented, resolve_path, Diagnostic, Files, RegeneratedPart};
+use crate::runtime::{
+    compile_assembly_indented, resolve_path, CompiledAssemblyWithIndentedBom, Diagnostic, Files,
+    RegeneratedPart,
+};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
@@ -66,6 +69,8 @@ pub struct CompiledModels {
     flats: BTreeMap<String, BTreeMap<FeatureId, FlatLayout>>,
     /// Part file → each structural-member feature's cut list, in feature order.
     cut_lists: BTreeMap<String, Vec<(String, Vec<runmat_cad::model::weldment::CutListRow>)>>,
+    /// The project root (the folder holding `runmat.toml`), which parts lists print files from.
+    root: Option<String>,
 }
 
 fn names_in(reference: &Value, out: &mut Vec<Value>) {
@@ -163,12 +168,34 @@ impl ModelReferences for CompiledModels {
         name: &PropertyName,
     ) -> Option<String> {
         let items = self.item_properties.get(model.file.as_str())?;
-        let file = item.definition.file.as_str();
+        let definition = item.definition.to_string();
         items
-            .get(&props::item_key(file, &item.configuration))
-            .or_else(|| items.get(file))?
+            .get(&props::item_key(&definition, &item.configuration))
+            .or_else(|| items.get(&definition))?
             .get(name.as_str())
             .cloned()
+    }
+
+    /// The defining file relative to the project root, or to the drawn model's folder in a
+    /// workspace with no `runmat.toml`.
+    fn item_definition(
+        &self,
+        model: &ModelRef,
+        item: &runmat_cad::assembly::bom::BomItem,
+    ) -> String {
+        let file = item.definition.file.as_str();
+        let base = self
+            .root
+            .clone()
+            .unwrap_or_else(|| runmat_cad::modules::folder_of(model.file.as_str()).to_owned());
+        let relative = match file.strip_prefix(base.as_str()) {
+            Some(rest) if !base.is_empty() && rest.starts_with('/') => &rest[1..],
+            _ => file,
+        };
+        match &item.definition.part {
+            Some(p) => format!("{relative}#{p}"),
+            None => relative.to_owned(),
+        }
     }
 }
 
@@ -227,7 +254,8 @@ pub fn compile_json_in(
     files: &Files,
     configuration: Option<&str>,
 ) -> String {
-    let parsed = parse_drawing_in(path, text, &crate::runtime::module_scope(path, text, files));
+    let scope = crate::runtime::module_scope(path, text, files);
+    let parsed = parse_drawing_in(path, text, &scope);
     // A new, empty file is an empty drawing named after the file: the editor shows its empty
     // prompt (Auto-drawing, add a view), not a syntax error.
     let empty = text.trim().is_empty().then(|| DrawingDocument {
@@ -247,7 +275,10 @@ pub fn compile_json_in(
             .collect();
         return json!({ "diagnostics": diagnostics }).to_string();
     };
-    let mut models = CompiledModels::default();
+    let mut models = CompiledModels {
+        root: scope.root.clone(),
+        ..CompiledModels::default()
+    };
     let mut displays = serde_json::Map::new();
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     // Each drawn part as regenerated, its bodies on the kernel that made them.
@@ -289,7 +320,12 @@ pub fn compile_json_in(
                 progress::model_key(&at, source, None, Some(files)),
             );
             match compile_assembly_indented(&at, source, files) {
-                Ok((index, display, _, indented)) => {
+                Ok(CompiledAssemblyWithIndentedBom {
+                    index,
+                    display,
+                    diagnostics: _,
+                    indented_bom: indented,
+                }) => {
                     models.indented.insert(file.clone(), indented);
                     let occ = index["occurrences"]
                         .as_array()

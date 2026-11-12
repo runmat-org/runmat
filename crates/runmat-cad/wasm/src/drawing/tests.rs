@@ -437,3 +437,51 @@ fn a_radius_dimension_carries_its_arc_radius() {
         out["projection"]["data"]["diagnostics"]
     );
 }
+
+/// A parts list's FILE column prints each file relative to the project root (the folder that
+/// holds `runmat.toml`), not as the workspace path.
+#[test]
+fn a_parts_list_prints_files_relative_to_the_project() {
+    let pair = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part bracket from \"../parts\" as a\n    use part bracket from \"../parts\" as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing pair {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = pair, from = \"../assemblies\" }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0], spec = { structure = parts_only, columns = [{ column = { column = item } }, { column = { column = definition } }, { column = { column = quantity } }] })\n}\n";
+    let files: Files = [
+        ("/w/proj/runmat.toml".to_owned(), String::new()),
+        ("/w/proj/parts/bracket.part".to_owned(), BRACKET.to_owned()),
+        (
+            "/w/proj/assemblies/pair.assembly".to_owned(),
+            pair.to_owned(),
+        ),
+    ]
+    .into();
+    let out: Value = serde_json::from_str(&compile_json(
+        "/w/proj/drawings/pair.drawing",
+        drawing,
+        &files,
+    ))
+    .unwrap();
+    let table = &out["projection"]["data"]["bom_tables"]["parts"];
+    assert_eq!(
+        table["lines"][0]["cells"][1], "parts/bracket.part",
+        "{table}"
+    );
+}
+
+/// A part file that makes two outputs (a screen and its case) is two parts-list items, each
+/// with its own part number, material and description.
+#[test]
+fn a_part_with_two_outputs_is_two_parts_list_items() {
+    let unit = "runmat 0.7\nstd 1\n\npart unit {\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = 10 mm)\n    }\n    feature screen = extrude(profile = sketch.s, distance = 2 mm)\n    sketch t on origin.xy {\n        c = circle(center = [40 mm, 0 mm], radius = 10 mm)\n    }\n    feature case = extrude(profile = sketch.t, distance = 5 mm)\n    output screen = { body = feature.screen.body, part_number = \"U-1\", material = \"glass\" }\n    output case = { body = feature.case.body, part_number = \"U-2\", material = \"aluminum_6061\" }\n}\n";
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part unit as unit\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0], spec = { structure = parts_only, columns = [{ column = { column = item } }, { column = { column = part_number } }, { column = { column = description } }, { column = { column = material } }, { column = { column = quantity } }] })\n}\n";
+    let files: Files = [
+        ("/p/unit.part".to_owned(), unit.to_owned()),
+        ("/p/rig.assembly".to_owned(), rig.to_owned()),
+    ]
+    .into();
+    let out: Value =
+        serde_json::from_str(&compile_json("/p/rig.drawing", drawing, &files)).unwrap();
+    let table = out["projection"]["data"]["bom_tables"]["parts"].to_string();
+    for text in ["U-1", "U-2", "Glass", "Aluminum 6061", "Screen", "Case"] {
+        assert!(table.contains(&format!("\"{text}\"")), "{text}: {table}");
+    }
+}
