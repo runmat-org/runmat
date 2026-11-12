@@ -1,6 +1,6 @@
 //! The overview's state lines, by kind, each from one check.
 
-use super::{plural, Fact, Level, Ran};
+use super::{plural, CheckCounts, Fact, Level, Ran};
 use crate::check::{check, CheckInput, CheckOutput};
 use crate::inspect::{inspect, InspectInput};
 use crate::rules::{drc, erc, RulesInput, RulesOutput};
@@ -57,13 +57,13 @@ fn count(c: &CheckOutput, key: &str) -> usize {
     c.counts.get(key).copied().unwrap_or(0)
 }
 
-/// What the file is and its state lines.
+/// What the file is, its state lines and the counts its checks returned.
 pub(super) fn state(
     kind: DesignKind,
     path: &str,
     files: &Files,
     ran: &mut Ran,
-) -> Result<(String, Vec<Fact>), ToolError> {
+) -> Result<(String, Vec<Fact>, CheckCounts), ToolError> {
     let checked = check(
         &CheckInput {
             path: path.to_owned(),
@@ -80,7 +80,38 @@ pub(super) fn state(
             circuit(kind, path, files, &checked, &mut out, ran)
         }
     };
-    Ok((about, out))
+    let counts = counts(kind, path, files, &checked);
+    Ok((about, out, counts))
+}
+
+/// The check's counts; a circuit's and a board's also take `design.inspect`'s totals
+/// (footprints, tracks, power ERC errors, board sync), which the check doesn't count.
+fn counts(kind: DesignKind, path: &str, files: &Files, c: &CheckOutput) -> CheckCounts {
+    let mut totals = c.counts.clone();
+    if kind.is_circuit() {
+        let input = InspectInput {
+            path: path.to_owned(),
+            sections: None,
+            filter: None,
+            density: None,
+            set: None,
+            limit: Some(1),
+            changed: None,
+            rays: None,
+            contact: None,
+            up: None,
+        };
+        if let Ok(seen) = inspect(&input, files) {
+            for (k, v) in seen.totals {
+                totals.entry(k).or_insert(v);
+            }
+        }
+    }
+    CheckCounts {
+        ok: c.ok && c.errors == 0,
+        summary: c.summary.clone(),
+        totals,
+    }
 }
 
 fn regeneration(c: &CheckOutput, label: &str, out: &mut Vec<Fact>) {
@@ -251,7 +282,7 @@ fn push_rules(out: &mut Vec<Fact>, id: &str, label: &str, r: &RulesOutput, sourc
     out.push(fact(id, label, value, level, source));
 }
 
-/// Board sync and placement, from the inspection the guides read. False when there is no board.
+/// Board sync and placement, from the board's inspection. False when there is no board.
 fn board(path: &str, files: &Files, out: &mut Vec<Fact>, ran: &mut Ran) -> bool {
     let input = InspectInput {
         path: path.to_owned(),
