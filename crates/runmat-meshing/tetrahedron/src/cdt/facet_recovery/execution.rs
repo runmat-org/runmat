@@ -483,6 +483,31 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                         SupportTriangleEdgeState::Ready | SupportTriangleEdgeState::Unavailable => {
                         }
                     }
+                    if let Some(protected_splits) = split_segment_encroached_by_interior_node(
+                        &mut working,
+                        &pending_triangle,
+                        &protection.triangles,
+                        &protected_edges,
+                        constraint_index as u32,
+                        &mut work,
+                    )? {
+                        apply_splits_with_current(
+                            &mut protection,
+                            &mut facets,
+                            &mut support,
+                            constraint_index as u32,
+                            protected_splits,
+                        );
+                        requeue_after_segment_split(
+                            &working,
+                            &mut pending,
+                            pending_triangle,
+                            &mut protected_edges,
+                            options.maximum_pending_support_triangles,
+                            constraint_index as u32,
+                        )?;
+                        continue;
+                    }
                     let recovery_rejection =
                         work.last_rejection()
                             .unwrap_or(recovery_rejection.as_deref().unwrap_or(

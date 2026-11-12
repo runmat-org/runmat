@@ -505,15 +505,20 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     // Face gaps are sized to at least one element layer across (thin-layer sizing): over a
     // whole face when all its edges face the gap, otherwise from the edges that do. Gaps are
     // located where they are measured and narrow faces size only along their length, so the
-    // 1 x 2 x 3 m boxes mesh closer to the 1.5 m target than the (584, 2330, 776) of 9bb447a159;
-    // peak displacement is within 6.1 % of a 0.2 m reference mesh (4.5 % before).
+    // 1 x 2 x 3 m boxes mesh closer to the 1.5 m target than the (584, 2330, 776) of 9bb447a159.
+    // Each box is 1 m thick in x, below the target, so its two 2 x 3 m x faces are the sides of a
+    // 1 m wall: one layer across, 1 m over each face and 0.5 m edge sources across it. Before
+    // e7484361c9 a face with a reversed use (left_support, sense .F.) had its material sides
+    // inside out, the x faces did not oppose, and the boxes meshed to (238, 582, 464) with peak
+    // displacement 6.1 % low. This mesh gives 9.766e-10 m, within 3.3 % of a 0.2 m reference
+    // mesh (9,104 nodes, 1.0094e-9 m).
     assert_eq!(
         (
             mesh.topology.nodes.len(),
             mesh.topology.volume_elements.len(),
             mesh.topology.boundary_faces.len()
         ),
-        (238, 582, 464)
+        (360, 1278, 528)
     );
 
     let model: AnalysisModel =

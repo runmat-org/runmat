@@ -249,6 +249,10 @@ pub fn derive_curve_geometry_metric(
                 .cloned()
                 .collect(),
             points_m: witness_points,
+            face_material_sides: face_normals
+                .keys()
+                .filter_map(|face| face_sides.get(face).map(|sides| (face.clone(), sides.clone())))
+                .collect(),
             face_normals,
         });
     }
@@ -331,8 +335,14 @@ pub fn derive_curve_geometry_metric(
 }
 
 /// The side of each solid face away from each solid it bounds, as a sign on the sampled surface
-/// normal (the evaluator's `du x dv` in world space): the face orientation composed with the
-/// shell use and the shell's orientation, and flipped under a mirroring occurrence transform.
+/// normal (the evaluator's `du x dv` in world space): the shell use composed with the shell's
+/// orientation, and flipped under a mirroring occurrence transform. A face use's orientation is
+/// relative to its surface's own `du x dv`, so it alone says which way the use faces.
+/// `ExactFace::orientation` is not composed in: it is the face's orientation in the first shell
+/// that uses it (the frame surface join gives its triangles), so composing it again would count
+/// that shell use twice and turn every face whose first use is reversed inside out. A face shared
+/// by two solids would then report the far solid on each side, and a step (two parallel faces
+/// of one solid that point the same way) would look like the two sides of a thin wall.
 /// Every shell use follows one convention, so the product of two faces' signs for one solid
 /// compares their sides. A shared interface has one entry per solid, with opposite signs.
 fn face_material_sides(
@@ -376,10 +386,7 @@ fn face_material_sides(
                 .signum();
             sides.entry(face.id.clone()).or_default().insert(
                 solid.clone(),
-                sign(shell.orientation)
-                    * sign(face_use.orientation)
-                    * sign(face.orientation)
-                    * handedness,
+                sign(shell.orientation) * sign(face_use.orientation) * handedness,
             );
         }
     }

@@ -37,8 +37,10 @@ fn runmat_and_independent_meshers_agree_on_box_invariants() {
     assert_watertight(&runmat_coordinates, &runmat_triangles);
     assert_eq!(oracle_surface.triangles.len(), 12);
     // The fixed solver request refines the box; the independent planar
-    // tessellator remains the twelve-triangle reference, not the same grid.
-    assert_eq!(artifact.topology.boundary_faces.len(), 240);
+    // tessellator remains the twelve-triangle reference, not the same grid. Each face
+    // pair gets one layer across the box's 1, 2 or 3 m thickness (264 faces; 240 while
+    // reversed face uses had their material sides inside out and no pair opposed).
+    assert_eq!(artifact.topology.boundary_faces.len(), 264);
     assert_eq!(
         bounds(&oracle_surface.vertices),
         ([0.0, 0.0, 0.0], [1.0, 2.0, 3.0])

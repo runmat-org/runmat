@@ -25,9 +25,11 @@ const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.b
 const DISCONNECTED_SOLIDS: &[u8] =
     include_bytes!("../../runmat-geometry/io/tests/fixtures/disconnected_solids.brep");
 // Snapshot of the integrated sizing field. The differential test independently
-// checks geometry, volume and linear-field energy.
+// checks geometry, volume and linear-field energy. The 1 x 2 x 3 m box is thinner than
+// the 10 m target in every direction, so each face pair is the two sides of a wall with
+// one layer across it (1, 2 and 3 m face sizing).
 const EXPECTED_BOX_ARTIFACT_DIGEST: &str =
-    "d893fe7da9f4ba05ad730913f882030fe2953df746b59a34cc603d9b4f65743a";
+    "4373fb972fbb6917749b5b3cc96d1a98b0c4649f5d2c79968c8ebbba03e2f281";
 
 #[path = "occt_exact_meshing/differential.rs"]
 mod differential;
