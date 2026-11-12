@@ -6,7 +6,7 @@ pub use catalog::*;
 pub use quantity::*;
 mod unit;
 mod parse;
-pub use parse::{parse_unit_expression, UnitExpressionError};
+pub use parse::{parse_unit_expecting, parse_unit_expression, UnitExpressionError};
 pub use unit::*;
 mod evidence;
 pub use evidence::*;
