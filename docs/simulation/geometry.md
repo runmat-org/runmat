@@ -87,7 +87,7 @@ from a display label, face ordinal, or geometric proximity.
 
 A study reads a RunMat MCAD part or assembly directly. Name the design file with `file =`:
 
-```fea pending=geometry.source.mcad
+```fea fragment
 geometry arm {
     file = "./arm_study.assembly"
     interfaces = shared
