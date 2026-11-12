@@ -219,11 +219,16 @@ const PROBE_FRAGMENT: &str = r#"
     if mean NEARER line_depth && from_left NEARER line_depth && from_right NEARER line_depth {
         discard;
     }
-    // One smooth surface across the line (its depth changes at a steady rate) in front of it.
+    // One smooth surface across the line (its depth changes at a steady rate) in front of it by
+    // more than its bend can explain. Where a concave fillet meets a wall the faces are tangent,
+    // so the rates agree, but the fillet curves toward the viewer and pulls the mean in front of
+    // the edge by a fraction of the rate's change; the margin keeps that edge drawn.
     let left = m05 - m15;
     let right = p15 - p05;
-    let smooth_surface = abs(left - right) <= 0.5 * max(abs(left), abs(right)) + 1.0e-7;
-    if smooth_surface && mean NEARER line_depth {
+    let bend = abs(left - right);
+    let smooth_surface = bend <= 0.5 * max(abs(left), abs(right)) + 1.0e-7;
+    let behind = select(mean + bend, mean - bend, (mean + bend) NEARER mean);
+    if smooth_surface && behind NEARER line_depth {
         discard;
     }
 "#;
