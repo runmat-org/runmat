@@ -10,41 +10,6 @@ Plane picks take an origin plane (`origin.xy`, `origin.yz`, `origin.zx`), a datu
 
 This file is generated from the command catalog.
 
-## `agent.` commands (`.part`, `.assembly`, `.drawing`, `.circuit`, `.circuit.layout`)
-
-- `agent.change`: Describe a change to the selected items; the agent proposes it as a reviewed change set.
-  - Runs on the `selection`: `face`, `edge`, `vertex`, `sketch_entity`, `sketch_point`, `plane`, `feature`, `sketch`, `body`, `occurrence`, `mate`, `view`, `annotation`, `component`, `pin`, `room`, `net`
-- `agent.explain`: Ask the agent what the selected items do and why they are built this way.
-  - Runs on the `selection`: `face`, `edge`, `vertex`, `sketch_entity`, `sketch_point`, `plane`, `feature`, `sketch`, `body`, `occurrence`, `mate`, `view`, `annotation`, `component`, `pin`, `room`, `net`
-- `agent.fix`: Ask the agent to fix the selected items' errors and warnings as a reviewed change set.
-  - Runs on the `selection`: `face`, `edge`, `vertex`, `sketch_entity`, `sketch_point`, `plane`, `feature`, `sketch`, `body`, `occurrence`, `mate`, `view`, `annotation`, `component`, `pin`, `room`, `net`
-
-## `annotate.` commands (`.part`)
-
-- `annotate.annotation-view`: Save a view direction that groups annotations.
-  - Required: `name` (text); `orientation` (one of `current`, `front`, `top`, `right`, default `current`)
-- `annotate.auto-dimension`: Dimension and tolerance a part from its datums.
-  - Required: `scheme` (one of `plus_minus`, `geometric`, default `plus_minus`)
-  - Optional: `datums` (picks: face or feature)
-- `annotate.coating`: Specify a coating on faces or the part.
-  - Required: `spec` (text)
-  - Optional: `faces` (picks: face or body)
-- `annotate.datum`: Label a face or feature as a datum.
-  - Required: `label` (text); `target` (pick: face or feature or axis)
-- `annotate.dimension`: Add a 3D dimension with tolerance.
-  - Required: `targets` (picks: face or edge or vertex); `tolerance` (one of `none`, `symmetric`, `bilateral`, `limit`, `fit`, default `none`); `plus` (number in mm, default 0.1) when `tolerance` is symmetric or bilateral; `minus` (number in mm, default 0.1) when `tolerance` is bilateral; `fit` (text) when `tolerance` is fit
-- `annotate.gdt`: Add a feature control frame.
-  - Required: `characteristic` (one of `position`, `flatness`, `perpendicularity`, `parallelism`, `profile_surface`, `runout`, `concentricity`, `cylindricity`, default `position`); `tolerance` (number in mm, default 0.1); `modifier` (one of `none`, `mmc`, `lmc`, default `none`); `targets` (picks: face or feature)
-  - Optional: `datums` (text)
-- `annotate.note`: Add a note attached to the model.
-  - Required: `text` (text)
-  - Optional: `anchor` (pick: face or edge or vertex or feature)
-- `annotate.surface-finish`: Mark a face's required roughness.
-  - Required: `faces` (picks: face); `ra` (number in mm, default 0.0016); `process` (one of `any`, `removal_required`, `removal_prohibited`, default `any`)
-- `annotate.weld-symbol`: Add a weld symbol on edges.
-  - Required: `edges` (picks: edge); `type` (one of `fillet`, `groove`, `plug`, `spot`, default `fillet`); `size` (number in mm, default 4)
-  - Optional: `all_around` (true or false, default false)
-
 ## `assembly.` commands (`.assembly`)
 
 - `assembly.bom`: Show the bill of materials: top level, indented or parts only.
@@ -55,57 +20,31 @@ This file is generated from the command catalog.
 - `assembly.component-configuration`: Use another configuration of the component's file.
   - Required: `configuration` (text)
   - Runs on the `selection`: `occurrence`
-- `assembly.configurations`: Add configurations and display states.
-  - Required: `kind` (one of `configuration`, `display_state`, default `configuration`); `name` (text)
-- `assembly.contacts`: Find touching faces between components and name them as contact regions.
-  - Required: `tolerance` (number in mm, default 0.05)
-  - Optional: `bonded` (true or false, default true)
-- `assembly.copy-with-mates`: Copy components with their mates, picking new references.
-  - Required: `components` (picks: component); `references` (picks: mate connector or face or edge or vertex or plane or axis or point or component)
 - `assembly.delete`: Delete components or mates.
   - Runs on the `selection`: `occurrence`, `mate`
-- `assembly.document-settings`: Units, standard and default tolerances.
-  - Required: `units` (one of `mmgs`, `mks`, `ips`, default `mmgs`)
-- `assembly.edit-in-context`: Edit a component's part inside the assembly.
-  - Runs on the `selection`: `occurrence`
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
   - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
   - Runs on the `selection`: `mate`
-- `assembly.envelope`: Reserve space with an envelope body others must stay out of.
-  - Required: `name` (text); `body` (pick: component or body)
 - `assembly.export`: Export as a STEP assembly, glTF or USD.
   - Required: `format` (one of `step`, `gltf`, `usd`, default `step`)
   - Optional: `hidden` (true or false, default false)
-- `assembly.feature`: Cut, drill across parts or add a weld bead at the assembly level.
-  - Required: `type` (one of `cut`, `hole`, `weld`, default `cut`); `profile` (pick: sketch) when `type` is cut; `components` (picks: component)
 - `assembly.fix`: Fix a component in place, or let mates move it.
   - Required: `components` (picks: component); `state` (one of `fixed`, `float`, default `fixed`)
   - Runs on the `selection`: `occurrence`
 - `assembly.flip-mate`: Flip the mate's alignment.
   - Runs on the `selection`: `mate`
-- `assembly.hide`: Hide or show components.
-  - Runs on the `selection`: `occurrence`
-- `assembly.hole-alignment`: Find holes across parts that don't line up.
-  - Required: `tolerance` (number in mm, default 0.1)
-- `assembly.hole-check`: Check hole alignment, fastener length and grip.
 - `assembly.insert`: Insert a part, assembly or circuit board from the project.
   - Required: `source` (one of `part`, `assembly`, `circuit`, default `part`); `file` (text); `quantity` (whole number, default 1); `x` (number in mm, default 0); `y` (number in mm, default 0); `z` (number in mm, default 0)
   - Optional: `configuration` (text); `fix` (true or false, default false)
-- `assembly.interface-check`: Check that mated interfaces still match their published definitions.
 - `assembly.interference`: Find components that overlap.
   - Optional: `components` (picks: component); `fasteners` (true or false, default false)
-- `assembly.isolate`: Show only the selected components.
-  - Runs on the `selection`: `occurrence`
 - `assembly.mass-properties`: Mass, center of mass and inertia of the assembly.
   - Optional: `components` (picks: component)
 - `assembly.mate`: Constrain two components: standard, advanced and mechanical mates, with limits.
   - Required: `type` (one of `coincident`, `concentric`, `distance`, `angle`, `parallel`, `perpendicular`, `tangent`, `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `coincident`); `first` (pick: mate connector or face or edge or vertex or plane or axis or point or component); `second` (pick: mate connector or face or edge or vertex or plane or axis or point or component); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is symmetric; `profile` (text) when `type` is cam; `path` (picks: edge) when `type` is path
   - Optional: `flip` (true or false, default false); `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `joint_point` (true or false, default true) when `type` is universal_joint
   - Runs on the `selection`: `occurrence`
-- `assembly.mate-connector`: Add a frame on a component to mate to.
-  - Required: `name` (text); `on` (pick: face or edge or vertex)
-  - Optional: `flip` (true or false, default false)
 - `assembly.mirror`: Mirror components about a plane, as copies or as an opposite-hand part.
   - Required: `plane` (pick: plane or face); `components` (picks: component); `result` (one of `copy`, `opposite`, default `copy`); `opposite` (text) when `result` is opposite
 - `assembly.move`: Move components by dragging, with a triad or by aligning.
@@ -114,34 +53,15 @@ This file is generated from the command catalog.
 - `assembly.new-part`: Create a part inside the assembly, referencing its neighbors.
   - Required: `name` (text)
   - Optional: `plane` (pick: plane or face)
-- `assembly.open`: Open the component's file in its own tab.
-  - Runs on the `selection`: `occurrence`
-- `assembly.options`: Pick the product options and effectivity the assembly shows.
-  - Required: `options` (text)
-  - Optional: `effectivity` (text)
-- `assembly.options-effectivity`: Define product options and the serial ranges they apply to.
-  - Required: `option` (text); `values` (text)
-  - Optional: `effectivity` (text)
 - `assembly.pack-and-share`: Collect the assembly and every file it references.
   - Required: `folder` (text)
 - `assembly.pattern`: Repeat components in a line, a circle, or by a part's feature pattern.
   - Required: `layout` (one of `linear`, `circular`, `feature`, default `linear`); `components` (picks: component); `direction` (pick: edge or axis or face) when `layout` is linear or circular; `spacing` (number in mm, default 20) when `layout` is linear; `angle` (number in deg, default 360) when `layout` is circular; `instances` (whole number, default 3) when `layout` is linear or circular; `feature` (pick: feature) when `layout` is feature
   - Runs on the `selection`: `occurrence`
-- `assembly.publish`: Publish an interface, frame or value for parent assemblies.
-  - Required: `name` (text); `item` (pick: mate connector or region or component)
 - `assembly.replace`: Replace components with another file; mates follow where they can.
   - Required: `components` (picks: component); `with` (text)
   - Optional: `remate` (true or false, default true)
   - Runs on the `selection`: `occurrence`
-- `assembly.representation`: Choose each component's representation for studies.
-  - Required: `components` (picks: component); `representation` (one of `full`, `envelope`, `defeatured`, `mid_surface`, `beam`, default `full`)
-  - Runs on the `selection`: `occurrence`
-- `assembly.show-mate-entities`: Highlight the faces, edges and connectors the mate uses.
-  - Runs on the `selection`: `mate`
-- `assembly.show-mates`: Highlight the component's mates and list them in Properties.
-  - Runs on the `selection`: `occurrence`
-- `assembly.skeleton`: Add a skeleton part that drives the layout.
-  - Required: `name` (text)
 - `assembly.smart-mate`: Drag a component onto another and accept the suggested mate.
   - Required: `component` (pick: component); `target` (pick: mate connector or face or edge or vertex or plane or axis or point or component)
 - `assembly.subassembly`: Form a subassembly from components, dissolve one, or make it flexible or rigid.
@@ -149,20 +69,11 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `occurrence`
 - `assembly.suppress`: Leave components out of this configuration.
   - Runs on the `selection`: `occurrence`, `mate`
-- `assembly.transparency`: Draw components see-through.
-  - Runs on the `selection`: `occurrence`
-- `assembly.update-pins`: Review pinned revisions of components and update them.
-  - Required: `to` (one of `latest`, `released`, default `latest`)
-  - Optional: `components` (picks: component)
-- `assembly.visualization`: Sort and color components by mass, cost or another property.
-  - Required: `by` (one of `mass`, `cost`, `rebuild`, `count`, default `mass`)
 - `assembly.where-used`: List where a component's file is used.
   - Runs on the `selection`: `occurrence`
 
 ## `board.` commands (`.circuit`, `.circuit.layout`)
 
-- `board.align`: Align or distribute components.
-  - Required: `align` (one of `left`, `right`, `top`, `bottom`, `center_x`, `center_y`, `distribute_x`, `distribute_y`, default `left`); `components` (picks: component)
 - `board.autoroute`: Route the unrouted connections of the picked nets, or of every net not on a plane.
   - Required: `width` (number in mm, default 0.2); `via` (text)
   - Optional: `nets` (picks: net); `layers` (text)
@@ -178,9 +89,6 @@ This file is generated from the command catalog.
 - `board.dimension`: Add a board dimension annotation.
   - Required: `layer` (text)
   - Optional: `points` (picks: point); `items` (picks: pad or track or via or component)
-- `board.drc`: Run the design rule check (also runs live while editing).
-  - Required: `scope` (one of `all`, `selection`, default `all`)
-  - Optional: `live` (true or false, default true)
 - `board.export`: Export the board and its components as a STEP model for mechanical design.
   - Optional: `copper` (true or false, default false); `mask` (true or false, default true)
 - `board.fab-outputs`: Make the fabrication and assembly files for the board.
@@ -193,8 +101,6 @@ This file is generated from the command catalog.
   - Optional: `net` (pick: net)
 - `board.flip`: Move components to the other side of the board, mirrored where they stand.
   - Required: `components` (picks: component)
-- `board.highlight-net`: Highlight the net on the board and dim the rest.
-  - Runs on the `selection`: `net`, `track`, `pad`, `via`
 - `board.keepout`: Draw an area where copper, vias or components may not go.
   - Required: `points` (picks: point); `applies` (one of `all`, `copper`, `tracks`, `vias`, `components`, default `all`); `layer` (text)
 - `board.layer-stack`: Edit the stackup, with the impedance calculator and thermal properties.
@@ -206,8 +112,6 @@ This file is generated from the command catalog.
   - Required: `items` (picks: component or track or via or pour); `dx` (number in mm, default 0); `dy` (number in mm, default 0); `rotation` (number in deg, default 0)
 - `board.outline`: Draw the board outline, or take it from an enclosure part.
   - Required: `source` (one of `draw`, `enclosure`, default `draw`); `points` (picks: point) when `source` is draw; `part` (text) when `source` is enclosure; `face` (pick: face) when `source` is enclosure
-- `board.place`: Place components from the schematic, all at once or one at a time.
-  - Required: `mode` (one of `from_schematic`, `single`, default `from_schematic`); `components` (picks: component) when `mode` is single; `side` (one of `top`, `bottom`, default `top`)
 - `board.place-via`: Place a via.
   - Required: `points` (picks: point); `size` (text); `span` (one of `through`, `blind`, `buried`, `micro`, default `through`)
   - Optional: `net` (pick: net)
@@ -220,9 +124,6 @@ This file is generated from the command catalog.
   - Required: `net` (pick: net or pad or track or via); `points` (picks: point); `width` (number in mm, default 0.15); `via` (text); `layer` (text); `mode` (one of `walkaround`, `ignore`, `stop`, default `walkaround`); `corner` (one of `45`, `90`, `arc45`, `any`, default `45`)
 - `board.route-net`: Route the net's open connections with the interactive router.
   - Runs on the `selection`: `net`
-- `board.rules`: Add or edit a design rule: clearance, width, via, pair, length, impedance, plane, mask or silk.
-  - Required: `kind` (one of `clearance`, `width`, `via`, `diff_pair`, `length`, `impedance`, `plane`, `mask`, `silk`, default `clearance`); `applies` (text); `value` (text); `priority` (whole number, default 1)
-- `board.select`: Select items on the board.
 - `board.stitch`: Stitch a pour with vias, or shield a net with a row of them.
   - Required: `mode` (one of `stitch`, `shield`, default `stitch`); `target` (pick: pour or net); `shield_net` (text) when `mode` is shield; `pitch` (number in mm, default 1.5); `via` (text)
 - `board.teardrops`: Add or remove teardrops at pads and vias.
@@ -239,73 +140,10 @@ This file is generated from the command catalog.
   - Required: `changes` (picks: change)
   - Runs on the `selection`: `eco_back_change`
 
-## `circuit.` commands (`.circuit`, `.circuit.layout`)
-
-- `circuit.active-layer`: Make a layer the one new tracks and pours go on; it draws over the others.
-  - Required: `layer` (text)
-- `circuit.change-part`: Replace the component's part with another from the pool; pins map by name.
-  - Required: `part` (text)
-  - Runs on the `selection`: `component`
-- `circuit.cross-probe`: Show the selection in the other view (schematic or board).
-  - Runs on the `selection`: `component`, `net`, `pin`
-- `circuit.delete`: Delete the selected items.
-  - Runs on the `selection`: `component`, `wire`, `track`, `via`, `zone`, `keepout`, `room`
-- `circuit.display`: Choose how layers draw.
-  - Required: `layers` (one of `all`, `active`, `dim`, default `all`)
-  - Optional: `ratsnest` (true or false, default true); `net_colors` (true or false, default false)
-- `circuit.edit-value`: Set the component's value with its unit and tolerance.
-  - Required: `value` (text)
-  - Runs on the `selection`: `component`
-- `circuit.fitted`: Fit, leave out or substitute the component in the current variant.
-  - Required: `fitting` (one of `fitted`, `not_fitted`, `alternate`, default `fitted`)
-  - Runs on the `selection`: `component`
-- `circuit.flip-board`: View the board from the bottom.
-- `circuit.footprint`: Use another of the part's footprints.
-  - Required: `footprint` (text)
-  - Runs on the `selection`: `component`
-- `circuit.layer-color`: Draw a layer in another color on this board.
-  - Required: `layer` (text); `color` (text)
-- `circuit.layer-opacity`: Draw a layer more or less see-through on this board.
-  - Required: `layer` (text); `opacity` (number, default 1)
-- `circuit.layer-visibility`: Show or hide board layers: one layer, only one, all, copper only, or one side.
-  - Required: `action` (one of `toggle`, `show`, `hide`, `only`, `all`, `hide_others`, `copper`, `top`, `bottom`, default `toggle`)
-  - Optional: `layer` (text)
-- `circuit.locate`: Jump to the item in the other view and frame it.
-  - Runs on the `selection`: `component`
-- `circuit.net-class`: Put the nets in a net class; its rules apply on the board.
-  - Required: `class` (text)
-  - Runs on the `selection`: `net`
-- `circuit.net-length`: Report the net's routed and unrouted length.
-  - Runs on the `selection`: `net`
-- `circuit.next-layer`: Make the next copper layer down the stack active.
-- `circuit.previous-layer`: Make the previous copper layer up the stack active.
-- `circuit.rename-net`: Rename the net; labels and ports follow.
-  - Required: `name` (text)
-  - Runs on the `selection`: `net`
-- `circuit.select-filter`: Choose what clicks select.
-  - Required: `filter` (one of `any`, `component`, `wire`, `net`, `track`, `via`, `pad`, `zone`, default `any`)
-- `circuit.single-layer`: Dim every layer but the active one; run again to draw them all.
-- `circuit.swap-pins`: Swap equivalent pins or gates to shorten routes; the schematic follows.
-  - Required: `swap` (one of `pins`, `gates`, default `pins`)
-  - Runs on the `selection`: `component`
-- `circuit.variant`: Pick the assembly variant (fitted and not-fitted parts).
-  - Required: `variant` (text)
-
-## `design.` commands (`.part`, `.assembly`, `.drawing`, `.circuit`, `.circuit.layout`)
-
-- `design.copy-reference`: Copy the selected items' references (feature.boss.depth) for a value field or a script.
-  - Runs on the `selection`: `face`, `edge`, `vertex`, `sketch_entity`, `sketch_point`, `plane`, `feature`, `sketch`, `body`, `occurrence`, `view`, `annotation`, `component`, `pin`, `room`, `net`
-- `design.exit-nested`: Leave the nested edit and return to the level above.
-- `design.rebuild`: Rebuild the file and refresh its checks.
-- `design.show-source`: Show the selected item's text in the file.
-  - Runs on the `selection`: `feature`, `sketch`, `mate`, `annotation`, `component`, `room`
-
 ## `direct.` commands (`.part`)
 
 - `direct.delete-face`: Delete faces and heal the gap from the neighbors.
   - Required: `faces` (picks: face); `heal` (one of `heal`, `patch`, `leave`, default `heal`)
-- `direct.instant-3d`: Drag any face or dimension in the view to change it.
-  - Required: `target` (pick: face or dimension or feature); `value` (number in mm, default 0)
 - `direct.move-body`: Move or rotate bodies directly.
   - Required: `bodies` (picks: body); `dx` (number in mm, default 0); `dy` (number in mm, default 0); `dz` (number in mm, default 0); `angle` (number in deg, default 0)
   - Optional: `axis` (pick: axis or edge)
@@ -346,8 +184,6 @@ This file is generated from the command catalog.
 - `drawing.chain`: Dimension features end to end.
   - Required: `items` (picks: edge)
   - Optional: `at` (pick: point)
-- `drawing.check`: Check the drawing against a standards pack.
-  - Required: `pack` (text)
 - `drawing.datum`: Add a datum feature symbol.
   - Required: `label` (text); `attach` (pick: edge or annotation)
   - Optional: `at` (pick: point)
@@ -360,8 +196,6 @@ This file is generated from the command catalog.
   - Required: `parent` (pick: view); `center` (pick: edge); `radius` (number in mm, default 5); `label` (text); `scale` (text)
   - Optional: `at` (pick: point)
   - Runs on the `selection`: `view`
-- `drawing.edit-view`: Open the view's properties.
-  - Runs on the `selection`: `view`
 - `drawing.export`: Export as PDF, DXF, DWG or SVG.
   - Required: `format` (one of `pdf`, `dxf`, `dwg`, `svg`, default `pdf`); `sheets` (one of `all`, `current`, default `all`)
 - `drawing.gdt`: Add a feature control frame.
@@ -373,8 +207,6 @@ This file is generated from the command catalog.
 - `drawing.isometric`: Place an isometric view.
   - Required: `model` (text); `scale` (text); `display` (one of `hidden_removed`, `shaded`, default `hidden_removed`)
   - Optional: `at` (pick: point)
-- `drawing.layer`: Choose the layer new annotations go on.
-  - Required: `layer` (text)
 - `drawing.model-view`: Place one view of a model in any orientation.
   - Required: `model` (text); `orientation` (one of `front`, `back`, `top`, `bottom`, `left`, `right`, `isometric`, default `front`); `scale` (text); `display` (one of `hidden_visible`, `hidden_removed`, `shaded`, default `hidden_visible`)
   - Optional: `at` (pick: point)
@@ -384,8 +216,6 @@ This file is generated from the command catalog.
 - `drawing.note`: Add a note, with an optional leader.
   - Required: `text` (text)
   - Optional: `attach` (pick: edge or view); `at` (pick: point)
-- `drawing.open-model`: Open the model a view shows.
-  - Runs on the `selection`: `view`
 - `drawing.ordinate`: Dimension features from a zero line.
   - Required: `origin` (pick: edge); `items` (picks: edge)
   - Optional: `at` (pick: point)
@@ -397,10 +227,6 @@ This file is generated from the command catalog.
   - Required: `parent` (pick: view); `through` (pick: edge); `label` (text)
   - Optional: `aligned` (true or false, default false); `at` (pick: point)
   - Runs on the `selection`: `view`
-- `drawing.sheet`: Switch to another sheet.
-  - Required: `sheet` (pick: sheet)
-- `drawing.show-in-model`: Open the model with the annotated geometry selected.
-  - Runs on the `selection`: `view`, `annotation`
 - `drawing.smart-dimension`: Dimension edges, points or circles.
   - Required: `items` (picks: edge); `measure` (one of `auto`, `linear`, `angular`, `radius`, `diameter`, default `auto`); `tolerance` (one of `none`, `symmetric`, `bilateral`, `fit`, default `none`)
   - Optional: `plus` (number in mm, default 0.1); `minus` (number in mm, default 0.1); `fit` (text); `at` (pick: point)
@@ -424,23 +250,11 @@ This file is generated from the command catalog.
 - `drawing.weld-symbol`: Add a weld symbol.
   - Required: `type` (one of `fillet`, `groove`, `plug`, `spot`, default `fillet`); `size` (number in mm, default 4); `attach` (pick: edge)
   - Optional: `all_around` (true or false, default false); `field` (true or false, default false); `at` (pick: point)
-- `drawing.zoom`: Fit the sheet, zoom to actual size or to the selection.
-  - Required: `zoom` (one of `sheet`, `actual`, `selection`, default `sheet`)
 
 ## `evaluate.` commands (`.part`)
 
-- `evaluate.check-geometry`: Find invalid faces, short edges, gaps and self-intersections.
-  - Optional: `strict` (true or false, default false)
 - `evaluate.clearance`: Find places closer than a clearance.
   - Required: `items` (picks: body or face); `minimum` (number in mm, default 1)
-- `evaluate.cost`: Estimate the part's cost for a process and quantity.
-  - Required: `process` (one of `machining`, `sheet_metal`, `molding`, `additive`, default `machining`); `quantity` (whole number, default 100)
-- `evaluate.curvature`: Color faces by curvature.
-- `evaluate.deviation`: Measure the angle between faces along shared edges.
-  - Required: `edges` (picks: edge)
-- `evaluate.dfm`: Check manufacturability for a process.
-  - Required: `process` (one of `machining`, `sheet_metal`, `molding`, `additive`, default `machining`)
-  - Optional: `rules` (text)
 - `evaluate.draft`: Color faces by draft angle.
   - Required: `direction` (pick: plane or face or axis); `angle` (number in deg, default 1)
 - `evaluate.interference`: Find bodies that overlap.
@@ -449,20 +263,11 @@ This file is generated from the command catalog.
   - Required: `mass` (number in kg, default 1) when `override_mass` is true
   - Optional: `bodies` (picks: body or part); `about` (pick: coordinate system); `override_mass` (true or false, default false)
   - Runs on the `selection`: `body`
-- `evaluate.section-properties`: Area, centroid and second moments of a planar face or sketch.
-  - Required: `section` (pick: face or sketch)
-- `evaluate.thickness`: Color thin and thick regions.
-  - Required: `target` (number in mm, default 2); `show` (one of `thin`, `thick`, default `thin`)
 - `evaluate.undercut`: Find undercut faces for a pull direction.
   - Required: `direction` (pick: plane or face or axis)
-- `evaluate.zebra`: Show stripes to judge surface continuity.
-  - Required: `stripes` (whole number, default 20)
 
 ## `explode.` commands (`.assembly`)
 
-- `explode.auto`: Explode the assembly automatically from its mates.
-  - Required: `spacing` (number in mm, default 20)
-  - Optional: `fasteners` (true or false, default true)
 - `explode.lines`: Draw lines showing how components move.
   - Optional: `steps` (picks: explode step)
 - `explode.new`: Create an exploded view.
@@ -472,29 +277,8 @@ This file is generated from the command catalog.
 - `explode.step`: Move components along a direction in one step.
   - Required: `components` (picks: component); `direction` (pick: edge or axis or face); `distance` (number in mm, default 50)
 
-## `fea.` commands (`.fea`)
-
-- `fea.analysis`: Open the study's analysis, outputs and assessments.
-- `fea.geometry`: Open the geometry declaration: the CAD file and its named regions.
-- `fea.loads`: Open the model's loads, supports and conditions in Source.
-- `fea.materials`: Open the material declarations and their assignments.
-- `fea.mesh`: Open the mesh declaration: element order, target size and deviation.
-- `fea.results`: Show the last run's result fields.
-- `fea.run`: Mesh and solve the study.
-- `fea.show-conditions`: Show thermal, electrical and other boundary symbols.
-  - Optional: `show` (true or false, default true)
-- `fea.show-loads`: Show the load arrows and their values on the model.
-  - Optional: `show` (true or false, default true)
-- `fea.show-supports`: Show the ground symbols on held faces.
-  - Optional: `show` (true or false, default true)
-- `fea.show-tints`: Tint each loaded, held or bonded face by its role.
-  - Optional: `show` (true or false, default true)
-- `fea.source`: Open the selected item's declaration in Source, or the study's.
-
 ## `library.` commands (`.circuit`, `.circuit.layout`)
 
-- `library.open-part`: Open the selected part's pool entry.
-  - Runs on the `selection`: `component`
 - `library.place`: Search the library and manufacturer parts, and place one on the sheet.
   - Required: `query` (text)
   - Optional: `in_stock` (true or false, default true); `designator` (text)
@@ -508,8 +292,6 @@ This file is generated from the command catalog.
 - `manage.configurations`: Add configurations and edit the design table.
   - Required: `name` (text)
   - Optional: `based_on` (text)
-- `manage.document-settings`: Units, drafting standard and default tolerances.
-  - Required: `units` (one of `mmgs`, `mks`, `ips`, default `mmgs`); `standard` (one of `iso`, `ansi`, `din`, `jis`, default `iso`); `tolerance_class` (one of `m`, `f`, `c`, default `m`); `decimals` (whole number, default 2)
 - `manage.equations`: Set an input's value, or add or change a named value or equation.
   - Required: `name` (text); `value` (text)
 - `manage.export`: Export the part as STEP AP242, IGES, STL, 3MF, glTF or a face as DXF.
@@ -519,11 +301,6 @@ This file is generated from the command catalog.
   - Required: `material` (one of `material.aluminum_6061_t6`, `material.aluminum_7075_t6`, `material.aluminum_2024_t3`, `material.steel_1018`, `material.steel_4140`, `material.stainless_304`, `material.stainless_316`, `material.titanium_ti_6al_4v`, `material.copper_c110`, `material.brass_c360`, `material.abs`, `material.nylon_pa12`, `material.glass_filled_nylon`, `material.pom_acetal`, `material.peek`, `material.polycarbonate`, `material.acrylic`, `material.carbon_fiber`, `material.fr4`, `material.silicone_rubber`, `material.oak`, `material.concrete`, `material.douglas_fir_lumber`, `material.osb`, `material.gypsum_board`, `material.xps_foam`, default `material.aluminum_6061_t6`)
   - Optional: `bodies` (picks: body or part)
   - Runs on the `selection`: `body`, `part`
-- `manage.recognize-features`: Turn an imported body into editable features.
-  - Required: `body` (pick: body)
-  - Optional: `interactive` (true or false, default false)
-- `manage.replace-reference`: Point a reference at another file or entity.
-  - Required: `reference` (pick: feature or input); `with` (text)
 - `manage.split-to-files`: Save bodies as separate parts and an assembly.
   - Optional: `bodies` (picks: body); `assembly` (true or false, default true)
 
@@ -540,24 +317,6 @@ This file is generated from the command catalog.
   - Optional: `uniform` (true or false, default true)
 - `mold.undercut`: Find faces that can't release in the pull direction.
   - Required: `direction` (pick: plane or face or axis)
-
-## `motion.` commands (`.assembly`)
-
-- `motion.animation`: Animate mates over time.
-  - Required: `name` (text); `duration` (number in s, default 5)
-- `motion.basic`: Simulate gravity, springs and motors on the mechanism.
-  - Required: `speed` (number in rpm, default 30); `duration` (number in s, default 5)
-  - Optional: `gravity` (true or false, default true); `motors` (picks: mate)
-- `motion.collision`: Stop or highlight when moving components touch.
-  - Required: `mode` (one of `stop`, `highlight`, default `stop`)
-  - Optional: `components` (picks: component)
-- `motion.drag`: Drag a component through its remaining degrees of freedom.
-  - Required: `component` (pick: component)
-  - Optional: `collisions` (true or false, default true)
-- `motion.mate-controller`: Save named positions of mates and step between them.
-  - Required: `name` (text); `mates` (picks: mate)
-- `motion.to-fea`: Send motion loads at an instant to a new study.
-  - Required: `time` (number in s, default 0); `name` (text)
 
 ## `part.` commands (`.part`)
 
@@ -608,13 +367,6 @@ This file is generated from the command catalog.
 - `part.draft`: Taper faces for molding by neutral plane, parting line or step.
   - Required: `type` (one of `neutral_plane`, `parting_line`, `step`, default `neutral_plane`); `faces` (picks: face); `neutral` (pick: plane or face) when `type` is neutral_plane; `parting` (picks: edge or curve) when `type` is parting_line or step; `angle` (number in deg, default 1)
   - Optional: `flip` (true or false, default false)
-- `part.edit-feature`: Open the feature's inputs in Properties.
-  - Runs on the `selection`: `feature`, `sketch`
-- `part.edit-sketch`: Open the sketch for editing.
-  - Runs on the `selection`: `feature`, `sketch`
-- `part.edit-sketch-plane`: Move the sketch to another plane or planar face.
-  - Required: `plane` (pick: plane or face)
-  - Runs on the `selection`: `sketch`
 - `part.emboss`: Raise or engrave a sketch or text on a face.
   - Required: `profile` (pick: sketch); `face` (pick: face); `depth` (number in mm, default 0.5); `mode` (one of `emboss`, `deboss`, default `emboss`)
 - `part.export-body`: Write the selected bodies to a STEP or STL file.
@@ -626,15 +378,9 @@ This file is generated from the command catalog.
 - `part.fillet`: Round edges, faces or a feature's edges, or blend faces: constant, variable, face or full round.
   - Required: `type` (one of `constant`, `variable`, `face`, `full_round`, default `constant`); `edges` (picks: edge or face or feature); `radius` (number in mm, default 2) when `type` is constant or face; `radii` (list of number in mm, default 2) when `type` is variable; `profile` (one of `circular`, `conic`, `curvature`, default `circular`)
   - Optional: `tangent_propagation` (true or false, default true)
-- `part.hide`: Hide the selected items in the view, or show them again.
-  - Runs on the `selection`: `feature`, `sketch`, `body`
 - `part.hole`: Add standard holes: simple, counterbore, countersink, tapped, pipe tap or slot.
   - Required: `type` (one of `simple`, `counterbore`, `countersink`, `tapped`, `pipe_tap`, `slot`, default `simple`); `standard` (one of `iso`, `ansi_metric`, `ansi_inch`, default `iso`); `size` (text); `fit` (one of `normal`, `close`, `loose`, default `normal`) when `type` is simple or counterbore or countersink or slot; `diameter` (number in mm, default 6) when `type` is simple; `cbore_diameter` (number in mm, default 11) when `type` is counterbore; `cbore_depth` (number in mm, default 6) when `type` is counterbore; `csink_diameter` (number in mm, default 12) when `type` is countersink; `csink_angle` (number in deg, default 90) when `type` is countersink; `slot_length` (number in mm, default 10) when `type` is slot; `end` (one of `blind`, `through_all`, `up_to_next`, `up_to_face`, default `blind`); `depth` (number in mm, default 12) when `end` is blind; `thread_depth` (number in mm, default 10) when `type` is tapped or pipe_tap; `face` (pick: face); `positions` (list of pick: sketch point or vertex or point)
   - Optional: `cosmetic_thread` (true or false, default true); `series` (true or false, default false)
-- `part.isolate`: Show only the selected items until isolate ends; a face, edge or vertex isolates its body.
-  - Runs on the `selection`: `face`, `edge`, `vertex`, `feature`, `sketch`, `body`
-- `part.library`: Insert a feature definition from your library or a company pack.
-  - Required: `definition` (text); `placement` (pick: face or plane or point or mate connector)
 - `part.loft`: Blend between two or more profiles, with guides and end tangency.
   - Required: `profiles` (picks: sketch or sketch region or face or point); `op` (one of `add`, `remove`, `intersect`, `new`, default `add`); `start_tangency` (one of `none`, `normal`, `direction`, `faces`, default `none`); `end_tangency` (one of `none`, `normal`, `direction`, `faces`, default `none`); `thin_thickness` (number in mm, default 1) when `thin` is true
   - Optional: `guides` (picks: sketch or curve or edge); `centerline` (pick: sketch or curve or edge); `closed` (true or false, default false); `thin` (true or false, default false); `merge` (pick: body) when `op` is add or remove or intersect
@@ -647,8 +393,6 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `feature`
 - `part.move-up`: Move the feature one place earlier in the tree.
   - Runs on the `selection`: `feature`
-- `part.parents-children`: List what the item is built on and what is built on it.
-  - Runs on the `selection`: `feature`
 - `part.pattern`: Repeat features, faces or bodies: linear, circular, curve, sketch, table, fill or variable.
   - Required: `layout` (one of `linear`, `circular`, `curve`, `sketch`, `table`, `fill`, `variable`, default `linear`); `seeds` (picks: feature or face or body); `direction` (pick: edge or axis or plane or face) when `layout` is linear or fill; `spacing` (number in mm, default 10) when `layout` is linear or fill; `instances` (whole number, default 3) when `layout` is linear or circular or curve; `direction2` (pick: edge or axis or plane) when `second_direction` is true; `spacing2` (number in mm, default 10) when `second_direction` is true; `instances2` (whole number, default 2) when `second_direction` is true; `axis` (pick: axis or edge or face) when `layout` is circular; `angle` (number in deg, default 360) when `layout` is circular; `curve` (pick: curve or edge or sketch) when `layout` is curve; `sketch` (pick: sketch) when `layout` is sketch; `table` (text) when `layout` is table or variable; `boundary` (pick: face or sketch) when `layout` is fill
   - Optional: `second_direction` (true or false, default false) when `layout` is linear; `equal_spacing` (true or false, default true) when `layout` is circular; `skip` (list of whole number, default 1)
@@ -657,9 +401,6 @@ This file is generated from the command catalog.
   - Optional: `flip` (true or false, default false)
 - `part.point`: Add a reference point.
   - Required: `type` (one of `coordinates`, `center`, `face_center`, `intersection`, `along_curve`, default `coordinates`); `references` (picks: edge or face or vertex or curve) when `type` is center or face_center or intersection or along_curve; `x` (number in mm, default 0) when `type` is coordinates; `y` (number in mm, default 0) when `type` is coordinates; `z` (number in mm, default 0) when `type` is coordinates; `parameter` (number, default 0.5) when `type` is along_curve
-- `part.rename`: Rename the item; references follow.
-  - Required: `name` (text)
-  - Runs on the `selection`: `feature`, `sketch`, `body`, `region`, `input`, `plane`, `mate_connector`
 - `part.reorder`: Move the feature before or after another one.
   - Required: `position` (one of `before`, `after`, default `before`); `anchor` (pick: feature or sketch)
   - Runs on the `selection`: `feature`, `sketch`
@@ -669,20 +410,11 @@ This file is generated from the command catalog.
 - `part.rib`: Add a thin wall from an open sketch.
   - Required: `profile` (pick: sketch); `thickness` (number in mm, default 2); `depth` (number in mm, default 10)
   - Optional: `reverse` (true or false, default false)
-- `part.rollback-end`: Move the rollback bar to the end of the tree.
-  - Runs on the `selection`: `feature`
-- `part.rollback-here`: Move the rollback bar to just after this feature.
-  - Runs on the `selection`: `feature`, `sketch`
-- `part.section-here`: Cut the view through the selected body, face or plane.
-  - Runs on the `selection`: `face`, `plane`, `body`
 - `part.shell`: Hollow a body, with different thicknesses on chosen faces.
   - Required: `body` (pick: body); `thickness` (number in mm, default 2); `face_thickness` (number in mm, default 3) when `thick_faces` is set
   - Optional: `open_faces` (picks: face); `outward` (true or false, default false); `thick_faces` (picks: face)
-- `part.show-references`: Show what this item uses and what uses it.
-  - Runs on the `selection`: `feature`, `sketch`, `region`, `input`
 - `part.sketch`: Start a sketch on a plane or planar face.
   - Required: `plane` (pick: plane or face)
-- `part.sketch-3d`: Start a sketch in space for paths and routes.
 - `part.split`: Split a body with a plane, face or surface.
   - Required: `body` (pick: body); `tool` (pick: plane or face or body)
 - `part.suppress`: Turn the feature off without deleting it.
@@ -701,16 +433,12 @@ This file is generated from the command catalog.
 - `schematic.annotate`: Assign designators to parts that have none.
   - Required: `order` (one of `across`, `down`, default `across`)
   - Optional: `reset` (true or false, default false)
-- `schematic.compile`: Compile the design: flatten the hierarchy and extract nets.
-- `schematic.copy`: Copy the selected parts, to paste copies with their own designators.
-  - Runs on the `selection`: `component`
 - `schematic.directive`: Attach a directive: differential pair, net class, parameter set or blanket.
   - Required: `type` (one of `diff_pair`, `net_class`, `parameters`, `blanket`, default `diff_pair`); `nets` (picks: net or wire)
   - Optional: `value` (text)
 - `schematic.disconnect`: Take a pin off its net: its wire to the rest of the net goes.
   - Required: `pin` (pick: pin)
   - Runs on the `selection`: `pin`
-- `schematic.erc`: Run the electrical rules check.
 - `schematic.export-pdf`: Export every schematic page, each with its title block, as one PDF.
 - `schematic.move`: Move selected items; wires stay connected.
   - Required: `items` (picks: component or wire or port or sheet symbol); `dx` (number in mm, default 0); `dy` (number in mm, default 0); `rotation` (number in deg, default 0)
@@ -746,7 +474,6 @@ This file is generated from the command catalog.
 - `schematic.repeat-channel`: Repeat a sheet as channels with their own designators.
   - Required: `symbol` (pick: sheet symbol); `channels` (whole number, default 4)
   - Optional: `designators` (text)
-- `schematic.select`: Select items in the schematic.
 - `schematic.sheet-entry`: Add an entry to a sheet symbol for a port of its sheet.
   - Required: `symbol` (pick: sheet symbol); `port` (text)
   - Optional: `to` (pick: pin or wire or net); `bus` (text); `offset` (whole number, default 0) when `bus` is set
@@ -770,8 +497,6 @@ This file is generated from the command catalog.
 - `sheet-metal.base-flange`: Start a sheet metal part from a sketch.
   - Required: `profile` (pick: sketch); `thickness` (number in mm, default 1.5); `radius` (number in mm, default 1); `depth` (number in mm, default 20); `bend_rule` (one of `k_factor`, `table`, `allowance`, `deduction`, default `k_factor`); `k` (number, default 0.44) when `bend_rule` is k_factor
   - Optional: `gauge` (text)
-- `sheet-metal.bend-table`: Choose the bend table or rule for this part.
-  - Required: `table` (text); `k` (number, default 0.44)
 - `sheet-metal.break-corner`: Chamfer or round a flat corner.
   - Required: `edges` (picks: edge); `break` (one of `chamfer`, `fillet`, default `chamfer`); `distance` (number in mm, default 2)
 - `sheet-metal.closed-corner`: Close the gap between flanges at a corner.
@@ -786,9 +511,6 @@ This file is generated from the command catalog.
   - Optional: `bends` (picks: face)
 - `sheet-metal.form-tool`: Stamp a form (louver, dimple, bead) into a face.
   - Required: `tool` (one of `louver`, `dimple`, `bead`, default `louver`); `face` (pick: face); `position` (pick: sketch point or point or vertex); `rotation` (number in deg, default 0)
-- `sheet-metal.gauge`: Pick the material gauge, which sets thickness and bend radius.
-  - Required: `gauge` (text)
-  - Optional: `table` (text)
 - `sheet-metal.hem`: Fold an edge back on itself.
   - Required: `edges` (picks: edge); `hem` (one of `closed`, `open`, `teardrop`, `rolled`, default `closed`); `length` (number in mm, default 5); `gap` (number in mm, default 0.5) when `hem` is open
 - `sheet-metal.jog`: Add two bends that offset a flat.
@@ -817,9 +539,6 @@ This file is generated from the command catalog.
 - `simulate.dc-sweep`: Add a DC sweep of a source to the simulation section.
   - Required: `source` (text); `start` (number in V, default 0); `stop` (number in V, default 5); `step` (number in V, default 0.1)
   - Optional: `name` (text)
-- `simulate.defeature`: Remove small fillets, holes and chamfers for simulation.
-  - Required: `max_fillet` (number in mm, default 2); `max_hole` (number in mm, default 3); `max_chamfer` (number in mm, default 1)
-  - Optional: `keep_regions` (true or false, default true)
 - `simulate.monte-carlo`: Add a Monte Carlo over the section's tolerances that reruns another analysis of the section.
   - Required: `kind` (one of `monte_carlo`, default `monte_carlo`); `of` (text); `runs` (whole number, default 1000); `seed` (whole number, default 1)
   - Optional: `name` (text)
@@ -836,16 +555,9 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `pin`
 - `simulate.publish`: Publish a region, frame, value or path for assemblies and studies to use.
   - Required: `name` (text); `target` (one of `region`, `frame`, `value`, `path`, default `region`); `item` (pick: region or mate connector or input) when `target` is region or frame or value; `edges` (picks: edge) when `target` is path
-- `simulate.region`: Name faces, edges or bodies so studies can load and fix them.
-  - Required: `name` (text); `kind` (one of `face`, `edge`, `body`, `vertex`, default `face`); `select` (picks: face or edge or body or vertex); `expect` (one of `at_least_one`, `exactly_one`, `any`, default `at_least_one`)
-- `simulate.representation`: Define how the part appears in assemblies and studies: full, envelope, defeatured, mid-surface or beam.
-  - Required: `kind` (one of `full`, `envelope`, `defeatured`, `mid_surface`, `beam`, default `full`); `name` (text)
-- `simulate.run`: Run the design's simulation section: plot its probes and list its measurements.
 - `simulate.set-tolerance`: Set the tolerance a Monte Carlo varies parts by (it replaces the parts' own bands).
   - Required: `match` (text); `percent` (number, default 1)
   - Optional: `name` (text)
-- `simulate.studies`: Open a study that uses this part.
-  - Required: `study` (text)
 - `simulate.temperature`: Add a temperature sweep that reruns another analysis of the section at each temperature.
   - Required: `of` (text); `values` (text)
   - Optional: `name` (text)
@@ -853,7 +565,7 @@ This file is generated from the command catalog.
   - Required: `stop` (number in s, default 0.001); `step` (number in s, default 0.000001)
   - Optional: `name` (text)
 
-## `sketch.` commands (`.part`, `.assembly`)
+## `sketch.` commands (`.part`)
 
 - `sketch.arc`: Draw an arc by center, tangent to an end or through three points.
   - Required: `type` (one of `center`, `tangent`, `three_point`, default `center`); `start` (pick: sketch point or vertex or point); `end` (pick: sketch point or vertex or point); `center` (pick: sketch point or vertex or point) when `type` is center
@@ -863,9 +575,6 @@ This file is generated from the command catalog.
   - Optional: `entities` (picks: sketch entity)
 - `sketch.chamfer`: Bevel sketch corners.
   - Required: `corners` (picks: sketch point or sketch entity); `distance` (number in mm, default 1); `angle` (number in deg, default 45)
-- `sketch.check`: Check the sketch for a feature: open contours, overlaps, self-intersections.
-  - Required: `for` (one of `extrude`, `revolve`, `sweep_path`, `loft_profile`, default `extrude`)
-  - Runs on the `selection`: `sketch`
 - `sketch.circle`: Draw a circle by center or through three points.
   - Required: `type` (one of `center`, `three_point`, default `center`); `center` (pick: sketch point or vertex or point) when `type` is center; `radius` (number in mm, default 10) when `type` is center; `points` (picks: sketch point or vertex) when `type` is three_point
 - `sketch.constraint`: Add a geometric relation between sketch entities.
@@ -876,10 +585,6 @@ This file is generated from the command catalog.
 - `sketch.dimension`: Add a driving or driven dimension.
   - Required: `type` (one of `smart`, `horizontal`, `vertical`, `ordinate`, `path_length`, default `smart`); `entities` (picks: sketch entity or sketch point)
   - Optional: `value` (number in mm); `driven` (true or false, default false)
-- `sketch.discard`: Leave the sketch without keeping the changes.
-- `sketch.ellipse`: Draw an ellipse, a partial ellipse, a parabola or a conic.
-  - Required: `type` (one of `full`, `partial`, `parabola`, `conic`, default `full`); `center` (pick: sketch point or vertex or point); `major` (number in mm, default 20); `minor` (number in mm, default 10); `rho` (number, default 0.5) when `type` is conic
-- `sketch.exit`: Keep the sketch changes and leave the sketch.
 - `sketch.extend`: Extend an entity to the next one it meets.
   - Required: `entities` (picks: sketch entity)
 - `sketch.fillet`: Round sketch corners.
@@ -898,30 +603,20 @@ This file is generated from the command catalog.
   - Required: `layout` (one of `linear`, `circular`, default `linear`); `entities` (picks: sketch entity); `spacing` (number in mm, default 10) when `layout` is linear; `direction` (number in deg, default 0) when `layout` is linear; `center` (pick: sketch point or vertex or point) when `layout` is circular; `angle` (number in deg, default 360) when `layout` is circular; `instances` (whole number, default 4)
 - `sketch.point`: Place a sketch point.
   - Required: `at` (pick: sketch point or vertex or point)
-- `sketch.polygon`: Draw a regular polygon.
-  - Required: `sides` (whole number, default 6); `center` (pick: sketch point or vertex or point); `radius` (number in mm, default 10); `fit` (one of `inscribed`, `circumscribed`, default `inscribed`); `rotation` (number in deg, default 0)
 - `sketch.rectangle`: Draw a rectangle by corners, center, three points or as a parallelogram.
   - Required: `type` (one of `corner`, `center`, `three_point`, `parallelogram`, default `corner`); `first` (pick: sketch point or vertex or point); `second` (pick: sketch point or vertex or point); `third` (pick: sketch point or vertex or point) when `type` is three_point or parallelogram
   - Optional: `construction_diagonals` (true or false, default false)
-- `sketch.show`: Show or hide relation glyphs, dimensions and DOF arrows.
-  - Optional: `glyphs` (true or false, default true); `dimensions` (true or false, default true); `dof` (true or false, default true)
 - `sketch.slot`: Draw a straight, center-point or arc slot.
   - Required: `type` (one of `straight`, `center`, `arc`, default `straight`); `start` (pick: sketch point or vertex or point); `end` (pick: sketch point or vertex or point); `width` (number in mm, default 6)
   - Optional: `dimension` (true or false, default true)
-- `sketch.spline`: Draw a spline through points, by control points, from an equation or as a style spline.
-  - Required: `type` (one of `through_points`, `control_points`, `equation`, `style`, default `through_points`); `points` (picks: sketch point or vertex) when `type` is through_points or control_points or style; `degree` (whole number, default 3) when `type` is control_points or style; `x` (text) when `type` is equation; `y` (text) when `type` is equation
-  - Optional: `closed` (true or false, default false)
 - `sketch.split`: Split an entity at a point.
   - Required: `entity` (pick: sketch entity); `at` (pick: sketch point or vertex or point)
-- `sketch.text`: Place text that features can extrude or emboss.
-  - Required: `text` (text); `font` (text); `height` (number in mm, default 5)
-  - Optional: `along` (pick: sketch entity)
 - `sketch.transform`: Move, copy, rotate or scale entities.
   - Required: `type` (one of `move`, `copy`, `rotate`, `scale`, default `move`); `entities` (picks: sketch entity or sketch point); `base` (pick: sketch point or vertex or point); `dx` (number in mm, default 0) when `type` is move or copy; `dy` (number in mm, default 0) when `type` is move or copy; `angle` (number in deg, default 0) when `type` is rotate; `factor` (number, default 1) when `type` is scale
 - `sketch.trim`: Trim entities by power trim, to a corner, inside or outside.
   - Required: `type` (one of `power`, `corner`, `inside`, `outside`, default `power`); `entities` (picks: sketch entity); `boundaries` (picks: sketch entity) when `type` is inside or outside
 
-## `study.` commands (`.part`, `.assembly`, `.circuit`, `.circuit.layout`)
+## `study.` commands (`.circuit`, `.circuit.layout`)
 
 - `study.new`: Create a .fea study from this design.
   - Required: `physics` (one of `structural`, `modal`, `thermal`, `ir_drop`, `warpage`, `thermal_structural`, default `structural`); `name` (text)
@@ -982,47 +677,11 @@ This file is generated from the command catalog.
   - Required: `rev` (text); `description` (text)
   - Optional: `date` (text); `by` (text); `at` (pick: point)
 
-## `view.` commands (`.part`, `.assembly`, `.fea`, `.circuit`, `.circuit.layout`, `.drawing`)
+## `view.` commands (`.part`, `.assembly`)
 
-- `view.back`: Look at the model from the back.
-- `view.bottom`: Look at the model from the bottom.
-- `view.configuration`: Switch the active configuration.
-  - Required: `configuration` (text)
-- `view.display`: Choose how the model is drawn.
-  - Required: `style` (one of `shaded`, `shaded_edges`, `xray`, `wireframe`, `hidden_lines`, default `shaded`)
-  - Optional: `perspective` (true or false, default false)
-- `view.fit`: Fit the whole model in the view.
-- `view.front`: Look at the model from the front.
-- `view.grid`: Show the grid and set its spacing.
-  - Required: `spacing` (number in mm, default 10)
-  - Optional: `show` (true or false, default true)
-- `view.isometric`: Look at the model from the isometric corner.
-- `view.left`: Look at the model from the left.
 - `view.measure`: Measure distance, angle, radius or path length; results stay pinned in the view.
   - Required: `mode` (one of `distance`, `angle`, `radius`, `path`, default `distance`); `items` (picks: face or edge or vertex or body or component or pad or track or via)
   - Optional: `pin` (true or false, default true)
-  - Runs on the `selection`: `face`, `edge`, `vertex`, `sketch_entity`, `sketch_point`, `plane`, `feature`, `sketch`, `body`, `occurrence`, `mate`
-- `view.normal-to`: Look straight at the selected plane, face or sketch.
-  - Runs on the `selection`: `face`, `plane`
-- `view.orthographic`: Draw the view as a parallel projection, so sizes don't change with depth.
-- `view.perspective`: Draw the view with perspective: nearer parts look larger.
-- `view.representation`: Choose how components load and draw in this view.
-  - Required: `representation` (one of `full`, `display`, `envelope`, `defeatured`, default `full`)
-- `view.right`: Look at the model from the right.
-- `view.section`: Cut the view with one or more section planes.
-  - Required: `plane` (one of `front`, `top`, `right`, `selection`, default `front`); `reference` (pick: plane or face) when `plane` is selection; `offset` (number in mm, default 0); `second_plane` (one of `front`, `top`, `right`, default `top`) when `second` is true
-  - Optional: `second` (true or false, default false); `cap` (true or false, default true)
-- `view.section-off`: Remove the section planes.
-- `view.select-filter`: Choose what clicks in the view select.
-  - Required: `filter` (one of `any`, `body`, `face`, `edge`, `vertex`, `feature`, `sketch`, default `any`)
-- `view.top`: Look at the model from the top.
-- `view.visibility`: Hide or show the selected bodies, components or regions, or show everything again.
-  - Required: `action` (one of `hide`, `show`, `show_all`, default `hide`)
-  - Runs on the `selection`: `face`, `edge`, `vertex`, `feature`, `sketch`, `body`, `occurrence`
-- `view.working-set`: Load only the selected components and what they touch.
-  - Required: `components` (picks: component)
-  - Optional: `neighbors` (true or false, default true)
-- `view.zoom-selection`: Frame the selected items.
   - Runs on the `selection`: `face`, `edge`, `vertex`, `sketch_entity`, `sketch_point`, `plane`, `feature`, `sketch`, `body`, `occurrence`, `mate`
 
 ## `weldment.` commands (`.part`)
@@ -1032,8 +691,6 @@ This file is generated from the command catalog.
   - Required: `face` (pick: face); `thickness` (number in mm, default 3); `inset` (number in mm, default 0)
 - `weldment.gusset`: Add a triangular plate between two members' faces at a corner.
   - Required: `faces` (picks: face); `leg` (number in mm, default 50); `thickness` (number in mm, default 5)
-- `weldment.profile-library`: Browse and add structural profiles.
-  - Required: `library` (text)
 - `weldment.structural-member`: Place profiles along sketch segments.
   - Required: `standard` (one of `iso`, `ansi`, `company`, default `iso`); `profile` (one of `rect_tube`, `square_tube`, `pipe`, `angle`, `channel`, `i_beam`, `flat_bar`, default `rect_tube`); `size` (text, default `40x40x3`); `material` (one of `s235`, `al_6061`, `stainless_304`, default `s235`); `segments` (picks: sketch entity or sketch); `corner` (one of `miter`, `butt1`, `butt2`, `none`, default `miter`); `rotation` (number in deg, default 0)
   - Optional: `mirror_profile` (true or false, default false)

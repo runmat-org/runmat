@@ -2,8 +2,12 @@
 //! claims. Each command is run through `commands::run` (the one dispatcher the Desktop host, the
 //! agent's tools and the CLI share) on a small file of each editor kind that offers it, with no
 //! values and no selection. A refusal (a pick missing, a value out of range) is an answer; a
-//! command that reaches a dispatcher with no code for it fails the build. A command with no
-//! handler yet is listed in its catalog's `UNBUILT`, so no surface offers it.
+//! command that reaches a dispatcher with no code for it is a gap: it must be in the gap ledger
+//! (`tests/command_gaps.txt`), which routes it to no surface. From the same probe the check
+//! writes what each surface offers: the Desktop's `design-command-gaps.json` (each gap shows
+//! disabled with its reason) and the agent's `docs/design/commands.md` (only commands the agent
+//! runs). Set `RUNMAT_COMMAND_GAPS_WRITE=1` to rewrite all three; `RUNMAT_PRIVATE_CAD_ROOT` names
+//! the Desktop checkout (default: the sibling `runmat-private-cad`).
 
 use runmat_design_commands::EditorKind;
 use runmat_design_tools::commands::{self, Handler, RunRequest, Surface};
@@ -85,11 +89,20 @@ fn every_design_command_has_a_handler_on_its_surfaces() {
             assert_eq!(route.surfaces, [Surface::Desktop], "{}", route.id);
             continue;
         }
-        assert!(
-            route.surfaces.contains(&Surface::Agent) && route.surfaces.contains(&Surface::Cli),
-            "{}",
-            route.id
-        );
+        if commands::is_gap(&route.id, route.editor) {
+            // A gap runs nowhere, and says why without reaching a dispatcher.
+            assert!(route.surfaces.is_empty(), "{}", route.id);
+            let (out, unhandled) = run(path, &request(&route.id, json!({}), &[]));
+            let label = &commands::catalog().command(&route.id).unwrap().label;
+            assert_eq!(out["message"], commands::unavailable_reason(label), "{}", route.id);
+            assert!(!unhandled, "{}", route.id);
+        } else {
+            assert!(
+                route.surfaces.contains(&Surface::Agent) && route.surfaces.contains(&Surface::Cli),
+                "{}",
+                route.id
+            );
+        }
         // A sketch tool runs in the open sketch.
         let base = if route.id == "board.autoroute" {
             // Check this dispatcher on one authored net. Routing every open connection of
@@ -101,7 +114,7 @@ fn every_design_command_has_a_handler_on_its_surfaces() {
         } else {
             json!({})
         };
-        let (out, unhandled) = run(path, &request(&route.id, base.clone(), &[]));
+        let (out, unhandled) = probe(path, &route, &request(&route.id, base.clone(), &[]));
         if route.id == "board.autoroute" {
             assert_eq!(out["ok"], true, "{}: {out}", route.editor.as_str());
         }
@@ -120,7 +133,7 @@ fn every_design_command_has_a_handler_on_its_surfaces() {
                 let value = option["value"].clone();
                 let mut values = base.clone();
                 values[field.id.as_str()] = value.clone();
-                let (_, unhandled) = run(path, &request(&route.id, values, &[]));
+                let (_, unhandled) = probe(path, &route, &request(&route.id, values, &[]));
                 if unhandled {
                     missing.push(format!(
                         "{} {} {}={}",
@@ -139,10 +152,30 @@ fn every_design_command_has_a_handler_on_its_surfaces() {
     // now has one, so the ledger is always the exact list of gaps.
     missing.sort();
     missing.dedup();
+    // A form choice that doesn't run is listed only under a command that doesn't run at all, so
+    // availability is per command and editor: a command whose form runs offers every choice.
+    let gaps: Vec<(&str, &str)> = missing
+        .iter()
+        .filter_map(|m| {
+            let mut words = m.split_whitespace();
+            let pair = (words.next()?, words.next()?);
+            words.next().is_none().then_some(pair)
+        })
+        .collect();
+    for m in &missing {
+        let mut words = m.split_whitespace();
+        let pair = (words.next().unwrap(), words.next().unwrap());
+        assert!(
+            gaps.contains(&pair),
+            "{m}: the command runs but this choice doesn't; build it, or take the choice out of the form"
+        );
+    }
+    let write = std::env::var_os("RUNMAT_COMMAND_GAPS_WRITE").is_some();
     let ledger_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/command_gaps.txt");
-    if std::env::var_os("RUNMAT_COMMAND_GAPS_WRITE").is_some() {
+    if write {
         std::fs::write(ledger_path, missing.join("\n") + "\n").unwrap();
     }
+    surfaces_are_current(&gaps, write);
     let ledger: Vec<String> = std::fs::read_to_string(ledger_path)
         .unwrap_or_default()
         .lines()
@@ -167,6 +200,69 @@ fn every_design_command_has_a_handler_on_its_surfaces() {
             .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join("\n")
+    );
+}
+
+/// One command run with its route's handler, past the gap ledger, to find whether a dispatcher
+/// has code for it.
+fn probe(path: &str, route: &commands::Route, request: &RunRequest) -> (Value, bool) {
+    let files = files();
+    commands::take_unhandled();
+    let out = commands::dispatch(path, &files[path], &files, request, route.handler);
+    (out, commands::take_unhandled())
+}
+
+/// The Desktop's `design-command-gaps.json` and the agent's `docs/design/commands.md`, from the
+/// probe's gaps (not the ledger compiled into this build, which a rewrite may have changed).
+fn surfaces_are_current(gaps: &[(&str, &str)], write: bool) {
+    let unavailable: Vec<Value> = gaps
+        .iter()
+        .map(|(command, editor)| json!({ "command": command, "editor": editor }))
+        .collect();
+    let desktop = serde_json::to_string_pretty(&json!({
+        "format": "runmat.design-command-gaps",
+        "unavailable": unavailable,
+    }))
+    .unwrap()
+        + "\n";
+    let doc = commands::catalog().commands_reference(|id, editor| {
+        commands::route(id, editor).is_some_and(|r| {
+            r.handler != Handler::Shell && !gaps.contains(&(id, editor.as_str()))
+        })
+    });
+    for line in [
+        "- `part.sketch`: Start a sketch on a plane or planar face.",
+        "  - Required: `plane` (pick: plane or face)",
+        "## `board.` commands (`.circuit`, `.circuit.layout`)",
+    ] {
+        assert!(doc.contains(line), "{line}");
+    }
+    let private = std::env::var_os("RUNMAT_PRIVATE_CAD_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../runmat-private-cad")
+        });
+    let desktop_path = private.join("desktop/src/generated/design-command-gaps.json");
+    let doc_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/design/commands.md");
+    if write {
+        if desktop_path.parent().is_some_and(|p| p.is_dir()) {
+            std::fs::write(&desktop_path, &desktop).expect("write design-command-gaps.json");
+        }
+        std::fs::write(&doc_path, &doc).expect("write commands.md");
+        return;
+    }
+    if let Ok(checked_in) = std::fs::read_to_string(&desktop_path) {
+        assert!(
+            checked_in == desktop,
+            "{} is stale; regenerate with RUNMAT_COMMAND_GAPS_WRITE=1 RUNMAT_PRIVATE_CAD_ROOT=<runmat-private-cad> cargo test -p runmat-design-tools --test command_registry",
+            desktop_path.display()
+        );
+    }
+    assert!(
+        std::fs::read_to_string(&doc_path).unwrap_or_default() == doc,
+        "{} is stale; regenerate with RUNMAT_COMMAND_GAPS_WRITE=1 cargo test -p runmat-design-tools --test command_registry",
+        doc_path.display()
     );
 }
 
