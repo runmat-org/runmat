@@ -299,3 +299,66 @@ fn c02_impact_and_verify_touch_only_affected_configurations() {
         vec![Some(ConfigurationName::new("thin"))]
     );
 }
+
+/// A mass input reads `g` as the gram, where elsewhere `g` is standard gravity: its default, an
+/// override, a negated literal and a sum all read their literal units expecting a mass.
+#[test]
+fn v04_a_mass_input_reads_g_as_the_gram() {
+    let ev = Evaluator {
+        units: &Units,
+        dynamic: &Fns,
+    };
+    let mass = |default: ValueExpr, overrides: &[(&str, ValueExpr)]| {
+        let overrides = overrides
+            .iter()
+            .map(|(n, e)| (InputName::new(*n), e.clone()))
+            .collect();
+        ev.evaluate_env(&[InputDecl::new("m", "mass", default)], &[], &overrides)
+    };
+    let env = mass(ValueExpr::qty(0.35, "g"), &[]);
+    assert!(env.failed.is_empty(), "{:?}", env.failed);
+    let m = env.inputs[&InputName::new("m")];
+    assert_eq!(m.dimension, Dimension::MASS);
+    assert!((m.si - 0.000_35).abs() < 1e-15, "{}", m.si);
+    let env = mass(
+        ValueExpr::qty(1.0, "kg"),
+        &[("m", ValueExpr::qty(250.0, "mg"))],
+    );
+    assert!((env.inputs[&InputName::new("m")].si - 0.000_25).abs() < 1e-15);
+    let sum = ValueExpr::Binary {
+        op: BinaryOp::Add,
+        lhs: Box::new(ValueExpr::qty(1.0, "kg")),
+        rhs: Box::new(ValueExpr::qty(500.0, "g")),
+    };
+    let env = mass(sum, &[]);
+    assert!((env.inputs[&InputName::new("m")].si - 1.5).abs() < 1e-12);
+    // A length input still refuses grams, naming the unit as usually read.
+    let env = ev.evaluate_env(
+        &[InputDecl::new("t", "length", ValueExpr::qty(3.0, "g"))],
+        &[],
+        &BTreeMap::new(),
+    );
+    assert!(
+        matches!(
+            env.failed.get("input.t"),
+            Some(ValueError::UnitMismatch { .. })
+        ),
+        "{:?}",
+        env.failed
+    );
+    // An acceleration keeps g as standard gravity.
+    let env = ev.evaluate_env(
+        &[InputDecl::new(
+            "a",
+            "acceleration",
+            ValueExpr::qty(1.0, "g"),
+        )],
+        &[],
+        &BTreeMap::new(),
+    );
+    assert!(
+        (env.inputs[&InputName::new("a")].si - 9.806_65).abs() < 1e-9,
+        "{:?}",
+        env.failed
+    );
+}

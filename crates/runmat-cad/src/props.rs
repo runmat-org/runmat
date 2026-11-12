@@ -124,7 +124,11 @@ pub fn validate_properties(
                 }
                 (PropertyType::Quantity { kind }, PropertyValue::Quantity(e)) => {
                     let want = units.kind(kind);
-                    match (ev.eval(e, &ValueEnv::default()), want) {
+                    let read = match want {
+                        Some(d) => ev.eval_expecting(e, &ValueEnv::default(), d),
+                        None => ev.eval(e, &ValueEnv::default()),
+                    };
+                    match (read, want) {
                         (Ok(q), Some(d)) if q.dimension == d => {}
                         (Ok(q), Some(d)) => push(
                             DiagCode::PropertyInvalid,
