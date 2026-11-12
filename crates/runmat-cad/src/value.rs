@@ -403,9 +403,9 @@ impl Written {
     /// The unit `expr` was written in, when one literal carries it.
     pub fn of(expr: &ValueExpr) -> Written {
         match expr {
-            ValueExpr::Quantity { unit, .. } | ValueExpr::Coerce { unit, .. } => Written::Unit {
-                unit: unit.clone(),
-            },
+            ValueExpr::Quantity { unit, .. } | ValueExpr::Coerce { unit, .. } => {
+                Written::Unit { unit: unit.clone() }
+            }
             ValueExpr::Number { .. } => Written::Number,
             ValueExpr::Neg { operand } => Written::of(operand),
             ValueExpr::Toleranced { nominal, .. } => Written::of(nominal),
@@ -628,7 +628,10 @@ pub fn dynamic_cache_key(
     for (n, q) in args {
         part(n.as_bytes());
         part(&q.si.to_bits().to_be_bytes());
-        part(&serde_json::to_vec(&crate::units::wire::to_wire(q.dimension)).expect("dimension serialises"));
+        part(
+            &serde_json::to_vec(&crate::units::wire::to_wire(q.dimension))
+                .expect("dimension serialises"),
+        );
     }
     for (path, digest) in &contract.reads {
         part(path.as_bytes());
@@ -793,6 +796,55 @@ pub struct Evaluator<'a> {
 }
 
 impl<'a> Evaluator<'a> {
+    /// [`Evaluator::eval`] for a value checked against its kind: a literal's unit is read
+    /// expecting that kind, so a mass input's `0.35 g` is grams. Sums and negations pass the
+    /// kind to their operands; anything else evaluates as usual.
+    pub fn eval_expecting(
+        &self,
+        expr: &ValueExpr,
+        env: &ValueEnv,
+        expected: crate::units::Dimension,
+    ) -> Result<Quantity, ValueError> {
+        match expr {
+            ValueExpr::Quantity { value, unit } => {
+                let Some(info) = self.units.unit_expecting(unit, expected) else {
+                    return self.eval(expr, env);
+                };
+                let si = info
+                    .to_canonical(*value)
+                    .map_err(|_| ValueError::UnknownUnit { unit: unit.clone() })?;
+                Ok(Quantity::new(si, crate::units::dimension_of(&info)))
+            }
+            ValueExpr::Neg { operand } => {
+                let v = self.eval_expecting(operand, env, expected)?;
+                Ok(Quantity::new(-v.si, v.dimension))
+            }
+            ValueExpr::Binary {
+                op: op @ (BinaryOp::Add | BinaryOp::Sub),
+                lhs,
+                rhs,
+            } => {
+                let (a, b) = (
+                    self.eval_expecting(lhs, env, expected)?,
+                    self.eval_expecting(rhs, env, expected)?,
+                );
+                if a.dimension != b.dimension {
+                    // The usual reading reports the mismatch.
+                    return self.eval(expr, env);
+                }
+                Ok(Quantity::new(
+                    if *op == BinaryOp::Add {
+                        a.si + b.si
+                    } else {
+                        a.si - b.si
+                    },
+                    a.dimension,
+                ))
+            }
+            _ => self.eval(expr, env),
+        }
+    }
+
     pub fn eval(&self, expr: &ValueExpr, env: &ValueEnv) -> Result<Quantity, ValueError> {
         match expr {
             ValueExpr::Quantity { value, unit } => {
@@ -834,8 +886,12 @@ impl<'a> Evaluator<'a> {
                         if a.dimension != b.dimension {
                             return Err(ValueError::UnitMismatch {
                                 subject: Some(
-                                    if *op == BinaryOp::Add { "the added value" } else { "the subtracted value" }
-                                        .to_owned(),
+                                    if *op == BinaryOp::Add {
+                                        "the added value"
+                                    } else {
+                                        "the subtracted value"
+                                    }
+                                    .to_owned(),
                                 ),
                                 expected: a.dimension,
                                 found: b.dimension,
@@ -1016,7 +1072,7 @@ impl<'a> Evaluator<'a> {
         env: &ValueEnv,
         expected: Dimension,
     ) -> Result<f64, ValueError> {
-        let q = self.eval(expr, env)?;
+        let q = self.eval_expecting(expr, env, expected)?;
         if q.dimension != expected {
             if let Some(e) = self.unitless(expr, env, expected, si_symbol(expected)) {
                 return Err(e);
@@ -1106,7 +1162,11 @@ impl<'a> Evaluator<'a> {
             if env.failed.contains_key(&format!("let.{}", name)) {
                 return;
             }
-            match ev.eval(&decl.value, env) {
+            let evaluated = match decl.kind.as_ref().and_then(|kind| ev.units.kind(kind)) {
+                Some(expected) => ev.eval_expecting(&decl.value, env, expected),
+                None => ev.eval(&decl.value, env),
+            };
+            match evaluated {
                 Ok(q) => {
                     if let Some(kind) = &decl.kind {
                         match ev.units.kind(kind) {
@@ -1160,7 +1220,7 @@ impl<'a> Evaluator<'a> {
             .ok_or_else(|| ValueError::UnknownKind {
                 kind: decl.kind.0.clone(),
             })?;
-        let q = self.eval(expr, env)?;
+        let q = self.eval_expecting(expr, env, expected)?;
         if q.dimension != expected {
             if let Some(e) = self.unitless(expr, env, expected, si_symbol(expected)) {
                 return Err(e);

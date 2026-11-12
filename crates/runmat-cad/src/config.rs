@@ -112,7 +112,11 @@ pub fn expand_columnar(
                 continue;
             }
             Some(ColumnData::F64 { unit, values }) => {
-                let Some(u) = units.unit(unit) else {
+                let read = match expected {
+                    Some(k) => units.unit_expecting(unit, k),
+                    None => units.unit(unit),
+                };
+                let Some(u) = read else {
                     problems.push(TableProblem::UnknownUnit {
                         column: col.clone(),
                         unit: unit.clone(),
