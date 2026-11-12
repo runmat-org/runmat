@@ -381,6 +381,7 @@ fn draw(
             ];
             Ok((entities, relations))
         }
+        "sketch.polygon" => polygon(values, &mut name),
         "sketch.offset" => {
             let d = values
                 .get("distance")
@@ -445,6 +446,72 @@ fn draw(
         }
         other => Err(super::unhandled(other)),
     }
+}
+
+/// A regular polygon: `sides` lines in a closed chain, each corner shared, all of equal length.
+/// Its corners sit on a circle of `radius` about `center` (inscribed), or its sides touch that
+/// circle (circumscribed); `rotation` (degrees) turns the first corner from the +x direction.
+fn polygon(
+    values: &Map<String, Value>,
+    name: &mut dyn FnMut(&str) -> String,
+) -> Result<(Vec<SketchEntity>, Vec<SketchConstraint>), EditFailure> {
+    let n = values.get("sides").and_then(num).unwrap_or(6.0).round();
+    if !(3.0..=64.0).contains(&n) {
+        return Err(model("a polygon has 3 to 64 sides"));
+    }
+    let n = n as usize;
+    let Some((cx, cy)) = xy(values, "center") else {
+        return Err(model("pick the polygon's centre on the sketch"));
+    };
+    let r = values
+        .get("radius")
+        .and_then(num)
+        .filter(|r| *r > 0.0)
+        .ok_or_else(|| model("give the polygon a radius"))?;
+    let step = std::f64::consts::TAU / n as f64;
+    // Circumscribed: the sides touch the circle, so the corners sit further out.
+    let corner_r = match values.get("fit").and_then(Value::as_str) {
+        Some("circumscribed") => r / (step / 2.0).cos(),
+        _ => r,
+    };
+    let turn = values.get("rotation").and_then(num).unwrap_or(0.0).to_radians();
+    let ids: Vec<String> = (0..n).map(|_| name("l")).collect();
+    let corner = |k: usize| {
+        let a = turn + step * k as f64;
+        let round = |v: f64| (v * 1e6).round() / 1e6;
+        PointExpr::Coords {
+            x: mm(round(cx + corner_r * a.cos())),
+            y: mm(round(cy + corner_r * a.sin())),
+        }
+    };
+    let entities = (0..n)
+        .map(|k| {
+            let start = if k == 0 {
+                corner(0)
+            } else {
+                of(&ids[k - 1], PointRole::End)
+            };
+            let end = if k == n - 1 {
+                of(&ids[0], PointRole::Start)
+            } else {
+                corner(k + 1)
+            };
+            SketchEntity {
+                id: SketchEntityId::new(&ids[k]),
+                geometry: G::Line { start, end },
+                construction: false,
+            }
+        })
+        .collect();
+    let relations = (1..n)
+        .map(|k| {
+            constraint(K::Equal {
+                a: SketchTarget::entity(&ids[0]),
+                b: SketchTarget::entity(&ids[k]),
+            })
+        })
+        .collect();
+    Ok((entities, relations))
 }
 
 /// A point's position from the sketch's `solved { }` cache, in millimetres.

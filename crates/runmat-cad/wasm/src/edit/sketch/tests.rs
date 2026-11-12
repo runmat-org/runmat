@@ -135,6 +135,27 @@ fn drawing_tools_write_entities_into_the_open_sketch() {
             .count(),
         2
     );
+    // A hexagon: six lines in a closed chain, all equal, its first corner on +x.
+    let hex = applied(
+        PLATE,
+        "sketch.polygon",
+        json!({ "sketch": "s1", "sides": 6, "center": { "x": 20, "y": 20 }, "radius": 5, "fit": "inscribed", "rotation": 0 }),
+    );
+    let new = added(PLATE, &hex);
+    assert_eq!(
+        new.iter().filter(|l| l.contains("= line(")).count(),
+        6,
+        "{new:?}"
+    );
+    assert_eq!(
+        new.iter().filter(|l| l.contains("constrain equal")).count(),
+        5,
+        "{new:?}"
+    );
+    assert!(
+        new.iter().any(|l| l.contains("start = [25 mm, 20 mm]")),
+        "{new:?}"
+    );
     // A circle, a slot (two lines, two arcs, tangent and equal), a point.
     let circle = applied(
         PLATE,

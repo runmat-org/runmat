@@ -117,7 +117,6 @@ sketch.offset assembly
 sketch.pattern assembly
 sketch.point assembly
 sketch.polygon assembly
-sketch.polygon part
 sketch.rectangle assembly
 sketch.rectangle assembly type=center
 sketch.rectangle assembly type=corner
