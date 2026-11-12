@@ -80,14 +80,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "44db52c4eb7410d88c988dfc061ea4d94b324d0ee1c4b7db0d6665edac0243cf",
+      "sha256": "190b41b66e4260e756e5a6187443feb05e3d1ae4f8b261e02a9ee57b831ab6da",
       "files": 26117,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the recorded scientific measurement across circuit lint metadata, an exact transparent return-type alias and a test-only initializer. Prior CAD/circuit conservation across the FEA intake remains individually declared. No arithmetic, allocation, workload, dependency, compiler setting or timing threshold changes.",
+    "reason": "Conserves the recorded scientific measurements across the reviewed process-retirement lifecycle change. Apple group-signal EPERM commits to bounded observation and retains its error; positive leader/group retirement is still required. Linux and Windows retain their previous signal/error decisions. No solver arithmetic, scientific inputs, dependencies, compiler settings or measured thresholds change. The direct in-process circuit Session workload and CAD drawing host workload do not invoke this child-retirement path. The actual Mac meshing and supervisor conformance executables pass with unchanged assertions; they qualify the affected native path separately from these conserved scientific measurements.",
     "review": {
-      "path": "qualification/scientific/reviews/circuit-quality-20261112-cad-airliner-drawing-memory.json",
-      "sha256": "1925a829d5c1cd00ba23081af1b17ee1b92a95a49dc0c6ce9981f1f6f59d051d"
+      "path": "qualification/scientific/reviews/process-retirement-20261112-cad-airliner-drawing-memory.json",
+      "sha256": "cc1c30f896cfd910865822fcc9194c53c53d2e07c4b2e91e3c3f043db048499a"
     }
   }
 }
