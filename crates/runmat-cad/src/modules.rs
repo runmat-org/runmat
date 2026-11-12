@@ -11,8 +11,13 @@
 //!   reaches `+pkg/fn.m` as `pkg.fn`.
 //! - **Pins:** `use part wing_skeleton from "//wing/skeleton" @ "R3" as skeleton`; `//` is the
 //!   project root (the outermost folder holding `runmat.toml`).
-//! - A design named by its file path (`from "seat_frame.part"`, `file = "arm.part"`) is an
-//!   error that says which symbol to write. Non-design sources (STEP) keep their paths.
+//! - **Files:** `from` may name one design file instead of its folder:
+//!   `model = { part = l_bracket, from = "../l_bracket.part" }` or
+//!   `use part seat_frame from "./cabin/seat_frame.part" as left`. The named design must be one
+//!   the file declares; with no name (`model = { from = "../l_bracket.part" }`) the file's own
+//!   design is used. See [`file_form`].
+//! - A `file = "arm.part"` key names a design by path, and is an error that says which symbol to
+//!   write. Non-design sources (STEP) keep their paths.
 //!
 //! The model keeps one identity for a definition: its resolved file ([`DefinitionRef`]). Text
 //! holds the symbol. [`bind`] turns the symbols a parse lowered into files through a
@@ -27,6 +32,9 @@ use runmat_design_syntax::ast::{Headed, Item, Statement, UseSource};
 use runmat_design_syntax::json::Json;
 use runmat_design_syntax::{parse_source, Dialect};
 use std::collections::{BTreeMap, BTreeSet};
+
+pub mod file_form;
+pub use file_form::relative;
 
 /// The kinds a design declares, with their file extensions.
 pub const DESIGN_KINDS: &[(&str, &str)] = &[
@@ -175,11 +183,8 @@ pub fn scan(path: &str, text: &str) -> FileHeader {
                         Statement::Use(u) => {
                             if let (Some(_), Some(source)) = (u.symbol(), u.source()) {
                                 match source {
-                                    UseSource::Path(p) if !is_file_path(&p) => {
-                                        out.occurrence_froms.push(p)
-                                    }
+                                    UseSource::Path(p) => out.occurrence_froms.push(p),
                                     UseSource::Package(s) => out.occurrence_froms.push(s.join(".")),
-                                    _ => {}
                                 }
                             } else if let Some(UseSource::Package(s)) = u.source() {
                                 if s.len() == 3 {
@@ -282,7 +287,12 @@ impl ModuleScope {
                 s.row(&folder).uses.push(UseDecl { from: target, ..u });
             }
             for from in header.occurrence_froms {
-                if let Ok(target) = s.module_folder(&folder, &from) {
+                let target = if is_file_path(&from) {
+                    s.path_of(&folder, &from).map(|f| folder_of(&f).to_string())
+                } else {
+                    s.module_folder(&folder, &from)
+                };
+                if let Ok(target) = target {
                     if target != folder {
                         s.occurrence_edges
                             .entry(folder.clone())
@@ -308,18 +318,8 @@ impl ModuleScope {
     /// The folder a `from` names, seen from `folder`: a path (`./cabin`, `../wing`, `//lib`),
     /// a folder alias of `folder`'s `use` lines, or a package.
     pub fn module_folder(&self, folder: &str, from: &str) -> Result<String, String> {
-        if let Some(rest) = from.strip_prefix("//") {
-            let root = self.root.as_deref().ok_or_else(|| {
-                format!("`{from}` is root-relative, and no runmat.toml marks the project root")
-            })?;
-            return Ok(join(root, rest));
-        }
         if from.starts_with('.') || from.starts_with('/') || from.contains('/') {
-            return Ok(if from.starts_with('/') {
-                normalize(from)
-            } else {
-                join(folder, from)
-            });
+            return self.path_of(folder, from);
         }
         if let Some(u) = self.scope.folders.get(folder).and_then(|f| {
             f.uses
@@ -340,7 +340,9 @@ impl ModuleScope {
         ))
     }
 
-    /// The file declaring `kind name`, seen from the file `doc`, through `from` when given.
+    /// The file declaring `kind name`, seen from the file `doc`, through `from` when given:
+    /// a folder, alias or package, or one design file (the file form). An empty `name` with a
+    /// file-form `from` takes the file's own design of `kind`.
     pub fn locate(
         &self,
         doc: &str,
@@ -349,6 +351,9 @@ impl ModuleScope {
         from: Option<&str>,
     ) -> Result<String, String> {
         let folder = folder_of(doc).to_string();
+        if let Some(f) = from.filter(|f| is_file_path(f)) {
+            return self.locate_in_file(&folder, kind, name, f);
+        }
         let target = match from {
             None => folder.clone(),
             Some(f) => self.module_folder(&folder, f)?,
@@ -356,7 +361,7 @@ impl ModuleScope {
         if !self.scope.folders.contains_key(&target) {
             return Err(match from {
                 None => format!("no `{kind} {name}` in this folder"),
-                Some(f) => format!("the folder `{f}` holds no designs (or isn't in the workspace)"),
+                Some(f) => self.missing(&folder, f, &target),
             });
         }
         match self.scope.resolve_qualified(&target, &[kind, name]) {
@@ -491,6 +496,10 @@ fn site(key: &str, obj: &[(String, Json)]) -> Option<(Site, String, String)> {
             if let Some(n) = text(get(k)) {
                 return Some((Site::Model, (*k).into(), n));
             }
+        }
+        // `model = { from = "../bracket.part" }`: the file's own design.
+        if let Some(kind) = text(get("from")).as_deref().and_then(kind_of_file) {
+            return Some((Site::Model, kind.into(), String::new()));
         }
     }
     None
@@ -691,16 +700,7 @@ pub fn module_text(doc: &str, file: &str) -> Option<String> {
             }
         }
     }
-    let a: Vec<&str> = here.split('/').filter(|s| !s.is_empty()).collect();
-    let b: Vec<&str> = there.split('/').filter(|s| !s.is_empty()).collect();
-    let common = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
-    let mut parts: Vec<String> = Vec::new();
-    if common == a.len() {
-        parts.push(".".into());
-    }
-    parts.extend(std::iter::repeat_n("..".to_string(), a.len() - common));
-    parts.extend(b[common..].iter().map(|s| s.to_string()));
-    Some(parts.join("/"))
+    Some(relative(here, there))
 }
 
 /// The symbol form of a value that names a design by file, for printing in the file `doc`;
@@ -823,15 +823,22 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     out.into_iter().collect()
 }
 
-/// The folder listings (`<folder>/`) a `from` names, seen from the file `doc`: the folder of a
-/// path (`./cabin`, `../wing`), or each `+package` folder a package can be in, from `doc`'s
-/// folder up to the workspace root. An alias names a folder the file's own `use` line lists; a
-/// file path and a root path (`//lib`) name none.
+/// The folder listings (`<folder>/`) and files a `from` names, seen from the file `doc`: the
+/// folder of a path (`./cabin`, `../wing`), the file of a file path (`../arm.part`), or each
+/// `+package` folder a package can be in, from `doc`'s folder up to the workspace root. An alias
+/// names a folder the file's own `use` line lists; a root path (`//lib`) names none.
 pub fn from_listings(doc: &str, from: &str) -> Vec<String> {
     let folder = folder_of(doc);
     let listing = |f: String| if f.ends_with('/') { f } else { format!("{f}/") };
-    if is_file_path(from) || from.starts_with("//") {
+    if from.starts_with("//") {
         return Vec::new();
+    }
+    if is_file_path(from) {
+        return vec![if from.starts_with('/') {
+            normalize(from)
+        } else {
+            join(folder, from)
+        }];
     }
     if from.starts_with('.') || from.contains('/') {
         return vec![listing(join(folder, from))];

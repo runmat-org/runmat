@@ -94,7 +94,7 @@ drawing bracket {
 
 ## Views
 
-`view <name> = <kind>(…, sheet, model, at, scale, display)`. Every view names its sheet, its model (`model = { part = bracket }`, `model = { assembly = drone, from = ".." }`), its position on the sheet in millimeters and its display (`visible_lines`, `hidden_lines` or `shaded`), and optionally its own scale. `exclude` leaves occurrences out of an assembly view, and `exploded` shows a named exploded state.
+`view <name> = <kind>(…, sheet, model, at, scale, display)`. Every view names its sheet, its model (`model = { part = bracket }`, `model = { assembly = drone, from = ".." }`, `model = { part = bracket, from = "../bracket.part" }`), its position on the sheet in millimeters and its display (`visible_lines`, `hidden_lines` or `shaded`), and optionally its own scale. `exclude` leaves occurrences out of an assembly view, and `exploded` shows a named exploded state.
 
 | Kind | Parameters | Shows |
 |---|---|---|
@@ -104,6 +104,23 @@ drawing bracket {
 | `detail` | `from`, `center`, `radius`, `label` | an enlarged circle of another view |
 | `auxiliary` | `from`, `edge`, `label` | a view perpendicular to a model edge |
 | `broken_out` | `from`, `boundary`, `depth` | material removed inside a boundary |
+
+A view's `from` names the folder that holds the design (`".."`) or the design's file (`"../bracket.part"`). With the file form, `part =` is optional, and the view shows the part that file declares. A drawing kept in a `drawings/` folder reaches the bracket one level up either way:
+
+```drawing file=drawings/bracket_shop.drawing
+runmat 0.7
+std 1
+
+drawing bracket_shop {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [{ label = "Sheet", source = { source = sheet_number } }]
+    }
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+    view front = standard(orientation = front, sheet = "1", model = { part = bracket, from = "../bracket.part" }, at = [150, 165], display = hidden_lines)
+    view top = standard(orientation = top, sheet = "1", model = { part = bracket, from = ".." }, at = [150, 80], display = hidden_lines)
+}
+```
 
 ```drawing fragment
 view a_a = section(from = front, plane = feature.body.face.start, label = A, sheet = "1", model = { part = bracket }, at = [100, 100], display = hidden_lines)

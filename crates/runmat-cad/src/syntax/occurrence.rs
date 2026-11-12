@@ -705,31 +705,25 @@ pub fn lower(
 ) -> Result<BlockEntry, LowerError> {
     let span = declaration.span();
     let form = "an occurrence is `use <kind> <name> as <name>` (this folder), \
-                `use <kind> <name> from \"<folder>\" as <name>`, or `use <alias>.<kind>.<name> as <name>`";
-    // (kind, name, the module it is in), or the file form's file.
-    let (kind, symbol, module, file) = match (declaration.symbol(), declaration.source()) {
-        (Some((kind, symbol)), Some(UseSource::Path(path)))
-            if crate::modules::is_file_path(&path) =>
-        {
-            (kind.text(), symbol.text(), None, Some(path))
-        }
-        (Some((kind, symbol)), Some(UseSource::Path(folder))) => {
-            let folder = if folder.starts_with('.') || folder.starts_with('/') {
-                folder
+                `use <kind> <name> from \"<folder or file>\" as <name>`, or `use <alias>.<kind>.<name> as <name>`";
+    // (kind, name, the folder, package or design file it is in).
+    let (kind, symbol, module) = match (declaration.symbol(), declaration.source()) {
+        (Some((kind, symbol)), Some(UseSource::Path(path))) => {
+            let path = if path.starts_with('.') || path.starts_with('/') {
+                path
             } else {
-                format!("./{folder}")
+                format!("./{path}")
             };
-            (kind.text(), symbol.text(), Some(folder), None)
+            (kind.text(), symbol.text(), Some(path))
         }
         (Some((kind, symbol)), Some(UseSource::Package(segments))) => {
-            (kind.text(), symbol.text(), Some(segments.join(".")), None)
+            (kind.text(), symbol.text(), Some(segments.join(".")))
         }
-        (Some((kind, symbol)), None) => (kind.text(), symbol.text(), None, None),
+        (Some((kind, symbol)), None) => (kind.text(), symbol.text(), None),
         (None, Some(UseSource::Package(segments))) if segments.len() == 3 => (
             segments[1].clone(),
             segments[2].clone(),
             Some(segments[0].clone()),
-            None,
         ),
         _ => return Err(error(span, form)),
     };
@@ -744,20 +738,10 @@ pub fn lower(
         .ok_or_else(|| error(span, "an occurrence needs `as <name>`"))?
         .text();
     let mut definition = vec![("kind".to_string(), Json::String(kind))];
-    match file {
-        Some(file) => {
-            definition.push(("file".into(), Json::String(file.clone())));
-            if symbol != stem_name(&file) {
-                definition.push(("part".into(), Json::String(symbol)));
-            }
-        }
-        None => {
-            // A symbol: `crate::modules::bind` resolves it to its file through the folder scope.
-            definition.push(("name".into(), Json::String(symbol)));
-            if let Some(module) = module {
-                definition.push(("from".into(), Json::String(module)));
-            }
-        }
+    // A symbol: `crate::modules::bind` resolves it to its file through the folder scope.
+    definition.push(("name".into(), Json::String(symbol)));
+    if let Some(module) = module {
+        definition.push(("from".into(), Json::String(module)));
     }
     let mut source = vec![("definition".to_string(), Json::Object(definition))];
     if let Some(revision) = declaration.pin() {

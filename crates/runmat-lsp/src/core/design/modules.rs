@@ -29,6 +29,7 @@ impl Resolved {
     pub fn origin(&self) -> String {
         let place = match &self.from {
             None => "this folder".to_string(),
+            Some(f) if runmat_cad::modules::is_file_path(f) => format!("file `{f}`"),
             Some(f) if f.starts_with('.') || f.starts_with('/') => format!("folder `{f}`"),
             Some(f) => format!(
                 "`{f}` (a folder alias or `+{}` package)",
@@ -42,10 +43,9 @@ impl Resolved {
     }
 }
 
-/// The `kind name` (with its module) a `use` line names by symbol; `None` for the file form.
+/// The `kind name` a `use` line names, with the folder, package or design file it is in.
 fn named(u: &UseDeclaration) -> Option<(String, String, Option<String>)> {
     match (u.symbol(), u.source()) {
-        (Some(_), Some(UseSource::Path(p))) if runmat_cad::modules::is_file_path(&p) => None,
         (Some((k, n)), Some(UseSource::Path(p))) => {
             let p = if p.starts_with('.') || p.starts_with('/') {
                 p
