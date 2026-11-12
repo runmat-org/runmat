@@ -76,14 +76,8 @@ motion.collision assembly
 motion.drag assembly
 motion.mate-controller assembly
 motion.to-fea assembly
-part.edit-feature part
 part.edit-sketch-plane part
 part.library part
-part.parents-children part
-part.rename part
-part.rollback-end part
-part.rollback-here part
-part.show-references part
 sheet-metal.bend-table part
 sheet-metal.gauge part
 simulate.defeature part

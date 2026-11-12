@@ -214,11 +214,13 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
 pub(super) fn tree_actions() -> Vec<CommandDescriptor> {
     let f = &[K::Feature, K::Sketch];
     vec![
+        // The canvas runs it: Properties opens on the feature with its inputs editable, and
+        // each change there is a `part.set-property` edit.
         cmd("part.edit-feature", "Edit feature", "edit", P)
             .desc("Open the feature's inputs in Properties.")
             .when(selected_one(f))
             .on(f)
-            .edit(edit(EditOp::Edit, Section::Features)),
+            .edit(view_action("edit_feature")),
         cmd("part.edit-sketch", "Edit sketch", "sketch", P)
             .desc("Open the sketch for editing.")
             .when(selected_one(&[K::Sketch, K::Feature]))
