@@ -84,6 +84,7 @@ mod stackup;
 mod package;
 mod graphic;
 mod print;
+pub mod authored;
 
 use graphic::*;
 use items::*;
