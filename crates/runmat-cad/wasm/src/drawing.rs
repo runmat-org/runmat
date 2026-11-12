@@ -430,6 +430,12 @@ pub fn compile_json_in(
         &values::Values {
             displays,
             documents: &documents,
+            units: document
+                .formats
+                .iter()
+                .map(|f| f.units)
+                .find(|u| !u.is_mm())
+                .unwrap_or_default(),
         },
     );
     let mut data = serde_json::to_value(&index).unwrap_or(Value::Null);
@@ -509,7 +515,11 @@ pub fn compile_json_in(
                     // A section through the plane the view names, seen across the parent's cutting
                     // line: the parent's right stays right and its depth becomes up.
                     Some("section") => {
-                        drawn_in = Some(section_axes(&parent_axes));
+                        drawn_in = Some(section_axes(
+                            &parent_axes,
+                            section_sides(&document, name).0,
+                            section_sides(&document, name).1,
+                        ));
                         section_entry(display, &document, name, &parent_axes, &views, parent)
                     }
                     // A detail: the parent's lines, clipped by the sheet to the circle around the
@@ -532,7 +542,13 @@ pub fn compile_json_in(
                                 if let Value::Object(o) = &mut cut {
                                     o.remove("cut");
                                 }
-                                (section_axes(&from_axes), cut)
+                                (
+                                    {
+                                        let (other, vertical) = section_sides(&document, parent);
+                                        section_axes(&from_axes, other, vertical)
+                                    },
+                                    cut,
+                                )
                             }
                             _ => (
                                 parent_axes,
@@ -871,11 +887,7 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 fn radius_mm(v: &runmat_cad::value::ValueExpr) -> Option<f64> {
-    match v {
-        runmat_cad::value::ValueExpr::Quantity { value, unit } if unit == "mm" => Some(*value),
-        runmat_cad::value::ValueExpr::Number { value } => Some(*value),
-        _ => None,
-    }
+    runmat_cad::units::length_mm(v)
 }
 
 /// A model point (mm) a reference names: a cylindrical face's axis at its middle, a face's
@@ -957,12 +969,53 @@ fn point_of(
 /// parent's view millimetres, with the label and the direction the arrows point).
 /// A section's axes, seen across its parent's cutting line: the parent's right stays right and
 /// its depth becomes up.
-fn section_axes(parent: &crate::hlr::Axes) -> crate::hlr::Axes {
+/// A section that keeps the other side looks the other way: toward the parent's bottom, the
+/// parent's right still right and its depth down (a floor plan cut through a front elevation is
+/// seen from above). A vertical cut looks toward the parent's right (the other side: its left),
+/// with the parent's viewer side up: a vertical cut through a roof plan looks along the building
+/// with the roof up.
+fn section_axes(parent: &crate::hlr::Axes, other_side: bool, vertical: bool) -> crate::hlr::Axes {
+    let neg = |a: [f64; 3]| a.map(|x| -x);
+    if vertical {
+        let depth = if other_side { neg(parent.u) } else { parent.u };
+        let v = neg(parent.depth);
+        // Right-handed like every view: u = depth × v.
+        let u = [
+            depth[1] * v[2] - depth[2] * v[1],
+            depth[2] * v[0] - depth[0] * v[2],
+            depth[0] * v[1] - depth[1] * v[0],
+        ];
+        return crate::hlr::Axes { u, v, depth };
+    }
+    if other_side {
+        return crate::hlr::Axes {
+            u: parent.u,
+            v: parent.depth,
+            depth: neg(parent.v),
+        };
+    }
     crate::hlr::Axes {
         u: parent.u,
-        v: parent.depth.map(|x| -x),
+        v: neg(parent.depth),
         depth: parent.v,
     }
+}
+
+/// How the section view `name` cuts: (keeps the other side, vertical cutting line).
+fn section_sides(document: &runmat_cad::drawing::DrawingDocument, name: &str) -> (bool, bool) {
+    document
+        .views
+        .iter()
+        .find(|v| v.name == name)
+        .and_then(|v| match v.kind {
+            runmat_cad::drawing::ViewKind::Section {
+                keep_other_side,
+                vertical,
+                ..
+            } => Some((keep_other_side, vertical)),
+            _ => None,
+        })
+        .unwrap_or((false, false))
 }
 
 fn section_entry(
@@ -973,17 +1026,27 @@ fn section_entry(
     views: &Value,
     from: &str,
 ) -> Value {
-    let Some((plane, label)) =
-        document
-            .views
-            .iter()
-            .find(|v| v.name == name)
-            .and_then(|v| match &v.kind {
-                runmat_cad::drawing::ViewKind::Section { plane, label, .. } => {
-                    Some((plane, label.clone()))
-                }
-                _ => None,
-            })
+    let Some((plane, label, offset, other_side, vertical)) = document
+        .views
+        .iter()
+        .find(|v| v.name == name)
+        .and_then(|v| match &v.kind {
+            runmat_cad::drawing::ViewKind::Section {
+                plane,
+                label,
+                offset,
+                keep_other_side,
+                vertical,
+                ..
+            } => Some((
+                plane,
+                label.clone(),
+                offset.as_ref(),
+                *keep_other_side,
+                *vertical,
+            )),
+            _ => None,
+        })
     else {
         return Value::Null;
     };
@@ -997,16 +1060,25 @@ fn section_entry(
         } => Some([0.0; 3]),
         PlaneRef::Datum { .. } => None,
     };
-    let Some(p0) = p0 else {
+    let Some(mut p0) = p0 else {
         return Value::Null;
     };
-    let axes = section_axes(parent);
+    // The cutting line's normal on the parent: its up, or its right for a vertical cut. The
+    // offset moves the cut along it.
+    let normal = if vertical { parent.u } else { parent.v };
+    if let Some(offset) = offset {
+        let Some(d) = radius_mm(offset) else {
+            return Value::Null;
+        };
+        p0 = [0, 1, 2].map(|i| p0[i] + normal[i] * d);
+    }
+    let axes = section_axes(parent, other_side, vertical);
     let mut lines =
         serde_json::to_value(crate::hlr::section_lines(display, &axes, p0)).unwrap_or(Value::Null);
     if let Value::Object(o) = &mut lines {
         o.insert(
             "cut".into(),
-            json!({ "view": from, "at": dot(p0, parent.v), "label": label, "toward": [dot(axes.depth, parent.u), dot(axes.depth, parent.v)] }),
+            json!({ "view": from, "at": dot(p0, normal), "vertical": vertical, "label": label, "toward": [dot(axes.depth, parent.u), dot(axes.depth, parent.v)] }),
         );
     }
     lines
@@ -1054,5 +1126,36 @@ mod exclude_tests {
             .collect();
         assert_eq!(paths, ["housing", "lid_screw1", "pairs"]);
         assert!(without_occurrences(&display, &[]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod section_side_tests {
+    use super::section_axes;
+
+    #[test]
+    fn a_horizontal_cut_that_keeps_the_other_side_is_a_plan_seen_from_above() {
+        let front = crate::hlr::axes("front");
+        // As drawn by default: seen from below, the model above the cut.
+        let up = section_axes(&front, false, false);
+        assert_eq!((up.v, up.depth), ([0.0, -1.0, 0.0], [0.0, 0.0, 1.0]));
+        // Keeping the other side: seen from above with north up, the model below the cut.
+        let plan = section_axes(&front, true, false);
+        assert_eq!(plan.u, [1.0, 0.0, 0.0]);
+        assert_eq!((plan.v, plan.depth), ([0.0, 1.0, 0.0], [0.0, 0.0, -1.0]));
+    }
+
+    #[test]
+    fn a_vertical_cut_through_a_plan_looks_along_the_building_with_the_roof_up() {
+        let top = crate::hlr::axes("top");
+        // Looking east, south on the right.
+        let east = section_axes(&top, false, true);
+        assert_eq!(east.depth, [1.0, 0.0, 0.0]);
+        assert_eq!(east.v, [0.0, 0.0, 1.0]);
+        assert_eq!(east.u, [0.0, -1.0, 0.0]);
+        // The other side: looking west, north on the right.
+        let west = section_axes(&top, true, true);
+        assert_eq!(west.depth, [-1.0, 0.0, 0.0]);
+        assert_eq!(west.u, [0.0, 1.0, 0.0]);
     }
 }

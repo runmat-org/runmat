@@ -243,12 +243,21 @@ pub fn measure(ctx: &mut Ctx<'_>) -> Vec<ViewPlan> {
         let big = ctx.std.text * 1.4;
         let small = ctx.std.text;
         let differs = (scale - ctx.scale).abs() > 1e-9;
-        let scale_line = (format!("SCALE {}", super::scale_text(scale)), small);
+        let scale_line = (format!("SCALE {}", ctx.scale_label(scale)), small);
         let mut labels = Vec::new();
         let titled = |t: String, labels: &mut Vec<(String, f64)>| {
             labels.push((t, big));
         };
+        let own_title = view["title"].as_str().map(str::to_owned);
+        if let Some(t) = &own_title {
+            titled(t.clone(), &mut labels);
+        }
         match kind.as_str() {
+            _ if own_title.is_some() => {
+                if kind == "standard" && k["orientation"].as_str() != Some("isometric") {
+                    first_standard = false;
+                }
+            }
             "section" => titled(
                 format!(
                     "SECTION {0}-{0}",
@@ -283,7 +292,7 @@ pub fn measure(ctx: &mut Ctx<'_>) -> Vec<ViewPlan> {
                 }
             }
         }
-        if differs || kind == "detail" {
+        if differs || kind == "detail" || own_title.is_some() {
             labels.push(scale_line);
         }
         let parent = k["from"].as_str().map(str::to_owned);
@@ -731,14 +740,15 @@ pub fn draw(ctx: &mut Ctx<'_>, plans: &[ViewPlan]) {
                 if let Some(at) = v.seam["cut"]["at"].as_f64() {
                     let toward = xy(&v.seam["cut"]["toward"]).unwrap_or([0.0, 1.0]);
                     let pg = parent.geom_box();
-                    let y = parent.to_sheet([0.0, at])[1];
-                    let marks = ctx.std.cutting_plane(
-                        &v.id,
-                        [pg.x0 - 8.0, y],
-                        [pg.x1 + 8.0, y],
-                        toward,
-                        &letter,
-                    );
+                    // Across the parent, or up it for a vertical cut.
+                    let (a, b) = if v.seam["cut"]["vertical"] == true {
+                        let x = parent.to_sheet([at, 0.0])[0];
+                        ([x, pg.y0 - 8.0], [x, pg.y1 + 8.0])
+                    } else {
+                        let y = parent.to_sheet([0.0, at])[1];
+                        ([pg.x0 - 8.0, y], [pg.x1 + 8.0, y])
+                    };
+                    let marks = ctx.std.cutting_plane(&v.id, a, b, toward, &letter);
                     ctx.occ.add_prims(&marks, &v.id);
                     out.extend(marks);
                 }

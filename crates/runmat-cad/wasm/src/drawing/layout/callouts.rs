@@ -71,7 +71,8 @@ pub fn reserve_manual(ctx: &mut Ctx<'_>) {
         let id = format!("annotation:{}", a["id"].as_str().unwrap_or(""));
         let t = ctx.text_of(a["id"].as_str().unwrap_or(""));
         let b = match a["kind"]["annotation"].as_str() {
-            Some("note") => notes_box(&ctx.std, at, &t),
+            Some("note") if a["kind"]["leader"].is_null() => notes_box(&ctx.std, at, &t),
+            Some("note") => ctx.std.leader_box(at, true, &t.replace('\n', " ")),
             Some("gdt") => {
                 let cells: Vec<&str> = t.split('|').collect();
                 let [w, h] = frame_size(&ctx.std, &cells);
@@ -79,7 +80,14 @@ pub fn reserve_manual(ctx: &mut Ctx<'_>) {
             }
             _ => continue,
         };
-        ctx.occ.add(b, &id, Class::Text);
+        // A plain note placed by hand belongs to its view's area (a room name on a plan), so it
+        // keeps other views and callouts away but never pushes its own view off its spot.
+        let owner = if a["kind"]["annotation"] == "note" && a["kind"]["leader"].is_null() {
+            format!("view:{}", a["view"].as_str().unwrap_or(""))
+        } else {
+            id
+        };
+        ctx.occ.add(b, &owner, Class::Text);
     }
 }
 
@@ -423,7 +431,9 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                     "weld" => weld_text(kind),
                     _ => t.replace('\n', " "),
                 };
-                if what == "note" {
+                // A note placed by hand is a block of text at `at`; a leadered one placed by hand
+                // keeps its leader, with its elbow at `at`.
+                if what == "note" && kind["leader"].is_null() {
                     if let Some(at) = manual {
                         ctx.out.placed.insert(id.clone(), at);
                         let prims = notes_block(&st, &id, at, &t);
@@ -461,7 +471,18 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                         } else {
                             0.0
                         };
-                        let tip_of = on_rim(c, rim);
+                        // A note's leader ends just inside the face it names, at the point
+                        // nearest its label, so leaders to stacked layers don't cross.
+                        let area = if what == "note" {
+                            face_box(ctx, v, &aid)
+                        } else {
+                            None
+                        };
+                        let rim_tip = on_rim(c, rim);
+                        let tip_of = move |e: Xy| match &area {
+                            Some(b) => inside_nearest(b, e),
+                            None => rim_tip(e),
+                        };
                         let stacked: Vec<(String, Vec<String>)> = under
                             .get(&aid)
                             .into_iter()
@@ -530,6 +551,36 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
             }
         }
     }
+}
+
+/// The sheet box (mm) of the face an annotation points at, from its extent; `None` when it has
+/// none or shows edge-on.
+fn face_box(ctx: &Ctx<'_>, v: &ViewPlan, aid: &str) -> Option<BoxR> {
+    let e = &ctx.data["extents"][aid][0];
+    let (lo, hi) = (floats(&e[0]), floats(&e[1]));
+    if lo.len() != 3 || hi.len() != 3 {
+        return None;
+    }
+    let mut b: Option<BoxR> = None;
+    for x in [lo[0], hi[0]] {
+        for y in [lo[1], hi[1]] {
+            for z in [lo[2], hi[2]] {
+                let p = v.model_to_sheet([x, y, z]);
+                let q = BoxR::new(p[0], p[1], p[0], p[1]);
+                b = Some(b.map_or(q, |b| b.union(&q)));
+            }
+        }
+    }
+    b.filter(|b| b.w() > 1e-6 && b.h() > 1e-6)
+}
+
+/// The point of `b` nearest `p`, kept a little inside it (a quarter of its size, at most 3 mm).
+fn inside_nearest(b: &BoxR, p: Xy) -> Xy {
+    let (ix, iy) = ((b.w() * 0.25).min(3.0), (b.h() * 0.25).min(3.0));
+    [
+        p[0].clamp(b.x0 + ix, b.x1 - ix),
+        p[1].clamp(b.y0 + iy, b.y1 - iy),
+    ]
 }
 
 /// The two ends (sheet mm) of an annotation's planar reference where the view shows it edge-on,
