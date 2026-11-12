@@ -4,7 +4,7 @@ keywords: [STEP, AP242, PMI, import STEP, export STEP, DXF, DWG, PDF drawing, 3M
 ---
 # Import and export
 
-RunMat reads STEP into a part and writes every common mechanical exchange format. Exports come from the editor's Export command, from the agent (`design.export`) and from the command line (`runmat-design export`), all through the same writers.
+RunMat reads STEP into a part and writes every common mechanical exchange format. Exports come from the editor's Export command, from the agent (`design.export`) and from the command line (`runmat design export`), all through the same writers.
 
 ## Import
 
@@ -28,10 +28,10 @@ Direct edits (`direct.move_faces`, `direct.replace_faces`, `direct.delete_faces`
 | `bom` | an assembly | the bill of materials |
 
 ```sh
-runmat-design export bracket.part --format step --out exports
-runmat-design export bracket.part --format step --all-configurations --out exports
-runmat-design export bracket.drawing --format pdf
-runmat-design export enclosure.part --format dxf --out flat
+runmat design export bracket.part --format step --out exports
+runmat design export bracket.part --format step --all-configurations --out exports
+runmat design export bracket.drawing --format pdf
+runmat design export enclosure.part --format dxf --out flat
 ```
 
 Region labels become STEP face names, which is how a study selects them: a region `label = "Mounting bores"` in the part is `select name "Mounting bores"` in the `.fea` file.

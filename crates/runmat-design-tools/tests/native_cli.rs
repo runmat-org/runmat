@@ -3,7 +3,6 @@
 
 use serde_json::Value;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const PLATE: &str = r#"runmat 0.7
@@ -66,22 +65,16 @@ impl Workspace {
     }
 
     fn invoke(&self, args: &[&str]) -> Value {
-        let output = Command::new(env!("CARGO_BIN_EXE_runmat-design"))
-            .current_dir(&self.0)
-            .args(args)
-            .output()
-            .unwrap();
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        let (ok, stdout, stderr) = runmat_cli(&args);
         assert!(
-            output.status.success(),
+            ok,
             "{args:?}: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
         );
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-            panic!(
-                "{args:?}: {error}: {}",
-                String::from_utf8_lossy(&output.stdout)
-            )
+        serde_json::from_slice(&stdout).unwrap_or_else(|error| {
+            panic!("{args:?}: {error}: {}", String::from_utf8_lossy(&stdout))
         })
     }
 }
@@ -150,4 +143,23 @@ fn native_run_publishes_the_canonical_single_file_export() {
         std::fs::read_to_string(directory.join(files[0]["name"].as_str().unwrap())).unwrap();
     assert_eq!(saved, files[0]["text"].as_str().unwrap());
     assert!(saved.contains("viewBox=\"0 0 420 297\""), "{saved}");
+}
+
+/// Runs `runmat check …` or `runmat design …` in-process: whether it succeeded, its stdout and
+/// its stderr.
+fn runmat_cli(args: &[String]) -> (bool, Vec<u8>, Vec<u8>) {
+    use runmat_design_tools::cli::{check, design, Io};
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = {
+        let mut io = Io {
+            out: &mut out,
+            err: &mut err,
+        };
+        if args.first().map(String::as_str) == Some("check") {
+            check(&args[1..], &mut io)
+        } else {
+            design(args, &mut io)
+        }
+    };
+    (code == std::process::ExitCode::SUCCESS, out, err)
 }

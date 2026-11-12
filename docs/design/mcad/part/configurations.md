@@ -50,7 +50,7 @@ A configuration that names an input, a feature or a parameter the part does not 
 
 - **In an assembly**, an occurrence selects one: `configuration = { select = named, name = long }`, or sets inputs directly with `configuration = { select = inputs, values = { width = 120 mm } }`. See [Occurrences and mates](/docs/mcad/assembly/mates).
 - **In the editor**, activating a configuration recompiles the part in it, and edits made while it is active can apply to all configurations, to this one, or to ones you pick. The Outline marks features suppressed or set in the active configuration.
-- **From the command line**, `runmat-design export bracket.part --format step --configuration long` exports one configuration, and `--all-configurations` exports each in turn.
+- **From the command line**, `runmat design export bracket.part --format step --configuration long` exports one configuration, and `--all-configurations` exports each in turn.
 - **In a drawing**, title blocks read the configuration's part number and description.
 
 ## Configurations and runs

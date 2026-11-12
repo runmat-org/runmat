@@ -109,8 +109,8 @@ The Auto-drawing command lays out a drawing for a part or an assembly in one ste
 ## 6. Export
 
 ```sh
-runmat-design export motor_plate.drawing --format pdf --out drawings
-runmat-design export motor_plate.drawing --format dxf --out drawings
+runmat design export motor_plate.drawing --format pdf --out drawings
+runmat design export motor_plate.drawing --format dxf --out drawings
 ```
 
 PDF, DXF and DWG write one file per sheet; `--sheet 1` writes one sheet, and `--all-configurations` writes every sheet once per configuration of the part.

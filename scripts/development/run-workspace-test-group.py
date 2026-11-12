@@ -140,7 +140,6 @@ GROUPS = {
     "tooling-distributed": (
         "runmat",
         "runmat-design-tools",
-        "runmat-design-tools-wasm",
         "runmat-config",
         "runmat-execution",
         "runmat-execution-artifact",

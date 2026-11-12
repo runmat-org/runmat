@@ -356,10 +356,11 @@ pub enum Commands {
         #[command(subcommand)]
         command: NativeInterfaceCommand,
     },
-    /// Check a MATLAB script or .fea document without running it, or run a circuit's checks
-    /// (ERC, the review suites, DRC and its simulations' limits)
+    /// Check a MATLAB script or .fea document without running it, regenerate a part, assembly
+    /// or drawing, or run a circuit's checks (ERC, the review suites, DRC and its simulations'
+    /// limits)
     Check {
-        /// .m, .fea, .circuit or .circuit.layout file to check
+        /// .m, .fea, .part, .assembly, .drawing, .circuit or .circuit.layout file to check
         file: PathBuf,
         #[command(flatten)]
         root: FeaRootArgs,
@@ -378,6 +379,20 @@ pub enum Commands {
         /// Circuits: leave out the simulation sections
         #[arg(long = "no-simulate")]
         no_simulate: bool,
+        /// Assemblies: also check the parts for overlapping material, and fail on any overlap
+        #[arg(long)]
+        interference: bool,
+        /// Design files: the workspace folder the file's imports resolve in (default: the file's
+        /// project, the nearest folder up holding a runmat.toml, else its folder)
+        #[arg(long = "root", value_name = "DIRECTORY")]
+        design_root: Option<PathBuf>,
+    },
+    /// Run a design catalog command or export a design file:
+    /// `runmat design run <file> <command> …` and `runmat design export <file> --format … …`
+    Design {
+        /// `run` or `export`, the file and the command's flags
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
     },
     /// Print the logical phases and analysis definition for one .fea study or sweep
     Plan {

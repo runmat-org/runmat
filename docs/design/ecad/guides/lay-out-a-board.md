@@ -133,7 +133,7 @@ Draw pour takes a net, the corners of its outline and a layer, and fills that la
 DRC runs as you edit. Each finding names the rule, the two objects and the gap between them, and selecting it selects those objects on the canvas. Typical findings are a track too close to a pad of another net, copper too near the edge, silkscreen on a pad, an unrouted connection. The check passes when DRC is clean, every connection is routed and the board has taken every schematic change:
 
 ```sh
-runmat-design check baro.circuit.layout
+runmat check baro.circuit.layout
 ```
 
 See [Board layout](/docs/ecad/layout#design-rules) for every rule.

@@ -115,7 +115,7 @@ The arguments arrive in SI units, and `as ohm` reads the result as a resistance.
 ## 5. Check it
 
 ```sh
-runmat-design check baro.circuit
+runmat check baro.circuit
 ```
 
 The check runs the electrical rules (undriven inputs, conflicting drivers, unconnected pins) and the design-review suites. On this circuit the I2C suite confirms each bus line has a pull-up between 1 kΩ and 10 kΩ, and the decoupling suite confirms each IC power pin has a capacitor to ground. `no_erc = [U1.NC]` tells the rules the regulator's no-connect pin is meant to be open.

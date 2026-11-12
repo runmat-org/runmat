@@ -75,7 +75,7 @@ A measure reads one number from an analysis, and `spec` sets its limits:
 The Desktop's Simulate runs the section and plots the probed waveforms (`probe = [net.IN, net.OUT]`), with each measure and its verdict beside them. The agent runs it with `design.simulate`. From the command line, the check runs every section:
 
 ```sh
-runmat-design check adc_filter.circuit
+runmat check adc_filter.circuit
 ```
 
 ```text

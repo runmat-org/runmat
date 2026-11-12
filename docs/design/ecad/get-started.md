@@ -66,7 +66,7 @@ circuit sensor {
 ## 2. Check it
 
 ```sh
-runmat-design check sensor.circuit
+runmat check sensor.circuit
 ```
 
 The check runs the electrical rules, the design-review suites and every simulation's measures, prints each finding, and exits with status 1 on an error. See [Rules and checks](/docs/ecad/circuit/rules-and-checks).
@@ -93,7 +93,7 @@ A check of the new board reports the schematic changes it has not taken yet (`bo
 ## 4. Fabrication outputs
 
 ```sh
-runmat-design export sensor.circuit.layout --format fabrication --out fab
+runmat design export sensor.circuit.layout --format fabrication --out fab
 ```
 
 This writes Gerber, drill, the fabrication drawing, IPC-2581, ODB++, the IPC-D-356A netlist, and the BOM and pick-and-place file of each variant. See [Fabrication outputs and netlists](/docs/ecad/fabrication).

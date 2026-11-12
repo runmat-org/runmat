@@ -22,6 +22,10 @@ pub struct CheckRequest {
     pub search_paths: Vec<PathBuf>,
     /// Circuits: leave out the simulation sections.
     pub no_simulate: bool,
+    /// Assemblies: also check for overlapping material.
+    pub interference: bool,
+    /// Design files: the workspace folder (default: the file's project, else its folder).
+    pub design_root: Option<PathBuf>,
 }
 
 pub async fn execute_check(
@@ -37,8 +41,38 @@ pub async fn execute_check(
         deny,
         search_paths,
         no_simulate,
+        interference,
+        design_root,
     } = request;
     let deny_warnings = parse_denied_levels(&deny)?;
+    if is_mechanical_design(&file) {
+        if !root.is_empty() || !search_paths.is_empty() {
+            anyhow::bail!(
+                "--study, --sweep and --path apply to .fea and .m sources; {} is a design file",
+                file.display()
+            );
+        }
+        let mut args = vec![file.to_string_lossy().into_owned()];
+        args.extend(json.then(|| "--json".to_owned()));
+        args.extend(interference.then(|| "--interference".to_owned()));
+        if let Some(root) = design_root {
+            args.push("--root".into());
+            args.push(root.to_string_lossy().into_owned());
+        }
+        let code =
+            runmat_design_tools::cli::Io::std(|io| runmat_design_tools::cli::check(&args, io));
+        return if code == std::process::ExitCode::SUCCESS {
+            Ok(())
+        } else {
+            Err(AlreadyReportedCliError.into())
+        };
+    }
+    if interference || design_root.is_some() {
+        anyhow::bail!(
+            "--interference and --root apply to .part, .assembly and .drawing files; got {}",
+            file.display()
+        );
+    }
     if crate::commands::circuit_checks::is_circuit(&file) {
         if !root.is_empty() || !search_paths.is_empty() {
             anyhow::bail!(
@@ -89,7 +123,7 @@ pub async fn execute_check(
     }
 
     anyhow::bail!(
-        "runmat check supports .m scripts, .fea documents and .circuit or .circuit.layout files; got {}",
+        "runmat check supports .m scripts, .fea documents, .part, .assembly and .drawing files, and .circuit or .circuit.layout files; got {}",
         file.display()
     )
 }
@@ -816,6 +850,14 @@ fn source_line(source: &str, offset: usize) -> (usize, usize, usize, &str) {
         column,
         line_start,
         text.strip_suffix('\r').unwrap_or(text),
+    )
+}
+
+/// A `.part`, `.assembly` or `.drawing`, which `runmat check` regenerates with the design tools.
+fn is_mechanical_design(path: &Path) -> bool {
+    matches!(
+        runmat_design_tools::DesignKind::of(&path.to_string_lossy()),
+        Some(kind) if !kind.is_circuit()
     )
 }
 

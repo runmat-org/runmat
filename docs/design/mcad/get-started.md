@@ -96,8 +96,8 @@ The tab occurrence sets its own width, so the same part file serves two sizes. M
 ## 4. Check and export
 
 ```sh
-runmat-design export base.assembly --format step --out exports
-runmat-design export plate.part --format dxf --out exports
+runmat design export base.assembly --format step --out exports
+runmat design export plate.part --format dxf --out exports
 ```
 
 The agent runs the same tools: ask it to check the assembly, change an input, or export STEP for a study, and it proposes each change as a diff you keep or undo. See [Agent tools and the command line](/docs/design-language/agent-and-cli).

@@ -8263,15 +8263,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runmat-design-tools-wasm"
-version = "0.7.1"
-dependencies = [
- "runmat-design-tools",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "runmat-execution"
 version = "0.7.1"
 dependencies = [

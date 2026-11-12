@@ -422,23 +422,13 @@ fn step_files_import_as_a_part_that_names_them() {
 }
 
 #[test]
-fn the_catalog_declares_every_tool_with_object_schemas() {
-    let names: Vec<String> = runmat_design_tools::catalog()
-        .into_iter()
-        .map(|t| t.name)
-        .collect();
-    for n in [
-        "design.check",
-        "design.render",
-        "design.inspect",
-        "design.drc",
-        "design.erc",
-        "design.import",
-        "design.export",
-        "design.propose_edit",
-        "design.overview",
-    ] {
-        assert!(names.iter().any(|x| x == n), "{n}");
+fn every_tool_name_runs() {
+    // An empty input fails on its arguments, never as an unknown tool.
+    for name in runmat_design_tools::TOOL_NAMES {
+        let err = runmat_design_tools::call(name, json!({}), &Files::new());
+        if let Err(e) = err {
+            assert_ne!(e.code, "unknown_tool", "{name}");
+        }
     }
 }
 
