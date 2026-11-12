@@ -114,19 +114,21 @@ fn assembly_fixture_matches(expected: &str, actual: &str) -> bool {
 
 #[test]
 fn assembly_fixture_comparison_bounds_only_rotation_roundoff() {
+    let root_half = std::f64::consts::FRAC_1_SQRT_2;
+    let adjacent_root_half = f64::from_bits(root_half.to_bits() - 1);
     let expected = serde_json::json!({"occurrences": [{
         "id": "frame", "world": {
-            "rotation": [[1.0, 0.0, 0.0], [0.0, 0.7071067811865475, -0.7071067811865475], [0.0, 0.7071067811865475, 0.7071067811865475]],
+            "rotation": [[1.0, 0.0, 0.0], [0.0, adjacent_root_half, -adjacent_root_half], [0.0, adjacent_root_half, adjacent_root_half]],
             "translation": [0.0, 1.0, 2.0]
         }
     }]});
     let mut actual = expected.clone();
-    actual["occurrences"][0]["world"]["rotation"][1][1] = serde_json::json!(0.7071067811865476);
+    actual["occurrences"][0]["world"]["rotation"][1][1] = serde_json::json!(root_half);
     assert!(assembly_fixture_matches(
         &expected.to_string(),
         &actual.to_string()
     ));
-    actual["occurrences"][0]["world"]["rotation"][1][1] = serde_json::json!(0.707106781187);
+    actual["occurrences"][0]["world"]["rotation"][1][1] = serde_json::json!(root_half + 1.0e-12);
     assert!(!assembly_fixture_matches(
         &expected.to_string(),
         &actual.to_string()
