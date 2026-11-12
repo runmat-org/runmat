@@ -239,3 +239,80 @@ fn a_missing_unit_reads_the_same_in_part_and_fea() {
     check_part(&case);
     check_fea("target_size", "target size", &case, "fea.");
 }
+
+#[test]
+fn a_vector_in_the_wrong_unit_gets_quick_fixes_that_keep_its_numbers() {
+    let temporary = tempfile::tempdir().unwrap();
+    let main_path = temporary.path().join("main.fea");
+    let value = "[0, 0, -10] mm";
+    let source = format!(
+        r#"geometry part {{
+    construct {{
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }}
+    region pad : face {{
+        select result
+        expect one_or_more
+    }}
+}}
+model loaded {{
+    constraint support {{ structural.fixed {{ target = geometry.part.region.pad }} }}
+    load probe {{ force on geometry.part.region.pad = {value} }}
+    load_case service {{ include load.probe }}
+}}
+"#
+    );
+    std::fs::write(&main_path, &source).unwrap();
+    let roots: Vec<PathBuf> = vec![temporary.path().to_path_buf()];
+    let analysis = FeaDocumentAnalysis::from_checked(
+        FeaDocumentAnalysis::prepare_with_overlays(&source, &main_path, &roots, &[])
+            .unwrap()
+            .check(Vec::new(), Vec::new())
+            .unwrap(),
+        BTreeMap::new(),
+    );
+    let uri = Url::from_file_path(&main_path).unwrap();
+    let message = unit_mismatch_message(
+        "force",
+        dimension("N"),
+        FoundUnit::Authored("mm", dimension("mm")),
+    )
+    .message;
+    assert_eq!(
+        message,
+        "force needs a unit of force such as N; mm measures length"
+    );
+    let (underlined, code, fixes) = report(
+        &uri,
+        &source,
+        &analysis.diagnostics(&source),
+        |range| analysis.code_actions(&uri, &source, range),
+        &message,
+    );
+    assert_eq!(underlined, value, ".fea vector span");
+    assert!(code.starts_with("fea."), "{code}");
+    assert_eq!(
+        fixes,
+        ["[0, 0, -10] N", "[0, 0, -10] kN"],
+        ".fea vector fixes"
+    );
+    let titles: Vec<String> = analysis
+        .code_actions(
+            &uri,
+            &source,
+            analysis
+                .diagnostics(&source)
+                .iter()
+                .find(|d| d.message == message)
+                .unwrap()
+                .range,
+        )
+        .into_iter()
+        .filter_map(|a| match a {
+            CodeActionOrCommand::CodeAction(a) => Some(a.title),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(titles, ["Write [0, 0, -10] N", "Write [0, 0, -10] kN"]);
+}

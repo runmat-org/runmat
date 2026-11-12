@@ -182,13 +182,50 @@ pub fn expected_si_example(message: &str) -> Option<&str> {
     Some(example)
 }
 
-/// Quick fixes for a value written `value_text` (`10 kg`, `5`) where a unit of the kind whose SI
-/// example is `si_example` is required: the value's own number with each unit of that kind
-/// ([`suggested_units`]), as replacement texts (`10 mm`, `10 cm`). The number stays exactly as
-/// written; a value that isn't a number literal gets no fixes.
+/// Quick fixes for a value written `value_text` (`10 kg`, `5`, `[0, 0, -10] mm`) where a unit of
+/// the kind whose SI example is `si_example` is required: the value's own number, or its vector
+/// of numbers, with each unit of that kind ([`suggested_units`]), as replacement texts (`10 mm`,
+/// `[0, 0, -10] N`). The numbers and brackets stay exactly as written; a value that isn't a
+/// number literal or a vector of number literals gets no fixes.
 pub fn unit_fixes(value_text: &str, si_example: &str) -> Vec<String> {
     let text = value_text.trim();
-    let number_end = text
+    let number_end = if text.starts_with('[') {
+        match vector_literal_end(text) {
+            Some(end) => end,
+            None => return Vec::new(),
+        }
+    } else {
+        number_literal_end(text)
+    };
+    let number = &text[..number_end];
+    if !number.starts_with('[') && number.parse::<f64>().is_err() {
+        return Vec::new();
+    }
+    let Ok(expected) = super::parse_unit_expression(si_example) else {
+        return Vec::new();
+    };
+    let written = text[number_end..].trim();
+    suggested_units(DynamicDimension::from_unit(expected))
+        .into_iter()
+        .filter(|unit| *unit != written)
+        .map(|unit| format!("{number} {unit}"))
+        .collect()
+}
+
+/// The end of `text`'s bracketed vector of plain number literals (`[0, 0, -10]`), just past the
+/// `]`; `None` when an element isn't a number literal or the bracket doesn't close.
+fn vector_literal_end(text: &str) -> Option<usize> {
+    let close = text.find(']')?;
+    let inner = &text[1..close];
+    let numbers = inner.split(',').map(str::trim).all(|element| {
+        element.parse::<f64>().is_ok() && number_literal_end(element) == element.len()
+    });
+    numbers.then_some(close + 1)
+}
+
+/// The end of the number literal that starts `text` (`-2.5e-3` in `-2.5e-3 mm`).
+fn number_literal_end(text: &str) -> usize {
+    text
         .char_indices()
         .find(|&(at, c)| {
             !(c.is_ascii_digit()
@@ -201,20 +238,7 @@ pub fn unit_fixes(value_text: &str, si_example: &str) -> Vec<String> {
                         .next()
                         .is_some_and(|n| n.is_ascii_digit() || n == '-' || n == '+')))
         })
-        .map_or(text.len(), |(at, _)| at);
-    let number = &text[..number_end];
-    if number.parse::<f64>().is_err() {
-        return Vec::new();
-    }
-    let Ok(expected) = super::parse_unit_expression(si_example) else {
-        return Vec::new();
-    };
-    let written = text[number_end..].trim();
-    suggested_units(DynamicDimension::from_unit(expected))
-        .into_iter()
-        .filter(|unit| *unit != written)
-        .map(|unit| format!("{number} {unit}"))
-        .collect()
+        .map_or(text.len(), |(at, _)| at)
 }
 
 /// A value as every editor shows it in hover and properties: the number as authored in `unit`,
@@ -361,6 +385,21 @@ mod tests {
         assert_eq!(unit_fixes("-2.5e-3", example)[0], "-2.5e-3 mm");
         assert_eq!(unit_fixes("10 mm", example), ["10 cm", "10 m", "10 in"]);
         assert!(unit_fixes("input.width", example).is_empty());
+        // A vector keeps its numbers and brackets as written.
+        let force =
+            unit_mismatch_message("force", of("N"), FoundUnit::Authored("mm", of("mm")));
+        let force = expected_si_example(&force.message).unwrap();
+        assert_eq!(
+            unit_fixes("[0, 0, -10] mm", force),
+            ["[0, 0, -10] N", "[0, 0, -10] kN"]
+        );
+        assert_eq!(
+            unit_fixes("[1.5,-2e3] N", "m"),
+            ["[1.5,-2e3] mm", "[1.5,-2e3] cm", "[1.5,-2e3] m", "[1.5,-2e3] in"]
+        );
+        assert!(unit_fixes("[0, input.load, 0] mm", force).is_empty());
+        assert!(unit_fixes("[0 N, 1 N] mm", force).is_empty());
+        assert!(unit_fixes("[0, 0, -10 mm", force).is_empty());
         assert!(expected_si_example("unknown unit `furlong`").is_none());
     }
 }
