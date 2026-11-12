@@ -41,87 +41,11 @@ fn on_sheet(v: &ViewPlan, c: &Value) -> Option<Xy> {
     (f.len() == 3).then(|| v.model_to_sheet([f[0], f[1], f[2]]))
 }
 
-/// Draws the sheet's grids, level marks and door swings.
+/// Draws the sheet's level marks and door swings (before the callouts, which keep clear of them).
 pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
     let st = ctx.std.clone();
     let data = ctx.data;
     let mut prims: Vec<(String, Vec<Prim>, Option<BoxR>)> = Vec::new();
-    for a in annotations(ctx, "grids") {
-        let Some(v) = views.iter().find(|v| a["view"].as_str() == Some(v.name.as_str())) else {
-            continue;
-        };
-        let aid = a["id"].as_str().unwrap_or("");
-        let id = format!("annotation:{aid}");
-        let labels: Vec<&str> = a["kind"]["labels"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect();
-        let g = v.geom_box();
-        let r = bubble_radius(&st);
-        let mut out = Vec::new();
-        for (i, extent) in data["extents"][aid]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .enumerate()
-        {
-            let corners: Vec<Xy> = extent
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|c| on_sheet(v, c))
-                .collect();
-            let [lo, hi] = match corners.as_slice() {
-                [lo, hi] => [*lo, *hi],
-                _ => continue,
-            };
-            // Seen edge-on, a grid plane is a line across the view: vertical (a grid measured
-            // left to right) or horizontal.
-            let vertical = (hi[0] - lo[0]).abs() < (hi[1] - lo[1]).abs();
-            let side = if vertical { v.h_side } else { v.v_side };
-            let room = v.room[match side {
-                Side::Below => 0,
-                Side::Above => 1,
-                Side::Left => 2,
-                Side::Right => 3,
-            }];
-            let (from, centre) = if vertical {
-                let x = (lo[0] + hi[0]) / 2.0;
-                match side {
-                    Side::Below => ([x, g.y1 + 3.0], [x, g.y0 - room + r + 1.5]),
-                    _ => ([x, g.y0 - 3.0], [x, g.y1 + room - r - 1.5]),
-                }
-            } else {
-                let y = (lo[1] + hi[1]) / 2.0;
-                match side {
-                    Side::Left => ([g.x1 + 3.0, y], [g.x0 - room + r + 1.5, y]),
-                    _ => ([g.x0 - 3.0, y], [g.x1 + room - r - 1.5, y]),
-                }
-            };
-            let toward = super::marks::unit(from, centre);
-            let end = [centre[0] - toward[0] * r, centre[1] - toward[1] * r];
-            out.push(mark(&id, "center", line(vec![from[0], from[1], end[0], end[1]])));
-            out.push(mark(
-                &id,
-                "dimink",
-                Shape::Circle {
-                    x: centre[0],
-                    y: centre[1],
-                    r,
-                },
-            ));
-            let label = labels.get(i).copied().unwrap_or("");
-            out.push(mark(
-                &id,
-                "dimtext",
-                text(centre[0], centre[1] - st.text / 2.0, label, st.text, "middle"),
-            ));
-            ctx.out.placed.entry(id.clone()).or_insert(centre);
-        }
-        prims.push((id, out, None));
-    }
     for a in annotations(ctx, "level") {
         let Some(v) = views.iter().find(|v| a["view"].as_str() == Some(v.name.as_str())) else {
             continue;
@@ -206,6 +130,107 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
     }
 }
 
+/// Draws the sheet's grids, last, so each grid line leaves a gap at every text it crosses.
+pub fn draw_grids(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
+    let st = ctx.std.clone();
+    let data = ctx.data;
+    // The text already on the sheet (figures, labels, notes), which grid lines leave a gap for.
+    let texts: Vec<BoxR> = ctx
+        .out
+        .primitives
+        .iter()
+        .filter_map(super::solver::text_box)
+        .map(|b| b.grow(0.8))
+        .collect();
+    let mut prims: Vec<(String, Vec<Prim>, Option<BoxR>)> = Vec::new();
+    for a in annotations(ctx, "grids") {
+        let Some(v) = views.iter().find(|v| a["view"].as_str() == Some(v.name.as_str())) else {
+            continue;
+        };
+        let aid = a["id"].as_str().unwrap_or("");
+        let id = format!("annotation:{aid}");
+        let labels: Vec<&str> = a["kind"]["labels"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let g = v.geom_box();
+        let r = bubble_radius(&st);
+        let mut out = Vec::new();
+        for (i, extent) in data["extents"][aid]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            let corners: Vec<Xy> = extent
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| on_sheet(v, c))
+                .collect();
+            let [lo, hi] = match corners.as_slice() {
+                [lo, hi] => [*lo, *hi],
+                _ => continue,
+            };
+            // Seen edge-on, a grid plane is a line across the view: vertical (a grid measured
+            // left to right) or horizontal.
+            let vertical = (hi[0] - lo[0]).abs() < (hi[1] - lo[1]).abs();
+            let side = if vertical { v.h_side } else { v.v_side };
+            let room = v.room[match side {
+                Side::Below => 0,
+                Side::Above => 1,
+                Side::Left => 2,
+                Side::Right => 3,
+            }];
+            let (from, centre) = if vertical {
+                let x = (lo[0] + hi[0]) / 2.0;
+                match side {
+                    Side::Below => ([x, g.y1 + 3.0], [x, g.y0 - room + r + 1.5]),
+                    _ => ([x, g.y0 - 3.0], [x, g.y1 + room - r - 1.5]),
+                }
+            } else {
+                let y = (lo[1] + hi[1]) / 2.0;
+                match side {
+                    Side::Left => ([g.x1 + 3.0, y], [g.x0 - room + r + 1.5, y]),
+                    _ => ([g.x0 - 3.0, y], [g.x1 + room - r - 1.5, y]),
+                }
+            };
+            let toward = super::marks::unit(from, centre);
+            let end = [centre[0] - toward[0] * r, centre[1] - toward[1] * r];
+            // Broken where it would cross text (a dimension's figure, a room name).
+            for (a, b) in around_text(from, end, &texts) {
+                out.push(mark(&id, "center", line(vec![a[0], a[1], b[0], b[1]])));
+            }
+            out.push(mark(
+                &id,
+                "dimink",
+                Shape::Circle {
+                    x: centre[0],
+                    y: centre[1],
+                    r,
+                },
+            ));
+            let label = labels.get(i).copied().unwrap_or("");
+            out.push(mark(
+                &id,
+                "dimtext",
+                text(centre[0], centre[1] - st.text / 2.0, label, st.text, "middle"),
+            ));
+            ctx.out.placed.entry(id.clone()).or_insert(centre);
+        }
+        prims.push((id, out, None));
+    }
+    for (id, out, label) in prims {
+        ctx.occ.add_prims(&out, &id);
+        if let Some(b) = label {
+            ctx.occ.add(b, &id, Class::Text);
+        }
+        ctx.push(out);
+    }
+}
+
 /// The level target: a circle of radius `r` at `c` with its upper-right and lower-left quarters
 /// filled.
 fn level_symbol(id: &str, c: Xy, r: f64) -> Vec<Prim> {
@@ -222,4 +247,52 @@ fn level_symbol(id: &str, c: Xy, r: f64) -> Vec<Prim> {
         quarter(0.0),
         quarter(std::f64::consts::PI),
     ]
+}
+
+/// The pieces of the straight line `a`-`b` (horizontal or vertical) outside every box in
+/// `boxes` that it crosses.
+fn around_text(a: Xy, b: Xy, boxes: &[BoxR]) -> Vec<(Xy, Xy)> {
+    let vertical = (b[0] - a[0]).abs() < (b[1] - a[1]).abs();
+    let (k, c) = if vertical { (1, a[0]) } else { (0, a[1]) };
+    let (lo, hi) = (a[k].min(b[k]), a[k].max(b[k]));
+    let mut cuts: Vec<(f64, f64)> = boxes
+        .iter()
+        .filter(|x| {
+            if vertical {
+                x.x0 <= c && c <= x.x1
+            } else {
+                x.y0 <= c && c <= x.y1
+            }
+        })
+        .map(|x| if vertical { (x.y0, x.y1) } else { (x.x0, x.x1) })
+        .filter(|(s, e)| *e > lo && *s < hi)
+        .collect();
+    cuts.sort_by(|p, q| p.0.total_cmp(&q.0));
+    let point = |t: f64| if vertical { [c, t] } else { [t, c] };
+    let mut out = Vec::new();
+    let mut at = lo;
+    for (s, e) in cuts {
+        if s > at {
+            out.push((point(at), point(s)));
+        }
+        at = at.max(e);
+    }
+    if at < hi {
+        out.push((point(at), point(hi)));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_grid_line_leaves_a_gap_where_it_crosses_text() {
+        let boxes = [BoxR::new(-2.0, 10.0, 2.0, 14.0), BoxR::new(5.0, 0.0, 9.0, 100.0)];
+        let pieces = around_text([0.0, 0.0], [0.0, 30.0], &boxes);
+        assert_eq!(pieces, vec![([0.0, 0.0], [0.0, 10.0]), ([0.0, 14.0], [0.0, 30.0])]);
+        // A line that crosses nothing stays whole.
+        assert_eq!(around_text([20.0, 0.0], [20.0, 5.0], &boxes).len(), 1);
+    }
 }

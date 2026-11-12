@@ -13,10 +13,12 @@
 //!    parent. Each view reserves room for its label and its dimension rows ([`views`]).
 //! 5. **Dimensions** stack outward from the view at the standard's offsets, shortest nearest;
 //!    a dimension that repeats one already drawn is a finding and is drawn once ([`dims`]).
-//! 6. **Building marks**: grid lines and bubbles, level marks and door swings ([`plan_marks`]).
+//! 6. **Building marks**: level marks and door swings ([`plan_marks`]).
 //! 7. **Callouts** (hole callouts, frames, finishes, notes, weld symbols, datum targets,
 //!    balloons) take the free spot nearest what they point at, where their label overlaps
 //!    nothing and their leader crosses no text ([`callouts`], [`solver`]).
+//! 8. **Grids** last: each grid line runs to its bubble with a gap at every text it crosses
+//!    ([`plan_marks`]).
 //!
 //! Line weights, text heights, arrowheads and dimension offsets come from the sheet's drafting
 //! standard (`styles`, [`runmat_cad::drawing::standard`]). The layout is deterministic: the
@@ -224,6 +226,7 @@ pub fn sheet_layout(data: &Value, displays: &Map<String, Value>, name: &str) -> 
     dims::draw(&mut ctx, &planned, plans);
     plan_marks::draw(&mut ctx, &planned);
     callouts::draw(&mut ctx, &planned);
+    plan_marks::draw_grids(&mut ctx, &planned);
     for p in &mut ctx.out.primitives {
         if p.width.is_none() {
             p.width = ctx.std.width(p.style);
