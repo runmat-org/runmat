@@ -117,8 +117,7 @@ fn mass_text(t: &str) -> Option<f64> {
         .flatten()
 }
 
-/// A `mass` param in kg. `mass = 0.35 g` reads as written: the param reader takes a bare `g`
-/// as gravity, so a quantity that isn't a mass is read again from its text, expecting a mass.
+/// A `mass` param in kg (the readers take `mass = 0.35 g` as grams; [`crate::units::param_quantity`]).
 fn param_mass(param: &crate::ir::Param) -> Option<f64> {
     match &param.value {
         crate::ir::ParamValue::Quantity { nominal, .. }
@@ -127,8 +126,7 @@ fn param_mass(param: &crate::ir::Param) -> Option<f64> {
             Some(nominal.value)
         }
         crate::ir::ParamValue::Text(t) => mass_text(t),
-        crate::ir::ParamValue::Quantity { .. } => param.written.as_deref().and_then(mass_text),
-        crate::ir::ParamValue::Bool(_) => None,
+        crate::ir::ParamValue::Quantity { .. } | crate::ir::ParamValue::Bool(_) => None,
     }
 }
 
