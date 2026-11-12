@@ -221,7 +221,8 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
         text.contains("\"RO.1\"]") && text.contains("measure i_ro"),
         "the daq section changed; update the scene"
     );
-    let files: Files = [("/p/daq.circuit".to_owned(), text)].into();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../runmat-circuit/tests/projects/daq");
+    let files = gather(dir, "daq.circuit", text);
     let out = call(
         "design.simulate",
         json!({ "path": "/p/daq.circuit", "maxPoints": 160 }),
@@ -243,9 +244,7 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
     // C·dV/dt = 1 nF × 1.5 V/µs = 1.5 mA, and that is the peak.
     let peak = i["value"].as_f64().unwrap();
     assert!((peak / 1.5e-3 - 1.0).abs() < 0.03, "peak {peak}");
-    if let Ok(path) = std::env::var("RUNMAT_SIMULATION_SCENE_OUT") {
-        std::fs::write(path, serde_json::to_string(&out).unwrap() + "\n").unwrap();
-    }
+    write_recording("RUNMAT_SIMULATION_SCENE_OUT", out, &files);
 }
 
 /// The Desktop's simulation scene on the camera drone: the ESC's current sense on all three
@@ -254,7 +253,8 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
 #[test]
 fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
     const ESC: &str = include_str!("../../runmat-cad/wasm/tests/drone/electrical/esc/esc.circuit");
-    let files: Files = [("/p/esc.circuit".to_owned(), ESC.to_owned())].into();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../runmat-cad/wasm/tests/drone/electrical/esc");
+    let files = gather(dir, "esc.circuit", ESC.to_owned());
     let out = call(
         "design.simulate",
         json!({ "path": "/p/esc.circuit", "simulation": "current_sense", "maxPoints": 160 }),
@@ -297,7 +297,80 @@ fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
     let spread = m("f3db_spread");
     let y = spread["yieldPercent"].as_f64().unwrap();
     assert!(y > 95.0 && y <= 100.0, "yield {y}");
-    if let Ok(path) = std::env::var("RUNMAT_SIMULATION_SCENE_ESC_OUT") {
-        std::fs::write(path, serde_json::to_string(&out).unwrap() + "\n").unwrap();
+    write_recording("RUNMAT_SIMULATION_SCENE_ESC_OUT", out, &files);
+}
+
+/// The circuit `entry` (with `text`) and every file it needs from `dir`, as the Desktop gathers
+/// them for a run (`runtime::dependencies`, read until nothing new is named), under `/p/`. A
+/// scene runs on exactly the files the Desktop's run of that circuit reads, so its recording's
+/// hashes are those files'.
+fn gather(dir: &str, entry: &str, text: String) -> Files {
+    let mut files: Files = [(format!("/p/{entry}"), text)].into();
+    let mut todo = vec![format!("/p/{entry}")];
+    while let Some(path) = todo.pop() {
+        let content = files[&path].clone();
+        for dep in runmat_circuit::runtime::dependencies(&path, &content) {
+            let names: Vec<String> = match dep.strip_suffix('/') {
+                Some(folder) => std::fs::read_dir(format!("{dir}{}", folder.trim_start_matches("/p")))
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| format!("{folder}/{}", e.file_name().to_string_lossy()))
+                    .collect(),
+                None => vec![dep],
+            };
+            for name in names {
+                if files.contains_key(&name) {
+                    continue;
+                }
+                let Some(rel) = name.strip_prefix("/p/") else { continue };
+                if let Ok(body) = std::fs::read_to_string(format!("{dir}/{rel}")) {
+                    files.insert(name.clone(), body);
+                    todo.push(name);
+                }
+            }
+        }
     }
+    files
+}
+
+/// Writes a scene's report for the Desktop when `var` names a file, with its recording: when it
+/// ran (UTC) and the SHA-256 of each source file the engine read. The Desktop shows the report
+/// only for a circuit whose files hash the same, labelled as recorded with that time and hash.
+fn write_recording(var: &str, mut out: serde_json::Value, files: &Files) {
+    use sha2::{Digest, Sha256};
+    let Ok(path) = std::env::var(var) else { return };
+    let sources: Vec<_> = files
+        .iter()
+        .map(|(file, text)| {
+            let name = file.rsplit('/').next().unwrap_or(file);
+            json!({ "name": name, "sha256": hex::encode(Sha256::digest(text.as_bytes())) })
+        })
+        .collect();
+    out["recording"] = json!({ "recordedAt": utc_now(), "sources": sources });
+    std::fs::write(path, serde_json::to_string(&out).unwrap() + "\n").unwrap();
+}
+
+/// The current time as `YYYY-MM-DDTHH:MM:SSZ` (civil-from-days, proleptic Gregorian).
+fn utc_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rem / 3_600,
+        rem / 60 % 60,
+        rem % 60
+    )
 }
