@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+  "controller_exit": 0,
+  "cohorts": {
+    "authored-cli-physics": {
+      "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+      "exit_code": 0,
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 0,
+      "test_seconds": 2477.83,
+      "case_names": [
+        "acoustic::authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog",
+        "acoustic::duct::authored_incident_duct_refines_and_reopens_full_partial_complex_components",
+        "acoustic::duct::authored_matched_duct_refines_and_reopens_full_partial_complex_components",
+        "acoustic::duct::authored_volume_velocity_duct_refines_and_reopens_full_partial_complex_components",
+        "acoustic::response::pressure_transient_publishes_its_complete_time_history",
+        "acoustic::response::rigid_cube_cavity_modes_match_rectangular_room_frequencies",
+        "assessments::authored_transient_and_frequency_assessments_reopen_without_re_solving_the_numerical_run",
+        "authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium",
+        "electrical::authored_charged_poisson_tet10_signed_gauge_and_cold_publication",
+        "electrical::authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold",
+        "generated_and_derived_geometry_complete_the_typed_study_pipeline",
+        "harmonic::authored_harmonic_generated_and_explicit_sources_preserve_rod_response_and_phase"
+      ],
+      "log_sha256": "f35aeb9defbceae6378381bbb761a0138ec7cbfdc3776b34f47ba225427a45eb",
+      "log_location": "/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics.authored-cli-physics.log",
+      "artifacts": [
+        {
+          "sha256": "fbca974f503d00a9ffd4dbc67e33598d52988a580626c1c0d58b369a5611f4df",
+          "bytes": 356206472,
+          "location": "/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/authored-cli-physics",
+          "executed_path": "/home/nallana/rm1293/targets/release/deps/typed_fea_geometry_cli-7aabf5b004ce44ea"
+        },
+        {
+          "sha256": "fdcebddc83ed3fde2ee4dc924bd48d84dd51737f2c214b3a1f36fc32a1acc6e6",
+          "bytes": 682562232,
+          "location": "/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/runmat",
+          "executed_path": "/home/nallana/rm1293/targets/release/runmat"
+        }
+      ],
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--release",
+        "--all-features",
+        "-p",
+        "runmat",
+        "--test",
+        "typed_fea_geometry_cli",
+        "--",
+        "--test-threads=1"
+      ]
+    },
+    "driver-recovery-physics": {
+      "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+      "exit_code": 0,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 464,
+      "test_seconds": 1625.63,
+      "case_names": [
+        "remote::driver_replacement_tests::active_analysis_attempt_retries_after_actual_driver_replacement",
+        "remote::driver_replacement_tests::actual_driver_restarts_from_server_checkpoint_on_a_different_worker",
+        "remote::driver_replacement_tests::authored_thermal_outer_root_matrix_replays_after_preexecution_driver_replacement",
+        "remote::driver_replacement_tests::authored_thermal_prefix_survives_driver_loss_after_its_commit",
+        "remote::driver_replacement_tests::authored_thermal_prefix_survives_lost_checkpoint_acknowledgement",
+        "remote::driver_replacement_tests::committed_structural_and_modal_work_survives_checkpoint_acknowledgement_loss",
+        "remote::driver_replacement_tests::exact_meshing_admission_deadline_expires_before_replacement_dispatch",
+        "remote::driver_replacement_tests::exact_meshing_admission_exhausts_retry_budget_after_two_driver_losses",
+        "remote::driver_replacement_tests::exact_meshing_admission_retries_and_cancels_after_encrypted_driver_replacement",
+        "remote::driver_replacement_tests::exact_meshing_root_preserves_committed_pool_task_after_encrypted_driver_replacement",
+        "remote::driver_replacement_tests::observer::lost_original_parent_cannot_supply_a_replacement_clock_end",
+        "remote::driver_replacement_tests::observer::original_parent_observer_survives_actual_worker_loss_and_driver_replacement",
+        "remote::driver_replacement_tests::random_response_driver_replacement_replays_on_a_different_worker",
+        "remote::driver_replacement_tests::rejected_structural_and_modal_checkpoint_does_not_grant_commit_authority",
+        "remote::driver_replacement_tests::rejected_thermal_checkpoint_cannot_be_restored_as_a_committed_prefix",
+        "remote::driver_replacement_tests::response_spectrum_driver_replacement_replays_on_a_different_worker",
+        "remote::driver_replacement_tests::restored_analysis_retry_observes_cancellation_before_publication",
+        "remote::driver_replacement_tests::thermal::authored_matrix_variants_typecheck_with_explicit_physical_loads"
+      ],
+      "log_sha256": "8b986093598f4f214911dc7834fb0085b59f604f6fa63fde4f89732577788ac8",
+      "log_location": "/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics.driver-recovery-physics.log",
+      "artifacts": [
+        {
+          "sha256": "cf36dc59e30a495ee9345c841f92dc19742530d41437765ad07310a4af5ad11b",
+          "bytes": 572364368,
+          "location": "/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/driver-recovery-physics",
+          "executed_path": "/home/nallana/rm1293/targets/release/deps/runmat_execution_runner_native-255843cfc32d581f"
+        }
+      ],
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--release",
+        "--all-features",
+        "-p",
+        "runmat-execution-runner-native",
+        "--lib",
+        "remote::driver_replacement_tests::",
+        "--",
+        "--test-threads=1"
+      ]
+    },
+    "occt-exact": {
+      "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+      "exit_code": 0,
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 0,
+      "test_seconds": 24.3,
+      "case_names": [
+        "differential::runmat_and_independent_meshers_agree_on_box_invariants",
+        "disconnected_cad_solids_retain_distinct_region_identity_through_meshing",
+        "occt_box_artifact_is_independent_of_legal_partition_layout",
+        "occt_box_executes_the_complete_serial_exact_dag"
+      ],
+      "log_sha256": "6ff288d0b4e6a01c6e6c41fb6a00c271acd0e90d7d6c5ed042c343a4c2432b46",
+      "log_location": "/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics.occt-exact.log",
+      "artifacts": [
+        {
+          "sha256": "d1f40da9927f887a45a32f28db59a1e9d8735912af349ddec90a98782ab8949f",
+          "bytes": 324379480,
+          "location": "/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/occt-exact",
+          "executed_path": "/home/nallana/rm1293/targets/release/deps/occt_exact_meshing-f7488ac517c439ec"
+        }
+      ]
+    }
+  },
+  "source_verification": {
+    "status": "verified",
+    "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+    "revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+    "files": 27272,
+    "before_and_after": true
+  },
+  "presource": {
+    "status": "verified",
+    "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+    "revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+    "files": 27272
+  },
+  "postsource": {
+    "status": "verified",
+    "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+    "revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+    "files": 27272
+  },
+  "completed_at": "2026-11-12T11:34:56.970Z"
+}

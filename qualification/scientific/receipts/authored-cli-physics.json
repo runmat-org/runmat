@@ -3,11 +3,13 @@
   "cohort": "authored-cli-physics",
   "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "ceae94b5da5d3c95f00cb6ba01a151a536f5fbcb",
+    "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+    "exit_code": 0,
     "passed": 12,
     "failed": 0,
     "ignored": 0,
     "filtered_out": 0,
+    "test_seconds": 2477.83,
     "case_names": [
       "acoustic::authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog",
       "acoustic::duct::authored_incident_duct_refines_and_reopens_full_partial_complex_components",
@@ -22,24 +24,22 @@
       "generated_and_derived_geometry_complete_the_typed_study_pipeline",
       "harmonic::authored_harmonic_generated_and_explicit_sources_preserve_rod_response_and_phase"
     ],
-    "log_sha256": "458b119514332cd25b996529050c1601de1a2c22ef42af1a5f5dc313d77c523d",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific.authored-cli-physics.log",
+    "log_sha256": "f35aeb9defbceae6378381bbb761a0138ec7cbfdc3776b34f47ba225427a45eb",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics.authored-cli-physics.log",
     "artifacts": [
       {
-        "sha256": "830d9243e079e3b1398a5cd44d5343da302eaf27a95fb5f57f94a10ab7675557",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific-artifacts/typed_fea_geometry_cli",
-        "bytes": 356405896
+        "sha256": "fbca974f503d00a9ffd4dbc67e33598d52988a580626c1c0d58b369a5611f4df",
+        "bytes": 356206472,
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/authored-cli-physics",
+        "executed_path": "/home/nallana/rm1293/targets/release/deps/typed_fea_geometry_cli-7aabf5b004ce44ea"
       },
       {
-        "sha256": "3c30253c880d8ae8ceed8de8947e38c5cf268c126c5530824a4c30c07c9c44cb",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific-artifacts/runmat",
-        "bytes": 682734392
+        "sha256": "fdcebddc83ed3fde2ee4dc924bd48d84dd51737f2c214b3a1f36fc32a1acc6e6",
+        "bytes": 682562232,
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/runmat",
+        "executed_path": "/home/nallana/rm1293/targets/release/runmat"
       }
     ],
-    "exit_code": 0,
-    "target": "linux-x86_64",
-    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
-    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "command": [
       "cargo",
       "test",
@@ -54,6 +54,9 @@
       "--",
       "--test-threads=1"
     ],
+    "target": "linux-x86_64",
+    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "profile": {
       "release": true,
       "debug": 0,
@@ -63,34 +66,17 @@
     },
     "selected_filter": null,
     "inputs": {
-      "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
-      "files": 26104,
+      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "files": 26117,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "source_verification": {
-      "at": "2026-11-12T00:02:14.039Z",
-      "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
-      "stage": "/home/nallana/rm1293/incoming/intake-ceae94b5da-source",
       "status": "verified",
-      "files": 27246
+      "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+      "revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+      "files": 27272,
+      "before_and_after": true
     },
-    "source_scope": "All 27,246 canonical source files verified against the frozen ceae94b5da snapshot after the authored cohort. Credentials and .env namespaces are excluded from transfers."
-  },
-  "conservation": {
-    "measured_inputs": {
-      "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
-      "files": 26104,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "accepted_inputs": {
-      "sha256": "ca414c8b6b4379438519fa5d90c3382b648a01333b825d5c37971c3f2796578c",
-      "files": 26104,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "reason": "The complete seven-file source delta contains four formatting-only changes, one isolated CAD integration fixture repair and the selected-plane sketch handler with its separate regression. The authored FEA CLI cohort does not dispatch part.sketch. Its scientific arithmetic, admission, publication, test cases and required command remain unchanged. The CAD integration-test witness expresses the same accepted rotation pair with FRAC_1_SQRT_2 and its preceding representable f64. A standard-library test verifies their exact decimal representations, their unchanged epsilon acceptance and rejection of a larger perturbation. No production code, comparator threshold, dependency or scientific test case changes. This separate integration-test target is not linked into these scientific cohort binaries. The unchanged cfg(test) module moves after the production items in modal/diagnostics.rs. Byte comparison proves that both the complete test module and production source are unchanged apart from module position and final whitespace. No arithmetic, diagnostic contents, accuracy policy, allocation, serialization contract or scientific assertion changes. Only the CAD syntax-test corpus JSON changes: the section-plane face reference is wrapped in the canonical tagged PlaneRef representation introduced by 484648602e. Every other byte, including floating-point numeric tokens, is preserved. The JSON is read by a separate integration-test target and does not change production Rust, dependencies, authored studies, scientific commands, arithmetic or thresholds. The 32 focused CAD syntax and corpus round-trip tests pass on Linux against all 27,256 verified source files. Existing scientific measurements retain their original producers, commands, binaries and outcomes.",
-    "review": {
-      "path": "qualification/scientific/reviews/authored-ceae-to-793f9ae2b3.json",
-      "sha256": "5e613deb686c2e97104d502d20ee032ad85b9ceb6a0d762ebdafdcde0fc6c8f5"
-    }
+    "source_scope": "All 27,272 canonical source files match the frozen consolidated snapshot before and after the required authored, recovery and bounded exact-kernel cohorts. Retained executables have byte-verified copies. Credentials and .env files are excluded from the source transfer."
   }
 }
