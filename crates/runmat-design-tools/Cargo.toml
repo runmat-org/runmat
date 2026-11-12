@@ -10,7 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 publish = false
 
 [dependencies]
-runmat-cad = { path = "../runmat-cad", version = "=0.7.1" }
+runmat-cad = { path = "../runmat-cad", version = "=0.7.1", features = ["schema"] }
 runmat-cad-wasm = { path = "../runmat-cad/wasm", version = "=0.7.1", default-features = false }
 runmat-circuit = { path = "../runmat-circuit", version = "=0.7.1" }
 runmat-circuit-sim = { path = "../runmat-circuit-sim", version = "=0.7.1" }

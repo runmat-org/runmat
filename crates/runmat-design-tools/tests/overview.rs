@@ -82,6 +82,7 @@ fn a_schematic_overview_reads_erc_its_board_and_its_simulation_sections() {
     .into();
     let out = overview("/b/io.circuit", &files);
     assert_grounded(&out);
+    assert_eq!(out["fileState"], "written");
     assert!(
         out["about"].as_str().unwrap().starts_with("Schematic: "),
         "{}",
@@ -188,6 +189,8 @@ drawing plate {
     assert_eq!(out["links"], json!([]));
     assert_eq!(out["counts"]["ok"], true, "{}", out["counts"]);
     assert_eq!(out["counts"]["totals"]["bodies"], 1, "{}", out["counts"]);
+    // What the part holds, from its index: a machined plate is a written part.
+    assert_eq!(out["fileState"], "written");
 }
 
 #[test]

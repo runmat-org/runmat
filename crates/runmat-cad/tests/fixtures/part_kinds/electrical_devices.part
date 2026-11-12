@@ -1,0 +1,25 @@
+runmat 0.7
+std 1
+
+// An excerpt of the house's electrical devices (construction/house/mep/electrical/
+// electrical_devices.part): the laundry receptacle's box and its device.
+part electrical_devices {
+    feature p_xy_3 = plane.offset(base = origin.xy, distance = 39.5 in)
+    feature p_xy_2 = plane.offset(base = origin.xy, distance = 40.5 in)
+    sketch c10_laundry_box_s on plane.p_xy_2 {
+        l0 = line(start = [298 in, 109 in], end = [300.5 in, 109 in])
+        l1 = line(start = [300.5 in, 109 in], end = [300.5 in, 111 in])
+        l2 = line(start = [300.5 in, 111 in], end = [298 in, 111 in])
+        l3 = line(start = [298 in, 111 in], end = [298 in, 109 in])
+    }
+    feature c10_laundry_box = extrude(profile = sketch.c10_laundry_box_s, distance = 3 in, mode = new)
+    material = { body = feature.c10_laundry_box.body, material = "material.pvc_electrical_box" }
+    sketch c10_laundry_s on plane.p_xy_3 {
+        l0 = line(start = [300.5 in, 108.5 in], end = [300.75 in, 108.5 in])
+        l1 = line(start = [300.75 in, 108.5 in], end = [300.75 in, 111.5 in])
+        l2 = line(start = [300.75 in, 111.5 in], end = [300.5 in, 111.5 in])
+        l3 = line(start = [300.5 in, 111.5 in], end = [300.5 in, 108.5 in])
+    }
+    feature c10_laundry = extrude(profile = sketch.c10_laundry_s, distance = 5 in, mode = new)
+    material = { body = feature.c10_laundry.body, material = "material.pvc_device" }
+}

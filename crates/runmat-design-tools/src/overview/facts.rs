@@ -5,6 +5,7 @@ use crate::check::{check, CheckInput, CheckOutput};
 use crate::inspect::{inspect, InspectInput};
 use crate::rules::{drc, erc, RulesInput, RulesOutput};
 use crate::{DesignKind, Files, ToolError};
+use runmat_cad::index::FileState;
 
 fn fact(id: &str, label: &str, value: String, level: Level, source: &str) -> Fact {
     Fact {
@@ -57,13 +58,25 @@ fn count(c: &CheckOutput, key: &str) -> usize {
     c.counts.get(key).copied().unwrap_or(0)
 }
 
-/// What the file is, its state lines and the counts its checks returned.
+/// What the file is, from `design.check`.
+pub(super) struct State {
+    /// The file in one line.
+    pub about: String,
+    /// Its state lines.
+    pub facts: Vec<Fact>,
+    /// The counts its checks returned.
+    pub counts: CheckCounts,
+    /// What it holds, as the guides choose by it.
+    pub file_state: FileState,
+}
+
+/// What the file is, its state lines, the counts its checks returned and what it holds.
 pub(super) fn state(
     kind: DesignKind,
     path: &str,
     files: &Files,
     ran: &mut Ran,
-) -> Result<(String, Vec<Fact>, CheckCounts), ToolError> {
+) -> Result<State, ToolError> {
     let checked = check(
         &CheckInput {
             path: path.to_owned(),
@@ -81,7 +94,12 @@ pub(super) fn state(
         }
     };
     let counts = counts(kind, path, files, &checked);
-    Ok((about, out, counts))
+    Ok(State {
+        about,
+        facts: out,
+        counts,
+        file_state: checked.file_state,
+    })
 }
 
 /// The check's counts; a circuit's and a board's also take `design.inspect`'s totals

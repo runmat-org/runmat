@@ -7,6 +7,7 @@
 
 use crate::{kind_of, text_of, DesignKind, Files, Locator, Range, ToolError};
 use runmat_cad::diagnostics::{Cause, Diagnostic as CadDiagnostic, Severity, Subject};
+use runmat_cad::index::FileState;
 use runmat_cad::regen::FeatureStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -98,6 +99,10 @@ pub struct CheckOutput {
     pub features: Vec<FeatureState>,
     /// What the design holds: features, bodies, occurrences, mates, views, components, nets…
     pub counts: BTreeMap<String, usize>,
+    /// What the file holds, as the guides choose by it: empty or written, and for a part its
+    /// kind (sheet metal, a reference skeleton, runs, electrical, structural), from the part's
+    /// index.
+    pub file_state: FileState,
 }
 
 pub fn check(input: &CheckInput, files: &Files) -> Result<CheckOutput, ToolError> {
@@ -114,6 +119,11 @@ pub fn check(input: &CheckInput, files: &Files) -> Result<CheckOutput, ToolError
         inputs: Vec::new(),
         features: Vec::new(),
         counts: BTreeMap::new(),
+        file_state: if text.trim().is_empty() {
+            FileState::Empty
+        } else {
+            FileState::Written
+        },
     };
     match kind {
         DesignKind::Part => check_part(&input.path, text, &mut out),
@@ -290,6 +300,7 @@ fn check_part(path: &str, text: &str, out: &mut CheckOutput) {
             return;
         }
     };
+    out.file_state = part.index.file_state;
     let mut failed: BTreeMap<u32, Vec<String>> = BTreeMap::new();
     for row in &part.index.features {
         let (status, diagnostic) = status_text(&row.status);

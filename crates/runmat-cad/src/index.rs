@@ -22,8 +22,12 @@ use crate::units::Dimension;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+mod file_state;
+
+pub use file_state::{part_file_state, FileState};
+
 /// Bumped on any change to the projection's shape.
-pub const INDEX_FORMAT_VERSION: u32 = 2;
+pub const INDEX_FORMAT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PartIndex {
@@ -33,6 +37,9 @@ pub struct PartIndex {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configuration: Option<String>,
     pub final_key: CacheKey,
+    /// What kind of part this is ([`part_file_state`]): the guides, the overview's next steps
+    /// and the Desktop's suggestions all read it from here.
+    pub file_state: FileState,
     pub inputs: Vec<InputRow>,
     /// The part's `let` values as evaluated, each with the `.m` function it calls, if any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -409,6 +416,7 @@ pub fn build_index(
         header: doc.header.clone(),
         configuration: result.configuration.as_ref().map(|c| c.0.clone()),
         final_key: result.final_key.clone(),
+        file_state: part_file_state(doc),
         inputs,
         lets,
         features,
