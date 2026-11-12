@@ -40,7 +40,7 @@ An assembly file declares one assembly: `assembly <name> { … }`.
 | `publish <name> = …` | frames and values for the assembly's own users | [Published values](/docs/mcad/part/regions-and-publish#published-values) |
 | `part_number = "…"` | the assembly's part number | |
 | `options = { axes, rules, groups, configurations }` | a configurable product: option axes, rules between them, effectivity groups and named configurations | [Options](#options) |
-| `exploded <name> = { … }` | an exploded state for drawings and instructions | |
+| `exploded <name> = { … }` | an exploded state for drawings and instructions ([Exploded views](/docs/mcad/assembly/exploded-views)) | |
 | `view <name> = { from, up, default }` | a saved camera | |
 
 ### Options
