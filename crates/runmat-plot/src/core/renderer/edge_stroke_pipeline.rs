@@ -72,7 +72,16 @@ impl WgpuRenderer {
             DepthMode::Standard => -1,
             DepthMode::ReversedZ => 1,
         };
-        let (depth_compare, bias) = if depth_tested {
+        // A depth-probed stroke decides its visibility in the fragment, once per point of the line
+        // (`EdgeStrokeShader::depth_probe`), so the depth test doesn't judge its side pixels: beside
+        // a valley crease (a boss's base on its plate) both faces lie in front of the stroke's sides,
+        // and the test left the edge in dots.
+        let (depth_compare, bias) = if depth_tested && variant.depth_probe.is_some() {
+            (
+                wgpu::CompareFunction::Always,
+                wgpu::DepthBiasState::default(),
+            )
+        } else if depth_tested {
             (
                 self.depth_compare(),
                 wgpu::DepthBiasState {
