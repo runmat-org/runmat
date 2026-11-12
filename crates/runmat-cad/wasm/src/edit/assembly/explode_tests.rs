@@ -147,3 +147,104 @@ fn a_step_needs_an_exploded_view() {
         "{out}"
     );
 }
+
+/// A row of three pegs (`pegs`: the seed and two instances) and its mirror image across
+/// y = 0 (`pegs_port`), with an exploded view that names each as a whole.
+const PEGS: &str = "runmat 0.7\nstd 1\n\nassembly stack {\n    use part block as base\n    use part block as peg {\n        placement = { placement = offset, offset = { translation = [0 mm, 30 mm, 15 mm] } }\n    }\n    pattern pegs = linear(seeds = [peg], direction = [1, 0, 0], spacing = 30 mm, count = 3)\n    mirror pegs_port = {\n        seeds = [pegs],\n        plane = { plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] },\n        hand = symmetric(point = [10 mm, 10 mm, 0 mm], normal = [0, 1, 0])\n    }\n    exploded open = {\n        steps = [\n            STEPS\n        ]\n    }\n}\n";
+
+const UP: &str = "{ id = up, PICK, motion = { motion = \"translate\", direction = { direction = \"vector\", vector = [0, 0, 1] }, distance = 50 mm, spacing = 5 mm } }";
+
+fn pegs(steps: &[&str]) -> String {
+    PEGS.replace("STEPS", &steps.join(",\n            "))
+}
+
+/// Each moved occurrence's exploded translation (metres), by path.
+fn moves(view: &Value) -> std::collections::BTreeMap<String, [f64; 3]> {
+    view["occurrences"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| {
+            let t = o["transform"].as_array().unwrap();
+            let f = |k: usize| t[k].as_f64().unwrap();
+            (o["path"].as_str().unwrap().to_owned(), [f(9), f(10), f(11)])
+        })
+        .collect()
+}
+
+fn paths_with(index: &Value, part: &str) -> Vec<String> {
+    index["occurrences"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["path"].as_str())
+        .filter(|p| p.contains(part))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn a_step_naming_a_pattern_moves_its_seed_and_every_instance_as_listing_them_would() {
+    let whole = index(&pegs(&[
+        &UP.replace("PICK", "patterns = [[{ name = pegs }]]")
+    ]));
+    let listed = index(&pegs(&[&UP.replace(
+        "PICK",
+        "occurrences = [[{ name = peg }], [{ name = peg, instance = { by = pegs, key = { instance = linear, step = 1 } } }], [{ name = peg, instance = { by = pegs, key = { instance = linear, step = 2 } } }]]",
+    )]));
+    let view = &whole["exploded"][0];
+    assert_eq!(view["diagnostics"], json!([]), "{view}");
+    assert_eq!(view["steps"][0]["patterns"], json!(["pegs"]));
+    let m = moves(view);
+    assert_eq!(m, moves(&listed["exploded"][0]));
+    // The seed and both instances, spaced in their laid-out order; nothing else.
+    let mut rows: Vec<_> = m.iter().collect();
+    rows.sort_by(|a, b| a.1[2].total_cmp(&b.1[2]));
+    assert_eq!(rows.len(), 3, "{m:?}");
+    assert_eq!(rows[0].0, "peg");
+    for (i, (_, t)) in rows.iter().enumerate() {
+        assert!(
+            (t[2] - (0.015 + 0.050 + 0.005 * i as f64)).abs() < 1e-9,
+            "{rows:?}"
+        );
+    }
+}
+
+#[test]
+fn a_step_naming_a_mirror_moves_each_image_and_leaves_the_originals() {
+    let text = pegs(&[&UP.replace("PICK", "mirrors = [[{ name = pegs_port }]]")]);
+    let i = index(&text);
+    let view = &i["exploded"][0];
+    assert_eq!(view["diagnostics"], json!([]), "{view}");
+    let m = moves(view);
+    let images = paths_with(&i, "@pegs_port[");
+    assert_eq!(images.len(), 3, "{images:?}");
+    assert_eq!(m.keys().cloned().collect::<Vec<_>>(), {
+        let mut v = images.clone();
+        v.sort();
+        v
+    });
+    // Each image its own occurrence: three distinct ids, three distinct exploded heights.
+    let ids: std::collections::BTreeSet<_> = images.iter().map(|p| uuid(&i, p)).collect();
+    assert_eq!(ids.len(), 3);
+    let mut z: Vec<f64> = m.values().map(|t| t[2]).collect();
+    z.sort_by(f64::total_cmp);
+    assert!((z[2] - z[0] - 0.010).abs() < 1e-9, "{z:?}");
+}
+
+#[test]
+fn a_step_naming_an_unknown_pattern_or_an_instance_is_diagnosed() {
+    let i = index(&pegs(&[
+        &UP.replace("PICK", "patterns = [[{ name = pins }]]"),
+        &UP.replace("id = up", "id = down").replace(
+            "PICK",
+            "mirrors = [[{ name = pegs_port, instance = { by = pegs, key = { instance = linear, step = 1 } } }]]",
+        ),
+    ]));
+    let d = i["exploded"][0]["diagnostics"].to_string();
+    assert!(
+        d.contains("names pattern `pins`, which `/p/stack.assembly` does not declare"),
+        "{d}"
+    );
+    assert!(d.contains("names an instance; a mirror is named by"), "{d}");
+}

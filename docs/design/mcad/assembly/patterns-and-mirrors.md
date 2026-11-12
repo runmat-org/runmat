@@ -98,6 +98,7 @@ mirror ribs_port = {
 
 See [Product families and configurations](/docs/mcad/guides/configurations) for a handed part built this way.
 - A seed may be a pattern of the same assembly. The mirror then reflects the pattern's seeds and every copy, keeping their keys and skips: `rib@ribs_far[3]` is the image of `rib@ribs[3]`. A copy reached twice, such as a seed listed directly and through its pattern, is an error that names both routes.
+- Every copy and every image is its own occurrence, with its own id. Selecting, hiding or exploding `rib@ribs_far[3]` acts on that copy alone, and an [exploded view](/docs/mcad/assembly/exploded-views) can move a whole pattern or mirror in one step.
 
 ## Fasteners
 
