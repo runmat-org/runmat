@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "source_revision": "78734fcbbe472203ca5572825f82ad336c8d7d78",
+  "previous_revision": "0c8e1e15ed26b501846021c2b6076bfac5d6253d",
+  "changed_scientific_inputs": [
+    "crates/runmat-cad/wasm/Cargo.toml",
+    "crates/runmat-design-tools/Cargo.toml"
+  ],
+  "checks": [
+    {
+      "name": "distribution-contracts-with-publication-tests",
+      "passed": 46,
+      "failed": 0,
+      "skipped": 3,
+      "scope": "macOS Node tests; the three PowerShell build-profile checks are unavailable on this host"
+    },
+    {
+      "name": "release-version-and-license-preflight",
+      "exit_code": 0,
+      "workspace_crates": 95,
+      "version": "0.7.1"
+    },
+    {
+      "name": "workflow-yaml-parse",
+      "exit_code": 0
+    },
+    {
+      "name": "git-diff-check",
+      "exit_code": 0
+    }
+  ],
+  "review": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements."
+}

@@ -89,14 +89,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "4d500a191b50949caed454de9cc875cba82e596961fb3fc9608ff14e7e80b38d",
+      "sha256": "55f884d6cb44d49c880e97e043a427c54be4a91e9d00a6ab8874ac7cf6f03a06",
       "files": 26117,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the recorded numerical and scientific measurements across the isolated native QUIC protocol security update. Only quinn-proto changes from 0.11.14 to 0.11.15; the native transport manifest enforces that minimum without adding features. Quinn, UDP, TLS, compiler settings, solver arithmetic, model inputs and thresholds remain unchanged. The recorded driver-replacement fixtures use their WebSocket RelayServer rather than direct QUIC; the authored local studies, direct Circuit Session and CAD drawing workloads do not exercise QUIC. Bounded native transport and runner acceptance qualify the affected route separately. This review does not represent a rerun of the scientific or performance measurements.",
+    "reason": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements.",
     "review": {
-      "path": "qualification/scientific/reviews/quic-security-20261113-circuit-large-board-performance.json",
-      "sha256": "7d24a6f8cd78761ba3adf90e4e221097c020c67d2c6b9f21dfcae1be94020833"
+      "path": "qualification/scientific/reviews/publication-metadata-20261113-circuit-large-board-performance.json",
+      "sha256": "c0ba6cf6b318a525f8b0bd855d5d11263a913217c064b4ba1e72f02d939b1849"
     }
   }
 }
