@@ -3,7 +3,7 @@ std 1
 
 // The L bracket with its sheet notes in the general notes: a numbered list above the title
 // block, each note wrapping with a hanging indent under its number.
-drawing l_bracket {
+drawing l_bracket_notes {
     format a3 = {
         size = { size = iso, name = A3 },
         title_block = [

@@ -12,14 +12,16 @@ const PART: &str = include_str!("../../../../tests/fixtures/notes/l_bracket.part
 const AGENT: &str = include_str!("../../../../tests/fixtures/notes/l_bracket.drawing");
 const LISTED: &str = include_str!("../../../../tests/fixtures/notes/l_bracket_notes.drawing");
 
-fn compile(drawing: &str) -> Value {
+/// The drawing as `/p/<name>.drawing` beside the L bracket, compiled with no error.
+fn compile(name: &str, drawing: &str) -> Value {
+    let path = format!("/p/{name}.drawing");
     let files: Files = [
         ("/p/l_bracket.part".to_owned(), PART.to_owned()),
-        ("/p/l_bracket.drawing".to_owned(), drawing.to_owned()),
+        (path.clone(), drawing.to_owned()),
     ]
     .into();
     let out: Value = serde_json::from_str(&crate::drawing::compile_json(
-        "/p/l_bracket.drawing",
+        &path,
         drawing,
         &files,
     ))
@@ -65,7 +67,7 @@ fn words(t: &str) -> Vec<String> {
 
 #[test]
 fn an_agent_s_long_notes_wrap_and_keep_clear_of_the_title_block_the_border_and_each_other() {
-    let out = compile(AGENT);
+    let out = compile("l_bracket", AGENT);
     let layout = sheet(&out, "1");
     let p = prims(&layout);
     let title = title_box(&p);
@@ -119,7 +121,7 @@ fn an_agent_s_long_notes_wrap_and_keep_clear_of_the_title_block_the_border_and_e
 
 #[test]
 fn the_general_notes_list_numbers_each_note_with_a_hanging_indent_above_the_title_block() {
-    let out = compile(LISTED);
+    let out = compile("l_bracket_notes", LISTED);
     let layout = sheet(&out, "1");
     assert_eq!(layout["findings"], serde_json::json!([]), "{:#}", layout["findings"]);
     let p = prims(&layout);
@@ -153,7 +155,7 @@ fn the_general_notes_list_numbers_each_note_with_a_hanging_indent_above_the_titl
     let title = title_box(&p);
     let b = union(lines.iter().map(|l| l.3)).unwrap();
     assert!(b.x1 - b.x0 <= runmat_cad::drawing::title_layout::BLOCK_WIDTH + 1e-6, "{b:?}");
-    assert!(b.y0 >= title.y1 && b.y0 - title.y1 < 15.0, "{b:?} above {title:?}");
+    assert!(b.y0 - title.y1 >= 2.0 && b.y0 - title.y1 < 15.0, "{b:?} above {title:?}");
     assert!(!b.hits(&title));
     // No ruled grid: the list is text only.
     assert!(p.iter().filter(|q| q.id == "table:notes").all(|q| matches!(q.shape, Shape::Text { .. })));

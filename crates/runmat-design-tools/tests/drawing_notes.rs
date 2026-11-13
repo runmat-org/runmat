@@ -12,10 +12,12 @@ const PART: &str = include_str!("../../runmat-cad/tests/fixtures/notes/l_bracket
 const AGENT: &str = include_str!("../../runmat-cad/tests/fixtures/notes/l_bracket.drawing");
 const LISTED: &str = include_str!("../../runmat-cad/tests/fixtures/notes/l_bracket_notes.drawing");
 
-fn files(drawing: &str) -> Files {
+/// The L bracket and `drawing` as `/p/<name>.drawing`.
+fn files(name: &str, drawing: &str) -> Files {
+    let path = format!("/p/{name}.drawing");
     [
         ("/p/l_bracket.part", PART),
-        ("/p/l_bracket.drawing", drawing),
+        (path.as_str(), drawing),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -25,9 +27,9 @@ fn files(drawing: &str) -> Files {
 /// The lines the layout sets for `id`: (text, x, baseline y).
 fn layout_lines(drawing: &str, id: &str) -> Vec<(String, f64, f64)> {
     let out: Value = serde_json::from_str(&runmat_cad_wasm::drawing::compile_json(
-        "/p/l_bracket.drawing",
+        "/p/l_bracket_notes.drawing",
         drawing,
-        &files(drawing),
+        &files("l_bracket_notes", drawing),
     ))
     .unwrap();
     out["projection"]["data"]["layouts"]["1"]["primitives"]
@@ -50,10 +52,10 @@ fn layout_lines(drawing: &str, id: &str) -> Vec<(String, f64, f64)> {
 fn wrapped_general_notes_export_as_the_same_lines_to_dxf_and_pdf() {
     let lines = layout_lines(LISTED, "table:notes");
     assert!(lines.len() > 6, "the notes wrap: {lines:?}");
-    let f = files(LISTED);
+    let f = files("l_bracket_notes", LISTED);
     let out = call(
         "design.export",
-        json!({ "path": "/p/l_bracket.drawing", "format": "dxf" }),
+        json!({ "path": "/p/l_bracket_notes.drawing", "format": "dxf" }),
         &f,
     )
     .unwrap_or_else(|e| panic!("{e}"));
@@ -76,7 +78,7 @@ fn wrapped_general_notes_export_as_the_same_lines_to_dxf_and_pdf() {
     }
     let pdf = call(
         "design.export",
-        json!({ "path": "/p/l_bracket.drawing", "format": "pdf" }),
+        json!({ "path": "/p/l_bracket_notes.drawing", "format": "pdf" }),
         &f,
     )
     .unwrap();
@@ -99,7 +101,7 @@ fn the_check_reports_a_note_that_had_no_room_where_it_was_put() {
     let out = call(
         "design.check",
         json!({ "path": "/p/l_bracket.drawing" }),
-        &files(AGENT),
+        &files("l_bracket", AGENT),
     )
     .unwrap();
     let warnings: Vec<&Value> = out["diagnostics"]
@@ -115,8 +117,8 @@ fn the_check_reports_a_note_that_had_no_room_where_it_was_put() {
     }
     let clean = call(
         "design.check",
-        json!({ "path": "/p/l_bracket.drawing" }),
-        &files(LISTED),
+        json!({ "path": "/p/l_bracket_notes.drawing" }),
+        &files("l_bracket_notes", LISTED),
     )
     .unwrap();
     assert!(

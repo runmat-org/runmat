@@ -489,7 +489,11 @@ pub fn place(ctx: &mut Ctx<'_>) {
                 let k = corner as usize;
                 let snapped = match corner {
                     Corner::TopRight => [f.x1 - w, stacks[k]],
-                    Corner::AboveTitle => [f.x1 - w, stacks[k] + h],
+                    // A ruled table sits on the title block; the notes' text keeps a space.
+                    Corner::AboveTitle => [
+                        f.x1 - w,
+                        stacks[k] + h + if matches!(grid, Block::Notes(_)) { SPACE } else { 0.0 },
+                    ],
                     Corner::TopLeft => [f.x0, stacks[k]],
                 };
                 let b = BoxR::new(snapped[0], snapped[1] - h, snapped[0] + w, snapped[1]);
