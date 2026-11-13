@@ -43,3 +43,6 @@ pub use unit_message::*;
 
 mod parameter_coordinate;
 pub use parameter_coordinate::*;
+
+/// The shared material library (ids, labels, properties and their sources).
+pub mod materials;
