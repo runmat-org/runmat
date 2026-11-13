@@ -114,6 +114,8 @@ pub enum DiagCode {
     SketchOpenProfile,
     #[serde(rename = "cad.sketch.self_intersecting")]
     SketchSelfIntersecting,
+    #[serde(rename = "cad.body.disconnected")]
+    BodyDisconnected,
     #[serde(rename = "cad.kernel.not_supported")]
     KernelNotSupported,
     #[serde(rename = "cad.kernel.failed")]

@@ -54,8 +54,9 @@ The check reports *`body` ran but no longer makes `body.side(l9)`* as a root cau
 |---|---|
 | `cad.ref.*` | References: an entity the maker no longer makes (`not_generated`), a reference to a later feature (`forward_reference`), ambiguous or empty selections, kind mismatches |
 | `cad.xref.*` | Reads from other files: an unknown file, a name it does not publish, a missing pinned revision |
-| `cad.sketch.*` | Sketches: over- or under-constrained, redundant constraints, open profiles |
+| `cad.sketch.*` | Sketches: over- or under-constrained, redundant constraints, open profiles, profiles whose sides cross (named with the crossing point) |
 | `cad.regen.*`, `cad.kernel.*` | Regeneration: cascades, operations the geometry kernel could not build |
+| `cad.body.disconnected` | Added material that touches none of the body it joins, or a body in separate pieces; each piece is named by the features that made it |
 | `cad.region.expectation` | A region that found more or fewer entities than its `expect` |
 | `cad.asm.*` | Assemblies: unknown designs and occurrences, cycles, mates that conflict, are redundant or leave parts under-defined, configuration problems, interference and clearance |
 | `cad.fastener.*` | Fastener sets: paths, exceptions, fits and tables |

@@ -68,6 +68,13 @@ impl<'a, 'b> Run<'a, 'b> {
                 );
                 self.st.bodies = bodies;
                 let (status, output, named) = ran?;
+                super::pieces::report_detached_add(
+                    id,
+                    &op,
+                    operands.len(),
+                    &named.bodies,
+                    &mut self.diags,
+                );
                 let buried = Self::commit(&mut self.st.bodies, &operands, output, named);
                 for (kind, n) in buried {
                     self.st

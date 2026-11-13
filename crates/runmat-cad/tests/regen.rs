@@ -892,3 +892,48 @@ fn self_intersecting_profile_names_the_crossing_sides_and_point() {
         .push(extrude("mount", "section", mm(26.0), BodyMode::New));
     assert!(!has(&env.regen(&ok), DiagCode::SketchSelfIntersecting));
 }
+
+/// Added material that touches none of the body it joins leaves the part in pieces; the check
+/// says so and names each piece by the features that made it, the way a recorded agent draft's
+/// camera plate floated under its clamp saddle.
+#[test]
+fn detached_add_reports_the_part_in_pieces() {
+    let env = Env::new();
+    let pad = |x0: f64| {
+        let mut d = block();
+        d.features.push(sketch(
+            "s_pad",
+            rect(
+                PlaneRef::origin_xy(),
+                mm(x0),
+                mm(0.0),
+                mm(x0 + 20.0),
+                mm(20.0),
+            ),
+        ));
+        d.features
+            .push(extrude("pad", "s_pad", mm(10.0), BodyMode::add()));
+        d
+    };
+
+    let r = env.regen(&pad(100.0));
+    let split = diag(&r, DiagCode::BodyDisconnected);
+    assert_eq!(split.severity, Severity::Warning);
+    assert!(
+        split
+            .message
+            .contains("`pad` adds material that doesn't touch"),
+        "{}",
+        split.message
+    );
+    assert!(
+        split.message.contains("2 separate solids"),
+        "{}",
+        split.message
+    );
+    assert!(split.message.contains("from `body`"), "{}", split.message);
+    assert!(split.message.contains("from `pad`"), "{}", split.message);
+
+    // Flush against the block's end face, the pad joins it: one solid, no warning.
+    assert!(!has(&env.regen(&pad(80.0)), DiagCode::BodyDisconnected));
+}
