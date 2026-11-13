@@ -555,7 +555,7 @@ jobs:
   publish-bindings:
     if: github.event_name == 'push'
     name: Publish wasm bindings to npm
-    needs: [publish-crates]
+    needs: [release-validation, meshing-release-evidence]
     uses: ./.github/workflows/wasm-bindings.yml
     secrets: inherit
     with:
