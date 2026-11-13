@@ -669,6 +669,9 @@ pub fn resolve_assembly_in(
                                 .map(|e| e.message.clone())
                                 .unwrap_or_default();
                             problems.append(&mut d);
+                            // Its occurrences are placed without their model: their Outline rows
+                            // say why, as for a file not in the workspace.
+                            unbuilt.insert(key.clone(), format!("{key} doesn't compile: {first}"));
                             failed_parts.push(FailedPart {
                                 missing: runmat_cad::assembly::source::SourceError::NotFound {
                                     file: runmat_cad::ids::FilePath::new(&key),
