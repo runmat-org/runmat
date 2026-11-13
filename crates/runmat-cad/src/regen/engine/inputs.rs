@@ -416,11 +416,28 @@ impl<'a, 'b> Run<'a, 'b> {
             unreachable!("sketch state")
         };
         match build_loops(sketch, &solved, &p.loops) {
-            Ok(loops) => Ok(CanonicalProfile {
-                frame,
-                loops,
-                merge_collinear: p.merge_collinear,
-            }),
+            Ok(loops) => {
+                // The kernel only reports an invalid wire for a profile whose sides cross; name
+                // the sides and the point here, where the sketch can be repaired.
+                let crossings: Vec<_> = loops
+                    .iter()
+                    .flat_map(|lp| loop_crossings(lp, 1e-7))
+                    .collect();
+                if !crossings.is_empty() {
+                    return Err(self.error(
+                        f,
+                        Some(param),
+                        DiagCode::SketchSelfIntersecting,
+                        crossing_message(&crossings),
+                        Vec::new(),
+                    ));
+                }
+                Ok(CanonicalProfile {
+                    frame,
+                    loops,
+                    merge_collinear: p.merge_collinear,
+                })
+            }
             Err(msg) => {
                 Err(self.error(f, Some(param), DiagCode::SketchOpenProfile, msg, Vec::new()))
             }

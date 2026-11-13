@@ -89,7 +89,7 @@ A sketch on a face moves with the face when an earlier feature changes.
 
 ## Solving
 
-The check reports a sketch that is over-constrained (with the conflicting constraints), under-constrained (with the free directions), or has redundant constraints, and a profile that does not close (`cad.sketch.open_profile`). The editor writes the solver's last result in a `solved { … }` block inside the sketch, in SI units, so a file reopens without re-solving:
+The check reports a sketch that is over-constrained (with the conflicting constraints), under-constrained (with the free directions), or has redundant constraints, a profile that does not close (`cad.sketch.open_profile`), and a profile whose sides cross (`cad.sketch.self_intersecting`). The crossing message names each pair of crossing lines and the point where they cross, in millimeters, for example `` `a` crosses `d` at (-12, 0) mm ``. The editor writes the solver's last result in a `solved { … }` block inside the sketch, in SI units, so a file reopens without re-solving:
 
 ```part fragment
 sketch s1 on origin.xy {
