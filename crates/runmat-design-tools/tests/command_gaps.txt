@@ -138,6 +138,4 @@ sketch.trim assembly type=corner
 sketch.trim assembly type=inside
 sketch.trim assembly type=outside
 sketch.trim assembly type=power
-study.new assembly
-study.new part
 weldment.profile-library part

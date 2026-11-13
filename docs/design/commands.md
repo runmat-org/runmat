@@ -648,7 +648,7 @@ This file is generated from the command catalog.
 - `sketch.trim`: Trim entities by power trim, to a corner, inside or outside.
   - Required: `type` (one of `power`, `corner`, `inside`, `outside`, default `power`); `entities` (picks: sketch entity); `boundaries` (picks: sketch entity) when `type` is inside or outside
 
-## `study.` commands (`.circuit`, `.circuit.layout`)
+## `study.` commands (`.part`, `.assembly`, `.circuit`, `.circuit.layout`)
 
 - `study.new`: Create a .fea study from this design.
   - Required: `physics` (one of `structural`, `modal`, `thermal`, `ir_drop`, `warpage`, `thermal_structural`, default `structural`); `name` (text)
