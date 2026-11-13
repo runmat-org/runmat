@@ -118,6 +118,14 @@ fn thermal_publication_is_admitted_with_the_plan() {
     );
     drop(replay);
     let reservation = source.publication_workspace(&dto, u64::MAX).unwrap();
+    // Publication re-checks the source under the allowance it admitted (`source_replay_allowance`,
+    // at least this reservation). The estimate must not depend on the maximum it is checked
+    // against, so the re-check under exactly the reservation reproduces it.
+    assert_eq!(
+        source.publication_workspace(&dto, reservation).unwrap(),
+        reservation
+    );
+    assert!(source.publication_workspace(&dto, reservation - 1).is_err());
     let import = reservation - owned - 2 * completion_bytes;
     assert!(
         import >= owned,
