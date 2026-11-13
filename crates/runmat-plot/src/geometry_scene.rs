@@ -1076,10 +1076,13 @@ impl GeometrySceneChunk {
             );
         }
         // A section cap takes the body's (or its material's) color, so it is cut from the faces
-        // as they are before highlights, hover, selection and setup tints paint them.
+        // as they are before highlights, hover, selection and setup tints paint them. Only a
+        // chunk of surface triangles bounds the solid: a feature-edge chunk beside it holds line
+        // segments, which read three vertices at a time would add false faces to the cut.
         let mut cap_source = presentation
             .active_section()
             .filter(|section| section.cap)
+            .filter(|_| render_data.pipeline_type == PipelineType::Triangles && !is_edge_chunk)
             .map(|_| self.cap_colors(render_data.clone()));
         for highlight in &presentation.region_highlights {
             self.apply_region_color(

@@ -269,11 +269,19 @@ impl GeometryScene {
             ));
         }
         if !stroke_vertices.is_empty() {
+            // Symbols draw over the model so a support on a far face still shows. In a section
+            // view the material left in front of a kept symbol (a rib over a mounting hole)
+            // hides it, as it hides that face; symbols on the removed side were dropped above.
+            let pipeline = if presentation.active_section().is_some() {
+                PipelineType::AnnotationStrokeDepth
+            } else {
+                PipelineType::AnnotationStroke
+            };
             nodes.push(self.annotation_node(
                 "FEA study symbols",
                 "__fea_annotations:vectors",
                 self.chunks.len() + 1,
-                PipelineType::AnnotationStroke,
+                pipeline,
                 stroke_vertices,
             ));
         }

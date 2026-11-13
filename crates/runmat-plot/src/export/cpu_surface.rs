@@ -2001,7 +2001,9 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
     let style_code = render_data.material.metallic as i32;
 
     match render_data.pipeline_type {
-        PipelineType::AnnotationStroke => {
+        PipelineType::AnnotationStroke | PipelineType::AnnotationStrokeDepth => {
+            let depth_test = axes.has_3d_content
+                && render_data.pipeline_type == PipelineType::AnnotationStrokeDepth;
             let projection = axes.camera_3d.as_ref().map(|camera| {
                 let mut camera = camera.clone();
                 camera.update_aspect_ratio(
@@ -2032,7 +2034,7 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
                 let mut b = b;
                 a.color[3] = 255;
                 b.color[3] = 255;
-                canvas.draw_line(a, b, 2.8, style_code, false);
+                canvas.draw_line(a, b, 2.8, style_code, depth_test);
             }
         }
         PipelineType::EdgeStroke | PipelineType::EdgeStrokeNoDepth => {

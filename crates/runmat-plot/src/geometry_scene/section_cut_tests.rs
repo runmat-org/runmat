@@ -262,7 +262,8 @@ fn a_cap_over_a_result_field_is_body_grey() {
     }
 }
 
-/// The cube as a CAD import draws it: each face its own chunk of one mesh (body).
+/// The cube as a CAD import draws it: each face its own chunk of one mesh (body), with that
+/// face's feature edges in a line chunk beside it.
 fn cube_by_face() -> GeometryScene {
     let whole = cube();
     let indices = whole.indices.clone().unwrap();
@@ -282,9 +283,14 @@ fn cube_by_face() -> GeometryScene {
                 vec![GeometrySceneTriangleRange::new(0, 2)],
             )]);
             chunk.chunk_id = format!("mesh_1:chunk_{face}");
-            chunk
+            let edges = chunk.wireframe_edges([0.1, 0.1, 0.1, 1.0]);
+            std::iter::once(chunk).chain(edges)
         })
-        .collect();
+        .flatten()
+        .collect::<Vec<_>>();
+    // The edge chunks belong to the same body: a cap reads only its surface triangles.
+    assert_eq!(chunks.len(), 12);
+    assert!(chunks.iter().all(|chunk| chunk.mesh_id.as_deref() == Some("mesh_1")));
     GeometryScene::new("cube-by-face", 1, chunks)
 }
 
@@ -331,4 +337,49 @@ fn a_body_drawn_one_face_per_chunk_is_capped_across_its_chunks_in_the_body_color
     // Open, or with no section, there is no cap.
     assert!(cap_nodes(&GeometryScenePresentation { section: section(false), ..Default::default() }).is_empty());
     assert!(cap_nodes(&GeometryScenePresentation::default()).is_empty());
+}
+
+#[test]
+fn a_section_views_kept_symbols_hide_behind_material_and_removed_ones_go() {
+    // Supports on the cube's bottom face (kept, below a cut at z = 0.5) and top face (removed).
+    let support = |region: &str| GeometrySceneRegionAnnotation {
+        region_id: region.into(),
+        color: None,
+        kind: GeometrySceneAnnotationKind::FixedSupport,
+        label: None,
+        direction: None,
+        size: None,
+    };
+    let scene = GeometryScene::new("cube", 1, vec![cube()]);
+    let symbols = |section: Option<GeometrySceneSection>, regions: &[&str]| {
+        scene
+            .nodes_with_presentation(&GeometryScenePresentation {
+                region_annotations: regions.iter().map(|r| support(r)).collect(),
+                section: Some(section),
+                ..Default::default()
+            })
+            .into_iter()
+            .find(|node| node.name == "FEA study symbols")
+            .and_then(|node| node.render_data)
+    };
+    let top_cut = GeometrySceneSection {
+        plane: GeometrySceneSectionPlane {
+            normal: [0.0, 0.0, -1.0],
+            origin: Some([0.0, 0.0, 0.5]),
+            offset: None,
+            label: None,
+        },
+        second_plane: None,
+        cap: true,
+    };
+    // Unsectioned, a support draws over the model so one on a far face still shows.
+    let whole = symbols(None, &["face_4"]).unwrap();
+    assert_eq!(whole.pipeline_type, PipelineType::AnnotationStroke);
+    // Sectioned, the kept one is depth-tested like the faces, so material in front hides it.
+    let kept = symbols(Some(top_cut.clone()), &["face_4"]).unwrap();
+    assert_eq!(kept.pipeline_type, PipelineType::AnnotationStrokeDepth);
+    assert_eq!(kept.vertices.len(), whole.vertices.len());
+    assert!(!PipelineType::AnnotationStrokeDepth.is_depth_free_overlay());
+    // The one on the removed top face goes with it.
+    assert!(symbols(Some(top_cut), &["face_5"]).is_none());
 }
