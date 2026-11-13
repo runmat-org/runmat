@@ -79,7 +79,7 @@ Each step has an `id`, what it moves, and a `motion`. A step names what it moves
 
 | Field | Moves |
 |---|---|
-| `occurrences` | Each occurrence by its path: `[{ name = fuselage }, { name = forward }, { name = panel }]`. A copy adds its instance: `{ name = rib, instance = { by = ribs, key = { instance = linear, step = 3 } } }`. |
+| `occurrences` | Each occurrence by its path: `[{ name = fuselage }, { name = forward }, { name = panel }]`. A pattern's seed brings every copy the pattern lays out of it, so `[{ name = stack_screw }]` moves all four screws of a grid. A copy named with its instance moves alone: `{ name = rib, instance = { by = ribs, key = { instance = linear, step = 3 } } }`. |
 | `patterns` | Each pattern whole: the path of the assembly that declares it, then the pattern's name. The step moves the pattern's seeds and every copy it lays out in the shown configuration. `[[{ name = wing }, { name = front_upper_cap }]]` moves one rivet row of the wing. |
 | `mirrors` | Each mirror whole, named the same way. The step moves every image the mirror makes, and leaves the originals where they are. A mirror of a pattern makes one image per seed and per copy, so `[[{ name = wing }, { name = rivets_port }]]` moves every port-side rivet. |
 
@@ -93,7 +93,7 @@ A pattern or mirror keeps up with its layout: when the count changes, the step m
 | `rotate` | `axis`, `angle` | Turns about `{ about = "explicit", point = […], direction = […] }`, or about an occurrence's axis: `{ about = "occurrence_axis", occurrence = […], axis = z }`. |
 | `radial` | `center`, `distance` | Moves each occurrence away from an axis (`{ center = "axis", point = […], direction = […] }`) or a point (`{ center = "point", point = […] }`), along the line from the centre to the occurrence's centre. Skins come off a barrel this way. |
 
-With `spacing`, the step moves its i-th occurrence `distance + i × spacing`, counting in the order the step lists them: first `occurrences`, then each pattern's seeds and copies in layout order, then each mirror's images. Stacked washers fan out this way.
+With `spacing`, the step moves its i-th occurrence `distance + i × spacing`, counting in the order the step lists them: first `occurrences` (each seed followed by its copies), then each pattern's seeds and copies in layout order, then each mirror's images. Stacked washers fan out this way.
 
 ## Lines, base views and sub-assembly views
 

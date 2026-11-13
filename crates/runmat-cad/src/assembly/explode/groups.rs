@@ -1,6 +1,7 @@
-//! The occurrences one exploded step moves: the occurrences it names, then whole patterns
-//! (seeds and every instance laid out in this configuration), then whole mirrors (every image,
-//! including one per instance of a mirrored pattern).
+//! The occurrences one exploded step moves: the occurrences it names (a pattern's seed with
+//! every copy the pattern lays out of it), then whole patterns (seeds and every instance laid
+//! out in this configuration), then whole mirrors (every image, including one per instance of a
+//! mirrored pattern).
 
 use super::{push, site, Eval, ExplodeStep};
 use crate::assembly::model::{AssemblyDocument, DefinitionKind, PathSegment, RelPath};
@@ -27,10 +28,20 @@ impl Eval<'_, '_> {
     /// Every occurrence the step moves, in the order it lists them. `None` holds a named
     /// occurrence that is absent here, so translate spacing (`distance + i × spacing`) keeps
     /// the order as written.
+    ///
+    /// A named seed brings its pattern copies right after it: the copies are laid out from the
+    /// seed, so `stack_screw` names every stack screw, as `patterns` names a whole pattern. A copy
+    /// named by its instance moves alone. Each occurrence counts once, at its first place.
     pub(super) fn step_members(&mut self, s: &ExplodeStep) -> Vec<Option<NodeId>> {
         let occ = format!("steps.{}.occurrences", s.id);
-        let mut out: Vec<Option<NodeId>> =
-            s.occurrences.iter().map(|o| self.node(o, &occ)).collect();
+        let mut out: Vec<Option<NodeId>> = Vec::new();
+        for o in &s.occurrences {
+            let n = self.node(o, &occ);
+            out.push(n);
+            if let Some(n) = n {
+                out.extend(self.seed_copies(n).into_iter().map(Some));
+            }
+        }
         let pat = format!("steps.{}.patterns", s.id);
         for g in &s.patterns {
             out.extend(self.group(g, Group::Pattern, &pat).into_iter().map(Some));
@@ -39,7 +50,33 @@ impl Eval<'_, '_> {
         for g in &s.mirrors {
             out.extend(self.group(g, Group::Mirror, &mir).into_iter().map(Some));
         }
+        let mut seen = std::collections::BTreeSet::new();
+        out.retain(|n| n.is_none_or(|n| seen.insert(n)));
         out
+    }
+
+    /// The copies patterns lay out of seed `n` in this configuration (none when `n` is a copy, a
+    /// mirror image or no pattern's seed), in layout order.
+    fn seed_copies(&self, n: NodeId) -> Vec<NodeId> {
+        let tree = self.tree;
+        let node = tree.node(n);
+        if node.origin != NodeOrigin::Authored || node.segment.instance.is_some() {
+            return Vec::new();
+        }
+        let Some(parent) = node.parent else {
+            return Vec::new();
+        };
+        tree.node(parent)
+            .children
+            .iter()
+            .copied()
+            .filter(|&c| {
+                let copy = tree.node(c);
+                matches!(copy.origin, NodeOrigin::Pattern { .. })
+                    && copy.segment.name == node.segment.name
+                    && copy.segment.instance.is_some()
+            })
+            .collect()
     }
 
     /// The members of one pattern or mirror, named by the path of the assembly that declares
