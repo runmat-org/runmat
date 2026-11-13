@@ -456,9 +456,10 @@ jobs:
   publish-crates:
     if: github.event_name == 'push'
     name: Publish crates to crates.io
-    needs: [create-release]
+    needs: [release-validation, meshing-release-evidence]
     environment: Production
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
       contents: read
     env:
@@ -472,6 +473,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.90.0
+
+      - name: Setup Node.js for rate-aware publication
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
 
       - name: Ensure LICENSE is included in each crate
         shell: bash
@@ -522,15 +528,8 @@ jobs:
         run: |
           set -euxo pipefail
           cargo install cargo-workspaces --locked
-          cargo workspaces publish \
-            --all \
-            --yes \
-            --allow-dirty \
-            --skip-published \
-            --publish-as-is \
-            --publish-interval 30 \
-            --no-verify \
-            --token "$CARGO_REGISTRY_TOKEN"
+          node --test scripts/publish-crates.test.mjs
+          node scripts/publish-crates.mjs
 
   publish-bindings:
     if: github.event_name == 'push'
