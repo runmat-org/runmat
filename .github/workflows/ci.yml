@@ -67,6 +67,7 @@ jobs:
           scripts/distribution/native-first-launch.test.mjs
           scripts/distribution/native-build-profile.test.mjs
           scripts/publish-crates.test.mjs
+          scripts/distribution/release-ci-checkpoint.test.mjs
           bindings/ts/scripts/sync-wasm-artifacts.test.cjs
           scripts/runtime/builtin-example-verifier/protocol.test.mjs
           scripts/development/check-reviewed-architecture.test.mjs

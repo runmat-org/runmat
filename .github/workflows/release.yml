@@ -41,12 +41,33 @@ jobs:
         run: echo "Testing ${{ inputs.ref }} without publishing a release."
 
   release-validation:
-    name: Validate release with CI
+    name: Verify qualified CI checkpoint and publication contracts
     needs: [validate-release-state]
-    uses: ./.github/workflows/ci.yml
-    with:
-      release_validation: true
-      source_ref: ${{ github.event.inputs.ref || github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Verify completed cross-platform CI and exact publication-only delta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/distribution/release-ci-checkpoint.mjs
+      - name: Test publication controls
+        run: node --test scripts/publish-crates.test.mjs scripts/distribution/release-ci-checkpoint.test.mjs
+      - name: Retain release CI checkpoint proof
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-ci-checkpoint
+          path: release-ci-checkpoint.json
+          if-no-files-found: error
 
   meshing-release-evidence:
     name: Verify meshing catalogs and scientific release evidence
