@@ -20,7 +20,19 @@ export function latestJobs(jobs) {
     assert.ok(!attempts.has(job.run_attempt), `Duplicate job in one attempt: ${job.name}`);
     attempts.set(job.run_attempt, job); groups.set(job.name, attempts);
   }
-  return [...groups.values()].map(attempts => attempts.get(Math.max(...attempts.keys())));
+  return [...groups.values()].map(attempts => {
+    const latest = attempts.get(Math.max(...attempts.keys()));
+    // A partial rerun copies completed jobs into the new attempt with new job
+    // IDs. Their execution timestamps and steps remain unchanged; their uploaded
+    // artifacts retain the attempt number of the actual execution.
+    const hasExecution = job => job.status === "completed" && job.started_at && job.completed_at
+      && Array.isArray(job.steps) && job.steps.length > 0;
+    if (!hasExecution(latest)) return latest;
+    const execution = job => JSON.stringify([job.status, job.conclusion, job.started_at, job.completed_at, job.steps]);
+    const signature = execution(latest);
+    return [...attempts.values()].filter(job => hasExecution(job) && execution(job) === signature)
+      .sort((a, b) => a.run_attempt - b.run_attempt)[0];
+  });
 }
 
 export function validateFrozenProducts(run, jobs, { tag, source, completed = true }) {

@@ -36,6 +36,29 @@ test("selects exact platform and attempt artifacts after accepted products", () 
   assert.deepEqual(validateFrozenProducts(run(), jobs(), options).map(product => product.artifact),
     PLATFORMS.map(platform => `runmat-v0.7.1-${platform}-1`));
 });
+
+test("uses the actual execution attempt for GitHub's carried-forward completed jobs", () => {
+  const originals = jobs().map(job => ({ ...job, run_attempt: 1,
+    started_at: "2026-11-13T10:37:51Z", completed_at: "2026-11-13T11:44:36Z" }));
+  const carried = originals.map(job => ({ ...structuredClone(job), id: (job.id ?? 100) + 200, run_attempt: 2 }));
+  assert.deepEqual(latestJobs([...originals, ...carried]).slice(4), originals.slice(4));
+  assert.deepEqual(validateFrozenProducts(run(), latestJobs([...originals, ...carried]), options)
+    .map(product => product.artifact), PLATFORMS.map(platform => `runmat-v0.7.1-${platform}-1`));
+});
+
+test("keeps a genuinely rerun execution and refuses to infer origin from incomplete metadata", () => {
+  const original = { ...jobs()[4], started_at: "2026-11-13T10:37:51Z", completed_at: "2026-11-13T11:44:36Z" };
+  const rerun = { ...structuredClone(original), id: 200, run_attempt: 2, started_at: "2026-11-13T18:46:00Z" };
+  assert.deepEqual(latestJobs([original, rerun]), [rerun]);
+  const changedSteps = { ...structuredClone(original), id: 201, run_attempt: 2 };
+  changedSteps.steps[0].completed_at = "2026-11-13T18:47:00Z";
+  assert.deepEqual(latestJobs([original, changedSteps]), [changedSteps]);
+  const missingTimes = { ...structuredClone(original), id: 202, run_attempt: 2 };
+  delete missingTimes.started_at;
+  assert.deepEqual(latestJobs([original, missingTimes]), [missingTimes]);
+  const active = { ...structuredClone(original), id: 203, run_attempt: 2, status: "in_progress" };
+  assert.deepEqual(latestJobs([original, active]), [active]);
+});
 test("permits retirement only after every product is safely uploaded", () => {
   const active = { ...run(), status: "in_progress" };
   assert.throws(() => validateFrozenProducts(active, jobs(), options));
