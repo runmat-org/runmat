@@ -211,6 +211,8 @@ Notes, tables and views never overprint each other, the title block or the borde
 - A note with no room at its `at` moves to the nearest free spot, and the check warns: "Note n2 at [20, 30] has no room there: …".
 - A note or table that fits nowhere on the sheet stays where it was put, and the check warns with what to change: "Note n2 doesn't fit on the sheet: it needs 200 x 60 mm of free space …".
 
+The sheet sets note text in capitals, as ASME Y14.2 and ISO 3098 lettering expect, with filled `{property}` fields included: `MATERIAL: {material}.` prints `MATERIAL: ALUMINUM 6061.` for a part whose material is `Aluminum 6061`. A unit symbol written after a number keeps the case it was written in, so `3 mm` and `25kg` print as written. The file and the model's properties keep their own case.
+
 The sheet, the PDF and the DXF break notes at the same words. Each line is its own text entity in the DXF and its own line of text in the PDF.
 
 ## Laid out for you

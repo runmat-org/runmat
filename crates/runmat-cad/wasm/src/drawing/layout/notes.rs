@@ -72,6 +72,51 @@ pub fn wrap(text: &str, size: f64, width: Option<f64>) -> Vec<String> {
     out
 }
 
+/// Note text as the sheet sets it: in capitals, with the `{property}` fields filled in
+/// included (ASME Y14.2 letters a drawing in uppercase; ISO 3098 sheet notes follow the same
+/// practice). A unit symbol written after a number keeps its case, since both standards keep
+/// SI symbols as defined: `3 mm`, `25kg`, `⌀0.2 mm`.
+pub fn sheet_case(text: &str) -> String {
+    let units = runmat_cad::units::Units;
+    let is_unit = |w: &str| {
+        let w = w.trim_end_matches(|c: char| ".,;:)".contains(c));
+        !w.is_empty() && w.chars().any(char::is_alphabetic) && units.unit(w).is_some()
+    };
+    let number_end = |w: &str| {
+        let w = w.trim_start_matches(['+', '-', '±', '(', '⌀', 'Ø', '~']);
+        let end = w
+            .char_indices()
+            .find(|(_, c)| !(c.is_ascii_digit() || *c == '.'))
+            .map_or(w.len(), |(i, _)| i);
+        (end > 0 && w[..end].chars().any(|c| c.is_ascii_digit())).then(|| w.len() - end)
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut after_number = false;
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        for (j, word) in line.split(' ').enumerate() {
+            if j > 0 {
+                out.push(' ');
+            }
+            let attached = number_end(word).map(|rest| &word[word.len() - rest..]);
+            if after_number && is_unit(word) {
+                out.push_str(word);
+            } else if let Some(unit) = attached.filter(|u| is_unit(u)) {
+                out.push_str(&word[..word.len() - unit.len()]);
+                out.push_str(unit);
+            } else {
+                out.push_str(&word.to_uppercase());
+            }
+            if !word.is_empty() {
+                after_number = attached == Some("");
+            }
+        }
+    }
+    out
+}
+
 /// A note's `width` in sheet millimetres, when it has one.
 pub fn width_of(kind: &Value) -> Option<f64> {
     let w = serde_json::from_value::<runmat_cad::value::ValueExpr>(kind["width"].clone()).ok()?;
@@ -89,7 +134,7 @@ pub struct TextBlock {
 impl TextBlock {
     pub fn new(st: &Std, text: &str, width: Option<f64>) -> TextBlock {
         TextBlock {
-            lines: wrap(text, st.text, width),
+            lines: wrap(&sheet_case(text), st.text, width),
             size: st.text,
             pitch: st.line_pitch(st.text),
         }
