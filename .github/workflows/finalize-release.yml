@@ -19,6 +19,10 @@ on:
         description: SHA-512 integrity of the independently verified npm package
         required: true
         type: string
+      defer_crates:
+        description: Publish accepted native products and SDK proof while crates.io publication is pending
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,6 +45,7 @@ jobs:
       RELEASE_SOURCE: ${{ inputs.source_revision }}
       RELEASE_RUN: ${{ inputs.source_run }}
       RELEASE_SDK_INTEGRITY: ${{ inputs.sdk_integrity }}
+      RELEASE_DEFER_CRATES: ${{ inputs.defer_crates }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -54,6 +59,7 @@ jobs:
             assert.match(process.env.RELEASE_SOURCE, /^[a-f0-9]{40}$/);
             assert.match(process.env.RELEASE_RUN, /^[1-9]\d*$/);
             assert.match(process.env.RELEASE_SDK_INTEGRITY, /^sha512-[A-Za-z0-9+/]+={0,2}$/);
+            assert.match(process.env.RELEASE_DEFER_CRATES, /^(true|false)$/);
           '
       - name: Test frozen publication controls
         run: node --test scripts/distribution/frozen-release*.test.mjs
@@ -71,7 +77,13 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE"
           node scripts/verify-release-version.mjs "${RELEASE_TAG#v}"
           node scripts/distribution/release-ci-checkpoint.mjs
+      - name: Verify published SDK
+        run: |
+          node scripts/distribution/frozen-release-registries.mjs \
+            "$GITHUB_WORKSPACE/frozen-source" "$RELEASE_SOURCE" "$RELEASE_TAG" \
+            "$RELEASE_SDK_INTEGRITY" "$RUNNER_TEMP/release-sdk.json" "$RUNNER_TEMP/crate-verification" npm-only
       - name: Verify complete registry publication
+        if: inputs.defer_crates == false
         run: |
           node scripts/distribution/frozen-release-registries.mjs \
             "$GITHUB_WORKSPACE/frozen-source" "$RELEASE_SOURCE" "$RELEASE_TAG" \
@@ -81,9 +93,15 @@ jobs:
           node scripts/distribution/frozen-release.mjs \
             "$RELEASE_RUN" "$RELEASE_TAG" "$RELEASE_SOURCE" "$GITHUB_WORKSPACE/frozen-source" \
             "$RUNNER_TEMP/release-assets" "$RUNNER_TEMP/release-downloads"
-          cp "$RUNNER_TEMP/release-registries.json" "$RUNNER_TEMP/release-assets/release-registries.json"
+          cp "$RUNNER_TEMP/release-sdk.json" "$RUNNER_TEMP/release-assets/release-sdk.json"
+          if [[ "$RELEASE_DEFER_CRATES" == false ]]; then
+            cp "$RUNNER_TEMP/release-registries.json" "$RUNNER_TEMP/release-assets/release-registries.json"
+          fi
       - name: Publish and verify the explicit asset set
-        run: node scripts/distribution/frozen-release-publish.mjs "$RUNNER_TEMP/release-assets" "$RELEASE_TAG" "$RELEASE_SOURCE"
+        run: |
+          MODE=complete
+          if [[ "$RELEASE_DEFER_CRATES" == true ]]; then MODE=defer-crates; fi
+          node scripts/distribution/frozen-release-publish.mjs "$RUNNER_TEMP/release-assets" "$RELEASE_TAG" "$RELEASE_SOURCE" "$MODE"
       - name: Retain final publication evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -92,6 +110,7 @@ jobs:
           path: |
             ${{ runner.temp }}/release-assets/release-publication.json
             ${{ runner.temp }}/release-registries.json
+            ${{ runner.temp }}/release-sdk.json
             frozen-source/release-ci-checkpoint.json
           if-no-files-found: warn
           retention-days: 30
