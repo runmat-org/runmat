@@ -1,0 +1,97 @@
+name: Finalize frozen release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable release tag
+        required: true
+        type: string
+      source_revision:
+        description: Exact qualified commit targeted by the tag
+        required: true
+        type: string
+      source_run:
+        description: Terminal Release run containing the accepted native products
+        required: true
+        type: string
+      sdk_integrity:
+        description: SHA-512 integrity of the independently verified npm package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finalize-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    environment: Production
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_SOURCE: ${{ inputs.source_revision }}
+      RELEASE_RUN: ${{ inputs.source_run }}
+      RELEASE_SDK_INTEGRITY: ${{ inputs.sdk_integrity }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Validate publication inputs
+        run: |
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            assert.match(process.env.RELEASE_TAG, /^v\d+\.\d+\.\d+$/);
+            assert.match(process.env.RELEASE_SOURCE, /^[a-f0-9]{40}$/);
+            assert.match(process.env.RELEASE_RUN, /^[1-9]\d*$/);
+            assert.match(process.env.RELEASE_SDK_INTEGRITY, /^sha512-[A-Za-z0-9+/]+={0,2}$/);
+          '
+      - name: Test frozen publication controls
+        run: node --test scripts/distribution/frozen-release*.test.mjs
+      - name: Checkout frozen source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+          path: frozen-source
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - name: Recheck qualified source and reviewed versions
+        working-directory: frozen-source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE"
+          node scripts/verify-release-version.mjs "${RELEASE_TAG#v}"
+          node scripts/distribution/release-ci-checkpoint.mjs
+      - name: Verify complete registry publication
+        run: |
+          node scripts/distribution/frozen-release-registries.mjs \
+            "$GITHUB_WORKSPACE/frozen-source" "$RELEASE_SOURCE" "$RELEASE_TAG" \
+            "$RELEASE_SDK_INTEGRITY" "$RUNNER_TEMP/release-registries.json" "$RUNNER_TEMP/crate-verification"
+      - name: Stage exact accepted native assets and intact evidence ZIP
+        run: |
+          node scripts/distribution/frozen-release.mjs \
+            "$RELEASE_RUN" "$RELEASE_TAG" "$RELEASE_SOURCE" "$GITHUB_WORKSPACE/frozen-source" \
+            "$RUNNER_TEMP/release-assets" "$RUNNER_TEMP/release-downloads"
+          cp "$RUNNER_TEMP/release-registries.json" "$RUNNER_TEMP/release-assets/release-registries.json"
+      - name: Publish and verify the explicit asset set
+        run: node scripts/distribution/frozen-release-publish.mjs "$RUNNER_TEMP/release-assets" "$RELEASE_TAG" "$RELEASE_SOURCE"
+      - name: Retain final publication evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frozen-release-publication-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/release-assets/release-publication.json
+            ${{ runner.temp }}/release-registries.json
+            frozen-source/release-ci-checkpoint.json
+          if-no-files-found: warn
+          retention-days: 30
