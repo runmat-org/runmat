@@ -564,3 +564,49 @@ fn a_circuit_value_from_an_m_function_names_its_function_in_the_hover() {
         "{hover}"
     );
 }
+
+/// The airliner's rivet with its countersunk head widened by an Offset face (Direct) on the
+/// cone, as the editor writes it. The grid test kernel can't move a curved face; that is the
+/// test double's limit, so the editor reports no error for the edit on either kernel.
+#[test]
+fn a_direct_edit_the_test_kernel_cant_make_is_not_reported_as_an_error() {
+    const RIVET: &str = r##"runmat 0.7
+std 1
+
+part rivet {
+    sketch s on origin.yz {
+        l1 = line(start = [0 mm, -16 mm], end = [2.4 mm, -16 mm])
+        l2 = line(start = [2.4 mm, -16 mm], end = [2.4 mm, -3.6 mm])
+        l3 = line(start = [2.4 mm, -3.6 mm], end = [5 mm, -1 mm])
+        l4 = line(start = [5 mm, -1 mm], end = [0 mm, -1 mm])
+        l5 = line(start = [0 mm, -1 mm], end = [0 mm, -16 mm])
+    }
+    feature body = revolve(profile = sketch.s, axis = origin.z, angle = 360 deg)
+    feature offset1 = direct.move_faces(faces = [feature.body.face.side(s.l3)], motion = offset(distance = 0.5 mm))
+
+    output rivet = { body = feature.body.body, part_number = "MS20426AD6", material = "aluminum_2117", color = "#BFC4CB" }
+}
+"##;
+    // On OCCT (the native server) the edit regenerates; on the test kernel (the browser build,
+    // and `--no-default-features`) the kernel refuses it, and the editor leaves that out.
+    let parsed = runmat_cad::syntax::parse_part("/p/rivet.part", RIVET);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let analysis = analyze("/p/rivet.part", RIVET, &DesignFiles::new());
+    let diagnostics = analysis.diagnostics();
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.severity != Some(DiagnosticSeverity::ERROR)
+                && !d.message.contains("fake kernel")),
+        "{diagnostics:#?}"
+    );
+    // A real model error in the same part is still reported.
+    let broken = RIVET.replace("side(s.l3)", "side(s.l9)");
+    let diagnostics = analyze("/p/rivet.part", &broken, &DesignFiles::new()).diagnostics();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+        "{diagnostics:#?}"
+    );
+}
