@@ -17,7 +17,7 @@ use crate::assembly::model::DefinitionKind;
 use crate::assembly::resolve::ResolvedAssembly;
 use crate::assembly::source::DesignSource;
 use crate::model::sketch::SketchGeometry;
-use crate::model::{FeatureKind, PartDocument};
+use crate::model::{FeatureKind, OriginPlane, PartDocument};
 use crate::refs::name::{EntityName, NameTable, TopoKind};
 use crate::refs::Reference;
 use crate::regen::engine::RegenResult;
@@ -147,6 +147,10 @@ pub struct PartDisplay {
     /// (see [`references::reference_display`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<references::ReferenceDisplay>,
+    /// The part's origin planes (Top, Front, Right) and their frames, so a viewer draws them
+    /// for a plane pick and picks them by the Outline's ids (see [`origin_plane_display`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub origin_planes: Vec<OriginPlaneDisplay>,
     /// The color the part draws in: its material's appearance ([`crate::appearance`]), sRGB
     /// and opacity. Absent: the CAD face color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -229,6 +233,41 @@ pub fn display_levels(
             level
         })
         .collect()
+}
+
+/// An origin plane as a viewer draws and picks it: the Outline's id (`origin:top`), its name
+/// and its frame (the language's [`OriginPlane::frame`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OriginPlaneDisplay {
+    pub id: String,
+    pub name: String,
+    pub frame: FrameDisplay,
+}
+
+/// The origin planes Top (`origin.xy`), Front (`origin.zx`) and Right (`origin.yz`), by the
+/// Outline's ids, which picks read back as those planes.
+pub fn origin_plane_display() -> Vec<OriginPlaneDisplay> {
+    let f32s = |v: [f64; 3]| v.map(|x| x as f32);
+    [
+        ("origin:top", "Top", OriginPlane::Xy),
+        ("origin:front", "Front", OriginPlane::Zx),
+        ("origin:right", "Right", OriginPlane::Yz),
+    ]
+    .into_iter()
+    .map(|(id, name, plane)| {
+        let frame = plane.frame();
+        OriginPlaneDisplay {
+            id: id.into(),
+            name: name.into(),
+            frame: FrameDisplay {
+                origin: f32s(frame.origin),
+                x: f32s(frame.x),
+                y: f32s(frame.y),
+                z: f32s(frame.z),
+            },
+        }
+    })
+    .collect()
 }
 
 /// A sketch plane in part coordinates.
@@ -949,4 +988,27 @@ pub fn part_display_json(display: &PartDisplay) -> String {
 /// The assembly display as JSON, for the Desktop.
 pub fn assembly_display_json(display: &AssemblyDisplay) -> String {
     serde_json::to_string(display).expect("display serializes")
+}
+
+#[cfg(test)]
+mod origin_plane_tests {
+    use super::*;
+
+    #[test]
+    fn origin_planes_carry_the_language_frames_by_the_outline_ids() {
+        let planes = origin_plane_display();
+        let ids: Vec<_> = planes.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["origin:top", "origin:front", "origin:right"]);
+        // Front is the zx plane: x along +Z, y along +X, normal +Y.
+        assert_eq!(planes[1].frame.x, [0.0, 0.0, 1.0]);
+        assert_eq!(planes[1].frame.y, [1.0, 0.0, 0.0]);
+        assert_eq!(planes[1].frame.z, [0.0, 1.0, 0.0]);
+        // The display JSON carries them as `origin_planes`.
+        let json = serde_json::to_value(PartDisplay {
+            origin_planes: planes,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(json["origin_planes"][2]["name"], "Right");
+    }
 }

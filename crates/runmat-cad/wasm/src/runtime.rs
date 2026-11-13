@@ -311,6 +311,7 @@ pub fn regenerate_part_in(
     values_host::resolve_let_files(path, &mut index.lets);
     let mut display = part_display(&result, kernel.as_ref(), tessellation);
     display.sketches = sketch_display(&document, &result);
+    display.origin_planes = runmat_cad::display::origin_plane_display();
     display.references = runmat_cad::display::references::reference_display(
         &document,
         &result,
