@@ -45,7 +45,8 @@ pub enum BodyMode {
     /// A new body.
     #[default]
     New,
-    /// Union with `targets` (empty: every body at this point in the history).
+    /// Union with `targets` (empty: every body at this point in the history; the part's first
+    /// body feature, with no body to add to, makes the first body as `New` does).
     Add {
         #[serde(default)]
         targets: Vec<Reference>,

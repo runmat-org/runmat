@@ -826,3 +826,37 @@ fn g13_body_pattern_copies_are_named_by_instance() {
         "the original body keeps its name"
     );
 }
+
+/// The first extrude of a new part, written with Add (the Desktop form's default Op), makes the
+/// part's first body: Add has nothing to add to yet, so it acts as New. A later Add still unions.
+#[test]
+fn g13_first_body_feature_with_add_makes_the_first_body() {
+    let env = Env::new();
+    let mut d = block();
+    d.features[1] = extrude("body", "s1", input("thickness"), BodyMode::add());
+    let r = env.regen(&d);
+    assert!(r.status("body").unwrap().ran(), "{:?}", errors(&r));
+    assert!(!has(&r, DiagCode::RefEmpty));
+    assert_eq!(r.state.bodies.len(), 1);
+
+    d.features.push(sketch(
+        "s2",
+        rect(PlaneRef::origin_xy(), mm(70.0), mm(0.0), mm(120.0), mm(50.0)),
+    ));
+    d.features
+        .push(extrude("boss", "s2", mm(10.0), BodyMode::add()));
+    let r = env.regen(&d);
+    assert!(r.status("boss").unwrap().ran(), "{:?}", errors(&r));
+    assert_eq!(r.state.bodies.len(), 1, "the second Add unions into the first body");
+}
+
+/// Remove and Intersect still need a body: on an empty part they fail with nothing to act on.
+#[test]
+fn g13b_first_body_feature_with_cut_has_no_body_to_act_on() {
+    let env = Env::new();
+    let mut d = block();
+    d.features[1] = extrude("body", "s1", input("thickness"), BodyMode::cut());
+    let r = env.regen(&d);
+    assert!(!r.status("body").unwrap().ran());
+    assert!(diag(&r, DiagCode::RefEmpty).message.contains("has no body to act on"));
+}
