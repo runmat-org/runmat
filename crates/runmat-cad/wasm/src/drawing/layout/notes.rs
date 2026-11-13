@@ -25,8 +25,9 @@ const MIN_WIDTH: f64 = 30.0;
 pub const DEFAULT_WIDTH: f64 = 100.0;
 /// The column a leadered note with no `width` wraps in.
 pub const LEADER_WIDTH: f64 = 90.0;
-/// The space kept between a note and what is beside it.
-const CLEAR: f64 = 1.0;
+/// The space kept between a note and what is beside it: more than the space between its own
+/// lines, so two notes never read as one.
+const CLEAR: f64 = 2.5;
 /// The space kept between a note and the border.
 const BORDER_CLEAR: f64 = 3.0;
 
