@@ -164,7 +164,25 @@ impl<'de> Deserialize<'de> for ValueExpr {
         if let Some(number) = value.as_f64().filter(|_| value.is_number()) {
             return Ok(ValueExpr::Number { value: number });
         }
+        // A bare word where a value belongs (`distance = thickness`) lowers as a plain string;
+        // say what to write instead of the deserializer's "expected internally tagged enum".
+        if let Some(word) = value.as_str() {
+            return Err(serde::de::Error::custom(bare_word_message(word)));
+        }
         ValueExprForm::deserialize(value).map_err(serde::de::Error::custom)
+    }
+}
+
+/// What a bare word where a value belongs should have been: an input (`input.<name>`) or a let
+/// (`let.<name>`), or a quantity with its unit.
+fn bare_word_message(word: &str) -> String {
+    let is_name = !word.is_empty()
+        && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !word.starts_with(|c: char| c.is_ascii_digit());
+    if is_name {
+        format!("`{word}` is not a value here: write `input.{word}` for an input or `let.{word}` for a let")
+    } else {
+        format!("`{word}` is not a value here: write a number with its unit (`5 mm`), `input.<name>` or `let.<name>`")
     }
 }
 
@@ -1342,6 +1360,16 @@ fn value_form(expr: &ValueExpr) -> &'static str {
 #[cfg(test)]
 mod value_expr_example_tests {
     use super::*;
+
+    /// `distance = thickness` (an input written without `input.`) names the fix.
+    #[test]
+    fn a_bare_word_says_to_write_input_or_let() {
+        let err = serde_json::from_value::<ValueExpr>(serde_json::json!("thickness")).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`thickness` is not a value here: write `input.thickness` for an input or `let.thickness` for a let"
+        );
+    }
 
     /// Writes or checks the Desktop's copy. Set `RUNMAT_VALUE_EXPR_OUT` to the Desktop's
     /// `src/generated/value-expr-examples.json` to write it.

@@ -196,8 +196,14 @@ async fn render_geometry_observation_scaled(
         })?;
     exporter.set_theme_config(theme.unwrap_or_else(web::current_plot_theme_config));
 
+    // Edges draw as the live view draws them: strokes of the view's width through the depth
+    // probe, scaled with the poster's pixels per point, not one-device-pixel hairlines.
+    let presentation = runmat_plot::geometry_scene::GeometryScenePresentation {
+        edge_width_px: Some(runmat_plot::geometry_scene::VIEW_EDGE_WIDTH_PX),
+        ..Default::default()
+    };
     let bytes = exporter
-        .render_geometry_scene_png_bytes_with_camera(&scene, &camera)
+        .render_geometry_scene_png_bytes_with_presentation(&scene, &camera, &presentation)
         .await
         .map_err(|err| {
             log::warn!(

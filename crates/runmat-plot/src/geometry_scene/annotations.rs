@@ -126,6 +126,13 @@ impl GeometryScene {
                 let Some(frame) = chunk.region_annotation_frame(&annotation.region_id) else {
                     continue;
                 };
+                // A symbol whose anchor the section removed goes with the geometry it marks;
+                // distributed arrows below keep the ones on the kept side.
+                if !presentation.section_keeps(frame.anchor)
+                    && !is_distributed(annotation.kind, direction_given(annotation.direction))
+                {
+                    continue;
+                }
                 let color = annotation
                     .color
                     .unwrap_or_else(|| annotation_color(annotation.kind));
@@ -175,7 +182,10 @@ impl GeometryScene {
                         };
                         let (anchors, face_span) =
                             chunk.distributed_annotation_anchors(&annotation.region_id, frame);
-                        for (index, anchor) in anchors.into_iter().enumerate() {
+                        let anchors = anchors
+                            .into_iter()
+                            .filter(|anchor| presentation.section_keeps(*anchor));
+                        for (index, anchor) in anchors.enumerate() {
                             append_arrow_with_visibility(
                                 &mut stroke_vertices,
                                 surface_arrow_start(anchor, frame.normal, direction, arrow_length),
@@ -259,11 +269,19 @@ impl GeometryScene {
             ));
         }
         if !stroke_vertices.is_empty() {
+            // Symbols draw over the model so a support on a far face still shows. In a section
+            // view the material left in front of a kept symbol (a rib over a mounting hole)
+            // hides it, as it hides that face; symbols on the removed side were dropped above.
+            let pipeline = if presentation.active_section().is_some() {
+                PipelineType::AnnotationStrokeDepth
+            } else {
+                PipelineType::AnnotationStroke
+            };
             nodes.push(self.annotation_node(
                 "FEA study symbols",
                 "__fea_annotations:vectors",
                 self.chunks.len() + 1,
-                PipelineType::AnnotationStroke,
+                pipeline,
                 stroke_vertices,
             ));
         }
@@ -317,6 +335,26 @@ impl GeometryScene {
             instances: None,
         }
     }
+}
+
+/// The kinds drawn as arrows spread over their face, each anchor sectioned on its own.
+fn is_distributed(kind: GeometrySceneAnnotationKind, has_direction: bool) -> bool {
+    has_direction
+        && matches!(
+            kind,
+            GeometrySceneAnnotationKind::Pressure
+                | GeometrySceneAnnotationKind::Traction
+                | GeometrySceneAnnotationKind::HeatFlux
+                | GeometrySceneAnnotationKind::CurrentDensity
+                | GeometrySceneAnnotationKind::NormalVelocity
+                | GeometrySceneAnnotationKind::FlowVelocity
+                | GeometrySceneAnnotationKind::MassFlow
+                | GeometrySceneAnnotationKind::WallMotion
+        )
+}
+
+fn direction_given(direction: Option<[f32; 3]>) -> bool {
+    direction.and_then(normalized_annotation_direction).is_some()
 }
 
 fn append_annotation_marker(

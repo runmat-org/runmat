@@ -37,6 +37,7 @@ pub struct WgpuRenderer {
     line_pipeline: Option<wgpu::RenderPipeline>,
     line_no_depth_pipeline: Option<wgpu::RenderPipeline>,
     annotation_stroke_pipeline: Option<wgpu::RenderPipeline>,
+    annotation_stroke_depth_pipeline: Option<wgpu::RenderPipeline>,
     edge_stroke_pipeline: Option<wgpu::RenderPipeline>,
     edge_stroke_no_depth_pipeline: Option<wgpu::RenderPipeline>,
     /// Device pixels per CSS pixel for screen-space stroke widths.
@@ -466,6 +467,7 @@ impl WgpuRenderer {
             line_pipeline: None,
             line_no_depth_pipeline: None,
             annotation_stroke_pipeline: None,
+            annotation_stroke_depth_pipeline: None,
             edge_stroke_pipeline: None,
             edge_stroke_no_depth_pipeline: None,
             pixels_per_point: 1.0,
@@ -691,7 +693,13 @@ impl WgpuRenderer {
             PipelineType::AnnotationStroke => {
                 if self.annotation_stroke_pipeline.is_none() {
                     self.annotation_stroke_pipeline =
-                        Some(self.create_annotation_stroke_pipeline(emission));
+                        Some(self.create_annotation_stroke_pipeline(emission, false));
+                }
+            }
+            PipelineType::AnnotationStrokeDepth => {
+                if self.annotation_stroke_depth_pipeline.is_none() {
+                    self.annotation_stroke_depth_pipeline =
+                        Some(self.create_annotation_stroke_pipeline(emission, true));
                 }
             }
             PipelineType::EdgeStroke => {
@@ -734,6 +742,9 @@ impl WgpuRenderer {
             PipelineType::Lines => self.line_pipeline.as_ref().unwrap(),
             PipelineType::LinesNoDepth => self.line_no_depth_pipeline.as_ref().unwrap(),
             PipelineType::AnnotationStroke => self.annotation_stroke_pipeline.as_ref().unwrap(),
+            PipelineType::AnnotationStrokeDepth => {
+                self.annotation_stroke_depth_pipeline.as_ref().unwrap()
+            }
             PipelineType::EdgeStroke => self.edge_stroke_pipeline.as_ref().unwrap(),
             PipelineType::EdgeStrokeNoDepth => self.edge_stroke_no_depth_pipeline.as_ref().unwrap(),
             PipelineType::Triangles => self.triangle_pipeline.as_ref().unwrap(),

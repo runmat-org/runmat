@@ -1457,6 +1457,25 @@ pub async fn render_geometry_scene_rgba_bytes_with_camera_theme_and_scale(
         .await
 }
 
+/// As [`render_geometry_scene_rgba_bytes_with_camera_theme_and_scale`], drawn with
+/// `presentation` (edge width, display mode, section) as an interactive view would draw it.
+pub async fn render_geometry_scene_rgba_bytes_with_presentation(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    camera: &Camera,
+    theme: PlotThemeConfig,
+    pixels_per_point: f32,
+    presentation: &GeometryScenePresentation,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_theme_config(theme);
+    context.set_pixels_per_point(pixels_per_point);
+    context
+        .render_geometry_scene_to_rgba_with_presentation(&scene, Some(camera), Some(presentation))
+        .await
+}
+
 pub async fn render_geometry_scene_rgba_bytes_interactive_and_theme(
     scene: GeometryScene,
     width: u32,

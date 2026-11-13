@@ -447,6 +447,13 @@ pub struct AssemblyResolution {
     pub unbuilt: BTreeMap<String, String>,
 }
 
+/// A part file an assembly uses that failed to compile: resolution's "not in the project" text
+/// for it, and what the assembly says in its place.
+struct FailedPart {
+    missing: String,
+    message: String,
+}
+
 /// Resolves the assembly `path` from its text; syntax errors are the `Err` diagnostics.
 pub fn resolve_assembly(
     path: &str,
@@ -486,6 +493,8 @@ pub fn resolve_assembly_in(
     let mut problems = Vec::new();
     let mut digests: BTreeMap<String, String> = BTreeMap::new();
     let mut unbuilt: BTreeMap<String, String> = BTreeMap::new();
+    // Part files that failed to compile: reported as such, instead of "not in the project".
+    let mut failed_parts: Vec<FailedPart> = Vec::new();
     let top_path = top.path.clone();
     // Breadth-first over sub-assemblies, each definition once.
     let mut queue: Vec<(String, AssemblyDocument)> = vec![(path.to_owned(), top)];
@@ -651,7 +660,25 @@ pub fn resolve_assembly_in(
                             displays.insert(key.clone(), part.display.clone());
                             documents.insert(key.clone(), part.document.clone());
                         }
-                        Err(mut d) => problems.append(&mut d),
+                        Err(mut d) => {
+                            // A part that doesn't compile places nothing. Resolution reports its
+                            // file as missing; that report is reworded below to say why.
+                            let first = d
+                                .iter()
+                                .find(|e| e.severity == "error")
+                                .map(|e| e.message.clone())
+                                .unwrap_or_default();
+                            problems.append(&mut d);
+                            failed_parts.push(FailedPart {
+                                missing: runmat_cad::assembly::source::SourceError::NotFound {
+                                    file: runmat_cad::ids::FilePath::new(&key),
+                                }
+                                .to_string(),
+                                message: format!(
+                                    "{key} doesn't compile, so it draws nothing: {first}"
+                                ),
+                            });
+                        }
                     }
                 }
             }
@@ -684,7 +711,31 @@ pub fn resolve_assembly_in(
         configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
         ..ResolveRequest::default()
     };
-    let resolved = resolve(&top_path, &request, &ctx);
+    let mut resolved = resolve(&top_path, &request, &ctx);
+    // Resolution sees a part that failed to compile as a missing file. Its diagnostic (code and
+    // span on the `use` line) is reworded at the source, so the index, the language server and
+    // the Desktop all say the part doesn't compile.
+    for failed in &failed_parts {
+        let mut found = false;
+        for d in resolved
+            .diagnostics
+            .diagnostics
+            .iter_mut()
+            .filter(|d| d.message.contains(&failed.missing))
+        {
+            d.message = failed.message.clone();
+            found = true;
+        }
+        if !found {
+            problems.push(Diagnostic {
+                path: path.to_owned(),
+                start: 0,
+                end: 0,
+                severity: "error".into(),
+                message: failed.message.clone(),
+            });
+        }
+    }
     // What resolution could not do (a placement whose frame is missing, a pattern that does
     // not expand) is shown on the assembly, not dropped.
     for d in &resolved.diagnostics.diagnostics {

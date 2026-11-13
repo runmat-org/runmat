@@ -87,9 +87,13 @@ pub(super) fn section_cap(
     if segments.is_empty() {
         return Vec::new();
     }
-    // Endpoints shared by neighbouring triangles are computed from the same edge, so they agree
-    // to rounding; the tolerance scales with the cut's size.
-    let tolerance = (extent * 2.0e-6).max(1.0e-9);
+    // Endpoints shared by neighbouring triangles of one face are computed from the same edge, so
+    // they agree to rounding. Neighbouring CAD faces are meshed apart: where their shared edge is
+    // curved, each face's chord crosses the plane a little apart (on the bracket.step test part,
+    // apart by more than rounding). The tolerance, 1e-4 of the cut's size, joins both.
+    let tolerance = (extent * 1.0e-4).max(1.0e-9);
+    snap_endpoints(&mut segments, tolerance);
+    segments.retain(|segment| segment.a != segment.b);
     let closed = closed_segments(&segments, tolerance);
     let face_normal = (-normal).to_array();
     fill_nonzero(&closed)
@@ -146,6 +150,36 @@ fn cut_triangle(tri: &[Vertex; 3], frame: &PlaneFrame) -> Option<Segment> {
     } else {
         Segment { a: b, b: a, color }
     })
+}
+
+/// Moves each segment end onto the first end seen within `tolerance` of it, so ends that meet
+/// share one point exactly, even when they fall on either side of a rounding cell's border.
+fn snap_endpoints(segments: &mut [Segment], tolerance: f32) {
+    let cell = |p: Vec2| {
+        (
+            (p.x / tolerance).floor() as i64,
+            (p.y / tolerance).floor() as i64,
+        )
+    };
+    let mut seen: HashMap<(i64, i64), Vec<Vec2>> = HashMap::new();
+    let mut snap = |p: Vec2| -> Vec2 {
+        let (cx, cy) = cell(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(points) = seen.get(&(cx + dx, cy + dy)) {
+                    if let Some(q) = points.iter().find(|q| (**q - p).length() <= tolerance) {
+                        return *q;
+                    }
+                }
+            }
+        }
+        seen.entry((cx, cy)).or_default().push(p);
+        p
+    };
+    for segment in segments.iter_mut() {
+        segment.a = snap(segment.a);
+        segment.b = snap(segment.b);
+    }
 }
 
 /// The segments that join end to start into closed loops; dangling chains (an open surface's
