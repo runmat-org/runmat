@@ -171,7 +171,7 @@ annotation swing_d1 = door_swing(door = [{ name = envelope }, { name = d1_a_l1_2
 
 ## Tables
 
-`table <name> = <kind>(…, sheet, at)`:
+`table <name> = <kind>(…, sheet, at)`. `at` is the table's corner on the sheet when you place it by hand, `[0, 0]` included; leave it out and the table takes its standard place.
 
 | Kind | Lists |
 |---|---|
@@ -184,7 +184,7 @@ annotation swing_d1 = door_swing(door = [{ name = envelope }, { name = d1_a_l1_2
 | `cut_list(view)` | a weldment's structural members, one row per group of identical members: item, quantity, profile, material, cut length and end angles |
 
 ```drawing fragment
-table bom = bom(view = front, include_fasteners, sheet = "1", at = [0, 0])
+table bom = bom(view = front, include_fasteners, sheet = "1")
 table revs = revision(rows = [{ rev = "A", description = "First release", date = "2026-11-05", by = "NA" }], sheet = "1", at = [300, 280])
 ```
 

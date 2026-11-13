@@ -40,7 +40,6 @@ drawing drone {
             "MATERIAL AND FINISH OF EACH ITEM PER THE PARTS LIST.",
             "TOLERANCING TO ISO 8015. DRAWN TO ISO 128 AND ISO 5456-2."
         ],
-        sheet = "1",
-        at = [0, 0]
+        sheet = "1"
     )
 }

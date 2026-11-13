@@ -348,7 +348,7 @@ fn drawing() -> DrawingDocument {
                 include_fasteners: true,
                 spec: Default::default(),
             },
-            at: [0.0, 0.0],
+            at: None,
         }],
     }
 }
@@ -557,6 +557,26 @@ fn assemblies_round_trip_through_text() {
         count += 1;
     }
     assert!(count > 2);
+}
+
+/// A table placed by hand at the sheet's origin keeps its place through text; a table with no
+/// place prints no `at` and reads back unplaced.
+#[test]
+fn a_table_placed_at_the_origin_round_trips_and_an_unplaced_one_prints_no_at() {
+    for at in [Some([0.0, 0.0]), None] {
+        let mut document = drawing();
+        document.tables[0].at = at;
+        let text = print_drawing(&document, &[]).unwrap();
+        let parsed = reparse_drawing("rig.drawing", &text, &document);
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "{text}\n{:#?}",
+            parsed.diagnostics
+        );
+        assert_eq!(parsed.document, Some(document), "{text}");
+        let line = text.lines().find(|l| l.trim_start().starts_with("table ")).unwrap();
+        assert_eq!(line.contains("at = [0, 0]"), at.is_some(), "{line}");
+    }
 }
 
 #[test]

@@ -629,7 +629,7 @@ fn drawing() -> DrawingDocument {
                 include_fasteners: true,
                 spec: Default::default(),
             },
-            at: [0.0, 0.0],
+            at: None,
         }],
     }
 }

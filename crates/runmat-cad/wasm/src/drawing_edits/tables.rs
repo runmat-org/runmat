@@ -39,10 +39,7 @@ pub fn edit(
     }
     Some((|| {
         let mut d = Drawing::open(path, text_, files)?;
-        let at = points(values, "at")?
-            .into_iter()
-            .next()
-            .unwrap_or([0.0, 0.0]);
+        let at = points(values, "at")?.into_iter().next();
         let picked_view = |d: &Drawing, field: &str| -> Result<String, EditFailure> {
             let v =
                 view_pick(values, field)?.ok_or_else(|| model("pick the view the table lists"))?;
