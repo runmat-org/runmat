@@ -133,6 +133,25 @@ pub(crate) fn board_inputs(file: &str, files: &Files) -> Result<BoardInputs, Str
     })
 }
 
+/// The box board `file` fills when its model can't be built (metres; z = 0 at the bottom face):
+/// its layout's outline over its stackup's thickness. The layout is parsed, not compiled, so a
+/// layout whose packages don't resolve still has its box. `None` when there is no layout or it
+/// has no outline.
+pub fn board_box(file: &str, files: &Files) -> Option<runmat_cad::assembly::source::Aabb> {
+    use runmat_circuit::geom::to_mm;
+    let layout = layout_path(file);
+    let (r, thickness) = runmat_circuit::syntax::board::board_extent(&layout, files.get(&layout)?)?;
+    let thickness = to_mm(thickness);
+    if !(r.max.x > r.min.x && r.max.y > r.min.y && thickness > 0.0) {
+        return None;
+    }
+    let m = |v: f64| v * 1e-3;
+    Some(runmat_cad::assembly::source::Aabb {
+        min: [m(to_mm(r.min.x)), m(to_mm(r.min.y)), 0.0],
+        max: [m(to_mm(r.max.x)), m(to_mm(r.max.y)), m(thickness)],
+    })
+}
+
 /// The board's layout compiled in a circuit session, or why it doesn't compile to a board.
 pub(crate) fn compiled_board(
     file: &str,
@@ -174,10 +193,21 @@ pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
         &inputs.text,
         &inputs.circuit_files,
     );
-    if crate::runtime::part_cache::skip(&key) {
-        return Err("its stored model isn't loaded yet".into());
-    }
     crate::runtime::part_cache::board_part(key, || board_display_of(&inputs))
+}
+
+/// Whether a compile running as a probe ([`crate::runtime::part_cache::probe`]) leaves board
+/// `file` out: the cache doesn't hold its model and the probe may not make it. The probe lists
+/// its digest for the caller to fetch or make, as it does a part's; the board isn't a failure.
+pub fn left_out(file: &str, files: &Files) -> bool {
+    board_inputs(file, files).is_ok_and(|inputs| {
+        crate::runtime::part_cache::skip(&crate::runtime::part_cache::board_key(
+            file,
+            &inputs.layout,
+            &inputs.text,
+            &inputs.circuit_files,
+        ))
+    })
 }
 
 /// The digest board `file`'s model is kept by ([`crate::runtime::part_cache::digest`] of its
@@ -527,5 +557,111 @@ mod tests {
             .as_array()
             .is_some_and(|b| b.len() > 3));
         assert!((display["occurrences"][0]["transform"][9].as_f64().unwrap() - 0.015).abs() < 1e-6);
+    }
+
+    const BOX: &str = "runmat 0.7\nstd 1\n\nassembly box {\n    use circuit daq as board {\n        placement = { placement = offset, offset = { translation = [15 mm, 10 mm, 10.5 mm] } }\n    }\n}\n";
+
+    /// The board's warning, its index row's `problem` and its prototype, for the box assembly.
+    fn unbuilt(files: &Files) -> (Vec<String>, serde_json::Value, serde_json::Value) {
+        let (index, display, diagnostics) =
+            crate::runtime::compile_assembly("/p/box.assembly", BOX, files).expect("compiles");
+        let warnings = diagnostics
+            .iter()
+            .filter(|d| d.severity == "warning")
+            .map(|d| d.message.clone())
+            .collect();
+        let row = index["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["path"] == "board")
+            .expect("the board's row")
+            .clone();
+        (
+            warnings,
+            row["problem"].clone(),
+            display["prototypes"][0].clone(),
+        )
+    }
+
+    /// A layout whose packages don't resolve has no board model: the occurrence draws the
+    /// outline's box over the stackup's thickness, the warning names the occurrence and the
+    /// reason, and the Outline row carries it. Never nothing, silently.
+    #[test]
+    fn a_board_whose_layout_does_not_compile_draws_its_box_and_says_why() {
+        let mut files = daq_files();
+        let layout = files.get_mut("/p/daq.circuit.layout").unwrap();
+        *layout = layout.replacen(
+            "    package C_0402_1005Metric_IPCN = {",
+            "    package C_0402_renamed = {",
+            1,
+        );
+        let (warnings, problem, prototype) = unbuilt(&files);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0]
+                .starts_with("`board` draws as its box: /p/daq.circuit.layout has no board: ")
+                && warnings[0].contains("C_0402_1005Metric_IPCN"),
+            "{warnings:?}"
+        );
+        assert!(
+            problem.as_str().is_some_and(|p| p.contains("has no board")),
+            "{problem}"
+        );
+        assert_eq!(prototype["shape"], "box", "{prototype}");
+        let at = |k: &str, i: usize| prototype["bounds"][k][i].as_f64().unwrap();
+        assert!(
+            (at("max", 0) - at("min", 0) - 0.090).abs() < 1e-6,
+            "{prototype}"
+        );
+        assert!(
+            (at("max", 1) - at("min", 1) - 0.060).abs() < 1e-6,
+            "{prototype}"
+        );
+        assert!(
+            at("min", 2).abs() < 1e-9 && at("max", 2) > 0.001,
+            "{prototype}"
+        );
+    }
+
+    /// A circuit whose layout isn't in the workspace draws nothing, and says so by name.
+    #[test]
+    fn a_board_without_its_layout_says_it_draws_nothing() {
+        let mut files = daq_files();
+        files.remove("/p/daq.circuit.layout");
+        let (warnings, problem, prototype) = unbuilt(&files);
+        assert_eq!(
+            warnings,
+            ["`board` draws nothing: /p/daq.circuit.layout isn't open or in the workspace"]
+        );
+        assert_eq!(
+            problem,
+            "/p/daq.circuit.layout isn't open or in the workspace"
+        );
+        assert_eq!(prototype["shape"], "empty", "{prototype}");
+    }
+
+    /// A probe that may not make the board leaves it out without a warning and lists its digest,
+    /// as it does a part's; the next compile draws it.
+    #[test]
+    fn a_probe_leaves_a_board_out_for_its_caller_without_a_warning() {
+        use crate::runtime::part_cache::{clear, probe};
+        clear();
+        let mut files = daq_files();
+        files.insert("/p/box.assembly".into(), BOX.into());
+        let ((_, _, diagnostics), report) = probe(Default::default(), || {
+            crate::runtime::compile_assembly("/p/box.assembly", BOX, &files).expect("compiles")
+        });
+        assert!(
+            diagnostics.iter().all(|d| d.severity != "warning"),
+            "{diagnostics:?}"
+        );
+        assert_eq!(
+            report.misses,
+            [board_digest("/p/daq.circuit", &files).unwrap()]
+        );
+        let (_, display, _) =
+            crate::runtime::compile_assembly("/p/box.assembly", BOX, &files).expect("compiles");
+        assert_eq!(display["prototypes"][0]["shape"], "mesh");
     }
 }

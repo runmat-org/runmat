@@ -3,6 +3,7 @@
 pub mod assembly_stages;
 pub mod part_cache;
 mod prototype_reuse;
+mod unbuilt;
 mod published_frames;
 mod published_paths;
 pub mod values_host;
@@ -440,6 +441,10 @@ pub struct AssemblyResolution {
     pub problems: Vec<Diagnostic>,
     /// Each regenerated part file's digest ([`part_cache::digest`] of its cache key), by file.
     pub digests: BTreeMap<String, String>,
+    /// The definitions placed without their model, by file, with the reason (a file not in the
+    /// workspace, a board whose layout doesn't compile). Their occurrences draw as their box,
+    /// and their Outline rows carry the reason ([`unbuilt::mark_rows`]).
+    pub unbuilt: BTreeMap<String, String>,
 }
 
 /// Resolves the assembly `path` from its text; syntax errors are the `Err` diagnostics.
@@ -480,6 +485,7 @@ pub fn resolve_assembly_in(
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     let mut problems = Vec::new();
     let mut digests: BTreeMap<String, String> = BTreeMap::new();
+    let mut unbuilt: BTreeMap<String, String> = BTreeMap::new();
     let top_path = top.path.clone();
     // Breadth-first over sub-assemblies, each definition once.
     let mut queue: Vec<(String, AssemblyDocument)> = vec![(path.to_owned(), top)];
@@ -492,18 +498,14 @@ pub fn resolve_assembly_in(
             }
             let file = resolve_path(&at, &key, files);
             let Some(text) = files.get(&file) else {
-                problems.push(Diagnostic {
-                    path: path.to_owned(),
-                    start: 0,
-                    end: 0,
-                    severity: "warning".into(),
-                    message: format!(
-                        "{key} isn't open or in the workspace, so it draws as its box"
-                    ),
-                });
+                let reason = format!("{file} isn't open or in the workspace");
+                problems.push(unbuilt::diagnostic(path, &doc, &def, &reason, false));
+                unbuilt.insert(key.clone(), reason);
                 continue;
             };
             match def.kind {
+                // A probe leaves a board the cache doesn't hold for its caller to find.
+                DefinitionKind::Circuit if crate::board::left_out(&file, files) => continue,
                 DefinitionKind::Circuit => match crate::board::board_display(&file, files) {
                     Ok(display) => {
                         let configured = ConfiguredSummary {
@@ -524,13 +526,27 @@ pub fn resolve_assembly_in(
                             digests.insert(key.clone(), d);
                         }
                     }
-                    Err(message) => problems.push(Diagnostic {
-                        path: path.to_owned(),
-                        start: 0,
-                        end: 0,
-                        severity: "warning".into(),
-                        message: format!("{key}: {message}, so it draws as its box"),
-                    }),
+                    Err(reason) => {
+                        // The board's outline box stands in, so the occurrence still shows
+                        // where it is and explodes with its steps.
+                        let bbox = crate::board::board_box(&file, files);
+                        problems.push(unbuilt::diagnostic(
+                            path,
+                            &doc,
+                            &def,
+                            &reason,
+                            bbox.is_some(),
+                        ));
+                        if bbox.is_some() {
+                            let configured = ConfiguredSummary {
+                                bbox,
+                                artifact: format!("text:{key}"),
+                                ..Default::default()
+                            };
+                            source.add_part(DefinitionSummary::new(def.clone()), configured);
+                        }
+                        unbuilt.insert(key.clone(), reason);
+                    }
                 },
                 DefinitionKind::Assembly => match parse_assembly_in(&file, text, &scope).document {
                     Some(sub) => {
@@ -692,6 +708,7 @@ pub fn resolve_assembly_in(
         resolved,
         problems,
         digests,
+        unbuilt,
     })
 }
 
@@ -759,6 +776,7 @@ fn compile_assembly_with(
         resolved,
         problems,
         digests,
+        unbuilt,
     } = resolve_assembly(path, text, files)?;
     also(&resolved, &source);
     let index = build_assembly_index(&resolved, Some(&source));
@@ -769,6 +787,7 @@ fn compile_assembly_with(
     let mut display = serde_json::to_value(&display).unwrap_or(Value::Null);
     prototype_reuse::mark(&mut display, &prototype_digests, &reused);
     let mut index = serde_json::to_value(&index).unwrap_or(Value::Null);
+    unbuilt::mark_rows(&mut index, &unbuilt);
     if let Some(row) = index.as_object_mut() {
         row.insert(
             "exploded".into(),
@@ -790,10 +809,12 @@ pub fn assembly_index(
         source,
         resolved,
         problems,
+        unbuilt,
         ..
     } = resolve_assembly(path, text, files)?;
     let mut index =
         serde_json::to_value(build_assembly_index(&resolved, Some(&source))).unwrap_or(Value::Null);
+    unbuilt::mark_rows(&mut index, &unbuilt);
     if let Some(row) = index.as_object_mut() {
         row.insert(
             "exploded".into(),

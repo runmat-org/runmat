@@ -248,3 +248,35 @@ fn a_step_naming_an_unknown_pattern_or_an_instance_is_diagnosed() {
     );
     assert!(d.contains("names an instance; a mirror is named by"), "{d}");
 }
+
+/// Naming a pattern's seed moves the seed and every copy the pattern lays out of it, as naming
+/// the pattern does; the mirror's images stay. A copy named by its instance moves alone, and a
+/// copy listed after its seed counts once, so spacing is unchanged.
+#[test]
+fn a_step_naming_a_seed_moves_its_pattern_copies_with_it() {
+    let whole = index(&pegs(&[
+        &UP.replace("PICK", "patterns = [[{ name = pegs }]]")
+    ]));
+    let seed = index(&pegs(&[
+        &UP.replace("PICK", "occurrences = [[{ name = peg }]]")
+    ]));
+    let view = &seed["exploded"][0];
+    assert_eq!(view["diagnostics"], json!([]), "{view}");
+    let m = moves(view);
+    assert_eq!(m.len(), 3, "the seed and both copies: {m:?}");
+    assert_eq!(m, moves(&whole["exploded"][0]));
+    assert!(m.keys().all(|p| !p.contains("pegs_port")), "{m:?}");
+
+    let again = index(&pegs(&[&UP.replace(
+        "PICK",
+        "occurrences = [[{ name = peg }], [{ name = peg, instance = { by = pegs, key = { instance = linear, step = 2 } } }]]",
+    )]));
+    assert_eq!(moves(&again["exploded"][0]), m);
+
+    let one = index(&pegs(&[&UP.replace(
+        "PICK",
+        "occurrences = [[{ name = peg, instance = { by = pegs, key = { instance = linear, step = 1 } } }]]",
+    )]));
+    let m = moves(&one["exploded"][0]);
+    assert_eq!(m.len(), 1, "{m:?}");
+}
