@@ -18,6 +18,17 @@ pub(super) fn inspect_geometry(
     path: &Path,
     request: &GeometryInspectionRequest,
 ) -> Result<GeometryInspection, SourceDiagnostic> {
+    // A RunMat MCAD part or assembly stands for the exact geometry its regeneration writes.
+    if crate::geometry::design_source::is_design_geometry(request.logical_path.as_str()) {
+        let bytes = crate::geometry::design_source::read_design_geometry(path).map_err(|error| {
+            diagnostic(
+                "fea.host.design_geometry_failed",
+                error,
+                SourceAvailability::Available,
+            )
+        })?;
+        return inspect_geometry_bytes(&bytes, request);
+    }
     let bytes = runmat_filesystem::read(path).map_err(|error| {
         diagnostic(
             "fea.host.geometry_unavailable",

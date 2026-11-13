@@ -307,6 +307,7 @@ thread_local! {
 }
 
 mod capture;
+pub mod design_source;
 
 pub struct ThreadGeometryCaptureAdapterGuard {
     previous: Option<&'static dyn GeometryViewCaptureAdapter>,
@@ -375,6 +376,33 @@ pub fn geometry_load_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<GeometryAsset>, OperationErrorEnvelope> {
     let import_context = current_geometry_import_context();
+    // A part or an assembly loads as the exact geometry its regeneration writes.
+    let design;
+    let bytes = if design_source::is_design_geometry(path) {
+        design = design_source::design_geometry(
+            std::path::Path::new(path),
+            Some(bytes),
+            &design_source::DiskDesignFiles,
+        )
+        .map_err(|message| {
+            operation_error(
+                GEOMETRY_LOAD_OPERATION,
+                GEOMETRY_LOAD_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.GEOMETRY.LOAD.DESIGN_EVALUATION_FAILED",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                message,
+                BTreeMap::from([("path".to_string(), path.to_string())]),
+            )
+        })?;
+        design.as_slice()
+    } else {
+        bytes
+    };
     let mut imported = import_geometry_with_context(path, bytes, options, &import_context)
         .map_err(|error| map_geometry_load_error(path, error, &context))?;
     imported.asset.source.sha256 = sha256_hex(bytes);

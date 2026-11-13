@@ -23,6 +23,9 @@ runmat-design-syntax = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The study geometry's source-closure digest (exchange::study).
+sha2 = { workspace = true }
+hex = { workspace = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [features]
