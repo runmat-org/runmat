@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Bumped on any change to the projection's shape.
-pub const DRAWING_INDEX_FORMAT_VERSION: u32 = 2;
+pub const DRAWING_INDEX_FORMAT_VERSION: u32 = 3;
 
 /// What the drawn model measures and declares, for annotation text (`40 mm`, `⏥ 0.05 A`).
 pub trait AnnotationValues {
@@ -103,6 +103,10 @@ pub struct DrawingIndex {
     /// Annotation id → its text as the sheet shows it (`40 mm`, `Balloon 3`, a note with its
     /// fields filled).
     pub text: BTreeMap<String, String>,
+    /// Notes table name → its notes as the sheet shows them, fields filled from the model of
+    /// the first view on its sheet.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub notes: BTreeMap<String, Vec<String>>,
 }
 
 pub fn build_drawing_index(
@@ -175,8 +179,27 @@ pub fn build_drawing_index(
             Some((a.id.clone(), shown))
         })
         .collect();
+    let notes = doc
+        .tables
+        .iter()
+        .filter_map(|t| match &t.kind {
+            super::TableKind::Notes { rows, .. } => {
+                let at = super::notes_model(doc, &t.sheet);
+                let shown = rows
+                    .iter()
+                    .map(|r| match at {
+                        Some(at) => fill_fields(r, |f| super::note_field(model, at, &doc.tables, f)),
+                        None => r.clone(),
+                    })
+                    .collect();
+                Some((t.name.clone(), shown))
+            }
+            _ => None,
+        })
+        .collect();
     DrawingIndex {
         text,
+        notes,
         format_version: DRAWING_INDEX_FORMAT_VERSION,
         document: doc.clone(),
         diagnostics: report.diagnostics.diagnostics.clone(),

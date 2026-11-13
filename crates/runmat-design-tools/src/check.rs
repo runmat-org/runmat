@@ -416,6 +416,37 @@ fn check_drawing(path: &str, text: &str, files: &Files, out: &mut CheckOutput) {
             &BTreeMap::new(),
         ));
     }
+    // What the layout found on each sheet (a note with no room, a view that doesn't fit, a
+    // repeated dimension) is a warning on the item, so a drawing that overprints never checks
+    // clean.
+    for (sheet, layout) in data["layouts"].as_object().into_iter().flatten() {
+        for f in layout["findings"].as_array().into_iter().flatten() {
+            let item = f["item"].as_str().unwrap_or("");
+            let name = item.rsplit(':').next().unwrap_or(item);
+            let declared = ["annotation", "table", "view"]
+                .iter()
+                .find_map(|w| text.find(&format!("{w} {name} =")));
+            let range = declared.map(|start| {
+                let end = text[start..].find('\n').map_or(text.len(), |e| start + e);
+                locator.range_utf16(path, start, end)
+            });
+            out.diagnostics.push(DesignDiagnostic {
+                id: None,
+                severity: "warning".into(),
+                code: f["code"].as_str().map(str::to_owned),
+                message: format!(
+                    "sheet {sheet}: {}",
+                    f["message"].as_str().unwrap_or_default()
+                ),
+                cause: "root".into(),
+                root: None,
+                subject: None,
+                failed_features: Vec::new(),
+                range,
+                repairs: Vec::new(),
+            });
+        }
+    }
     let len = |v: &Value| v.as_array().map_or(0, Vec::len);
     out.counts
         .insert("sheets".into(), len(&data["document"]["sheets"]));

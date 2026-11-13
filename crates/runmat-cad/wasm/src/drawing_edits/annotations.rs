@@ -478,7 +478,7 @@ pub fn edit(
                 let leader = refs(values, "attach")
                     .ok()
                     .and_then(|r| r.into_iter().next());
-                let mut place = at(values)?;
+                let place = at(values)?;
                 // A note goes with the view it points at, else the view nearest it.
                 let view = match view_of(&d, values, &["attach"]) {
                     Ok(v) => v,
@@ -495,15 +495,17 @@ pub fn edit(
                         .map(|v| v.name.clone())
                         .ok_or_else(|| model("place a view first"))?,
                 };
-                if place == [0.0, 0.0] && leader.is_none() {
-                    // Above the title block on the right, where general notes go (ISO 7200).
-                    place = [300.0, 70.0];
-                }
+                // Unplaced, the layout puts the note in the free space nearest its view.
+                let width = number(values, "width", 0.0);
                 let id = add(
                     &mut d,
                     &view,
                     "note",
-                    AnnotationKind::Note { text: body, leader },
+                    AnnotationKind::Note {
+                        text: body,
+                        leader,
+                        width: (width > 0.0).then(|| ValueExpr::mm(width)),
+                    },
                     place,
                 );
                 format!("Added note {id}")

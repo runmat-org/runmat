@@ -521,11 +521,14 @@ pub enum AnnotationKind {
         #[serde(default)]
         field: bool,
     },
-    /// Text with `{property}` fields.
+    /// Text with `{property}` fields. `\n` breaks a line; the text wraps at spaces to `width`
+    /// (a length on the sheet), else to the room it has on the sheet.
     Note {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         leader: Option<Reference>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<ValueExpr>,
     },
     /// A BOM balloon for an occurrence, numbered by the named BOM table.
     Balloon {
@@ -570,11 +573,15 @@ pub enum TableKind {
         #[serde(default)]
         rows: Vec<revision_table::RevisionRow>,
     },
-    /// The drawing's general notes, numbered in order and laid out above the title block
-    /// (ISO 7200): `table notes = notes(rows = ["Dimensions in millimeters.", …], sheet = "1")`.
+    /// The drawing's general notes: a numbered list under a "NOTES:" heading, each note
+    /// wrapping with a hanging indent in a column `width` wide (the title block's width when
+    /// unset), above the title block (ISO 7200) unless placed by hand:
+    /// `table notes = notes(rows = ["Dimensions in millimeters.", …], sheet = "1")`.
     Notes {
         #[serde(default)]
         rows: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<ValueExpr>,
     },
     Bend {
         view: String,
@@ -592,6 +599,8 @@ pub struct DrawingTable {
     pub name: String,
     pub sheet: String,
     pub kind: TableKind,
+    /// Its corner on the sheet when placed by hand; unset, the table takes its standard place.
+    #[serde(default)]
     pub at: [f64; 2],
 }
 
@@ -939,6 +948,36 @@ pub fn check_drawing_with(
             | TableKind::CutList { view } => Some(view),
             TableKind::Revision { .. } | TableKind::Notes { .. } => None,
         };
+        if let TableKind::Notes { rows, width } = &t.kind {
+            if let Some(message) = width.as_ref().and_then(text_width_problem) {
+                err(
+                    &mut rep,
+                    DiagCode::DrawingInvalid,
+                    s("width"),
+                    format!("notes table `{}`: {message}", t.name),
+                );
+            }
+            if let Some(at) = notes_model(doc, &t.sheet) {
+                for (i, row) in rows.iter().enumerate() {
+                    for field in fields_in(row) {
+                        if note_field(model, at, &doc.tables, field).is_none() {
+                            rep.diagnostics.push(
+                                DiagCode::DrawingReference,
+                                Severity::Warning,
+                                s("rows"),
+                                format!(
+                                    "note {} of `{}` shows `{{{field}}}`, which the model does not have",
+                                    i + 1,
+                                    t.name
+                                ),
+                                Cause::Root,
+                                Vec::new(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
         let Some(vn) = view_of else { continue };
         let Some(v) = doc.view(vn) else {
             err(
@@ -1282,14 +1321,23 @@ pub fn check_drawing_with(
             AnnotationKind::SurfaceFinish { on }
             | AnnotationKind::Weld { on, .. }
             | AnnotationKind::CenterMark { on } => refs.push(("on", on)),
-            AnnotationKind::Note { text, leader } => {
+            AnnotationKind::Note {
+                text,
+                leader,
+                width,
+            } => {
                 if let Some(l) = leader {
                     refs.push(("leader", l));
                 }
-                let mut rest = text.as_str();
-                while let Some(i) = rest.find('{') {
-                    let Some(j) = rest[i..].find('}') else { break };
-                    let field = &rest[i + 1..i + j];
+                if let Some(message) = width.as_ref().and_then(text_width_problem) {
+                    err(
+                        &mut rep,
+                        DiagCode::DrawingInvalid,
+                        s("width"),
+                        format!("note `{}`: {message}", a.id),
+                    );
+                }
+                for field in fields_in(text) {
                     if note_field(model, &v.model, &doc.tables, field).is_none() {
                         rep.diagnostics.push(
                             DiagCode::DrawingReference,
@@ -1303,7 +1351,6 @@ pub fn check_drawing_with(
                             Vec::new(),
                         );
                     }
-                    rest = &rest[i + j + 1..];
                 }
             }
             AnnotationKind::Balloon { occurrence, table } => {
@@ -1447,6 +1494,41 @@ pub fn check_drawing_with(
         rep.title_blocks.insert(sh.name.clone(), rows);
     }
     rep
+}
+
+/// The `{field}` names in a note's text.
+fn fields_in(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find('{') {
+        let Some(j) = rest[i..].find('}') else { break };
+        out.push(&rest[i + 1..i + j]);
+        rest = &rest[i + j + 1..];
+    }
+    out
+}
+
+/// The model a sheet's general notes fill their `{field}`s from: the first view's on the sheet,
+/// else the drawing's first view's.
+pub(crate) fn notes_model<'a>(doc: &'a DrawingDocument, sheet: &str) -> Option<&'a ModelRef> {
+    doc.views
+        .iter()
+        .find(|v| v.sheet == sheet)
+        .or_else(|| doc.views.first())
+        .map(|v| &v.model)
+}
+
+/// What is wrong with a note's or notes table's `width`, if anything: it must be a positive
+/// length on the sheet (`120 mm`, `4 in`; a bare number is millimetres).
+fn text_width_problem(width: &ValueExpr) -> Option<String> {
+    match crate::units::length_mm(width) {
+        Some(mm) if mm >= 10.0 => None,
+        Some(mm) => Some(format!(
+            "`width` is {} mm; a text block needs at least 10 mm to wrap in",
+            standard::metric_text(mm, 2)
+        )),
+        None => Some("`width` must be a length on the sheet, such as `120 mm`".into()),
+    }
 }
 
 /// A note's `{field}`: the drawn model's property, and for `{revision}` with none the drawing's

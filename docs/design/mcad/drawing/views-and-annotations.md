@@ -1,5 +1,5 @@
 ---
-description: Reference for RunMat drawing files. Sheet formats and title blocks, standard, projected, section, detail, auxiliary and broken-out views, dimensions, hole callouts, GD&T frames from the part's PMI, surface finish and weld symbols, notes, balloons, level marks, plan grids and door swings, and BOM, hole, revision, bend, weld and cut-list tables.
+description: Reference for RunMat drawing files. Sheet formats and title blocks, standard, projected, section, detail, auxiliary and broken-out views, dimensions, hole callouts, GD&T frames from the part's PMI, surface finish and weld symbols, wrapped notes and general notes, balloons, level marks, plan grids and door swings, and BOM, hole, revision, bend, weld and cut-list tables.
 keywords: [engineering drawing, 2D drawing, title block, section view, detail view, dimensions, GD&T, feature control frame, surface finish symbol, BOM table, hole table, revision table, cut list, third angle projection]
 ---
 # Drawing views and annotations
@@ -139,7 +139,7 @@ view b = detail(from = a_a, center = feature.body.face.end, radius = 20 mm, labe
 | `datum_symbol`, `datum_target` | `label` | a datum symbol or target from the part's PMI |
 | `surface_finish` | `on` | the finish symbol of the face's `finish` |
 | `weld` | `on`, `symbol`, `size`, `all_around`, `field` | a weld symbol |
-| `note` | `text`, `leader` | text; `{part_number}`, `{revision}` and other `{property}` fields fill in |
+| `note` | `text`, `leader`, `width` | text; `{part_number}`, `{revision}` and other `{property}` fields fill in. The text wraps at spaces to `width` (a length on the sheet, such as `60 mm`), otherwise to the room it has; `\n` starts a new line |
 | `balloon` | `occurrence`, `table` | a balloon numbered by a BOM table |
 | `center_mark`, `centerline` | `on`, `between` | center marks and centerlines |
 | `level` | `label`, `on` or `datum`, `occurrence` | a level mark: a line from a face's or a datum plane's height to a target symbol, the label above the line and the elevation below it |
@@ -178,6 +178,7 @@ annotation swing_d1 = door_swing(door = [{ name = envelope }, { name = d1_a_l1_2
 | `bom(view, include_fasteners)` | the bill of materials of an assembly view, with item numbers the balloons use |
 | `hole(view, origin)` | every hole in a view with its position from an origin face, size and form |
 | `revision(rows)` | revisions: `rows = [{ rev = "B", description = "…", date = "2026-11-05", by = "NA" }]` |
+| `notes(rows, width)` | the general notes: a numbered list under "NOTES:", one note per row, each wrapping with a hanging indent in a column `width` wide (the title block's width when unset) |
 | `bend(view)` | the bends of a sheet-metal flat pattern |
 | `weld(view)` | the welds in a view |
 | `cut_list(view)` | a weldment's structural members, one row per group of identical members: item, quantity, profile, material, cut length and end angles |
@@ -186,6 +187,31 @@ annotation swing_d1 = door_swing(door = [{ name = envelope }, { name = d1_a_l1_2
 table bom = bom(view = front, include_fasteners, sheet = "1", at = [0, 0])
 table revs = revision(rows = [{ rev = "A", description = "First release", date = "2026-11-05", by = "NA" }], sheet = "1", at = [300, 280])
 ```
+
+### General notes
+
+Sheet-wide notes go in one `notes` table, with one note per row. Write each note as one string; the sheet wraps it. Unless placed with `at`, the list sits on the title block's top edge and grows upward. A `{property}` field fills in from the model of the sheet's first view.
+
+```drawing fragment
+table notes = notes(
+    rows = [
+        "MATERIAL: {material}.",
+        "BREAK SHARP EDGES 0.2 TO 0.5 MM; DEBURR ALL HOLES BOTH SIDES.",
+        "GENERAL TOLERANCES: ISO 2768-mK WHERE NO INDIVIDUAL TOLERANCE IS SHOWN."
+    ],
+    sheet = "1"
+)
+```
+
+### Notes on the sheet
+
+Notes, tables and views never overprint each other, the title block or the border:
+
+- A note placed with `at` wraps to its `width`. Without a width, it wraps at the room to its right, up to the border, the title block or the next item.
+- A note with no room at its `at` moves to the nearest free spot, and the check warns: "Note n2 at [20, 30] has no room there: …".
+- A note or table that fits nowhere on the sheet stays where it was put, and the check warns with what to change: "Note n2 doesn't fit on the sheet: it needs 200 x 60 mm of free space …".
+
+The sheet, the PDF and the DXF break notes at the same words. Each line is its own text entity in the DXF and its own line of text in the PDF.
 
 ## Laid out for you
 

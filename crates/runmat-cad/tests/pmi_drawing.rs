@@ -324,6 +324,7 @@ fn drawing() -> DrawingDocument {
                 kind: AnnotationKind::Note {
                     text: "PART {part_number} REV {revision}".into(),
                     leader: None,
+                    width: None,
                 },
                 at: [0.0, 0.0],
             },

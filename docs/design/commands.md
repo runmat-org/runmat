@@ -224,9 +224,9 @@ This file is generated from the command catalog.
 - `drawing.move`: Move views, annotations or tables to a picked point, or by a distance.
   - Optional: `to` (pick: point); `dx` (number in mm, default 0); `dy` (number in mm, default 0)
   - Runs on the `selection`: `view`, `annotation`
-- `drawing.note`: Add a note, with an optional leader.
+- `drawing.note`: Add a note, with an optional leader. Long text wraps to the width, else to the room the note has; put sheet-wide notes in the general notes list instead.
   - Required: `text` (text)
-  - Optional: `attach` (pick: edge or view); `at` (pick: point)
+  - Optional: `attach` (pick: edge or view); `width` (number in mm, default 0); `at` (pick: point)
 - `drawing.ordinate`: Dimension features from a zero line.
   - Required: `origin` (pick: edge); `items` (picks: edge)
   - Optional: `at` (pick: point)
@@ -705,6 +705,9 @@ This file is generated from the command catalog.
 - `table.hole`: List holes with positions from an origin.
   - Required: `origin` (pick: edge)
   - Optional: `faces` (picks: edge); `combine` (true or false, default true); `at` (pick: point)
+- `table.notes`: Add a note to the sheet's numbered general notes, above the title block.
+  - Required: `text` (text)
+  - Optional: `at` (pick: point)
 - `table.revision`: Add the revision table, or a revision to it.
   - Required: `rev` (text); `description` (text)
   - Optional: `date` (text); `by` (text); `at` (pick: point)
